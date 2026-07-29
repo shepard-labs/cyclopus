@@ -1,0 +1,641 @@
+syntax = "proto3";
+
+package cyclopus.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/rpc/error_details.proto";
+
+option go_package = "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1;cyclopusv1";
+
+// The imported error detail messages are the required typed error vocabulary.
+message ErrorDetailTypes {
+  google.rpc.ErrorInfo error_info = 1;
+  google.rpc.BadRequest bad_request = 2;
+}
+
+enum EnvironmentKind {
+  ENVIRONMENT_KIND_UNSPECIFIED = 0;
+  ENVIRONMENT_KIND_PRODUCTION = 1;
+  ENVIRONMENT_KIND_PREVIEW = 2;
+}
+
+enum ScalingMode {
+  SCALING_MODE_UNSPECIFIED = 0;
+  SCALING_MODE_HPA = 1;
+  SCALING_MODE_KEDA_CRON = 2;
+  SCALING_MODE_KEDA_HTTP = 3;
+}
+
+enum RuntimeClass {
+  RUNTIME_CLASS_UNSPECIFIED = 0;
+  RUNTIME_CLASS_GVISOR = 1;
+  RUNTIME_CLASS_RUNC = 2;
+}
+
+enum ReleaseKind {
+  RELEASE_KIND_UNSPECIFIED = 0;
+  RELEASE_KIND_DEPLOY = 1;
+  RELEASE_KIND_ENV_CHANGE = 2;
+  RELEASE_KIND_ROLLBACK = 3;
+  RELEASE_KIND_RECONCILE = 4;
+}
+
+enum ReleaseStatus {
+  RELEASE_STATUS_UNSPECIFIED = 0;
+  RELEASE_STATUS_PENDING = 1;
+  RELEASE_STATUS_DEPLOYING = 2;
+  RELEASE_STATUS_LIVE = 3;
+  RELEASE_STATUS_FAILED = 4;
+  RELEASE_STATUS_SUPERSEDED = 5;
+}
+
+enum OperationStatus {
+  OPERATION_STATUS_UNSPECIFIED = 0;
+  OPERATION_STATUS_QUEUED = 1;
+  OPERATION_STATUS_RUNNING = 2;
+  OPERATION_STATUS_SUCCEEDED = 3;
+  OPERATION_STATUS_FAILED = 4;
+  OPERATION_STATUS_CANCELLED = 5;
+}
+
+enum CreateApiTokenResult {
+  CREATE_API_TOKEN_RESULT_UNSPECIFIED = 0;
+  CREATE_API_TOKEN_RESULT_CREATED = 1;
+  CREATE_API_TOKEN_RESULT_ALREADY_CREATED_SECRET_NOT_REPLAYABLE = 2;
+}
+
+enum ReconcileScopeKind {
+  RECONCILE_SCOPE_KIND_UNSPECIFIED = 0;
+  RECONCILE_SCOPE_KIND_ORGANIZATION = 1;
+  RECONCILE_SCOPE_KIND_APPLICATION = 2;
+  RECONCILE_SCOPE_KIND_ENVIRONMENT = 3;
+}
+
+enum ReconcileCategory {
+  RECONCILE_CATEGORY_UNSPECIFIED = 0;
+  RECONCILE_CATEGORY_DATABASE = 1;
+  RECONCILE_CATEGORY_NAMESPACE = 2;
+  RECONCILE_CATEGORY_WORKLOAD = 3;
+  RECONCILE_CATEGORY_NETWORK_POLICY = 4;
+  RECONCILE_CATEGORY_INGRESS = 5;
+  RECONCILE_CATEGORY_TLS = 6;
+  RECONCILE_CATEGORY_SCALING = 7;
+  RECONCILE_CATEGORY_ENVIRONMENT_VARIABLES = 8;
+  RECONCILE_CATEGORY_ORCHESTRATION = 9;
+}
+
+enum ReconcileFindingStatus {
+  RECONCILE_FINDING_STATUS_UNSPECIFIED = 0;
+  RECONCILE_FINDING_STATUS_IN_SYNC = 1;
+  RECONCILE_FINDING_STATUS_DRIFTED = 2;
+  RECONCILE_FINDING_STATUS_MISSING = 3;
+  RECONCILE_FINDING_STATUS_ORPHANED = 4;
+  RECONCILE_FINDING_STATUS_ERROR = 5;
+}
+
+message User {
+  string id = 1;
+  string organization_id = 2;
+  string email = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message Session {
+  string access_token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  User user = 3;
+}
+
+message ApiToken {
+  string id = 1;
+  string user_id = 2;
+  string name = 3;
+  repeated string scopes = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_used_at = 7;
+}
+
+message Organization {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp deleted_at = 5;
+}
+
+message Project {
+  string id = 1;
+  string organization_id = 2;
+  string name = 3;
+  string slug = 4;
+  string git_connection_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp deleted_at = 7;
+}
+
+message Application {
+  string id = 1;
+  string organization_id = 2;
+  string project_id = 3;
+  string name = 4;
+  string slug = 5;
+  string hostname_label = 6;
+  string registry_id = 7;
+  string image_repository = 8;
+  int32 container_port = 9;
+  string health_check_path = 10;
+  ScalingMode scaling_mode = 11;
+  int32 min_replicas = 12;
+  int32 max_replicas = 13;
+  int32 hpa_target_cpu_percent = 14;
+  int32 cpu_request_millicores = 15;
+  int32 cpu_limit_millicores = 16;
+  int32 memory_request_mib = 17;
+  int32 memory_limit_mib = 18;
+  bool previews_enabled = 19;
+  int32 max_preview_environments = 20;
+  int32 preview_idle_ttl_hours = 21;
+  int32 deploy_timeout_seconds = 22;
+  int32 release_retention_count = 23;
+  RuntimeClass runtime_class = 24;
+  string ci_workflow_id = 25;
+  google.protobuf.Timestamp created_at = 26;
+  google.protobuf.Timestamp deleted_at = 27;
+}
+
+message Environment {
+  string id = 1;
+  string organization_id = 2;
+  string application_id = 3;
+  string branch = 4;
+  EnvironmentKind kind = 5;
+  string preview_slug = 6;
+  string namespace = 7;
+  string planned_hostname = 8;
+  string current_release_id = 9;
+  string in_progress_release_id = 10;
+  string current_env_var_revision_id = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp torn_down_at = 13;
+}
+
+message Release {
+  string id = 1;
+  string organization_id = 2;
+  string environment_id = 3;
+  string image_ref = 4;
+  string git_commit_sha = 5;
+  string triggered_by_user_id = 6;
+  ReleaseKind kind = 7;
+  string env_var_revision_id = 8;
+  ReleaseStatus status = 9;
+  string failure_reason = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message EnvironmentVariable {
+  string key = 1;
+  bool secret = 2;
+  string value = 3;
+}
+
+message EnvironmentVariableRevision {
+  string id = 1;
+  string organization_id = 2;
+  string environment_id = 3;
+  int64 revision = 4;
+  string created_by_user_id = 5;
+  repeated EnvironmentVariable variables = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message Operation {
+  string id = 1;
+  OperationStatus status = 2;
+  string resource_name = 3;
+}
+
+message ReconcileScope {
+  ReconcileScopeKind kind = 1;
+  string organization_id = 2;
+  string application_id = 3;
+  string environment_id = 4;
+}
+
+message ReconcileFinding {
+  ReconcileCategory category = 1;
+  ReconcileFindingStatus status = 2;
+  string resource_name = 3;
+  string summary = 4;
+  oneof details {
+    RuntimeClassDriftFinding runtime_class_drift = 5;
+    NetworkPolicyDriftFinding network_policy_drift = 6;
+  }
+  google.protobuf.Timestamp observed_at = 7;
+}
+
+message RuntimeClassDriftFinding {
+  string expected_runtime_class = 1;
+  string observed_runtime_class = 2;
+}
+
+message NetworkPolicyDriftFinding {
+  repeated string missing_policies = 1;
+}
+
+message ReconciliationObject {
+  string kind = 1;
+  string namespace = 2;
+  string name = 3;
+}
+
+message ReconciliationPlanOperation {
+  ReconciliationObject object = 1;
+  string desired_hash = 2;
+  string observed_hash = 3;
+  google.protobuf.Value details = 4;
+}
+
+message ReconciliationPlan {
+  repeated ReconciliationPlanOperation create = 1;
+  repeated ReconciliationPlanOperation patch = 2;
+  repeated ReconciliationPlanOperation delete = 3;
+}
+
+message ReconciliationReport {
+  repeated ReconciliationObject orphans = 1;
+  repeated ReconciliationObject pruned = 2;
+  int32 planned = 3;
+  int32 applied = 4;
+  bool dry_run = 5;
+}
+
+message ReconciliationEvidence {
+  int64 sequence = 1;
+  string kind = 2;
+  ReconciliationObject object = 3;
+  string action = 4;
+  string desired_hash = 5;
+  string observed_hash = 6;
+  google.protobuf.Value details = 7;
+  google.protobuf.Timestamp observed_at = 8;
+}
+
+message ReconciliationRun {
+  string id = 1;
+  ReconcileScope scope = 2;
+  repeated ReconcileCategory categories = 3;
+  OperationStatus status = 4;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp completed_at = 7;
+  bool dry_run = 8;
+  bool prune = 9;
+  ReconciliationPlan plan = 10;
+  ReconciliationReport report = 11;
+  repeated ReconcileFinding findings = 12;
+  google.protobuf.Timestamp started_at = 13;
+  string error_code = 14;
+  string error_message = 15;
+}
+
+message BootstrapRequest {
+  string email = 1;
+  string password = 2;
+  string idempotency_key = 3;
+  string bootstrap_token = 4;
+}
+
+message BootstrapResponse { Session session = 1; }
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse { Session session = 1; }
+
+message LogoutRequest {}
+message LogoutResponse {}
+
+message GetCurrentUserRequest {}
+message GetCurrentUserResponse { User user = 1; }
+
+message CreateApiTokenRequest {
+  string name = 1;
+  repeated string scopes = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  string idempotency_key = 4;
+}
+
+message CreateApiTokenResponse {
+  ApiToken api_token = 1;
+  string token = 2;
+  CreateApiTokenResult result = 3;
+}
+
+message ListApiTokensRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListApiTokensResponse {
+  repeated ApiToken api_tokens = 1;
+  string next_page_token = 2;
+}
+
+message RevokeApiTokenRequest {
+  string api_token_id = 1;
+  string idempotency_key = 2;
+}
+message RevokeApiTokenResponse {}
+
+message GetOrganizationRequest { string organization_id = 1; }
+message GetOrganizationResponse { Organization organization = 1; }
+
+message DeleteOrganizationRequest {
+  string organization_id = 1;
+  bool external_credentials_revoked = 2;
+  string idempotency_key = 3;
+}
+message DeleteOrganizationResponse { Operation operation = 1; }
+
+message CreateProjectRequest {
+  string organization_id = 1;
+  Project project = 2;
+  string idempotency_key = 3;
+}
+message CreateProjectResponse { Project project = 1; }
+
+message GetProjectRequest { string project_id = 1; }
+message GetProjectResponse { Project project = 1; }
+
+message ListProjectsRequest {
+  string organization_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+  bool include_deleted = 4;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+  string next_page_token = 2;
+}
+
+message UpdateProjectRequest {
+  Project project = 1;
+  google.protobuf.FieldMask update_mask = 2;
+  string idempotency_key = 3;
+}
+message UpdateProjectResponse { Project project = 1; }
+
+message DeleteProjectRequest {
+  string project_id = 1;
+  bool external_credentials_revoked = 2;
+  string idempotency_key = 3;
+}
+message DeleteProjectResponse { Operation operation = 1; }
+
+message CreateApplicationRequest {
+  string project_id = 1;
+  Application application = 2;
+  string idempotency_key = 3;
+}
+message CreateApplicationResponse { Application application = 1; }
+
+message GetApplicationRequest { string application_id = 1; }
+message GetApplicationResponse { Application application = 1; }
+
+message ListApplicationsRequest {
+  string project_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+  bool include_deleted = 4;
+}
+
+message ListApplicationsResponse {
+  repeated Application applications = 1;
+  string next_page_token = 2;
+}
+
+message UpdateApplicationRequest {
+  Application application = 1;
+  google.protobuf.FieldMask update_mask = 2;
+  string idempotency_key = 3;
+}
+message UpdateApplicationResponse { Application application = 1; }
+
+message DeleteApplicationRequest {
+  string application_id = 1;
+  bool external_credentials_revoked = 2;
+  string idempotency_key = 3;
+}
+message DeleteApplicationResponse { Operation operation = 1; }
+
+message GetEnvironmentRequest { string environment_id = 1; }
+message GetEnvironmentResponse { Environment environment = 1; }
+
+message ListEnvironmentsRequest {
+  string application_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+  bool include_torn_down = 4;
+}
+
+message ListEnvironmentsResponse {
+  repeated Environment environments = 1;
+  string next_page_token = 2;
+}
+
+message DeployRequest {
+  string environment_id = 1;
+  string image_ref = 2;
+  string git_commit_sha = 3;
+  string idempotency_key = 4;
+}
+message DeployResponse { Operation operation = 1; }
+
+message RollbackRequest {
+  string environment_id = 1;
+  string release_id = 2;
+  string idempotency_key = 3;
+}
+message RollbackResponse { Operation operation = 1; }
+
+message GetReleaseRequest { string release_id = 1; }
+message GetReleaseResponse { Release release = 1; }
+
+message ListReleasesRequest {
+  string environment_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+  repeated ReleaseStatus statuses = 4;
+}
+
+message ListReleasesResponse {
+  repeated Release releases = 1;
+  string next_page_token = 2;
+}
+
+message GetEnvironmentVariablesRequest { string environment_id = 1; }
+message GetEnvironmentVariablesResponse { EnvironmentVariableRevision revision = 1; }
+
+message SetEnvironmentVariablesRequest {
+  string environment_id = 1;
+  repeated EnvironmentVariable variables = 2;
+  string idempotency_key = 3;
+}
+message SetEnvironmentVariablesResponse { Operation operation = 1; }
+
+message StartReconciliationRequest {
+  ReconcileScope scope = 1;
+  repeated ReconcileCategory categories = 2;
+  string idempotency_key = 3;
+  optional bool dry_run = 4;
+  bool prune = 5;
+}
+message StartReconciliationResponse { Operation operation = 1; }
+
+message GetReconciliationRequest { string reconciliation_id = 1; }
+message GetReconciliationResponse { ReconciliationRun reconciliation = 1; }
+
+message ListReconciliationsRequest {
+  string organization_id = 1;
+  string application_id = 2;
+  string environment_id = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListReconciliationsResponse {
+  repeated ReconciliationRun reconciliations = 1;
+  string next_page_token = 2;
+}
+
+message ListReconciliationEvidenceRequest {
+  string reconciliation_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListReconciliationEvidenceResponse {
+  repeated ReconciliationEvidence evidence = 1;
+  string next_page_token = 2;
+}
+
+service AuthenticationService {
+  rpc Bootstrap(BootstrapRequest) returns (BootstrapResponse) {
+    option (google.api.http) = { post: "/v1/auth/bootstrap" body: "*" };
+  }
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = { post: "/v1/auth/login" body: "*" };
+  }
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (google.api.http) = { post: "/v1/auth/logout" body: "*" };
+  }
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse) {
+    option (google.api.http) = { get: "/v1/user" };
+  }
+  rpc CreateApiToken(CreateApiTokenRequest) returns (CreateApiTokenResponse) {
+    option (google.api.http) = { post: "/v1/user/api-tokens" body: "*" };
+  }
+  rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse) {
+    option (google.api.http) = { get: "/v1/user/api-tokens" };
+  }
+  rpc RevokeApiToken(RevokeApiTokenRequest) returns (RevokeApiTokenResponse) {
+    option (google.api.http) = { delete: "/v1/user/api-tokens/{api_token_id}" };
+  }
+}
+
+service OrganizationService {
+  rpc GetOrganization(GetOrganizationRequest) returns (GetOrganizationResponse) {
+    option (google.api.http) = { get: "/v1/organizations/{organization_id}" };
+  }
+  rpc DeleteOrganization(DeleteOrganizationRequest) returns (DeleteOrganizationResponse) {
+    option (google.api.http) = { delete: "/v1/organizations/{organization_id}" };
+  }
+}
+
+service ProjectService {
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse) {
+    option (google.api.http) = { post: "/v1/organizations/{organization_id}/projects" body: "project" };
+  }
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse) {
+    option (google.api.http) = { get: "/v1/projects/{project_id}" };
+  }
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option (google.api.http) = { get: "/v1/organizations/{organization_id}/projects" };
+  }
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse) {
+    option (google.api.http) = { patch: "/v1/projects/{project.id}" body: "project" };
+  }
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse) {
+    option (google.api.http) = { delete: "/v1/projects/{project_id}" };
+  }
+}
+
+service ApplicationService {
+  rpc CreateApplication(CreateApplicationRequest) returns (CreateApplicationResponse) {
+    option (google.api.http) = { post: "/v1/projects/{project_id}/applications" body: "application" };
+  }
+  rpc GetApplication(GetApplicationRequest) returns (GetApplicationResponse) {
+    option (google.api.http) = { get: "/v1/applications/{application_id}" };
+  }
+  rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse) {
+    option (google.api.http) = { get: "/v1/projects/{project_id}/applications" };
+  }
+  rpc UpdateApplication(UpdateApplicationRequest) returns (UpdateApplicationResponse) {
+    option (google.api.http) = { patch: "/v1/applications/{application.id}" body: "application" };
+  }
+  rpc DeleteApplication(DeleteApplicationRequest) returns (DeleteApplicationResponse) {
+    option (google.api.http) = { delete: "/v1/applications/{application_id}" };
+  }
+}
+
+service EnvironmentService {
+  rpc GetEnvironment(GetEnvironmentRequest) returns (GetEnvironmentResponse) {
+    option (google.api.http) = { get: "/v1/environments/{environment_id}" };
+  }
+  rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsResponse) {
+    option (google.api.http) = { get: "/v1/applications/{application_id}/environments" };
+  }
+}
+
+service ReleaseService {
+  rpc Deploy(DeployRequest) returns (DeployResponse) {
+    option (google.api.http) = { post: "/v1/environments/{environment_id}/deploys" body: "*" };
+  }
+  rpc Rollback(RollbackRequest) returns (RollbackResponse) {
+    option (google.api.http) = { post: "/v1/environments/{environment_id}/rollbacks" body: "*" };
+  }
+  rpc GetRelease(GetReleaseRequest) returns (GetReleaseResponse) {
+    option (google.api.http) = { get: "/v1/releases/{release_id}" };
+  }
+  rpc ListReleases(ListReleasesRequest) returns (ListReleasesResponse) {
+    option (google.api.http) = { get: "/v1/environments/{environment_id}/releases" };
+  }
+  rpc GetEnvironmentVariables(GetEnvironmentVariablesRequest) returns (GetEnvironmentVariablesResponse) {
+    option (google.api.http) = { get: "/v1/environments/{environment_id}/env-vars" };
+  }
+  rpc SetEnvironmentVariables(SetEnvironmentVariablesRequest) returns (SetEnvironmentVariablesResponse) {
+    option (google.api.http) = { put: "/v1/environments/{environment_id}/env-vars" body: "*" };
+  }
+}
+
+service ReconciliationService {
+  rpc StartReconciliation(StartReconciliationRequest) returns (StartReconciliationResponse) {
+    option (google.api.http) = { post: "/v1/reconciliations" body: "*" };
+  }
+  rpc GetReconciliation(GetReconciliationRequest) returns (GetReconciliationResponse) {
+    option (google.api.http) = { get: "/v1/reconciliations/{reconciliation_id}" };
+  }
+  rpc ListReconciliations(ListReconciliationsRequest) returns (ListReconciliationsResponse) {
+    option (google.api.http) = { get: "/v1/reconciliations" };
+  }
+  rpc ListReconciliationEvidence(ListReconciliationEvidenceRequest) returns (ListReconciliationEvidenceResponse) {
+    option (google.api.http) = { get: "/v1/reconciliations/{reconciliation_id}/evidence" };
+  }
+}

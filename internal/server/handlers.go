@@ -1,0 +1,1399 @@
+package server
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
+	internalauth "github.com/cyclopus-dev/cyclopus/internal/auth"
+	"github.com/cyclopus-dev/cyclopus/internal/service"
+	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/google/uuid"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+const (
+	defaultPageSize = 50
+	maxPageSize     = 200
+	maxSessionTTL   = 7 * 24 * time.Hour
+)
+
+type apiHandlers struct {
+	cyclopusv1.UnimplementedAuthenticationServiceServer
+	cyclopusv1.UnimplementedOrganizationServiceServer
+	cyclopusv1.UnimplementedProjectServiceServer
+	cyclopusv1.UnimplementedApplicationServiceServer
+	cyclopusv1.UnimplementedEnvironmentServiceServer
+	cyclopusv1.UnimplementedReleaseServiceServer
+	cyclopusv1.UnimplementedReconciliationServiceServer
+	auth       *internalauth.Service
+	service    *service.Service
+	sessionTTL time.Duration
+}
+
+func NewServices(authService *internalauth.Service, domainService *service.Service, sessionTTL time.Duration) Services {
+	if sessionTTL > maxSessionTTL {
+		sessionTTL = maxSessionTTL
+	}
+	handler := &apiHandlers{auth: authService, service: domainService, sessionTTL: sessionTTL}
+	return Services{Authentication: handler, Organization: handler, Project: handler, Application: handler,
+		Environment: handler, Release: handler, Reconciliation: handler}
+}
+
+func (h *apiHandlers) Bootstrap(ctx context.Context, req *cyclopusv1.BootstrapRequest) (*cyclopusv1.BootstrapResponse, error) {
+	if err := requiredFields(map[string]string{"email": req.GetEmail(), "password": req.GetPassword(), "idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	principal, err := h.auth.ClaimFirstUser(ctx, req.GetEmail(), req.GetPassword(), req.GetBootstrapToken())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	session, err := h.issueSession(ctx, principal, "auth.bootstrap_session_created")
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.BootstrapResponse{Session: session}, nil
+}
+
+func (h *apiHandlers) Login(ctx context.Context, req *cyclopusv1.LoginRequest) (*cyclopusv1.LoginResponse, error) {
+	if err := requiredFields(map[string]string{"email": req.GetEmail(), "password": req.GetPassword()}); err != nil {
+		return nil, err
+	}
+	principal, err := h.auth.AuthenticatePassword(ctx, req.GetEmail(), req.GetPassword())
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+	}
+	session, err := h.issueSession(ctx, principal, "auth.login")
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.LoginResponse{Session: session}, nil
+}
+
+func (h *apiHandlers) issueSession(ctx context.Context, principal internalauth.Principal, auditAction string) (*cyclopusv1.Session, error) {
+	expires := time.Now().Add(h.sessionTTL)
+	created, err := h.auth.CreateToken(ctx, principal, internalauth.CreateTokenParams{
+		Kind: internalauth.CredentialKindSession, Name: "local session", ExpiresAt: &expires, AuditAction: auditAction,
+	})
+	if err != nil {
+		return nil, err
+	}
+	user, err := h.service.CurrentUser(ctx, service.ActorContext{UserID: principal.UserID, OrgID: principal.OrgID})
+	if err != nil {
+		return nil, err
+	}
+	return &cyclopusv1.Session{AccessToken: created.Token, ExpiresAt: timestamppb.New(expires), User: userProto(user)}, nil
+}
+
+func (h *apiHandlers) Logout(ctx context.Context, _ *cyclopusv1.LogoutRequest) (*cyclopusv1.LogoutResponse, error) {
+	if _, err := sessionActor(ctx); err != nil {
+		return nil, err
+	}
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.auth.RevokeToken(ctx, principal, principal.TokenID); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.LogoutResponse{}, nil
+}
+
+func (h *apiHandlers) GetCurrentUser(ctx context.Context, _ *cyclopusv1.GetCurrentUserRequest) (*cyclopusv1.GetCurrentUserResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	user, err := h.service.CurrentUser(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetCurrentUserResponse{User: userProto(user)}, nil
+}
+
+func (h *apiHandlers) CreateApiToken(ctx context.Context, req *cyclopusv1.CreateApiTokenRequest) (*cyclopusv1.CreateApiTokenResponse, error) {
+	if _, err := sessionActor(ctx); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"name": req.GetName(), "idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	var expires *time.Time
+	if req.ExpiresAt != nil {
+		value := req.ExpiresAt.AsTime()
+		expires = &value
+	}
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	created, err := h.auth.CreateIdempotentAPIToken(ctx, principal, req.GetIdempotencyKey(), internalauth.CreateTokenParams{
+		Name: req.GetName(), Scopes: req.GetScopes(), ExpiresAt: expires,
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	result := cyclopusv1.CreateApiTokenResult_CREATE_API_TOKEN_RESULT_CREATED
+	if created.Replayed {
+		result = cyclopusv1.CreateApiTokenResult_CREATE_API_TOKEN_RESULT_ALREADY_CREATED_SECRET_NOT_REPLAYABLE
+	}
+	return &cyclopusv1.CreateApiTokenResponse{ApiToken: apiTokenProto(created.Token), Token: created.Secret, Result: result}, nil
+}
+
+func (h *apiHandlers) ListApiTokens(ctx context.Context, req *cyclopusv1.ListApiTokensRequest) (*cyclopusv1.ListApiTokensResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	values, err := h.service.ListAPITokens(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "api_tokens", values, func(v store.APIToken) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, "api_tokens", func(v store.APIToken) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListApiTokensResponse{ApiTokens: make([]*cyclopusv1.ApiToken, 0, len(page)), NextPageToken: next}
+	for _, value := range page {
+		response.ApiTokens = append(response.ApiTokens, apiTokenProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) RevokeApiToken(ctx context.Context, req *cyclopusv1.RevokeApiTokenRequest) (*cyclopusv1.RevokeApiTokenResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("api_token_id", req.GetApiTokenId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	if _, err := h.service.RevokeAPIToken(ctx, actor, req.GetIdempotencyKey(), req.GetApiTokenId()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.RevokeApiTokenResponse{}, nil
+}
+
+func (h *apiHandlers) GetOrganization(ctx context.Context, req *cyclopusv1.GetOrganizationRequest) (*cyclopusv1.GetOrganizationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	value, err := h.service.CurrentOrganization(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetOrganizationResponse{Organization: organizationProto(value)}, nil
+}
+
+func (h *apiHandlers) DeleteOrganization(ctx context.Context, req *cyclopusv1.DeleteOrganizationRequest) (*cyclopusv1.DeleteOrganizationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("organization_id", req.GetOrganizationId())
+	if strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		violations.add("idempotency_key", "is required")
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	operation, err := h.service.DeleteOrganization(ctx, actor, req.GetIdempotencyKey(), req.GetExternalCredentialsRevoked())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteOrganizationResponse{Operation: operationProto(operation, "organizations/")}, nil
+}
+
+func (h *apiHandlers) CreateProject(ctx context.Context, req *cyclopusv1.CreateProjectRequest) (*cyclopusv1.CreateProjectResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Project == nil {
+		return nil, fieldError("project", "is required")
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(), "project.name": req.Project.GetName(), "project.slug": req.Project.GetSlug()}); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	value, err := h.service.CreateProject(ctx, actor, req.GetIdempotencyKey(), projectInput(req.Project))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateProjectResponse{Project: projectProto(value)}, nil
+}
+
+func (h *apiHandlers) GetProject(ctx context.Context, req *cyclopusv1.GetProjectRequest) (*cyclopusv1.GetProjectResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("project_id", req.GetProjectId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetProject(ctx, actor, req.GetProjectId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetProjectResponse{Project: projectProto(value)}, nil
+}
+
+func (h *apiHandlers) ListProjects(ctx context.Context, req *cyclopusv1.ListProjectsRequest) (*cyclopusv1.ListProjectsResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	values, err := h.service.ListProjects(ctx, actor, req.GetIncludeDeleted())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "projects", values, func(v store.Project) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, "projects", func(v store.Project) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListProjectsResponse{Projects: make([]*cyclopusv1.Project, 0, len(page)), NextPageToken: next}
+	for _, value := range page {
+		response.Projects = append(response.Projects, projectProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) UpdateProject(ctx context.Context, req *cyclopusv1.UpdateProjectRequest) (*cyclopusv1.UpdateProjectResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Project == nil {
+		return nil, fieldError("project", "is required")
+	}
+	if err := validateUUID("project.id", req.Project.GetId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	current, err := h.service.GetProject(ctx, actor, req.Project.GetId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	merged := projectProto(current)
+	if err := mergeMaskedMessage(merged, req.Project, req.GetUpdateMask(), map[string]bool{"name": true, "slug": true, "git_connection_id": true}); err != nil {
+		return nil, err
+	}
+	value, err := h.service.UpdateProject(ctx, actor, req.GetIdempotencyKey(), req.Project.GetId(), projectInput(merged))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.UpdateProjectResponse{Project: projectProto(value)}, nil
+}
+
+func (h *apiHandlers) DeleteProject(ctx context.Context, req *cyclopusv1.DeleteProjectRequest) (*cyclopusv1.DeleteProjectResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("project_id", req.GetProjectId())
+	if strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		violations.add("idempotency_key", "is required")
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	operation, err := h.service.DeleteProject(ctx, actor, req.GetIdempotencyKey(), req.GetProjectId(), req.GetExternalCredentialsRevoked())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteProjectResponse{Operation: operationProto(operation, "projects/")}, nil
+}
+
+func (h *apiHandlers) CreateApplication(ctx context.Context, req *cyclopusv1.CreateApplicationRequest) (*cyclopusv1.CreateApplicationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Application == nil {
+		return nil, fieldError("application", "is required")
+	}
+	if err := validateUUID("project_id", req.GetProjectId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(), "application.name": req.Application.GetName(), "application.slug": req.Application.GetSlug(), "application.hostname_label": req.Application.GetHostnameLabel()}); err != nil {
+		return nil, err
+	}
+	input := appInput(req.Application)
+	input.ProjectID = req.GetProjectId()
+	value, err := h.service.CreateApp(ctx, actor, req.GetIdempotencyKey(), input)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateApplicationResponse{Application: applicationProto(value)}, nil
+}
+
+func (h *apiHandlers) GetApplication(ctx context.Context, req *cyclopusv1.GetApplicationRequest) (*cyclopusv1.GetApplicationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("application_id", req.GetApplicationId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetApp(ctx, actor, req.GetApplicationId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetApplicationResponse{Application: applicationProto(value)}, nil
+}
+
+func (h *apiHandlers) ListApplications(ctx context.Context, req *cyclopusv1.ListApplicationsRequest) (*cyclopusv1.ListApplicationsResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("project_id", req.GetProjectId()); err != nil {
+		return nil, err
+	}
+	values, err := h.service.ListApps(ctx, actor, req.GetProjectId(), req.GetIncludeDeleted())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "applications", values, func(v store.App) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, "applications", func(v store.App) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListApplicationsResponse{Applications: make([]*cyclopusv1.Application, 0, len(page)), NextPageToken: next}
+	for _, value := range page {
+		response.Applications = append(response.Applications, applicationProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) UpdateApplication(ctx context.Context, req *cyclopusv1.UpdateApplicationRequest) (*cyclopusv1.UpdateApplicationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Application == nil {
+		return nil, fieldError("application", "is required")
+	}
+	if err := validateUUID("application.id", req.Application.GetId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	current, err := h.service.GetApp(ctx, actor, req.Application.GetId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	merged := applicationProto(current)
+	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "registry_id": true, "image_repository": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true, "ci_workflow_id": true}
+	if err := mergeMaskedMessage(merged, req.Application, req.GetUpdateMask(), allowed); err != nil {
+		return nil, err
+	}
+	value, err := h.service.UpdateApp(ctx, actor, req.GetIdempotencyKey(), req.Application.GetId(), appInput(merged))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.UpdateApplicationResponse{Application: applicationProto(value)}, nil
+}
+
+func (h *apiHandlers) DeleteApplication(ctx context.Context, req *cyclopusv1.DeleteApplicationRequest) (*cyclopusv1.DeleteApplicationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("application_id", req.GetApplicationId())
+	if strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		violations.add("idempotency_key", "is required")
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	operation, err := h.service.DeleteApp(ctx, actor, req.GetIdempotencyKey(), req.GetApplicationId(), req.GetExternalCredentialsRevoked())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteApplicationResponse{Operation: operationProto(operation, "applications/")}, nil
+}
+
+func (h *apiHandlers) GetEnvironment(ctx context.Context, req *cyclopusv1.GetEnvironmentRequest) (*cyclopusv1.GetEnvironmentResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("environment_id", req.GetEnvironmentId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetEnvironment(ctx, actor, req.GetEnvironmentId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetEnvironmentResponse{Environment: environmentProto(value)}, nil
+}
+
+func (h *apiHandlers) ListEnvironments(ctx context.Context, req *cyclopusv1.ListEnvironmentsRequest) (*cyclopusv1.ListEnvironmentsResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("application_id", req.GetApplicationId()); err != nil {
+		return nil, err
+	}
+	values, err := h.service.ListEnvironments(ctx, actor, req.GetApplicationId(), req.GetIncludeTornDown())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "environments", values, func(v store.Environment) cursorKey { return cursorKey{CreatedAt: timeValue(v.CreatedAt), ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, "environments", func(v store.Environment) cursorKey { return cursorKey{CreatedAt: timeValue(v.CreatedAt), ID: v.ID} })
+	response := &cyclopusv1.ListEnvironmentsResponse{Environments: make([]*cyclopusv1.Environment, 0, len(page)), NextPageToken: next}
+	for _, value := range page {
+		response.Environments = append(response.Environments, environmentProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) Deploy(ctx context.Context, req *cyclopusv1.DeployRequest) (*cyclopusv1.DeployResponse, error) {
+	actor, err := actorFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("environment_id", req.GetEnvironmentId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"image_ref": req.GetImageRef(), "idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	environment, err := h.service.GetEnvironment(ctx, actor, req.GetEnvironmentId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if principal.Kind == internalauth.CredentialKindAPI {
+		if err := h.auth.AuthorizeDeployApp(ctx, principal, environment.AppID); err != nil {
+			return nil, notFound()
+		}
+	}
+	operation, err := h.service.AcceptDeploy(ctx, actor, req.GetIdempotencyKey(), req.GetEnvironmentId(), service.DeployInput{ImageRef: req.GetImageRef(), GitCommitSHA: req.GetGitCommitSha()})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeployResponse{Operation: operationProto(operation, "releases/")}, nil
+}
+
+func (h *apiHandlers) Rollback(ctx context.Context, req *cyclopusv1.RollbackRequest) (*cyclopusv1.RollbackResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("environment_id", req.GetEnvironmentId()); err != nil {
+		return nil, err
+	}
+	if err := validateUUID("release_id", req.GetReleaseId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	operation, err := h.service.AcceptRollback(ctx, actor, req.GetIdempotencyKey(), req.GetEnvironmentId(), req.GetReleaseId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.RollbackResponse{Operation: operationProto(operation, "releases/")}, nil
+}
+
+func (h *apiHandlers) GetRelease(ctx context.Context, req *cyclopusv1.GetReleaseRequest) (*cyclopusv1.GetReleaseResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("release_id", req.GetReleaseId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetRelease(ctx, actor, req.GetReleaseId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetReleaseResponse{Release: releaseProto(value)}, nil
+}
+
+func (h *apiHandlers) ListReleases(ctx context.Context, req *cyclopusv1.ListReleasesRequest) (*cyclopusv1.ListReleasesResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("environment_id", req.GetEnvironmentId()); err != nil {
+		return nil, err
+	}
+	statuses, validationErr := releaseStatusFilters(req.GetStatuses())
+	if validationErr != nil {
+		return nil, validationErr
+	}
+	values, err := h.service.ListReleases(ctx, actor, req.GetEnvironmentId(), statuses)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "releases", values, func(v store.Release) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, "releases", func(v store.Release) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListReleasesResponse{Releases: make([]*cyclopusv1.Release, 0, len(page)), NextPageToken: next}
+	for _, value := range page {
+		response.Releases = append(response.Releases, releaseProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) GetEnvironmentVariables(ctx context.Context, req *cyclopusv1.GetEnvironmentVariablesRequest) (*cyclopusv1.GetEnvironmentVariablesResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("environment_id", req.GetEnvironmentId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetEnvironmentVariables(ctx, actor, req.GetEnvironmentId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	variables := make([]*cyclopusv1.EnvironmentVariable, 0, len(value.Variables))
+	for _, variable := range value.Variables {
+		variables = append(variables, &cyclopusv1.EnvironmentVariable{Key: variable.Key, Secret: variable.IsSecret})
+	}
+	return &cyclopusv1.GetEnvironmentVariablesResponse{Revision: &cyclopusv1.EnvironmentVariableRevision{Id: value.ID, OrganizationId: value.OrgID, EnvironmentId: value.EnvironmentID, Revision: value.Revision, CreatedByUserId: value.CreatedByUserID, Variables: variables, CreatedAt: timestamppb.New(value.CreatedAt)}}, nil
+}
+
+func (h *apiHandlers) SetEnvironmentVariables(ctx context.Context, req *cyclopusv1.SetEnvironmentVariablesRequest) (*cyclopusv1.SetEnvironmentVariablesResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("environment_id", req.GetEnvironmentId())
+	if strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		violations.add("idempotency_key", "is required")
+	}
+	inputs := make([]service.EnvVarInput, 0, len(req.GetVariables()))
+	seen := map[string]bool{}
+	for index, variable := range req.GetVariables() {
+		if variable == nil {
+			violations.add(fmt.Sprintf("variables[%d]", index), "is required")
+			continue
+		}
+		if !variable.GetSecret() {
+			violations.add(fmt.Sprintf("variables[%d].secret", index), "must be true")
+		}
+		if strings.TrimSpace(variable.GetValue()) == "" {
+			violations.add(fmt.Sprintf("variables[%d].value", index), "must contain a secret reference")
+		}
+		if seen[variable.GetKey()] {
+			violations.add(fmt.Sprintf("variables[%d].key", index), "must not be duplicated")
+		}
+		seen[variable.GetKey()] = true
+		inputs = append(inputs, service.EnvVarInput{Key: variable.GetKey(), SecretRef: variable.GetValue()})
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	operation, err := h.service.SetEnvironmentVariables(ctx, actor, req.GetIdempotencyKey(), req.GetEnvironmentId(), inputs)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.SetEnvironmentVariablesResponse{Operation: operationProto(operation, "releases/")}, nil
+}
+
+func (h *apiHandlers) StartReconciliation(ctx context.Context, req *cyclopusv1.StartReconciliationRequest) (*cyclopusv1.StartReconciliationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Scope == nil {
+		return nil, fieldError("scope", "is required")
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	input, validationErr := reconciliationInput(req)
+	if validationErr != nil {
+		return nil, validationErr
+	}
+	value, err := h.service.CreateReconciliation(ctx, actor, req.GetIdempotencyKey(), input)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.StartReconciliationResponse{Operation: &cyclopusv1.Operation{Id: value.ID, ResourceName: "reconciliations/" + value.ID, Status: operationStatus(value.Status)}}, nil
+}
+
+func (h *apiHandlers) GetReconciliation(ctx context.Context, req *cyclopusv1.GetReconciliationRequest) (*cyclopusv1.GetReconciliationResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("reconciliation_id", req.GetReconciliationId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.ReconciliationStatus(ctx, actor, req.GetReconciliationId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	projected, err := reconciliationProto(value)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "invalid persisted reconciliation result")
+	}
+	return &cyclopusv1.GetReconciliationResponse{Reconciliation: projected}, nil
+}
+
+func (h *apiHandlers) ListReconciliations(ctx context.Context, req *cyclopusv1.ListReconciliationsRequest) (*cyclopusv1.ListReconciliationsResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	if req.GetOrganizationId() != "" {
+		violations.uuid("organization_id", req.GetOrganizationId())
+	}
+	if req.GetApplicationId() != "" {
+		violations.uuid("application_id", req.GetApplicationId())
+	}
+	if req.GetEnvironmentId() != "" {
+		violations.uuid("environment_id", req.GetEnvironmentId())
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != "" && req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	values, err := h.service.ListReconciliations(ctx, actor, pointer(req.GetApplicationId()), pointer(req.GetEnvironmentId()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "reconciliations", values, func(v store.ReconciliationRun) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, "reconciliations", func(v store.ReconciliationRun) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListReconciliationsResponse{Reconciliations: make([]*cyclopusv1.ReconciliationRun, 0, len(page)), NextPageToken: next}
+	for _, value := range page {
+		projected, err := reconciliationProto(value)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "invalid persisted reconciliation result")
+		}
+		response.Reconciliations = append(response.Reconciliations, projected)
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) ListReconciliationEvidence(ctx context.Context, req *cyclopusv1.ListReconciliationEvidenceRequest) (*cyclopusv1.ListReconciliationEvidenceResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("reconciliation_id", req.GetReconciliationId()); err != nil {
+		return nil, err
+	}
+	size, err := boundedPageSize(req.GetPageSize())
+	if err != nil {
+		return nil, err
+	}
+	afterSequence, err := reconciliationEvidenceCursor(req.GetPageToken(), req.GetReconciliationId())
+	if err != nil {
+		return nil, err
+	}
+	values, err := h.service.ListReconciliationEvidence(ctx, actor, req.GetReconciliationId(), afterSequence, size+1)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	hasNext := len(values) > size
+	if hasNext {
+		values = values[:size]
+	}
+	response := &cyclopusv1.ListReconciliationEvidenceResponse{Evidence: make([]*cyclopusv1.ReconciliationEvidence, 0, len(values))}
+	for _, value := range values {
+		projected, err := reconciliationEvidenceProto(value)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "invalid persisted reconciliation evidence")
+		}
+		response.Evidence = append(response.Evidence, projected)
+	}
+	if hasNext {
+		response.NextPageToken = encodeReconciliationEvidenceCursor(req.GetReconciliationId(), values[len(values)-1].Sequence)
+	}
+	return response, nil
+}
+
+func sessionActor(ctx context.Context) (service.ActorContext, error) {
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return service.ActorContext{}, err
+	}
+	if principal.Kind != internalauth.CredentialKindSession {
+		return service.ActorContext{}, status.Error(codes.PermissionDenied, "session credential required")
+	}
+	return actorFromContext(ctx)
+}
+
+func rpcError(err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "request cancelled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, internalauth.ErrNotFound):
+		return notFound()
+	case errors.Is(err, internalauth.ErrUnauthenticated):
+		return status.Error(codes.Unauthenticated, "invalid credentials")
+	case errors.Is(err, service.ErrInvalidArgument), errors.Is(err, internalauth.ErrInvalidScope), errors.Is(err, internalauth.ErrInvalidCredential):
+		return fieldError("request", "contains invalid values")
+	case errors.Is(err, service.ErrForbidden):
+		return status.Error(codes.PermissionDenied, "permission denied")
+	case errors.Is(err, store.ErrAlreadyExists):
+		return typedError(codes.AlreadyExists, "request conflicts with existing state", "CONFLICT")
+	case errors.Is(err, store.ErrFailedPrecondition):
+		return typedError(codes.FailedPrecondition, "resource is not in the required state", "FAILED_PRECONDITION")
+	case errors.Is(err, service.ErrConflict), errors.Is(err, store.ErrConflict):
+		return typedError(codes.Aborted, "request conflicts with current state", "CONFLICT")
+	case errors.Is(err, service.ErrInProgress):
+		return typedError(codes.Aborted, "operation is in progress", "IN_PROGRESS")
+	case errors.Is(err, store.ErrIdempotencyActive):
+		return typedError(codes.Aborted, "operation is in progress", "IN_PROGRESS")
+	default:
+		return status.Error(codes.Internal, "internal error")
+	}
+}
+
+func notFound() error { return typedError(codes.NotFound, "resource not found", "NOT_FOUND") }
+
+func fieldError(field, description string) error {
+	base := status.New(codes.InvalidArgument, "request validation failed")
+	withDetails, err := base.WithDetails(
+		&errdetails.ErrorInfo{Reason: "INVALID_ARGUMENT", Domain: "cyclopus.dev"},
+		&errdetails.BadRequest{FieldViolations: []*errdetails.BadRequest_FieldViolation{{Field: field, Description: description}}},
+	)
+	if err != nil {
+		return base.Err()
+	}
+	return withDetails.Err()
+}
+
+func typedError(code codes.Code, message, reason string) error {
+	base := status.New(code, message)
+	withDetails, err := base.WithDetails(&errdetails.ErrorInfo{Reason: reason, Domain: "cyclopus.dev"})
+	if err != nil {
+		return base.Err()
+	}
+	return withDetails.Err()
+}
+
+func requiredFields(fields map[string]string) error {
+	violations := make(validationViolations, 0, len(fields))
+	for field, value := range fields {
+		if strings.TrimSpace(value) == "" {
+			violations = append(violations, fieldViolation{field, "is required"})
+		}
+	}
+	return violations.err()
+}
+
+func validateUUID(field, value string) error {
+	parsed, err := uuid.Parse(value)
+	if err != nil || parsed.String() != value {
+		return fieldError(field, "must be a canonical UUID")
+	}
+	return nil
+}
+
+func pointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func projectInput(value *cyclopusv1.Project) service.ProjectInput {
+	return service.ProjectInput{Name: value.GetName(), Slug: value.GetSlug(), GitConnectionID: pointer(value.GetGitConnectionId())}
+}
+
+func appInput(value *cyclopusv1.Application) service.AppInput {
+	runtimeClass := map[cyclopusv1.RuntimeClass]string{cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR: "gvisor", cyclopusv1.RuntimeClass_RUNTIME_CLASS_RUNC: "runc"}[value.GetRuntimeClass()]
+	input := service.AppInput{ProjectID: value.GetProjectId(), Name: value.GetName(), Slug: value.GetSlug(), HostnameLabel: value.GetHostnameLabel(),
+		RegistryID: pointer(value.GetRegistryId()), ImageRepository: pointer(value.GetImageRepository()), CIWorkflowID: pointer(value.GetCiWorkflowId()), ContainerPort: int(value.GetContainerPort()),
+		HealthCheckPath: value.GetHealthCheckPath(), ScalingMode: scalingModeString(value.GetScalingMode()), MinReplicas: int(value.GetMinReplicas()), MaxReplicas: int(value.GetMaxReplicas()), HPATargetCPUPercent: int(value.GetHpaTargetCpuPercent()),
+		CPURequestMillicores: int(value.GetCpuRequestMillicores()), CPULimitMillicores: int(value.GetCpuLimitMillicores()), MemoryRequestMiB: int(value.GetMemoryRequestMib()), MemoryLimitMiB: int(value.GetMemoryLimitMib()),
+		PreviewsEnabled: value.GetPreviewsEnabled(), MaxPreviewEnvironments: int(value.GetMaxPreviewEnvironments()), PreviewIdleTTLHours: int(value.GetPreviewIdleTtlHours()), DeployTimeoutSeconds: int(value.GetDeployTimeoutSeconds()), ReleaseRetentionCount: int(value.GetReleaseRetentionCount())}
+	if runtimeClass != "" {
+		input.RuntimeClass = &runtimeClass
+	}
+	return input
+}
+
+func reconciliationInput(req *cyclopusv1.StartReconciliationRequest) (service.ReconciliationInput, error) {
+	scope := req.GetScope()
+	violations := validationViolations{}
+	if scope == nil {
+		return service.ReconciliationInput{}, fieldError("scope", "is required")
+	}
+	setIDs := 0
+	for field, value := range map[string]string{"scope.organization_id": scope.GetOrganizationId(), "scope.application_id": scope.GetApplicationId(), "scope.environment_id": scope.GetEnvironmentId()} {
+		if value != "" {
+			setIDs++
+			violations.uuid(field, value)
+		}
+	}
+	var input service.ReconciliationInput
+	switch scope.GetKind() {
+	case cyclopusv1.ReconcileScopeKind_RECONCILE_SCOPE_KIND_ORGANIZATION:
+		if setIDs != 1 || scope.GetOrganizationId() == "" {
+			violations.add("scope", "organization scope requires only organization_id")
+		}
+		input = service.ReconciliationInput{ScopeKind: "org", ScopeID: scope.GetOrganizationId()}
+	case cyclopusv1.ReconcileScopeKind_RECONCILE_SCOPE_KIND_APPLICATION:
+		if setIDs != 1 || scope.GetApplicationId() == "" {
+			violations.add("scope", "application scope requires only application_id")
+		}
+		input = service.ReconciliationInput{ScopeKind: "app", ScopeID: scope.GetApplicationId(), ScopeAppID: pointer(scope.GetApplicationId())}
+	case cyclopusv1.ReconcileScopeKind_RECONCILE_SCOPE_KIND_ENVIRONMENT:
+		if setIDs != 1 || scope.GetEnvironmentId() == "" {
+			violations.add("scope", "environment scope requires only environment_id")
+		}
+		input = service.ReconciliationInput{ScopeKind: "environment", ScopeID: scope.GetEnvironmentId(), ScopeEnvironmentID: pointer(scope.GetEnvironmentId())}
+	default:
+		violations.add("scope.kind", "must be specified")
+	}
+	seen := map[cyclopusv1.ReconcileCategory]bool{}
+	for index, category := range req.GetCategories() {
+		name := reconcileCategoryString(category)
+		if name == "" {
+			violations.add(fmt.Sprintf("categories[%d]", index), "must be specified")
+		} else if seen[category] {
+			violations.add(fmt.Sprintf("categories[%d]", index), "must not be duplicated")
+		} else {
+			seen[category] = true
+			input.Categories = append(input.Categories, name)
+		}
+	}
+	if req.GetPrune() && (req.DryRun == nil || req.GetDryRun()) {
+		violations.add("prune", "requires dry_run to be explicitly false")
+	}
+	if err := violations.err(); err != nil {
+		return service.ReconciliationInput{}, err
+	}
+	if req.DryRun != nil {
+		value := req.GetDryRun()
+		input.DryRun = &value
+	}
+	input.Prune = req.GetPrune()
+	return input, nil
+}
+
+func userProto(v store.User) *cyclopusv1.User {
+	return &cyclopusv1.User{Id: v.ID, OrganizationId: v.OrgID, Email: v.Email, CreatedAt: timestamppb.New(v.CreatedAt)}
+}
+func organizationProto(v store.Organization) *cyclopusv1.Organization {
+	return &cyclopusv1.Organization{Id: v.ID, Name: v.Name, Slug: v.Slug, CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
+}
+func projectProto(v store.Project) *cyclopusv1.Project {
+	return &cyclopusv1.Project{Id: v.ID, OrganizationId: v.OrgID, Name: v.Name, Slug: v.Slug, GitConnectionId: stringValue(v.GitConnectionID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
+}
+func applicationProto(v store.App) *cyclopusv1.Application {
+	return &cyclopusv1.Application{Id: v.ID, OrganizationId: v.OrgID, ProjectId: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel, RegistryId: stringValue(v.RegistryID), ImageRepository: stringValue(v.ImageRepository), ContainerPort: int32(v.ContainerPort), HealthCheckPath: v.HealthCheckPath, ScalingMode: scalingModeProto(v.ScalingMode), MinReplicas: int32(v.MinReplicas), MaxReplicas: int32(v.MaxReplicas), HpaTargetCpuPercent: int32(v.HPATargetCPUPercent), CpuRequestMillicores: int32(v.CPURequestMillicores), CpuLimitMillicores: int32(v.CPULimitMillicores), MemoryRequestMib: int32(v.MemoryRequestMiB), MemoryLimitMib: int32(v.MemoryLimitMiB), PreviewsEnabled: v.PreviewsEnabled, MaxPreviewEnvironments: int32(v.MaxPreviewEnvironments), PreviewIdleTtlHours: int32(v.PreviewIdleTTLHours), DeployTimeoutSeconds: int32(v.DeployTimeoutSeconds), ReleaseRetentionCount: int32(v.ReleaseRetentionCount), RuntimeClass: runtimeClassProto(v.RuntimeClass), CiWorkflowId: stringValue(v.CIWorkflowID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
+}
+func environmentProto(v store.Environment) *cyclopusv1.Environment {
+	return &cyclopusv1.Environment{Id: v.ID, OrganizationId: v.OrgID, ApplicationId: v.AppID, Branch: v.Branch, Kind: environmentKindProto(v.Kind), PreviewSlug: stringValue(v.PreviewSlug), Namespace: v.Namespace, PlannedHostname: v.PlannedHostname, CurrentReleaseId: stringValue(v.CurrentReleaseID), InProgressReleaseId: stringValue(v.InProgressReleaseID), CurrentEnvVarRevisionId: stringValue(v.CurrentEnvVarRevisionID), CreatedAt: timeProto(v.CreatedAt), TornDownAt: timeProto(v.TornDownAt)}
+}
+func releaseProto(v store.Release) *cyclopusv1.Release {
+	return &cyclopusv1.Release{Id: v.ID, OrganizationId: v.OrgID, EnvironmentId: v.EnvironmentID, ImageRef: v.ImageRef, GitCommitSha: stringValue(v.GitCommitSHA), TriggeredByUserId: stringValue(v.TriggeredByUserID), Kind: releaseKindProto(v.Kind), EnvVarRevisionId: stringValue(v.EnvVarRevisionID), Status: releaseStatusProto(v.Status), FailureReason: v.FailureReason, CreatedAt: timestamppb.New(v.CreatedAt)}
+}
+func apiTokenProto(v store.APIToken) *cyclopusv1.ApiToken {
+	return &cyclopusv1.ApiToken{Id: v.ID, UserId: v.UserID, Name: v.Name, Scopes: append([]string(nil), v.Scopes...), ExpiresAt: timeProto(v.ExpiresAt), CreatedAt: timestamppb.New(v.CreatedAt), LastUsedAt: timeProto(v.LastUsedAt)}
+}
+func operationProto(v service.AcceptedOperation, prefix string) *cyclopusv1.Operation {
+	return &cyclopusv1.Operation{Id: v.OperationID, ResourceName: prefix + v.ResourceID, Status: operationStatus(v.Status)}
+}
+func reconciliationProto(v store.ReconciliationRun) (*cyclopusv1.ReconciliationRun, error) {
+	categories := make([]cyclopusv1.ReconcileCategory, 0, len(v.Categories))
+	for _, category := range v.Categories {
+		categories = append(categories, reconcileCategoryProto(category))
+	}
+	plan, err := reconciliationPlanProto(v.Plan)
+	if err != nil {
+		return nil, err
+	}
+	report, findings, err := reconciliationReportProto(v.Report)
+	if err != nil {
+		return nil, err
+	}
+	return &cyclopusv1.ReconciliationRun{Id: v.ID, Scope: &cyclopusv1.ReconcileScope{Kind: reconcileScopeKindProto(v.ScopeKind), OrganizationId: v.OrgID, ApplicationId: stringValue(v.ScopeAppID), EnvironmentId: stringValue(v.ScopeEnvironmentID)}, Categories: categories, Status: operationStatus(v.Status), CreatedAt: timeProto(&v.CreatedAt), StartedAt: timeProto(v.StartedAt), CompletedAt: timeProto(v.CompletedAt), DryRun: v.DryRun, Prune: v.Prune, Plan: plan, Report: report, Findings: findings, ErrorCode: stringValue(v.ErrorCode), ErrorMessage: stringValue(v.ErrorMessage)}, nil
+}
+
+type reconciliationObjectJSON struct {
+	Kind            string `json:"kind"`
+	ObjectKind      string `json:"object_kind"`
+	Namespace       string `json:"namespace"`
+	ObjectNamespace string `json:"object_namespace"`
+	Name            string `json:"name"`
+	ObjectName      string `json:"object_name"`
+}
+
+type reconciliationOperationJSON struct {
+	Action          string          `json:"action"`
+	Object          json.RawMessage `json:"object"`
+	Kind            string          `json:"kind"`
+	ObjectKind      string          `json:"object_kind"`
+	Namespace       string          `json:"namespace"`
+	ObjectNamespace string          `json:"object_namespace"`
+	ObjectName      string          `json:"object_name"`
+	Name            string          `json:"name"`
+	DesiredHash     string          `json:"desired_hash"`
+	ObservedHash    string          `json:"observed_hash"`
+	Details         map[string]any  `json:"details"`
+}
+
+func reconciliationPlanProto(raw json.RawMessage) (*cyclopusv1.ReconciliationPlan, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var value struct {
+		Create  []reconciliationOperationJSON `json:"create"`
+		Patch   []reconciliationOperationJSON `json:"patch"`
+		Delete  []reconciliationOperationJSON `json:"delete"`
+		Actions []reconciliationOperationJSON `json:"actions"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	for _, operation := range value.Actions {
+		switch operation.Action {
+		case "create":
+			value.Create = append(value.Create, operation)
+		case "patch", "update":
+			value.Patch = append(value.Patch, operation)
+		case "delete", "prune":
+			value.Delete = append(value.Delete, operation)
+		default:
+			return nil, fmt.Errorf("unknown reconciliation action %q", operation.Action)
+		}
+	}
+	create, err := reconciliationOperationsProto(value.Create)
+	if err != nil {
+		return nil, err
+	}
+	patch, err := reconciliationOperationsProto(value.Patch)
+	if err != nil {
+		return nil, err
+	}
+	deleted, err := reconciliationOperationsProto(value.Delete)
+	if err != nil {
+		return nil, err
+	}
+	return &cyclopusv1.ReconciliationPlan{Create: create, Patch: patch, Delete: deleted}, nil
+}
+
+func reconciliationOperationsProto(values []reconciliationOperationJSON) ([]*cyclopusv1.ReconciliationPlanOperation, error) {
+	operations := make([]*cyclopusv1.ReconciliationPlanOperation, 0, len(values))
+	for _, value := range values {
+		object, err := reconciliationOperationObjectProto(value)
+		if err != nil {
+			return nil, err
+		}
+		details, err := valueProto(value.Details)
+		if err != nil {
+			return nil, err
+		}
+		operations = append(operations, &cyclopusv1.ReconciliationPlanOperation{Object: object, DesiredHash: value.DesiredHash, ObservedHash: value.ObservedHash, Details: details})
+	}
+	return operations, nil
+}
+
+func reconciliationOperationObjectProto(value reconciliationOperationJSON) (*cyclopusv1.ReconciliationObject, error) {
+	object := reconciliationObjectJSON{Kind: value.Kind, ObjectKind: value.ObjectKind, Namespace: value.Namespace, ObjectNamespace: value.ObjectNamespace, Name: value.Name, ObjectName: value.ObjectName}
+	if len(value.Object) != 0 && string(value.Object) != "null" {
+		var name string
+		if err := json.Unmarshal(value.Object, &name); err == nil {
+			object.Name = name
+		} else if err := json.Unmarshal(value.Object, &object); err != nil {
+			return nil, err
+		}
+	}
+	return reconciliationObjectProto(object), nil
+}
+
+type reconciliationFindingJSON struct {
+	Type                 string   `json:"type"`
+	Kind                 string   `json:"kind"`
+	Category             string   `json:"category"`
+	Status               string   `json:"status"`
+	ResourceName         string   `json:"resource_name"`
+	Summary              string   `json:"summary"`
+	ExpectedRuntimeClass string   `json:"expected_runtime_class"`
+	ObservedRuntimeClass string   `json:"observed_runtime_class"`
+	MissingPolicies      []string `json:"missing_policies"`
+	ObservedAt           string   `json:"observed_at"`
+}
+
+func reconciliationReportProto(raw json.RawMessage) (*cyclopusv1.ReconciliationReport, []*cyclopusv1.ReconcileFinding, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil, nil
+	}
+	var value struct {
+		Orphans  []reconciliationObjectJSON  `json:"orphans"`
+		Pruned   []reconciliationObjectJSON  `json:"pruned"`
+		Planned  int32                       `json:"planned"`
+		Applied  int32                       `json:"applied"`
+		DryRun   bool                        `json:"dry_run"`
+		Findings []reconciliationFindingJSON `json:"findings"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, nil, err
+	}
+	orphans := make([]*cyclopusv1.ReconciliationObject, 0, len(value.Orphans))
+	for _, object := range value.Orphans {
+		orphans = append(orphans, reconciliationObjectProto(object))
+	}
+	pruned := make([]*cyclopusv1.ReconciliationObject, 0, len(value.Pruned))
+	for _, object := range value.Pruned {
+		pruned = append(pruned, reconciliationObjectProto(object))
+	}
+	findings := make([]*cyclopusv1.ReconcileFinding, 0, len(value.Findings))
+	for _, finding := range value.Findings {
+		projected, err := reconciliationFindingProto(finding)
+		if err != nil {
+			return nil, nil, err
+		}
+		findings = append(findings, projected)
+	}
+	return &cyclopusv1.ReconciliationReport{Orphans: orphans, Pruned: pruned, Planned: value.Planned, Applied: value.Applied, DryRun: value.DryRun}, findings, nil
+}
+
+func reconciliationFindingProto(value reconciliationFindingJSON) (*cyclopusv1.ReconcileFinding, error) {
+	finding := &cyclopusv1.ReconcileFinding{Category: reconcileCategoryProto(value.Category), Status: reconcileFindingStatusProto(value.Status), ResourceName: value.ResourceName, Summary: value.Summary}
+	if value.ObservedAt != "" {
+		observedAt, err := time.Parse(time.RFC3339Nano, value.ObservedAt)
+		if err != nil {
+			return nil, err
+		}
+		finding.ObservedAt = timestamppb.New(observedAt)
+	}
+	switch firstNonEmpty(value.Type, value.Kind) {
+	case "runtime_class_drift":
+		finding.Details = &cyclopusv1.ReconcileFinding_RuntimeClassDrift{RuntimeClassDrift: &cyclopusv1.RuntimeClassDriftFinding{ExpectedRuntimeClass: value.ExpectedRuntimeClass, ObservedRuntimeClass: value.ObservedRuntimeClass}}
+	case "network_policy_drift":
+		finding.Details = &cyclopusv1.ReconcileFinding_NetworkPolicyDrift{NetworkPolicyDrift: &cyclopusv1.NetworkPolicyDriftFinding{MissingPolicies: append([]string(nil), value.MissingPolicies...)}}
+	default:
+		return nil, fmt.Errorf("unknown reconciliation finding type %q", firstNonEmpty(value.Type, value.Kind))
+	}
+	return finding, nil
+}
+
+func reconciliationObjectProto(value reconciliationObjectJSON) *cyclopusv1.ReconciliationObject {
+	return &cyclopusv1.ReconciliationObject{Kind: firstNonEmpty(value.Kind, value.ObjectKind), Namespace: firstNonEmpty(value.Namespace, value.ObjectNamespace), Name: firstNonEmpty(value.Name, value.ObjectName)}
+}
+
+func reconciliationEvidenceProto(value store.ReconciliationEvidence) (*cyclopusv1.ReconciliationEvidence, error) {
+	var details any
+	if len(value.Details) != 0 && string(value.Details) != "null" {
+		if err := json.Unmarshal(value.Details, &details); err != nil {
+			return nil, err
+		}
+	}
+	structured, err := valueProto(details)
+	if err != nil {
+		return nil, err
+	}
+	return &cyclopusv1.ReconciliationEvidence{Sequence: value.Sequence, Kind: value.Kind, Object: &cyclopusv1.ReconciliationObject{Kind: stringValue(value.ObjectKind), Namespace: stringValue(value.ObjectNamespace), Name: stringValue(value.ObjectName)}, Action: stringValue(value.Action), DesiredHash: stringValue(value.DesiredHash), ObservedHash: stringValue(value.ObservedHash), Details: structured, ObservedAt: timeProto(&value.ObservedAt)}, nil
+}
+
+func valueProto(value any) (*structpb.Value, error) {
+	if value == nil {
+		return nil, nil
+	}
+	return structpb.NewValue(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+func timeProto(value *time.Time) *timestamppb.Timestamp {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	return timestamppb.New(*value)
+}
+func scalingModeString(v cyclopusv1.ScalingMode) string {
+	return map[cyclopusv1.ScalingMode]string{cyclopusv1.ScalingMode_SCALING_MODE_HPA: "hpa", cyclopusv1.ScalingMode_SCALING_MODE_KEDA_CRON: "keda_cron", cyclopusv1.ScalingMode_SCALING_MODE_KEDA_HTTP: "keda_http"}[v]
+}
+func scalingModeProto(v string) cyclopusv1.ScalingMode {
+	return map[string]cyclopusv1.ScalingMode{"hpa": cyclopusv1.ScalingMode_SCALING_MODE_HPA, "keda_cron": cyclopusv1.ScalingMode_SCALING_MODE_KEDA_CRON, "keda_http": cyclopusv1.ScalingMode_SCALING_MODE_KEDA_HTTP}[v]
+}
+func runtimeClassProto(v string) cyclopusv1.RuntimeClass {
+	return map[string]cyclopusv1.RuntimeClass{"gvisor": cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR, "runc": cyclopusv1.RuntimeClass_RUNTIME_CLASS_RUNC}[v]
+}
+func environmentKindProto(v string) cyclopusv1.EnvironmentKind {
+	return map[string]cyclopusv1.EnvironmentKind{"production": cyclopusv1.EnvironmentKind_ENVIRONMENT_KIND_PRODUCTION, "preview": cyclopusv1.EnvironmentKind_ENVIRONMENT_KIND_PREVIEW}[v]
+}
+func releaseKindProto(v string) cyclopusv1.ReleaseKind {
+	return map[string]cyclopusv1.ReleaseKind{"deploy": cyclopusv1.ReleaseKind_RELEASE_KIND_DEPLOY, "env_change": cyclopusv1.ReleaseKind_RELEASE_KIND_ENV_CHANGE, "rollback": cyclopusv1.ReleaseKind_RELEASE_KIND_ROLLBACK, "reconcile": cyclopusv1.ReleaseKind_RELEASE_KIND_RECONCILE}[v]
+}
+func releaseStatusProto(v string) cyclopusv1.ReleaseStatus {
+	return map[string]cyclopusv1.ReleaseStatus{"pending": cyclopusv1.ReleaseStatus_RELEASE_STATUS_PENDING, "deploying": cyclopusv1.ReleaseStatus_RELEASE_STATUS_DEPLOYING, "live": cyclopusv1.ReleaseStatus_RELEASE_STATUS_LIVE, "failed": cyclopusv1.ReleaseStatus_RELEASE_STATUS_FAILED, "superseded": cyclopusv1.ReleaseStatus_RELEASE_STATUS_SUPERSEDED}[v]
+}
+func operationStatus(v string) cyclopusv1.OperationStatus {
+	return map[string]cyclopusv1.OperationStatus{"queued": cyclopusv1.OperationStatus_OPERATION_STATUS_QUEUED, "accepted": cyclopusv1.OperationStatus_OPERATION_STATUS_QUEUED, "leased": cyclopusv1.OperationStatus_OPERATION_STATUS_RUNNING, "running": cyclopusv1.OperationStatus_OPERATION_STATUS_RUNNING, "completed": cyclopusv1.OperationStatus_OPERATION_STATUS_SUCCEEDED, "succeeded": cyclopusv1.OperationStatus_OPERATION_STATUS_SUCCEEDED, "failed": cyclopusv1.OperationStatus_OPERATION_STATUS_FAILED, "cancelled": cyclopusv1.OperationStatus_OPERATION_STATUS_CANCELLED}[v]
+}
+func reconcileScopeKindProto(v string) cyclopusv1.ReconcileScopeKind {
+	return map[string]cyclopusv1.ReconcileScopeKind{"org": cyclopusv1.ReconcileScopeKind_RECONCILE_SCOPE_KIND_ORGANIZATION, "app": cyclopusv1.ReconcileScopeKind_RECONCILE_SCOPE_KIND_APPLICATION, "environment": cyclopusv1.ReconcileScopeKind_RECONCILE_SCOPE_KIND_ENVIRONMENT}[v]
+}
+
+type fieldViolation struct{ field, description string }
+type validationViolations []fieldViolation
+
+func (v *validationViolations) add(field, description string) {
+	*v = append(*v, fieldViolation{field, description})
+}
+func (v *validationViolations) uuid(field, value string) {
+	if value == "" {
+		return
+	}
+	parsed, err := uuid.Parse(value)
+	if err != nil || parsed.String() != value {
+		v.add(field, "must be a canonical UUID")
+	}
+}
+func (v validationViolations) err() error {
+	if len(v) == 0 {
+		return nil
+	}
+	sort.Slice(v, func(i, j int) bool {
+		if v[i].field == v[j].field {
+			return v[i].description < v[j].description
+		}
+		return v[i].field < v[j].field
+	})
+	details := make([]*errdetails.BadRequest_FieldViolation, 0, len(v))
+	for _, violation := range v {
+		details = append(details, &errdetails.BadRequest_FieldViolation{Field: violation.field, Description: violation.description})
+	}
+	base := status.New(codes.InvalidArgument, "request validation failed")
+	withDetails, err := base.WithDetails(&errdetails.ErrorInfo{Reason: "INVALID_ARGUMENT", Domain: "cyclopus.dev"}, &errdetails.BadRequest{FieldViolations: details})
+	if err != nil {
+		return base.Err()
+	}
+	return withDetails.Err()
+}
+
+type cursorKey struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+type pageCursor struct {
+	Scope string    `json:"scope"`
+	Key   cursorKey `json:"key"`
+}
+
+type reconciliationEvidencePageCursor struct {
+	ReconciliationID string `json:"reconciliation_id"`
+	Sequence         int64  `json:"sequence"`
+}
+
+func boundedPageSize(requested int32) (int, error) {
+	if requested < 0 {
+		return 0, fieldError("page_size", "must not be negative")
+	}
+	size := int(requested)
+	if size == 0 {
+		size = defaultPageSize
+	}
+	if size > maxPageSize {
+		size = maxPageSize
+	}
+	return size, nil
+}
+
+func reconciliationEvidenceCursor(token, reconciliationID string) (int64, error) {
+	if token == "" {
+		return 0, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return 0, fieldError("page_token", "is invalid")
+	}
+	var cursor reconciliationEvidencePageCursor
+	if json.Unmarshal(raw, &cursor) != nil || cursor.ReconciliationID != reconciliationID || cursor.Sequence <= 0 {
+		return 0, fieldError("page_token", "is invalid")
+	}
+	return cursor.Sequence, nil
+}
+
+func encodeReconciliationEvidenceCursor(reconciliationID string, sequence int64) string {
+	raw, _ := json.Marshal(reconciliationEvidencePageCursor{ReconciliationID: reconciliationID, Sequence: sequence})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func pageWindow[T any](requested int32, token, scope string, values []T, key func(T) cursorKey) (int, int, error) {
+	if requested < 0 {
+		return 0, 0, fieldError("page_size", "must not be negative")
+	}
+	size := int(requested)
+	if size == 0 {
+		size = defaultPageSize
+	}
+	if size > maxPageSize {
+		size = maxPageSize
+	}
+	if token == "" {
+		return 0, size, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return 0, 0, fieldError("page_token", "is invalid")
+	}
+	var cursor pageCursor
+	if json.Unmarshal(raw, &cursor) != nil || cursor.Scope != scope || cursor.Key.ID == "" {
+		return 0, 0, fieldError("page_token", "is invalid")
+	}
+	for index, value := range values {
+		if key(value) == cursor.Key {
+			return index + 1, size, nil
+		}
+	}
+	return 0, 0, fieldError("page_token", "is stale or invalid")
+}
+func pageValues[T any](values []T, start, size int, scope string, key func(T) cursorKey) ([]T, string) {
+	if start > len(values) {
+		start = len(values)
+	}
+	end := start + size
+	if end > len(values) {
+		end = len(values)
+	}
+	page := values[start:end]
+	if end == len(values) || len(page) == 0 {
+		return page, ""
+	}
+	encoded, _ := json.Marshal(pageCursor{Scope: scope, Key: key(page[len(page)-1])})
+	return page, base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func mergeMaskedMessage(destination, source proto.Message, mask *fieldmaskpb.FieldMask, allowed map[string]bool) error {
+	violations := validationViolations{}
+	if mask == nil || len(mask.GetPaths()) == 0 {
+		violations.add("update_mask", "must contain at least one mutable field")
+		return violations.err()
+	}
+	paths := append([]string(nil), mask.GetPaths()...)
+	sort.Strings(paths)
+	destinationReflect, sourceReflect := destination.ProtoReflect(), source.ProtoReflect()
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if seen[path] {
+			violations.add("update_mask.paths", "must not contain duplicate path "+path)
+			continue
+		}
+		seen[path] = true
+		if strings.Contains(path, ".") || !allowed[path] {
+			violations.add("update_mask.paths", "contains unsupported path "+path)
+			continue
+		}
+		field := destinationReflect.Descriptor().Fields().ByName(protoreflect.Name(path))
+		if field == nil {
+			violations.add("update_mask.paths", "contains unknown path "+path)
+			continue
+		}
+		destinationReflect.Set(field, sourceReflect.Get(field))
+	}
+	return violations.err()
+}
+
+func releaseStatusFilters(values []cyclopusv1.ReleaseStatus) ([]string, error) {
+	seen := map[cyclopusv1.ReleaseStatus]bool{}
+	filters := make([]string, 0, len(values))
+	violations := validationViolations{}
+	for index, value := range values {
+		name := map[cyclopusv1.ReleaseStatus]string{cyclopusv1.ReleaseStatus_RELEASE_STATUS_PENDING: "pending", cyclopusv1.ReleaseStatus_RELEASE_STATUS_DEPLOYING: "deploying", cyclopusv1.ReleaseStatus_RELEASE_STATUS_LIVE: "live", cyclopusv1.ReleaseStatus_RELEASE_STATUS_FAILED: "failed", cyclopusv1.ReleaseStatus_RELEASE_STATUS_SUPERSEDED: "superseded"}[value]
+		if name == "" {
+			violations.add(fmt.Sprintf("statuses[%d]", index), "must be specified")
+		} else if seen[value] {
+			violations.add(fmt.Sprintf("statuses[%d]", index), "must not be duplicated")
+		} else {
+			seen[value] = true
+			filters = append(filters, name)
+		}
+	}
+	return filters, violations.err()
+}
+func reconcileCategoryString(value cyclopusv1.ReconcileCategory) string {
+	return map[cyclopusv1.ReconcileCategory]string{cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_DATABASE: "database", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_NAMESPACE: "namespace", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_WORKLOAD: "workload", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_NETWORK_POLICY: "network_policy", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_INGRESS: "ingress", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_TLS: "tls", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_SCALING: "scaling", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_ENVIRONMENT_VARIABLES: "environment_variables", cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_ORCHESTRATION: "orchestration"}[value]
+}
+func reconcileCategoryProto(value string) cyclopusv1.ReconcileCategory {
+	return map[string]cyclopusv1.ReconcileCategory{"database": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_DATABASE, "namespace": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_NAMESPACE, "workload": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_WORKLOAD, "network_policy": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_NETWORK_POLICY, "ingress": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_INGRESS, "tls": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_TLS, "scaling": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_SCALING, "environment_variables": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_ENVIRONMENT_VARIABLES, "orchestration": cyclopusv1.ReconcileCategory_RECONCILE_CATEGORY_ORCHESTRATION}[value]
+}
+func reconcileFindingStatusProto(value string) cyclopusv1.ReconcileFindingStatus {
+	return map[string]cyclopusv1.ReconcileFindingStatus{"in_sync": cyclopusv1.ReconcileFindingStatus_RECONCILE_FINDING_STATUS_IN_SYNC, "drifted": cyclopusv1.ReconcileFindingStatus_RECONCILE_FINDING_STATUS_DRIFTED, "missing": cyclopusv1.ReconcileFindingStatus_RECONCILE_FINDING_STATUS_MISSING, "orphaned": cyclopusv1.ReconcileFindingStatus_RECONCILE_FINDING_STATUS_ORPHANED, "error": cyclopusv1.ReconcileFindingStatus_RECONCILE_FINDING_STATUS_ERROR}[value]
+}
+func timeValue(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
+}
