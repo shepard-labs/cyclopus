@@ -1,0 +1,347 @@
+package store
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+)
+
+const (
+	ReleaseSnapshotVersion      = 2
+	DesiredStateSnapshotVersion = 1
+	EnvVarRevisionVersion       = 1
+)
+
+const (
+	ReleaseIDAnnotationTemplate  = "${release_id}"
+	ConfigHashAnnotationTemplate = "${config_hash}"
+)
+
+type ReleaseSnapshotEnvelope struct {
+	Version        int                  `json:"version"`
+	DesiredState   DesiredStateSnapshot `json:"desired_state"`
+	EnvVarRevision *EnvVarRevision      `json:"env_var_revision,omitempty"`
+}
+
+type DesiredStateSnapshot struct {
+	Version    int              `json:"version"`
+	Deployment DeploymentIntent `json:"deployment"`
+	Service    ServiceIntent    `json:"service"`
+	Ingress    IngressIntent    `json:"ingress"`
+	Scaling    ScalingIntent    `json:"scaling"`
+}
+
+type ObjectIdentity struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Labels    map[string]string `json:"labels"`
+}
+
+type DeploymentIntent struct {
+	Version                 int                 `json:"version"`
+	Identity                ObjectIdentity      `json:"identity"`
+	Selector                map[string]string   `json:"selector"`
+	Replicas                int32               `json:"replicas"`
+	Strategy                RollingUpdateIntent `json:"strategy"`
+	PodLabels               map[string]string   `json:"pod_labels"`
+	PodAnnotations          map[string]string   `json:"pod_annotations"`
+	RuntimeClassName        string              `json:"runtime_class_name"`
+	ProgressDeadlineSeconds int32               `json:"progress_deadline_seconds"`
+	Container               ContainerIntent     `json:"container"`
+}
+
+type RollingUpdateIntent struct {
+	Type           string `json:"type"`
+	MaxUnavailable int32  `json:"max_unavailable"`
+	MaxSurge       int32  `json:"max_surge"`
+}
+
+type ContainerIntent struct {
+	Name           string          `json:"name"`
+	Image          string          `json:"image"`
+	Port           int32           `json:"port"`
+	EnvFromSecrets []string        `json:"env_from_secrets"`
+	Resources      ResourceIntent  `json:"resources"`
+	ReadinessProbe ReadinessIntent `json:"readiness_probe"`
+}
+
+type ResourceIntent struct {
+	CPURequestMillicores int64 `json:"cpu_request_millicores"`
+	CPULimitMillicores   int64 `json:"cpu_limit_millicores"`
+	MemoryRequestMiB     int64 `json:"memory_request_mib"`
+	MemoryLimitMiB       int64 `json:"memory_limit_mib"`
+}
+
+type ReadinessIntent struct {
+	Path string `json:"path"`
+	Port int32  `json:"port"`
+}
+
+type ServiceIntent struct {
+	Version    int               `json:"version"`
+	Identity   ObjectIdentity    `json:"identity"`
+	Selector   map[string]string `json:"selector"`
+	Port       int32             `json:"port"`
+	TargetPort int32             `json:"target_port"`
+}
+
+type IngressIntent struct {
+	Version     int            `json:"version"`
+	Identity    ObjectIdentity `json:"identity"`
+	Hostname    string         `json:"hostname"`
+	Path        string         `json:"path"`
+	ServiceName string         `json:"service_name"`
+	ServicePort int32          `json:"service_port"`
+	TLS         TLSIntent      `json:"tls"`
+}
+
+type TLSIntent struct {
+	Enabled    bool   `json:"enabled"`
+	SecretName string `json:"secret_name"`
+}
+
+type ScalingIntent struct {
+	Version int         `json:"version"`
+	Kind    string      `json:"kind"`
+	Name    string      `json:"name,omitempty"`
+	HPA     *HPAIntent  `json:"hpa,omitempty"`
+	KEDA    *KEDAIntent `json:"keda,omitempty"`
+}
+
+type HPAIntent struct {
+	MinReplicas      int32 `json:"min_replicas"`
+	MaxReplicas      int32 `json:"max_replicas"`
+	TargetCPUPercent int32 `json:"target_cpu_percent"`
+}
+
+type KEDAIntent struct {
+	Mode             string `json:"mode"`
+	MinReplicas      int32  `json:"min_replicas"`
+	MaxReplicas      int32  `json:"max_replicas"`
+	TargetCPUPercent int32  `json:"target_cpu_percent"`
+}
+
+type EnvVarRevision struct {
+	Version   int                  `json:"version"`
+	ID        string               `json:"id"`
+	Revision  int64                `json:"revision"`
+	Hash      string               `json:"hash"`
+	Variables []ReleaseEnvironment `json:"variables"`
+}
+
+type ReleaseEnvironment struct {
+	Key       string `json:"key"`
+	SecretRef string `json:"secret_ref"`
+	IsSecret  bool   `json:"is_secret"`
+}
+
+func EncodeReleaseSnapshot(envelope ReleaseSnapshotEnvelope) (json.RawMessage, string, error) {
+	canonical := canonicalReleaseSnapshot(envelope)
+	if err := ValidateReleaseSnapshot(canonical); err != nil {
+		return nil, "", err
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal release snapshot: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return encoded, hex.EncodeToString(sum[:]), nil
+}
+
+func DecodeReleaseSnapshot(encoded []byte) (ReleaseSnapshotEnvelope, error) {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	var envelope ReleaseSnapshotEnvelope
+	if err := decoder.Decode(&envelope); err != nil {
+		return ReleaseSnapshotEnvelope{}, fmt.Errorf("decode release snapshot: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return ReleaseSnapshotEnvelope{}, errors.New("decode release snapshot: multiple JSON values")
+		}
+		return ReleaseSnapshotEnvelope{}, fmt.Errorf("decode release snapshot trailing data: %w", err)
+	}
+	envelope = canonicalReleaseSnapshot(envelope)
+	if err := ValidateReleaseSnapshot(envelope); err != nil {
+		return ReleaseSnapshotEnvelope{}, err
+	}
+	return envelope, nil
+}
+
+func ValidateReleaseSnapshot(envelope ReleaseSnapshotEnvelope) error {
+	if envelope.Version != ReleaseSnapshotVersion {
+		return fmt.Errorf("release snapshot: unsupported version %d", envelope.Version)
+	}
+	desired := envelope.DesiredState
+	if desired.Version != DesiredStateSnapshotVersion {
+		return fmt.Errorf("release snapshot desired state: unsupported version %d", desired.Version)
+	}
+	if err := validateDesiredState(desired); err != nil {
+		return err
+	}
+	if revision := envelope.EnvVarRevision; revision != nil {
+		if revision.Version != EnvVarRevisionVersion || revision.ID == "" || revision.Revision <= 0 {
+			return errors.New("release snapshot: versioned env revision id and positive revision are required")
+		}
+		seen := make(map[string]struct{}, len(revision.Variables))
+		for _, variable := range revision.Variables {
+			if variable.Key == "" || variable.SecretRef == "" || !variable.IsSecret {
+				return errors.New("release snapshot: env variables require key, secret ref, and secret=true")
+			}
+			if _, exists := seen[variable.Key]; exists {
+				return errors.New("release snapshot: env variable keys must be unique")
+			}
+			seen[variable.Key] = struct{}{}
+		}
+		if desired.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"] != revision.ID {
+			return errors.New("release snapshot: pod env revision annotation must match env revision")
+		}
+		expectedHash := ComputeEnvVarRevisionHash(revision.Variables)
+		if revision.Hash != expectedHash || desired.Deployment.PodAnnotations["cyclopus.dev/env-hash"] != expectedHash {
+			return errors.New("release snapshot: pod env hash annotation must match canonical env revision hash")
+		}
+	}
+	return nil
+}
+
+func validateDesiredState(desired DesiredStateSnapshot) error {
+	d := desired.Deployment
+	if d.Version != 1 || desired.Service.Version != 1 || desired.Ingress.Version != 1 || desired.Scaling.Version != 1 {
+		return errors.New("release snapshot desired state: unsupported object version")
+	}
+	if err := validateIdentity(d.Identity); err != nil {
+		return fmt.Errorf("release snapshot deployment: %w", err)
+	}
+	if err := validateIdentity(desired.Service.Identity); err != nil {
+		return fmt.Errorf("release snapshot service: %w", err)
+	}
+	if err := validateIdentity(desired.Ingress.Identity); err != nil {
+		return fmt.Errorf("release snapshot ingress: %w", err)
+	}
+	if d.Identity.Namespace != desired.Service.Identity.Namespace || d.Identity.Namespace != desired.Ingress.Identity.Namespace {
+		return errors.New("release snapshot: object namespaces must match")
+	}
+	if len(d.Selector) == 0 || !mapContains(d.PodLabels, d.Selector) || !mapsEqual(d.Selector, desired.Service.Selector) {
+		return errors.New("release snapshot: deployment, pod, and service selectors must match")
+	}
+	if d.Replicas < 0 || d.Strategy.Type != "RollingUpdate" || d.Strategy.MaxUnavailable != 0 || d.Strategy.MaxSurge < 1 {
+		return errors.New("release snapshot deployment: RollingUpdate with maxUnavailable=0 and positive maxSurge is required")
+	}
+	if d.RuntimeClassName != "gvisor" && d.RuntimeClassName != "runc" {
+		return errors.New("release snapshot deployment: runtime class must be gvisor or runc")
+	}
+	if d.ProgressDeadlineSeconds <= 0 || d.Container.Name == "" || strings.TrimSpace(d.Container.Image) == "" || d.Container.Port < 1 || d.Container.Port > 65535 {
+		return errors.New("release snapshot deployment: progress deadline, container, image, and port are required")
+	}
+	r := d.Container.Resources
+	if r.CPURequestMillicores <= 0 || r.CPULimitMillicores < r.CPURequestMillicores || r.MemoryRequestMiB <= 0 || r.MemoryLimitMiB < r.MemoryRequestMiB {
+		return errors.New("release snapshot deployment: valid resource requests and limits are required")
+	}
+	if !strings.HasPrefix(d.Container.ReadinessProbe.Path, "/") || d.Container.ReadinessProbe.Port != d.Container.Port {
+		return errors.New("release snapshot deployment: readiness path and container port are required")
+	}
+	if d.PodAnnotations["cyclopus.dev/release-id"] == "" || d.PodAnnotations["cyclopus.dev/config-hash"] == "" {
+		return errors.New("release snapshot deployment: release and config hash annotations are required")
+	}
+	svc := desired.Service
+	if svc.Port < 1 || svc.Port > 65535 || svc.TargetPort != d.Container.Port || svc.Identity.Name != d.Identity.Name {
+		return errors.New("release snapshot service: identity and ports must target the deployment")
+	}
+	ing := desired.Ingress
+	if strings.TrimSpace(ing.Hostname) == "" || ing.Path != "/" || ing.ServiceName != svc.Identity.Name || ing.ServicePort != svc.Port || !ing.TLS.Enabled || ing.TLS.SecretName == "" {
+		return errors.New("release snapshot ingress: hostname, root path, service backend, and TLS are required")
+	}
+	scaling := desired.Scaling
+	switch scaling.Kind {
+	case "none":
+		if scaling.Name != "" || scaling.HPA != nil || scaling.KEDA != nil || d.Replicas != 1 {
+			return errors.New("release snapshot scaling: no-scaler identity requires exactly one replica")
+		}
+	case "hpa":
+		if scaling.Name == "" || scaling.HPA == nil || scaling.KEDA != nil || scaling.HPA.MinReplicas < 1 || scaling.HPA.MaxReplicas < scaling.HPA.MinReplicas || scaling.HPA.TargetCPUPercent < 1 || scaling.HPA.TargetCPUPercent > 100 || d.Replicas != scaling.HPA.MinReplicas {
+			return errors.New("release snapshot scaling: valid HPA intent is required")
+		}
+	case "keda":
+		if scaling.Name == "" || scaling.KEDA == nil || scaling.HPA != nil || (scaling.KEDA.Mode != "cron" && scaling.KEDA.Mode != "http") || scaling.KEDA.MinReplicas < 0 || scaling.KEDA.MaxReplicas < 1 || scaling.KEDA.MaxReplicas < scaling.KEDA.MinReplicas || scaling.KEDA.TargetCPUPercent < 1 || scaling.KEDA.TargetCPUPercent > 100 || d.Replicas != scaling.KEDA.MinReplicas {
+			return errors.New("release snapshot scaling: valid KEDA intent is required")
+		}
+	default:
+		return errors.New("release snapshot scaling: kind must be none, hpa, or keda")
+	}
+	return nil
+}
+
+func validateIdentity(identity ObjectIdentity) error {
+	if strings.TrimSpace(identity.Name) == "" || strings.TrimSpace(identity.Namespace) == "" {
+		return errors.New("name and namespace are required")
+	}
+	if identity.Labels["app.kubernetes.io/managed-by"] != "cyclopus" || identity.Labels["cyclopus.dev/environment-id"] == "" {
+		return errors.New("ownership labels are required")
+	}
+	return nil
+}
+
+func canonicalReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotEnvelope {
+	copy := envelope
+	copy.DesiredState.Deployment.Identity.Labels = cloneMap(envelope.DesiredState.Deployment.Identity.Labels)
+	copy.DesiredState.Deployment.Selector = cloneMap(envelope.DesiredState.Deployment.Selector)
+	copy.DesiredState.Deployment.PodLabels = cloneMap(envelope.DesiredState.Deployment.PodLabels)
+	copy.DesiredState.Deployment.PodAnnotations = cloneMap(envelope.DesiredState.Deployment.PodAnnotations)
+	copy.DesiredState.Service.Identity.Labels = cloneMap(envelope.DesiredState.Service.Identity.Labels)
+	copy.DesiredState.Service.Selector = cloneMap(envelope.DesiredState.Service.Selector)
+	copy.DesiredState.Ingress.Identity.Labels = cloneMap(envelope.DesiredState.Ingress.Identity.Labels)
+	if envelope.EnvVarRevision != nil {
+		revision := *envelope.EnvVarRevision
+		revision.Variables = append([]ReleaseEnvironment(nil), revision.Variables...)
+		sort.Slice(revision.Variables, func(i, j int) bool { return revision.Variables[i].Key < revision.Variables[j].Key })
+		copy.EnvVarRevision = &revision
+	}
+	return copy
+}
+
+func ComputeEnvVarRevisionHash(variables []ReleaseEnvironment) string {
+	canonical := append([]ReleaseEnvironment(nil), variables...)
+	sort.Slice(canonical, func(i, j int) bool { return canonical[i].Key < canonical[j].Key })
+	encoded, _ := json.Marshal(canonical)
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+func cloneMap(source map[string]string) map[string]string {
+	if source == nil {
+		return map[string]string{}
+	}
+	copy := make(map[string]string, len(source))
+	for key, value := range source {
+		copy[key] = value
+	}
+	return copy
+}
+
+func mapsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func mapContains(container, subset map[string]string) bool {
+	for key, value := range subset {
+		if container[key] != value {
+			return false
+		}
+	}
+	return true
+}
