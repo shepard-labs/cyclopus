@@ -1,0 +1,208 @@
+schema_version: 1
+scope: backend-platform-api-only
+phases:
+  - id: phase-0
+    name: Architecture contracts and executable skeleton
+    spec_sections: ["2", "3", "4.3", "4.7", "5", "6"]
+    owner_agent: workflow-architecture-implementer
+    reviewer_agent: distributed-systems-adversary
+    deliverables:
+      - Phase 0 decisions encoded in schema, API contracts, and worker boundaries
+      - Durable same-binary deploy worker and Postgres saga skeleton
+      - API idempotency and atomic pending SHA take-and-clear contracts
+      - Durable orchestration job and lease acquired before GitHub workflow dispatch
+      - Deadline-bounded startup and periodic GitHub run reconciliation with terminal evidence and atomic pending SHA promotion
+      - Configurable hostname provider seam with sslip.io launch block
+    checkpoints: [version-probe, contracts, unit, evidence, adversarial-review]
+    gates:
+      unit:
+        command: go test ./... -run 'Phase0|Idempotency|PendingSHA|HostnameProvider'
+        evidence: unit.json
+      evidence:
+        - id: phase-0-decisions
+          command: test -f docs/decisions/phase-0-decisions.md
+          evidence: decisions.json
+        - id: api-only-scope
+          command: ./scripts/validate_workflow.sh
+          evidence: scope.json
+        - id: postgres-18-pending-sha-contract
+          command: ./scripts/validate_postgres_contract.sh
+          evidence: postgres-contract.json
+        - id: gate-evidence-draft-2020-12
+          command: ./tests/workflow/validate_gate_evidence_test.sh
+          evidence: gate-evidence-schema.json
+        - id: psl-probe
+          command: ./scripts/probe_psl.sh sslip.io absent
+          evidence: psl-probe.json
+      adversarial_review:
+        agent: distributed-systems-adversary
+        evidence: adversarial-review.json
+        fix_loop: true
+
+  - id: phase-1
+    name: Postgres model, authentication, and API foundation
+    spec_sections: ["5", "6", "7.3", "7.4", "9.2"]
+    owner_agent: postgres-api-implementer
+    reviewer_agent: api-security-adversary
+    deliverables:
+      - Postgres migrations and repositories for v1 resources and durable jobs
+      - One-user-one-org bootstrap, token authentication, audit events, and API idempotency
+      - gRPC and grpc-gateway API contracts for external and internal API callers
+    checkpoints: [version-probe, migrations, repositories, api, unit, evidence, adversarial-review]
+    gates:
+      unit:
+        command: go test ./... -run 'Store|Migration|Auth|API|Idempotency'
+        evidence: unit.json
+      evidence:
+        - id: postgres-authoritative-saga
+          command: go test ./... -run 'Saga|Recovery|Lease'
+          evidence: saga.json
+        - id: api-contract
+          command: go test ./... -run 'GRPC|Gateway|Validation'
+          evidence: api-contract.json
+      adversarial_review:
+        agent: api-security-adversary
+        evidence: adversarial-review.json
+        fix_loop: true
+
+  - id: phase-2
+    name: Durable deploy, release, rollback, and preview orchestration
+    spec_sections: ["4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9"]
+    owner_agent: deployment-saga-implementer
+    reviewer_agent: concurrency-failure-adversary
+    deliverables:
+      - Asynchronous deploy worker in the API binary with persisted jobs and leases
+      - Idempotent Kubernetes and Postgres saga steps without cross-system transactions
+      - Atomic queued SHA drain, release snapshots for env changes, rollback, and startup recovery
+      - Mutable Deployment rollout with maxUnavailable zero and accepted mixed traffic
+    checkpoints: [version-probe, worker, deploy-saga, recovery, unit, evidence, adversarial-review]
+    gates:
+      unit:
+        command: go test ./... -run 'Deploy|Release|Rollback|Preview|EnvSnapshot'
+        evidence: unit.json
+      evidence:
+        - id: crash-resume
+          command: go test ./... -run 'CrashResume|StartupSweep|ExpiredLease'
+          evidence: crash-resume.json
+        - id: concurrency
+          command: go test -race ./... -run 'PendingSHA|DeployLease|Coalesce'
+          evidence: concurrency.json
+        - id: orbstack-ubuntu
+          profile: orbstack_ubuntu
+          command: ./scripts/integration.sh deploy
+          evidence: orbstack-ubuntu.json
+        - id: orbstack-debian
+          profile: orbstack_debian
+          command: ./scripts/integration.sh deploy
+          evidence: orbstack-debian.json
+      adversarial_review:
+        agent: concurrency-failure-adversary
+        evidence: adversarial-review.json
+        fix_loop: true
+
+  - id: phase-3
+    name: Isolation, networking, hostnames, domains, and certificates
+    spec_sections: ["7.1", "7.2", "7.3", "7.5", "7.6", "7.7"]
+    owner_agent: kubernetes-security-implementer
+    reviewer_agent: tenant-escape-adversary
+    deliverables:
+      - Fail-closed gVisor and Kyverno enforcement
+      - Default-deny ingress and egress NetworkPolicies including metadata and node protections
+      - Hostname provider implementation, domain verification, and certificate lifecycle
+      - sslip.io remains disabled until PSL compatibility gate passes
+    checkpoints: [version-probe, isolation, networking, hostname-provider, tls, unit, evidence, adversarial-review]
+    gates:
+      unit:
+        command: go test ./... -run 'Policy|RuntimeClass|Hostname|Domain|Certificate'
+        evidence: unit.json
+      evidence:
+        - id: orbstack-ubuntu
+          profile: orbstack_ubuntu
+          command: ./scripts/integration.sh security
+          evidence: orbstack-ubuntu.json
+        - id: orbstack-debian
+          profile: orbstack_debian
+          command: ./scripts/integration.sh security
+          evidence: orbstack-debian.json
+        - id: psl-launch-block
+          command: ./scripts/probe_psl.sh sslip.io absent
+          evidence: psl-launch-block.json
+      adversarial_review:
+        agent: tenant-escape-adversary
+        evidence: adversarial-review.json
+        fix_loop: true
+
+  - id: phase-4
+    name: Scaling, webhooks, observability, and reconciliation
+    spec_sections: ["3.4", "6.1", "8", "9.2"]
+    owner_agent: platform-runtime-implementer
+    reviewer_agent: reliability-observability-adversary
+    deliverables:
+      - HPA default and mutually exclusive KEDA modes
+      - Durable signed outbound webhook delivery with retries
+      - OpenTelemetry, OpenObserve, Beszel proxy, and structured control-plane logs
+      - Idempotent Postgres-to-cluster scoped reconciliation
+    checkpoints: [version-probe, scaling, webhooks, observability, reconcile, unit, evidence, adversarial-review]
+    gates:
+      unit:
+        command: go test ./... -run 'Scaling|Webhook|Telemetry|Reconcile'
+        evidence: unit.json
+      evidence:
+        - id: webhook-restart-recovery
+          command: go test ./... -run 'WebhookRetry|WebhookRecovery|WebhookSignature'
+          evidence: webhook-recovery.json
+        - id: orbstack-ubuntu
+          profile: orbstack_ubuntu
+          command: ./scripts/integration.sh runtime
+          evidence: orbstack-ubuntu.json
+        - id: orbstack-debian
+          profile: orbstack_debian
+          command: ./scripts/integration.sh runtime
+          evidence: orbstack-debian.json
+      adversarial_review:
+        agent: reliability-observability-adversary
+        evidence: adversarial-review.json
+        fix_loop: true
+
+  - id: phase-5
+    name: Installation, OVH profiles, backup, disaster recovery, and upgrades
+    spec_sections: ["2.2", "9", "10", "11"]
+    owner_agent: infrastructure-dr-implementer
+    reviewer_agent: production-readiness-adversary
+    deliverables:
+      - Terraform/OpenTofu and Helm installation path for OVH Public Cloud
+      - Constrained OVH VPS profile with explicit capacity gates
+      - Ubuntu and Debian node bootstrap, gVisor registration, k3s hardening, and floating IP handling
+      - WAL-G backup and restore, full DR reconcile, and reviewed upgrade procedure
+    checkpoints: [version-probe, provisioning, packaging, backup-restore, upgrade, unit, evidence, adversarial-review]
+    gates:
+      unit:
+        command: ./scripts/test_infrastructure.sh
+        evidence: unit.json
+      evidence:
+        - id: orbstack-ubuntu
+          profile: orbstack_ubuntu
+          command: ./scripts/integration.sh install
+          evidence: orbstack-ubuntu.json
+        - id: orbstack-debian
+          profile: orbstack_debian
+          command: ./scripts/integration.sh install
+          evidence: orbstack-debian.json
+        - id: ovh-public-cloud-primary
+          profile: ovh_public_cloud
+          command: ./scripts/integration.sh ovh-public-cloud
+          evidence: ovh-public-cloud.json
+        - id: ovh-vps-constrained
+          profile: ovh_vps_constrained
+          command: ./scripts/integration.sh ovh-vps-constrained
+          evidence: ovh-vps-constrained.json
+        - id: ovh-capability-decision
+          command: ./scripts/integration.sh ovh-capabilities
+          evidence: ovh-capability-decision.json
+        - id: disaster-recovery
+          command: ./scripts/integration.sh disaster-recovery
+          evidence: disaster-recovery.json
+      adversarial_review:
+        agent: production-readiness-adversary
+        evidence: adversarial-review.json
+        fix_loop: true

@@ -1,0 +1,146 @@
+schema_version: 1
+workflow: cyclopus-api-platform-v1
+spec: cyclopus-spec.md
+scope:
+  include:
+    - backend
+    - api
+    - database
+    - kubernetes
+    - infrastructure
+    - observability
+    - security
+  exclude:
+    - ui
+    - frontend
+    - browser
+    - templ
+    - htmx
+    - tailwind
+state:
+  checkpoint_dir: .workflow/checkpoints
+  evidence_dir: .workflow/evidence
+  atomic_writes: true
+  resume_from_last_success: true
+  checkpoint_schema: workflow/checkpoint.schema.json
+  input_digest_algorithm: sha256
+  invalidate_on:
+    - source_revision_change
+    - phase_definition_digest_change
+    - run_policy_digest_change
+    - versions_digest_change
+    - prerequisite_evidence_digest_change
+  recovery: earliest_invalid_or_missing_checkpoint
+versions:
+  manifest: versions.yaml
+  probe_before_each_phase: true
+  pin_only_after_compatibility_review: true
+retries:
+  subagent:
+    max_attempts: 3
+    backoff_seconds: [5, 15]
+    jitter: full
+    retry_on: [timeout, unavailable, rate_limited]
+    never_retry_on: [invalid_request, permission_denied, policy_failure]
+    exhausted_status: blocked
+    preserve_successful_evidence: true
+    checkpoint_after_attempt: true
+  network:
+    max_attempts: 5
+    backoff_seconds: [5, 15, 30, 60]
+    jitter: full
+    retry_on: [timeout, connection_reset, dns_temporary, http_429, http_502, http_503, http_504]
+    never_retry_on: [http_400, http_401, http_403, http_404, validation_failure]
+    exhausted_status: blocked
+    preserve_successful_evidence: true
+    checkpoint_after_attempt: true
+  vm:
+    max_attempts: 3
+    backoff_seconds: [15, 45]
+    jitter: full
+    retry_on: [provision_timeout, boot_timeout, transient_provider_error]
+    never_retry_on: [invalid_image, quota_denied, authentication_failure, capability_missing]
+    exhausted_status: blocked
+    preserve_successful_evidence: true
+    recreate_on_retry: true
+    checkpoint_after_attempt: true
+review_loop:
+  required_after_each_phase: true
+  reviewer_must_differ_from_implementer: true
+  mode: adversarial
+  fix_and_rerun_required: true
+  max_cycles: 5
+gate_schema: workflow/gate.schema.json
+evidence_validation:
+  schema_draft: "2020-12"
+  validator: check-jsonschema
+  validator_version: "0.33.3"
+  runner: uvx
+  command: uvx --from check-jsonschema==0.33.3 check-jsonschema --schemafile workflow/gate.schema.json
+  require_current_source_revision: true
+orchestration:
+  durable_store: postgres
+  job_contract: workflow/orchestration-job.sql
+  lease_required_before_github_dispatch: true
+  lease_ttl_seconds: 120
+  single_flight_scope: [repository, workflow, ref, environment]
+  idempotency_scope: [repository, workflow, ref, environment, commit_sha]
+  latest_sha_coalescing: true
+  persist_observed_run_before_reconciliation_exit: true
+  recover_expired_leases_on_startup: true
+  dispatch_inputs: [orchestration_job_id, commit_sha]
+  immutable_commit_contract: "required commit_sha input; checkout commit_sha; attest HEAD equals commit_sha before build"
+  observable_run_correlation: "run-name cyclopus:<orchestration_job_id>; head_sha equals commit_sha"
+  ambiguous_dispatch_state: dispatch_reconciling
+  ambiguous_dispatch_auto_redispatch: false
+  retry_trigger: next_push
+  reconciliation:
+    run_on_startup: true
+    periodic_interval_seconds: 30
+    claim_ttl_seconds: 60
+    states: [dispatch_reconciling, dispatched]
+  timeouts:
+    hard_deadline_owner: store
+    dispatch_observation_seconds: 300
+    dispatch_observation_poll_seconds: 90
+    github_run_seconds: 2700
+  terminal_run_conclusions: [success, failure, cancelled, timed_out]
+  terminal_failure_conclusions: [failure, cancelled, timed_out]
+  missing_run_after_dispatch_deadline: failed
+  persist_status_and_error_evidence: true
+  terminal_resolution_promotes_pending_sha_atomically: true
+integration_profiles:
+  orbstack_ubuntu:
+    provider: orbstack
+    image: ubuntu:24.04
+    purpose: integration
+  orbstack_debian:
+    provider: orbstack
+    image: debian:12
+    purpose: integration
+  ovh_public_cloud:
+    provider: ovh
+    product: public-cloud
+    role: primary
+    os: ubuntu-24.04
+    selection:
+      kind: user_override
+      decided_by: project-owner
+      decided_at: "2026-07-29"
+      rationale: Primary production target selected by the user for Phase 0 planning.
+      capability_gate: ovh-capability-decision
+  ovh_vps_constrained:
+    provider: ovh
+    product: vps
+    role: constrained
+    os: debian-12
+    selection:
+      kind: user_override
+      decided_by: project-owner
+      decided_at: "2026-07-29"
+      rationale: Constrained OVH VPS behavior was explicitly requested by the user.
+      capability_gate: ovh-capability-decision
+    limits:
+      vcpu: 2
+      memory_mib: 2048
+      disk_gib: 20

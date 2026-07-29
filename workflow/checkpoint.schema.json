@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclopus.local/schemas/workflow-checkpoint.json",
+  "title": "Cyclopus workflow checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "workflow",
+    "phase",
+    "checkpoint",
+    "status",
+    "source_revision",
+    "input_digest",
+    "prerequisite_evidence",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "workflow": { "const": "cyclopus-api-platform-v1" },
+    "phase": { "type": "string", "pattern": "^phase-[0-9]+$" },
+    "checkpoint": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["passed", "blocked", "invalidated"] },
+    "source_revision": { "type": "string", "minLength": 1 },
+    "input_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prerequisite_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "invalidated_at": { "type": "string", "format": "date-time" },
+    "invalidation_reason": {
+      "enum": [
+        "source_revision_change",
+        "phase_definition_digest_change",
+        "run_policy_digest_change",
+        "versions_digest_change",
+        "prerequisite_evidence_digest_change"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "invalidated" } }, "required": ["status"] },
+      "then": { "required": ["invalidated_at", "invalidation_reason"] }
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+schema_version: 1
+policy:
+  probe_before_each_phase: true
+  pin_rule: reviewed_or_documented_intentional_pin
+  on_newer_version: record_only
+  observed_at: "2026-07-29"
+components:
+  go:
+    pin: "1.26"
+    observed_latest: "1.26.5"
+    probe: "curl -fsSL https://go.dev/VERSION?m=text"
+    review:
+      status: approved
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://go.dev/VERSION?m=text", "go.mod"]
+      rationale: Go 1.26 is the module language/toolchain line; patch selection remains deployment-managed.
+  postgres:
+    pin: "18"
+    observed_latest: "18.4"
+    probe: "curl -fsSL https://www.postgresql.org/versions.json"
+    review:
+      status: approved
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://www.postgresql.org/versions.json", "tests/workflow/fixtures/pending_sha_pg18.sql"]
+      rationale: PostgreSQL 18 is required for native OLD row RETURNING syntax and is contract-tested.
+  golang_migrate:
+    pin: "v4.19.1"
+    observed_latest: "v4.19.1"
+    probe: "curl -fsSL https://api.github.com/repos/golang-migrate/migrate/releases/latest"
+    review:
+      status: approved
+      reviewer: schema-foundation
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/golang-migrate/migrate/releases/tag/v4.19.1", "go.mod"]
+      rationale: Current stable v4 release supports embedded io/fs sources and PostgreSQL connection instances.
+  pgx:
+    pin: "v5.10.0"
+    observed_latest: "v5.10.0"
+    probe: "curl -fsSL 'https://api.github.com/repos/jackc/pgx/tags?per_page=20'"
+    review:
+      status: approved
+      reviewer: schema-foundation
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/jackc/pgx/releases/tag/v5.10.0", "go.mod"]
+      rationale: Current stable pgx/v5 release is compatible with Go 1.26 and PostgreSQL 18.
+  grpc_go:
+    pin: "v1.82.1"
+    observed_latest: "v1.82.1"
+    probe: "curl -fsSL https://api.github.com/repos/grpc/grpc-go/releases/latest"
+    review:
+      status: approved
+      reviewer: api-contract-transport
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/grpc/grpc-go/releases/tag/v1.82.1", "go.mod"]
+      rationale: Current stable grpc-go security patch release for the native transport.
+  grpc_gateway:
+    pin: "v2.29.0"
+    observed_latest: "v2.29.0"
+    probe: "curl -fsSL https://api.github.com/repos/grpc-ecosystem/grpc-gateway/releases/latest"
+    review:
+      status: approved
+      reviewer: api-contract-transport
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/grpc-ecosystem/grpc-gateway/releases/tag/v2.29.0", "buf.gen.yaml", "go.mod"]
+      rationale: Current stable v2 gateway release with pinned code generation.
+  protobuf_go:
+    pin: "v1.36.11"
+    observed_latest: "v1.36.11"
+    probe: "curl -fsSL https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest"
+    review:
+      status: approved
+      reviewer: api-contract-transport
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/protocolbuffers/protobuf-go/releases/tag/v1.36.11", "buf.gen.yaml", "go.mod"]
+      rationale: Current stable Go protobuf runtime and generator release.
+  protoc_gen_go_grpc:
+    pin: "v1.6.2"
+    observed_latest: "v1.6.2"
+    probe: "curl -fsSL https://proxy.golang.org/google.golang.org/grpc/cmd/protoc-gen-go-grpc/@latest"
+    review:
+      status: approved
+      reviewer: api-contract-transport
+      reviewed_at: "2026-07-29"
+      evidence: ["buf.gen.yaml"]
+      rationale: Current stable grpc-go generator release.
+  buf:
+    pin: "v1.72.0"
+    observed_latest: "v1.72.0"
+    probe: "curl -fsSL https://api.github.com/repos/bufbuild/buf/releases/latest"
+    review:
+      status: approved
+      reviewer: api-contract-transport
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/bufbuild/buf/releases/tag/v1.72.0", "buf.yaml", "buf.gen.yaml"]
+      rationale: Current stable Buf CLI used for dependency locking, linting, breaking checks, and generation.
+  protoc:
+    pin: "v35.1"
+    observed_latest: "v35.1"
+    probe: "curl -fsSL https://api.github.com/repos/protocolbuffers/protobuf/releases/latest"
+    review:
+      status: approved
+      reviewer: api-contract-transport
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/protocolbuffers/protobuf/releases/tag/v35.1"]
+      rationale: Latest stable protoc was probed; generation uses Buf remote plugins and does not require a local protoc binary.
+  k3s:
+    pin: "v1.33.13+k3s1"
+    observed_latest: "v1.36.2+k3s1"
+    probe: "curl -fsSL https://api.github.com/repos/k3s-io/k3s/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: kubernetes-client-go-recovery
+      reviewed_at: "2026-07-29"
+      evidence: ["https://github.com/k3s-io/k3s/releases/tag/v1.33.13%2Bk3s1", "https://raw.githubusercontent.com/k3s-io/k3s/v1.33.13%2Bk3s1/go.mod", "https://raw.githubusercontent.com/kubernetes/client-go/v0.33.13/go.mod", "go.mod"]
+      rationale: k3s v1.33.13+k3s1 embeds Kubernetes v1.33.13; the adapter uses matching upstream k8s.io api, apimachinery, and client-go v0.33.13 modules.
+  client_go:
+    pin: "v0.33.13"
+    observed_latest: "v0.33.13"
+    probe: "curl -fsSL https://raw.githubusercontent.com/kubernetes/client-go/v0.33.13/go.mod"
+    review:
+      status: approved
+      reviewer: kubernetes-client-go-recovery
+      reviewed_at: "2026-07-29"
+      evidence: ["https://raw.githubusercontent.com/kubernetes/client-go/v0.33.13/go.mod", "https://raw.githubusercontent.com/k3s-io/k3s/v1.33.13%2Bk3s1/go.mod", "go.mod"]
+      rationale: client-go v0.33.13 directly requires k8s.io/api and k8s.io/apimachinery v0.33.13 and matches the Kubernetes v1.33.13 API served by the selected k3s patch.
+  traefik:
+    pin: "v3.4.1"
+    observed_latest: "v3.7.9"
+    probe: "curl -fsSL https://api.github.com/repos/traefik/traefik/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://api.github.com/repos/traefik/traefik/releases/latest"]
+      rationale: Retain until ingress, CONNECT hardening, and the k3s embedded-chart compatibility matrix is exercised.
+  cert_manager:
+    pin: "v1.17.2"
+    observed_latest: "v1.21.0"
+    probe: "curl -fsSL https://api.github.com/repos/cert-manager/cert-manager/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://api.github.com/repos/cert-manager/cert-manager/releases/latest"]
+      rationale: Latest has documented breaking Helm/RBAC changes and known issues; retain until certificate lifecycle integration review.
+  kyverno:
+    pin: "v1.14.2"
+    observed_latest: "v1.18.2"
+    probe: "curl -fsSL https://api.github.com/repos/kyverno/kyverno/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://api.github.com/repos/kyverno/kyverno/releases/latest"]
+      rationale: Retain until fail-closed admission policies and CRD/chart changes pass Phase 3 integration gates.
+  keda:
+    pin: "v2.17.1"
+    observed_latest: "v2.20.1"
+    probe: "curl -fsSL https://api.github.com/repos/kedacore/keda/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://api.github.com/repos/kedacore/keda/releases/latest"]
+      rationale: Retain until mutually exclusive HPA/KEDA behavior and upgrade notes are tested in Phase 4.
+  opentofu:
+    pin: "1.10.1"
+    observed_latest: "1.12.5"
+    probe: "curl -fsSL https://api.github.com/repos/opentofu/opentofu/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://api.github.com/repos/opentofu/opentofu/releases/latest"]
+      rationale: Retain until provider locks, state compatibility, and OVH plans pass Phase 5 infrastructure tests.
+  helm:
+    pin: "v3.18.3"
+    observed_latest: "v4.2.3"
+    probe: "curl -fsSL https://api.github.com/repos/helm/helm/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-0-workflow-fixer
+      reviewed_at: "2026-07-29"
+      evidence: ["https://api.github.com/repos/helm/helm/releases/latest"]
+      rationale: Helm 4 is a major-version change; retain Helm 3 until chart rendering and upgrade/rollback contracts pass Phase 5.

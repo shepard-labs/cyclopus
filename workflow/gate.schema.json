@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclopus.local/schemas/workflow-gate.json",
+  "title": "Cyclopus workflow gate evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "workflow",
+    "phase",
+    "gate",
+    "gate_type",
+    "status",
+    "attempt",
+    "started_at",
+    "finished_at",
+    "source_revision",
+    "input_digest",
+    "implementer_agent",
+    "command",
+    "exit_code",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "workflow": { "const": "cyclopus-api-platform-v1" },
+    "phase": { "type": "string", "pattern": "^phase-[0-9]+$" },
+    "gate": { "type": "string", "minLength": 1 },
+    "gate_type": {
+      "type": "string",
+      "enum": ["version_probe", "unit", "evidence", "integration", "adversarial_review"]
+    },
+    "status": { "type": "string", "enum": ["passed", "failed", "blocked"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "source_revision": { "type": "string", "minLength": 1 },
+    "input_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "implementer_agent": { "type": "string", "minLength": 1 },
+    "command": { "type": "string", "minLength": 1 },
+    "exit_code": { "type": "integer" },
+    "profile": {
+      "type": "string",
+      "enum": ["local", "orbstack_ubuntu", "orbstack_debian", "ovh_public_cloud", "ovh_vps_constrained"]
+    },
+    "reviewer_agent": { "type": "string", "minLength": 1 },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "summary", "resolved"],
+        "properties": {
+          "severity": { "enum": ["critical", "high", "medium", "low"] },
+          "summary": { "type": "string", "minLength": 1 },
+          "resolved": { "type": "boolean" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "notes": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "gate_type": { "const": "adversarial_review" } },
+        "required": ["gate_type"]
+      },
+      "then": { "required": ["reviewer_agent", "findings"] }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_type": { "const": "adversarial_review" },
+          "status": { "const": "passed" }
+        },
+        "required": ["gate_type", "status"]
+      },
+      "then": {
+        "properties": {
+          "findings": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "severity": { "enum": ["critical", "high"] },
+                  "resolved": { "const": false }
+                },
+                "required": ["severity", "resolved"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_type": { "const": "integration" } },
+        "required": ["gate_type"]
+      },
+      "then": { "required": ["profile"] }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "passed" } },
+        "required": ["status"]
+      },
+      "then": { "properties": { "exit_code": { "const": 0 } } }
+    }
+  ]
+}
