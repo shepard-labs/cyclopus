@@ -2,3 +2,8 @@
 .bmad-loop/cache/
 .bmad-loop/policy.toml
 .workflow/
+/.agents
+/.claude
+/.opencode
+/_bmad
+/.bmad-loop
