@@ -110,7 +110,7 @@ func DecodeDeploymentSnapshot(encoded []byte) (*appsv1.Deployment, error) {
 	container := corev1.Container{
 		Name:  d.Container.Name,
 		Image: d.Container.Image,
-		Ports: []corev1.ContainerPort{{ContainerPort: d.Container.Port}},
+		Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: d.Container.Port}},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewMilliQuantity(d.Container.Resources.CPURequestMillicores, resource.DecimalSI), corev1.ResourceMemory: *resource.NewQuantity(d.Container.Resources.MemoryRequestMiB*1024*1024, resource.BinarySI)},
 			Limits:   corev1.ResourceList{corev1.ResourceCPU: *resource.NewMilliQuantity(d.Container.Resources.CPULimitMillicores, resource.DecimalSI), corev1.ResourceMemory: *resource.NewQuantity(d.Container.Resources.MemoryLimitMiB*1024*1024, resource.BinarySI)},

@@ -38,7 +38,12 @@ func TestHTTPFakeAPIServerRestoresSnapshotAndPreservesMetadata(t *testing.T) {
 	}
 	adapter.now = func() time.Time { return time.Unix(100, 0) }
 
-	if _, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease); err != nil {
+	state := recoveryStore.state
+	_, previousSnapshot, err := validateRecoveryState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.restore(context.Background(), recoveryStore.lease, state, previousSnapshot); err != nil {
 		api.mu.Lock()
 		puts := api.puts
 		api.mu.Unlock()
