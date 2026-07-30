@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/cyclopus-dev/cyclopus/internal/webhook"
 )
 
 type RecoveryStore interface {
@@ -34,6 +35,8 @@ type RecoveryStore interface {
 	RescheduleEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, time.Duration, string, string) error
 	ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error)
 	RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error)
+	ListWebhookOrgIDs(context.Context) ([]string, error)
+	ClaimWebhookDelivery(context.Context, string, string, time.Duration) (store.WebhookDelivery, error)
 }
 
 type GitHubRecoveryAdapter interface {
@@ -50,12 +53,17 @@ type KubernetesLifecycleAdapter interface {
 	ExecuteEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob) error
 }
 
+type WebhookDeliveryAdapter interface {
+	Deliver(context.Context, store.WebhookDelivery) (store.WebhookDeliveryOutcome, error)
+}
+
 type RecoveryAdapters struct {
 	Capabilities               RecoveryCapabilities
 	GitHub                     GitHubRecoveryAdapter
 	GitHubErrorDisposition     func(error) (bool, time.Duration, string, bool)
 	Kubernetes                 KubernetesRecoveryAdapter
 	Lifecycle                  KubernetesLifecycleAdapter
+	Webhook                    WebhookDeliveryAdapter
 	KubernetesErrorDisposition func(error) (bool, time.Duration, string)
 }
 
@@ -137,6 +145,9 @@ func (r *Runner) validate() error {
 	if r.store == nil || r.logger == nil || r.config.ScanInterval <= 0 || r.config.LeaseDuration <= 0 || r.config.MaxConcurrentDeploys <= 0 || r.config.RequestTimeout <= 0 || r.config.RequestTimeout >= r.config.LeaseDuration || r.config.Owner == "" {
 		return errors.New("invalid recovery worker configuration")
 	}
+	if r.config.LeaseDuration <= webhook.RequestTimeout {
+		return fmt.Errorf("webhook lease duration %s must exceed the %s delivery timeout", r.config.LeaseDuration, webhook.RequestTimeout)
+	}
 	return nil
 }
 
@@ -170,6 +181,10 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 	lifecycleOrgIDs, err := r.store.ListLifecycleOrgIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("scan environment lifecycle: %w", err)
+	}
+	webhookOrgIDs, err := r.store.ListWebhookOrgIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("scan webhook deliveries: %w", err)
 	}
 
 	queuedOrgIDs, err := r.store.ListOrchestrationOrgIDs(ctx)
@@ -229,6 +244,35 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 			}
 			if rescheduleErr := r.store.RescheduleEnvironmentLifecycle(ctx, job, retryDelay(job.Attempt, 0, r.config.LeaseDuration), "lifecycle_retry", err.Error()); rescheduleErr != nil {
 				return fmt.Errorf("reschedule environment lifecycle %s: %w", job.ID, rescheduleErr)
+			}
+		}
+	}
+	for _, orgID := range webhookOrgIDs {
+		if r.adapters.Webhook == nil {
+			return errors.New("webhook delivery adapter is unavailable")
+		}
+		for {
+			delivery, err := r.store.ClaimWebhookDelivery(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("claim webhook delivery for organization %s: %w", orgID, err)
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, webhook.RequestTimeout)
+			outcome, err := r.adapters.Webhook.Deliver(requestCtx, delivery)
+			cancel()
+			if err != nil && !errors.Is(err, store.ErrLeaseNotOwned) {
+				r.logger.Warn("webhook delivery error", "org_id", delivery.OrgID, "webhook_id", delivery.WebhookID,
+					"delivery_id", delivery.ID, "event", delivery.Event, "error", err)
+				continue
+			}
+			if outcome.Abandoned {
+				r.logger.Warn("webhook.delivery_failed", "org_id", delivery.OrgID, "webhook_id", delivery.WebhookID,
+					"delivery_id", delivery.ID, "event", delivery.Event, "reason", outcome.Reason)
+			}
+			if outcome.EndpointDisabled {
+				r.logger.Warn("webhook.disabled", "org_id", delivery.OrgID, "webhook_id", delivery.WebhookID)
 			}
 		}
 	}

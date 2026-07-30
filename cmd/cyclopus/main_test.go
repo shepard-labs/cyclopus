@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/cyclopus-dev/cyclopus/internal/config"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
 	"github.com/cyclopus-dev/cyclopus/internal/worker"
+	"k8s.io/client-go/kubernetes"
+	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 )
 
 func TestBuildRecoveryAdaptersUsesSuccessfullyConstructedAdapters(t *testing.T) {
@@ -21,7 +24,7 @@ func TestBuildRecoveryAdaptersUsesSuccessfullyConstructedAdapters(t *testing.T) 
 	kubernetesCalls := 0
 	cfg := adapterTestConfig()
 
-	adapters, err := buildRecoveryAdapters(cfg, adapterConstructors{
+	adapters, err := buildRecoveryAdapters(cfg, nil, adapterConstructors{
 		github: func(got config.GitHub) (worker.GitHubRecoveryAdapter, error) {
 			githubCalls++
 			if got.AppID != cfg.GitHub.AppID {
@@ -53,7 +56,7 @@ func TestBuildRecoveryAdaptersSkipsGitHubWhenDisabled(t *testing.T) {
 	cfg.GitHub = config.GitHub{}
 	githubCalled := false
 
-	adapters, err := buildRecoveryAdapters(cfg, adapterConstructors{
+	adapters, err := buildRecoveryAdapters(cfg, nil, adapterConstructors{
 		github: func(config.GitHub) (worker.GitHubRecoveryAdapter, error) {
 			githubCalled = true
 			return &fakeGitHubAdapter{}, nil
@@ -75,7 +78,7 @@ func TestBuildRecoveryAdaptersSkipsGitHubWhenDisabled(t *testing.T) {
 
 func TestBuildRecoveryAdaptersConstructionFailureReturnsNoReadyCapabilities(t *testing.T) {
 	want := errors.New("cluster unavailable")
-	adapters, err := buildRecoveryAdapters(adapterTestConfig(), adapterConstructors{
+	adapters, err := buildRecoveryAdapters(adapterTestConfig(), nil, adapterConstructors{
 		kubernetes: func(config.Kubernetes) (worker.KubernetesRecoveryAdapter, error) {
 			return nil, want
 		},
@@ -88,10 +91,24 @@ func TestBuildRecoveryAdaptersConstructionFailureReturnsNoReadyCapabilities(t *t
 	}
 }
 
+func TestBuildRecoveryAdaptersFailsWithoutWebhookCapableKubernetesAdapter(t *testing.T) {
+	adapters, err := buildRecoveryAdapters(adapterTestConfig(), nil, adapterConstructors{
+		kubernetes: func(config.Kubernetes) (worker.KubernetesRecoveryAdapter, error) {
+			return &clientlessKubernetesAdapter{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "webhook delivery") {
+		t.Fatalf("buildRecoveryAdapters() error = %v, want webhook capability failure", err)
+	}
+	if adapters.Webhook != nil {
+		t.Fatal("webhook adapter constructed from a clientless Kubernetes adapter")
+	}
+}
+
 func TestStartupWithDueWorkUsesConstructedAdapters(t *testing.T) {
 	github := &countingGitHubAdapter{}
 	kubernetes := &countingKubernetesAdapter{}
-	adapters, err := buildRecoveryAdapters(adapterTestConfig(), adapterConstructors{
+	adapters, err := buildRecoveryAdapters(adapterTestConfig(), nil, adapterConstructors{
 		github: func(config.GitHub) (worker.GitHubRecoveryAdapter, error) { return github, nil },
 		kubernetes: func(config.Kubernetes) (worker.KubernetesRecoveryAdapter, error) {
 			return kubernetes, nil
@@ -138,6 +155,24 @@ func (*fakeGitHubAdapter) ReconcileDispatch(context.Context, *store.Orchestratio
 
 type fakeKubernetesAdapter struct{}
 
+func (*fakeKubernetesAdapter) KubernetesClient() kubernetes.Interface {
+	return kubernetesfake.NewSimpleClientset()
+}
+
+type clientlessKubernetesAdapter struct{}
+
+func (*clientlessKubernetesAdapter) ExecuteDeploy(_ context.Context, lease store.DeployExecution) (store.DeployRecoveryResult, error) {
+	return store.DeployRecoveryResult{Lease: lease}, nil
+}
+
+func (*clientlessKubernetesAdapter) RecoverExpiredDeploy(_ context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
+	return store.DeployRecoveryResult{Lease: lease}, nil
+}
+
+func (*clientlessKubernetesAdapter) ExecuteEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob) error {
+	return nil
+}
+
 func (*fakeKubernetesAdapter) ExecuteDeploy(_ context.Context, lease store.DeployExecution) (store.DeployRecoveryResult, error) {
 	return store.DeployRecoveryResult{Lease: lease}, nil
 }
@@ -162,6 +197,10 @@ func (a *countingGitHubAdapter) ReconcileDispatch(context.Context, *store.Orches
 }
 
 type countingKubernetesAdapter struct{ calls int }
+
+func (*countingKubernetesAdapter) KubernetesClient() kubernetes.Interface {
+	return kubernetesfake.NewSimpleClientset()
+}
 
 func (a *countingKubernetesAdapter) ExecuteDeploy(_ context.Context, lease store.DeployExecution) (store.DeployRecoveryResult, error) {
 	a.calls++
@@ -230,6 +269,12 @@ func (s *startupRecoveryStore) ListOrchestrationRecoveryOrgIDs(context.Context) 
 
 func (*startupRecoveryStore) ListOrchestrationOrgIDs(context.Context) ([]string, error) {
 	return nil, nil
+}
+func (*startupRecoveryStore) ListWebhookOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (*startupRecoveryStore) ClaimWebhookDelivery(context.Context, string, string, time.Duration) (store.WebhookDelivery, error) {
+	return store.WebhookDelivery{}, store.ErrNotFound
 }
 
 func (s *startupRecoveryStore) ClaimDispatchReconciliation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {

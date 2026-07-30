@@ -157,7 +157,11 @@ func (s *Store) CompleteEnvironmentProvision(ctx context.Context, job Environmen
 		if err != nil {
 			return err
 		}
-		return rowsAffected(command, ErrConflict)
+		if err := rowsAffected(command, ErrConflict); err != nil {
+			return err
+		}
+		return enqueueWebhookEvent(ctx, tx, job.OrgID, "environment.created", job.EnvironmentID, nil,
+			map[string]any{"hostname": plannedHostname, "namespace": job.Namespace})
 	})
 }
 
@@ -223,7 +227,11 @@ func (s *Store) CompleteEnvironmentTeardown(ctx context.Context, job Environment
 		if err != nil {
 			return err
 		}
-		return rowsAffected(command, ErrConflict)
+		if err := rowsAffected(command, ErrConflict); err != nil {
+			return err
+		}
+		return enqueueWebhookEvent(ctx, tx, job.OrgID, "environment.torn_down", job.EnvironmentID, nil,
+			map[string]any{"namespace": job.Namespace, "reason": job.Reason})
 	})
 }
 

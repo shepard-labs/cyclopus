@@ -39,6 +39,7 @@ type apiHandlers struct {
 	cyclopusv1.UnimplementedEnvironmentServiceServer
 	cyclopusv1.UnimplementedReleaseServiceServer
 	cyclopusv1.UnimplementedReconciliationServiceServer
+	cyclopusv1.UnimplementedWebhookServiceServer
 	auth       *internalauth.Service
 	service    *service.Service
 	sessionTTL time.Duration
@@ -50,7 +51,7 @@ func NewServices(authService *internalauth.Service, domainService *service.Servi
 	}
 	handler := &apiHandlers{auth: authService, service: domainService, sessionTTL: sessionTTL}
 	return Services{Authentication: handler, Organization: handler, Project: handler, Application: handler,
-		Environment: handler, Release: handler, Reconciliation: handler}
+		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler}
 }
 
 func (h *apiHandlers) Bootstrap(ctx context.Context, req *cyclopusv1.BootstrapRequest) (*cyclopusv1.BootstrapResponse, error) {
@@ -851,6 +852,119 @@ func (h *apiHandlers) ListReconciliationEvidence(ctx context.Context, req *cyclo
 	return response, nil
 }
 
+func (h *apiHandlers) CreateWebhook(ctx context.Context, req *cyclopusv1.CreateWebhookRequest) (*cyclopusv1.CreateWebhookResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Webhook == nil {
+		return nil, fieldError("webhook", "is required")
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(), "webhook.target_url": req.Webhook.GetTargetUrl(), "webhook.secret_ref": req.Webhook.GetSecretRef()}); err != nil {
+		return nil, err
+	}
+	value, err := h.service.CreateWebhook(ctx, actor, req.GetIdempotencyKey(), webhookInput(req.Webhook))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateWebhookResponse{Webhook: webhookProto(value)}, nil
+}
+
+func (h *apiHandlers) GetWebhook(ctx context.Context, req *cyclopusv1.GetWebhookRequest) (*cyclopusv1.GetWebhookResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("webhook_id", req.GetWebhookId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetWebhook(ctx, actor, req.GetWebhookId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetWebhookResponse{Webhook: webhookProto(value)}, nil
+}
+
+func (h *apiHandlers) ListWebhooks(ctx context.Context, req *cyclopusv1.ListWebhooksRequest) (*cyclopusv1.ListWebhooksResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, notFound()
+	}
+	values, err := h.service.ListWebhooks(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	scope := pageScope("webhooks", actor.OrgID)
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Webhook) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, scope, func(v store.Webhook) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListWebhooksResponse{NextPageToken: next, Webhooks: make([]*cyclopusv1.WebhookEndpoint, 0, len(page))}
+	for _, value := range page {
+		response.Webhooks = append(response.Webhooks, webhookProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) UpdateWebhook(ctx context.Context, req *cyclopusv1.UpdateWebhookRequest) (*cyclopusv1.UpdateWebhookResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Webhook == nil {
+		return nil, fieldError("webhook", "is required")
+	}
+	if err := validateUUID("webhook.id", req.Webhook.GetId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	current, err := h.service.GetWebhook(ctx, actor, req.Webhook.GetId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	merged := webhookProto(current)
+	if err := mergeMaskedMessage(merged, req.Webhook, req.GetUpdateMask(), map[string]bool{"target_url": true, "events": true, "secret_ref": true, "enabled": true}); err != nil {
+		return nil, err
+	}
+	value, err := h.service.UpdateWebhook(ctx, actor, req.GetIdempotencyKey(), req.Webhook.GetId(), webhookInput(merged))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.UpdateWebhookResponse{Webhook: webhookProto(value)}, nil
+}
+
+func (h *apiHandlers) DeleteWebhook(ctx context.Context, req *cyclopusv1.DeleteWebhookRequest) (*cyclopusv1.DeleteWebhookResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("webhook_id", req.GetWebhookId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	if err := h.service.DeleteWebhook(ctx, actor, req.GetIdempotencyKey(), req.GetWebhookId()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteWebhookResponse{}, nil
+}
+
 func sessionActor(ctx context.Context) (service.ActorContext, error) {
 	principal, err := principalFromContext(ctx)
 	if err != nil {
@@ -956,6 +1070,10 @@ func appInput(value *cyclopusv1.Application) service.AppInput {
 	return input
 }
 
+func webhookInput(value *cyclopusv1.WebhookEndpoint) service.WebhookInput {
+	return service.WebhookInput{TargetURL: value.GetTargetUrl(), Events: append([]string(nil), value.GetEvents()...), SecretRef: value.GetSecretRef(), Enabled: value.GetEnabled()}
+}
+
 func reconciliationInput(req *cyclopusv1.StartReconciliationRequest) (service.ReconciliationInput, error) {
 	scope := req.GetScope()
 	violations := validationViolations{}
@@ -1046,6 +1164,9 @@ func releaseProto(v store.Release) *cyclopusv1.Release {
 }
 func apiTokenProto(v store.APIToken) *cyclopusv1.ApiToken {
 	return &cyclopusv1.ApiToken{Id: v.ID, UserId: v.UserID, Name: v.Name, Scopes: append([]string(nil), v.Scopes...), ExpiresAt: timeProto(v.ExpiresAt), CreatedAt: timestamppb.New(v.CreatedAt), LastUsedAt: timeProto(v.LastUsedAt)}
+}
+func webhookProto(v store.Webhook) *cyclopusv1.WebhookEndpoint {
+	return &cyclopusv1.WebhookEndpoint{Id: v.ID, OrganizationId: v.OrgID, TargetUrl: v.TargetURL, Events: append([]string(nil), v.Events...), SecretRef: v.SecretRef, Enabled: v.DisabledAt == nil, ConsecutiveFailures: int32(v.ConsecutiveFailures), DisabledAt: timeProto(v.DisabledAt), CreatedAt: timestamppb.New(v.CreatedAt), UpdatedAt: timestamppb.New(v.UpdatedAt)}
 }
 func operationProto(v service.AcceptedOperation, prefix string) *cyclopusv1.Operation {
 	return &cyclopusv1.Operation{Id: v.OperationID, ResourceName: prefix + v.ResourceID, Status: operationStatus(v.Status)}

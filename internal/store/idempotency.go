@@ -216,7 +216,7 @@ func validateIdempotencyResource(ctx context.Context, tx pgx.Tx, orgID string, r
 		"release": "releases", "environment": "environments", "app": "apps",
 		"project": "projects", "reconciliation_run": "reconciliation_runs",
 		"orchestration_job": "orchestration_jobs", "env_var": "env_vars",
-		"api_token": "api_tokens",
+		"api_token": "api_tokens", "webhook": "webhooks", "org": "orgs",
 	}
 	table, ok := tables[*resourceType]
 	if !ok {
@@ -224,6 +224,9 @@ func validateIdempotencyResource(ctx context.Context, tx pgx.Tx, orgID string, r
 	}
 	var exists bool
 	query := "SELECT EXISTS (SELECT 1 FROM " + pgx.Identifier{table}.Sanitize() + " WHERE org_id = $1 AND id = $2)"
+	if *resourceType == "org" {
+		query = `SELECT EXISTS (SELECT 1 FROM orgs WHERE id = $1 AND id = $2)`
+	}
 	if *resourceType == "api_token" {
 		query = `SELECT EXISTS (SELECT 1 FROM api_tokens token JOIN users user_account ON user_account.id = token.user_id
 			WHERE user_account.org_id = $1 AND token.id = $2)`

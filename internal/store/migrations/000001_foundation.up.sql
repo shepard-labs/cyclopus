@@ -608,26 +608,46 @@ CREATE TABLE webhooks (
     secret_ref text NOT NULL CHECK (secret_ref ~ '^k8s-secret://[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/[a-z0-9]([-a-z0-9]{0,251}[a-z0-9])?#[A-Za-z0-9._-]{1,253}$'),
     consecutive_failures integer NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
     disabled_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (org_id, id)
 );
 
 CREATE TABLE webhook_deliveries (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
-    webhook_id uuid NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
-    event text NOT NULL CHECK (btrim(event) <> '' AND octet_length(event) <= 200),
+    org_id uuid NOT NULL,
+    webhook_id uuid NOT NULL,
+    event text NOT NULL CHECK (event IN ('deploy.started','deploy.succeeded','deploy.failed','rollback.completed','environment.created','environment.torn_down')),
     payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 1048576),
-    attempt integer NOT NULL DEFAULT 0 CHECK (attempt BETWEEN 0 AND 6),
-    next_attempt_at timestamptz,
+    raw_body bytea NOT NULL CHECK (octet_length(raw_body) BETWEEN 2 AND 1048576),
+    target_url text NOT NULL CHECK (target_url ~ '^https://[^[:space:]]+$' AND octet_length(target_url) <= 2047),
+    secret_ref text NOT NULL CHECK (secret_ref ~ '^k8s-secret://[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/[a-z0-9]([-a-z0-9]{0,251}[a-z0-9])?#[A-Za-z0-9._-]{1,253}$'),
+    first_send_timestamp bigint,
+    signature text CHECK (signature IS NULL OR signature ~ '^sha256=[0-9a-f]{64}$'),
+    attempt integer NOT NULL DEFAULT 0 CHECK (attempt BETWEEN 0 AND 7),
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    lease_owner text CHECK (lease_owner IS NULL OR (btrim(lease_owner) <> '' AND octet_length(lease_owner) <= 255)),
+    lease_expires_at timestamptz,
+    fence bigint NOT NULL DEFAULT 0 CHECK (fence >= 0),
     last_status_code integer CHECK (last_status_code BETWEEN 100 AND 599),
     last_error text CHECK (last_error IS NULL OR octet_length(last_error) <= 8192),
     delivered_at timestamptz,
     abandoned_at timestamptz,
+    abandoned_reason text CHECK (abandoned_reason IS NULL OR octet_length(abandoned_reason) <= 200),
     created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (num_nonnulls(delivered_at, abandoned_at) <= 1)
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (org_id, id),
+    FOREIGN KEY (org_id, webhook_id) REFERENCES webhooks(org_id, id) ON DELETE CASCADE,
+    CHECK ((lease_owner IS NULL) = (lease_expires_at IS NULL)),
+    CHECK ((first_send_timestamp IS NULL) = (signature IS NULL)),
+    CHECK (num_nonnulls(delivered_at, abandoned_at) <= 1),
+    CHECK ((delivered_at IS NULL AND abandoned_at IS NULL) OR (lease_owner IS NULL AND lease_expires_at IS NULL)),
+    CHECK (delivered_at IS NULL OR (first_send_timestamp IS NOT NULL AND signature IS NOT NULL)),
+    CHECK (payload = convert_from(raw_body, 'UTF8')::jsonb)
 );
 
 CREATE INDEX webhook_deliveries_pending
-    ON webhook_deliveries (next_attempt_at)
+    ON webhook_deliveries (next_attempt_at, created_at, id)
     WHERE delivered_at IS NULL AND abandoned_at IS NULL;
 
 CREATE TABLE audit_events (

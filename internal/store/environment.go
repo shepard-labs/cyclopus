@@ -169,6 +169,10 @@ func (s *Store) claimForwardDeploy(ctx context.Context, orgID, status string, ex
 				return fmt.Errorf("validate previous live snapshot: %w", err)
 			}
 		}
+		if status == "pending" {
+			return enqueueWebhookEvent(ctx, tx, execution.OrgID, "deploy.started", execution.EnvironmentID,
+				&execution.ReleaseID, map[string]any{"kind": execution.FailedRelease.Kind})
+		}
 		return nil
 	})
 	if err == pgx.ErrNoRows {

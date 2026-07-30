@@ -77,8 +77,16 @@ func (s *Store) FinalizeReleaseLive(ctx context.Context, params FinalizeReleaseP
 			}
 		}
 		after, _ := json.Marshal(map[string]any{"status": "live", "hostname": params.Hostname})
-		return insertAuditEvent(ctx, tx, params.Lease.OrgID, params.Audit,
-			"release.finalized_live", "release", params.Lease.ReleaseID, before, after)
+		if err := insertAuditEvent(ctx, tx, params.Lease.OrgID, params.Audit,
+			"release.finalized_live", "release", params.Lease.ReleaseID, before, after); err != nil {
+			return err
+		}
+		event := "deploy.succeeded"
+		if params.Lease.FailedRelease.Kind == "rollback" {
+			event = "rollback.completed"
+		}
+		return enqueueWebhookEvent(ctx, tx, params.Lease.OrgID, event, params.Lease.EnvironmentID,
+			&params.Lease.ReleaseID, map[string]any{"hostname": params.Hostname})
 	})
 	return result, err
 }
@@ -140,7 +148,15 @@ func (s *Store) AdoptRecoveredReleaseLive(ctx context.Context, lease DeployLease
 			(id, org_id, action, target_type, target_id, before, after)
 			VALUES (uuidv7(), $1, 'release.recovery_adopted_live', 'release', $2, $3, $4)`,
 			lease.OrgID, lease.ReleaseID, before, after)
-		return err
+		if err != nil {
+			return err
+		}
+		event := "deploy.succeeded"
+		if lease.FailedRelease.Kind == "rollback" {
+			event = "rollback.completed"
+		}
+		return enqueueWebhookEvent(ctx, tx, lease.OrgID, event, lease.EnvironmentID, &lease.ReleaseID,
+			map[string]any{"recovery": "late_ready_adopted"})
 	})
 	return result, err
 }
@@ -209,10 +225,15 @@ func (s *Store) finalizeReleaseFailed(ctx context.Context, params FailReleasePar
 				(id, org_id, action, target_type, target_id, before, after)
 				VALUES (uuidv7(), $1, 'release.recovery_finalized_failed', 'release', $2, $3, $4)`,
 				params.Lease.OrgID, params.Lease.ReleaseID, before, after)
+			if err != nil {
+				return err
+			}
+		} else if err := insertAuditEvent(ctx, tx, params.Lease.OrgID, params.Audit,
+			"release.finalized_failed", "release", params.Lease.ReleaseID, before, after); err != nil {
 			return err
 		}
-		return insertAuditEvent(ctx, tx, params.Lease.OrgID, params.Audit,
-			"release.finalized_failed", "release", params.Lease.ReleaseID, before, after)
+		return enqueueWebhookEvent(ctx, tx, params.Lease.OrgID, "deploy.failed", params.Lease.EnvironmentID,
+			&params.Lease.ReleaseID, map[string]any{"failure_reason": params.FailureReason})
 	})
 	return result, err
 }

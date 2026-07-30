@@ -10,6 +10,7 @@ type Services struct {
 	Environment      cyclopusv1.EnvironmentServiceServer
 	Release          cyclopusv1.ReleaseServiceServer
 	Reconciliation   cyclopusv1.ReconciliationServiceServer
+	Webhook          cyclopusv1.WebhookServiceServer
 	Authenticator    *Authenticator
 	RateLimiter      *authRateLimiter
 	RequestBodyBytes int64
@@ -24,6 +25,7 @@ func DefaultServices() Services {
 		Environment:    unimplementedEnvironmentService{},
 		Release:        unimplementedReleaseService{},
 		Reconciliation: unimplementedReconciliationService{},
+		Webhook:        unimplementedWebhookService{},
 	}
 }
 
@@ -48,6 +50,9 @@ type unimplementedReleaseService struct {
 type unimplementedReconciliationService struct {
 	cyclopusv1.UnimplementedReconciliationServiceServer
 }
+type unimplementedWebhookService struct {
+	cyclopusv1.UnimplementedWebhookServiceServer
+}
 
 func withDefaults(services Services) Services {
 	defaults := DefaultServices()
@@ -71,6 +76,9 @@ func withDefaults(services Services) Services {
 	}
 	if services.Reconciliation == nil {
 		services.Reconciliation = defaults.Reconciliation
+	}
+	if services.Webhook == nil {
+		services.Webhook = defaults.Webhook
 	}
 	return services
 }

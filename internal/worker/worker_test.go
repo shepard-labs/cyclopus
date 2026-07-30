@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/cyclopus-dev/cyclopus/internal/webhook"
 )
 
 func TestStartupBlocksDispatchRecoveryWithoutGitHubAdapterBeforeClaiming(t *testing.T) {
@@ -188,7 +190,7 @@ func TestStartupDispatchesQueuedProductionWork(t *testing.T) {
 
 func TestRunReturnsBlockedRecoveryDiscoveredPeriodicallyWithoutClaiming(t *testing.T) {
 	fake := &fakeRecoveryStore{orgIDs: []string{"org-one"}}
-	runner := New(Config{ScanInterval: time.Millisecond, LeaseDuration: time.Second, MaxConcurrentDeploys: 4, RequestTimeout: time.Millisecond, Owner: "worker"},
+	runner := New(Config{ScanInterval: time.Millisecond, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), fake, RecoveryAdapters{})
 
 	err := runner.Run(context.Background())
@@ -201,12 +203,21 @@ func TestRunReturnsBlockedRecoveryDiscoveredPeriodicallyWithoutClaiming(t *testi
 func TestRunReturnsScanError(t *testing.T) {
 	want := errors.New("database unavailable")
 	fake := &fakeRecoveryStore{requeueErr: want}
-	runner := New(Config{ScanInterval: time.Millisecond, LeaseDuration: time.Second, MaxConcurrentDeploys: 4, RequestTimeout: time.Millisecond, Owner: "worker"},
+	runner := New(Config{ScanInterval: time.Millisecond, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), fake, RecoveryAdapters{})
 
 	err := runner.Run(context.Background())
 	if !errors.Is(err, want) {
 		t.Fatalf("Run() error = %v, want %v", err, want)
+	}
+}
+
+func TestStartupRejectsLeaseDurationWithinWebhookDeliveryTimeout(t *testing.T) {
+	runner := New(Config{ScanInterval: time.Second, LeaseDuration: webhook.RequestTimeout, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker"},
+		slog.New(slog.NewTextHandler(io.Discard, nil)), &fakeRecoveryStore{}, RecoveryAdapters{})
+	err := runner.Startup(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "webhook lease duration") {
+		t.Fatalf("Startup() error = %v, want webhook lease duration rejection", err)
 	}
 }
 
@@ -305,6 +316,9 @@ type fakeRecoveryStore struct {
 	resumeDeploys         []store.DeployExecution
 	pendingDeploys        []store.DeployExecution
 	forwardClaims         int
+	webhookOrgIDs         []string
+	webhookDeliveries     []store.WebhookDelivery
+	webhookClaims         int
 }
 
 func (f *fakeRecoveryStore) DeleteExpiredIdempotencyRecords(context.Context, int) (int64, error) {
@@ -355,6 +369,22 @@ func (*fakeRecoveryStore) RequestIdlePreviewTeardown(context.Context, store.Idle
 
 func (f *fakeRecoveryStore) ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error) {
 	return f.orgIDs, nil
+}
+
+func (f *fakeRecoveryStore) ListWebhookOrgIDs(context.Context) ([]string, error) {
+	return f.webhookOrgIDs, nil
+}
+
+func (f *fakeRecoveryStore) ClaimWebhookDelivery(_ context.Context, _ string, owner string, leaseDuration time.Duration) (store.WebhookDelivery, error) {
+	f.webhookClaims++
+	f.lastOwner = owner
+	f.lastLeaseDuration = leaseDuration
+	if len(f.webhookDeliveries) == 0 {
+		return store.WebhookDelivery{}, store.ErrNotFound
+	}
+	delivery := f.webhookDeliveries[0]
+	f.webhookDeliveries = f.webhookDeliveries[1:]
+	return delivery, nil
 }
 
 func (f *fakeRecoveryStore) ListOrchestrationOrgIDs(context.Context) ([]string, error) {
@@ -628,6 +658,12 @@ func (*concurrentForwardStore) ListOrchestrationOrgIDs(context.Context) ([]strin
 func (*concurrentForwardStore) ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error) {
 	return nil, nil
 }
+func (*concurrentForwardStore) ListWebhookOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (*concurrentForwardStore) ClaimWebhookDelivery(context.Context, string, string, time.Duration) (store.WebhookDelivery, error) {
+	return store.WebhookDelivery{}, store.ErrNotFound
+}
 func (*concurrentForwardStore) ClaimOrchestration(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
 	return nil, store.ErrNotFound
 }
@@ -686,4 +722,168 @@ func (a *orderedKubernetesAdapter) ExecuteDeploy(_ context.Context, execution st
 func (a *orderedKubernetesAdapter) RecoverExpiredDeploy(_ context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
 	*a.order = append(*a.order, "recovery:"+lease.EnvironmentID)
 	return store.DeployRecoveryResult{Lease: lease}, nil
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+type fakeWebhookDeliveryAdapter struct {
+	calls      int
+	err        error
+	deliveries []store.WebhookDelivery
+	outcome    store.WebhookDeliveryOutcome
+}
+
+func (f *fakeWebhookDeliveryAdapter) Deliver(_ context.Context, delivery store.WebhookDelivery) (store.WebhookDeliveryOutcome, error) {
+	f.calls++
+	f.deliveries = append(f.deliveries, delivery)
+	return f.outcome, f.err
+}
+
+func TestWebhookRecoveryStartupClaimsAndDeliversDueDeliveries(t *testing.T) {
+	adapter := &fakeWebhookDeliveryAdapter{}
+	fake := &fakeRecoveryStore{
+		webhookOrgIDs: []string{"org-one"},
+		webhookDeliveries: []store.WebhookDelivery{
+			{ID: "delivery-one", OrgID: "org-one", WebhookID: "webhook-one", Event: "deploy.succeeded"},
+		},
+	}
+	runner := newTestRunner(fake, RecoveryAdapters{Webhook: adapter})
+
+	if err := runner.Startup(context.Background()); err != nil {
+		t.Fatalf("Startup() error = %v", err)
+	}
+	if adapter.calls != 1 || len(adapter.deliveries) != 1 || adapter.deliveries[0].ID != "delivery-one" {
+		t.Fatalf("deliveries = %d/%+v, want delivery-one", adapter.calls, adapter.deliveries)
+	}
+	if fake.webhookClaims != 2 {
+		t.Fatalf("webhook claims = %d, want delivery plus terminal not-found claim", fake.webhookClaims)
+	}
+	if fake.lastOwner != "worker-one" || fake.lastLeaseDuration != time.Minute {
+		t.Fatalf("claim config = %q/%s", fake.lastOwner, fake.lastLeaseDuration)
+	}
+}
+
+func TestWebhookRecoveryMissingAdapterFailsWhenWorkIsPending(t *testing.T) {
+	fake := &fakeRecoveryStore{
+		webhookOrgIDs:     []string{"org-one"},
+		webhookDeliveries: []store.WebhookDelivery{{ID: "delivery-one", OrgID: "org-one"}},
+	}
+	runner := newTestRunner(fake, RecoveryAdapters{})
+
+	err := runner.Startup(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "webhook delivery adapter is unavailable") {
+		t.Fatalf("Startup() error = %v, want webhook adapter unavailable", err)
+	}
+	if fake.webhookClaims != 0 {
+		t.Fatalf("webhook claims = %d, want no claim mutations without adapter", fake.webhookClaims)
+	}
+}
+
+func TestWebhookRetryDeliveryErrorLogsWarningAndContinues(t *testing.T) {
+	want := errors.New("receiver unreachable")
+	fake := &fakeRecoveryStore{
+		webhookOrgIDs: []string{"org-one"},
+		webhookDeliveries: []store.WebhookDelivery{
+			{ID: "delivery-one", OrgID: "org-one", WebhookID: "webhook-one"},
+			{ID: "delivery-two", OrgID: "org-one", WebhookID: "webhook-one"},
+		},
+	}
+	adapter := &fakeWebhookDeliveryAdapter{err: want}
+	var logs syncBuffer
+	runner := New(Config{ScanInterval: time.Second, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker-one"},
+		slog.New(slog.NewTextHandler(&logs, nil)), fake, RecoveryAdapters{Webhook: adapter})
+
+	if err := runner.Startup(context.Background()); err != nil {
+		t.Fatalf("Startup() error = %v, want delivery error tolerated with warning", err)
+	}
+	if adapter.calls != 2 {
+		t.Fatalf("Deliver calls = %d, want scan to continue past delivery error", adapter.calls)
+	}
+	output := logs.String()
+	if !strings.Contains(output, "webhook delivery error") || !strings.Contains(output, want.Error()) ||
+		!strings.Contains(output, "delivery_id=delivery-one") || !strings.Contains(output, "delivery_id=delivery-two") {
+		t.Fatalf("logs = %q, want warning per failed delivery", output)
+	}
+}
+
+func TestWebhookRetryLeaseNotOwnedIsToleratedAndScanContinues(t *testing.T) {
+	fake := &fakeRecoveryStore{
+		webhookOrgIDs:     []string{"org-one"},
+		webhookDeliveries: []store.WebhookDelivery{{ID: "delivery-one", OrgID: "org-one"}},
+	}
+	runner := newTestRunner(fake, RecoveryAdapters{Webhook: &fakeWebhookDeliveryAdapter{err: store.ErrLeaseNotOwned}})
+
+	if err := runner.Startup(context.Background()); err != nil {
+		t.Fatalf("Startup() error = %v, want ErrLeaseNotOwned tolerated", err)
+	}
+	if fake.webhookClaims != 2 {
+		t.Fatalf("webhook claims = %d, want scan to continue after lease loss", fake.webhookClaims)
+	}
+}
+
+func TestWebhookAbandonedOutcomeLogsDeliveryFailedAndDisabledEvents(t *testing.T) {
+	fake := &fakeRecoveryStore{
+		webhookOrgIDs: []string{"org-one"},
+		webhookDeliveries: []store.WebhookDelivery{
+			{ID: "delivery-one", OrgID: "org-one", WebhookID: "webhook-one", Event: "deploy.failed"},
+		},
+	}
+	adapter := &fakeWebhookDeliveryAdapter{outcome: store.WebhookDeliveryOutcome{
+		Abandoned: true, Reason: "retry_exhausted", EndpointDisabled: true,
+	}}
+	var logs syncBuffer
+	runner := New(Config{ScanInterval: time.Second, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker-one"},
+		slog.New(slog.NewTextHandler(&logs, nil)), fake, RecoveryAdapters{Webhook: adapter})
+
+	if err := runner.Startup(context.Background()); err != nil {
+		t.Fatalf("Startup() error = %v", err)
+	}
+	output := logs.String()
+	for _, want := range []string{
+		"webhook.delivery_failed", "org_id=org-one", "webhook_id=webhook-one",
+		"delivery_id=delivery-one", "event=deploy.failed", "reason=retry_exhausted",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("logs = %q, missing %q", output, want)
+		}
+	}
+	if !strings.Contains(output, "webhook.disabled") {
+		t.Fatalf("logs = %q, missing webhook.disabled event", output)
+	}
+}
+
+func TestWebhookNonAbandonedOutcomeLogsNoFailureEvents(t *testing.T) {
+	fake := &fakeRecoveryStore{
+		webhookOrgIDs: []string{"org-one"},
+		webhookDeliveries: []store.WebhookDelivery{
+			{ID: "delivery-one", OrgID: "org-one", WebhookID: "webhook-one", Event: "deploy.succeeded"},
+		},
+	}
+	adapter := &fakeWebhookDeliveryAdapter{outcome: store.WebhookDeliveryOutcome{Delivered: true}}
+	var logs syncBuffer
+	runner := New(Config{ScanInterval: time.Second, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker-one"},
+		slog.New(slog.NewTextHandler(&logs, nil)), fake, RecoveryAdapters{Webhook: adapter})
+
+	if err := runner.Startup(context.Background()); err != nil {
+		t.Fatalf("Startup() error = %v", err)
+	}
+	output := logs.String()
+	if strings.Contains(output, "webhook.delivery_failed") || strings.Contains(output, "webhook.disabled") {
+		t.Fatalf("logs = %q, want no failure events for delivered outcome", output)
+	}
 }

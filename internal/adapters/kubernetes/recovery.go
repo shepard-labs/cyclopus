@@ -97,6 +97,10 @@ func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardSto
 	return adapter, err
 }
 
+func (a *RecoveryAdapter) KubernetesClient() kubernetes.Interface {
+	return a.client
+}
+
 func (a *RecoveryAdapter) ExecuteEnvironmentLifecycle(ctx context.Context, job store.EnvironmentLifecycleJob) error {
 	return a.lifecycle.ExecuteEnvironmentLifecycle(ctx, job)
 }

@@ -254,6 +254,48 @@ message EnvironmentVariableRevision {
   google.protobuf.Timestamp created_at = 7;
 }
 
+message WebhookEndpoint {
+  string id = 1;
+  string organization_id = 2;
+  string target_url = 3;
+  repeated string events = 4;
+  string secret_ref = 5;
+  bool enabled = 6;
+  int32 consecutive_failures = 7;
+  google.protobuf.Timestamp disabled_at = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message CreateWebhookRequest {
+  string organization_id = 1;
+  WebhookEndpoint webhook = 2;
+  string idempotency_key = 3;
+}
+message CreateWebhookResponse { WebhookEndpoint webhook = 1; }
+message GetWebhookRequest { string webhook_id = 1; }
+message GetWebhookResponse { WebhookEndpoint webhook = 1; }
+message ListWebhooksRequest {
+  string organization_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListWebhooksResponse {
+  repeated WebhookEndpoint webhooks = 1;
+  string next_page_token = 2;
+}
+message UpdateWebhookRequest {
+  WebhookEndpoint webhook = 1;
+  google.protobuf.FieldMask update_mask = 2;
+  string idempotency_key = 3;
+}
+message UpdateWebhookResponse { WebhookEndpoint webhook = 1; }
+message DeleteWebhookRequest {
+  string webhook_id = 1;
+  string idempotency_key = 2;
+}
+message DeleteWebhookResponse {}
+
 message Operation {
   string id = 1;
   OperationStatus status = 2;
@@ -688,5 +730,23 @@ service ReconciliationService {
   }
   rpc ListReconciliationEvidence(ListReconciliationEvidenceRequest) returns (ListReconciliationEvidenceResponse) {
     option (google.api.http) = { get: "/v1/reconciliations/{reconciliation_id}/evidence" };
+  }
+}
+
+service WebhookService {
+  rpc CreateWebhook(CreateWebhookRequest) returns (CreateWebhookResponse) {
+    option (google.api.http) = { post: "/v1/organizations/{organization_id}/webhooks" body: "webhook" };
+  }
+  rpc GetWebhook(GetWebhookRequest) returns (GetWebhookResponse) {
+    option (google.api.http) = { get: "/v1/webhooks/{webhook_id}" };
+  }
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse) {
+    option (google.api.http) = { get: "/v1/organizations/{organization_id}/webhooks" };
+  }
+  rpc UpdateWebhook(UpdateWebhookRequest) returns (UpdateWebhookResponse) {
+    option (google.api.http) = { patch: "/v1/webhooks/{webhook.id}" body: "webhook" };
+  }
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse) {
+    option (google.api.http) = { delete: "/v1/webhooks/{webhook_id}" };
   }
 }

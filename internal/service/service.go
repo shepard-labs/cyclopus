@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"sort"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/cyclopus-dev/cyclopus/internal/webhook"
 	"github.com/google/uuid"
 )
 
@@ -110,6 +112,113 @@ func (s *Service) GetRelease(ctx context.Context, actor ActorContext, id string)
 		return store.Release{}, err
 	}
 	return s.store.GetRelease(ctx, actor.OrgID, id)
+}
+
+type WebhookInput struct {
+	TargetURL string
+	Events    []string
+	SecretRef string
+	Enabled   bool
+}
+
+func (s *Service) GetWebhook(ctx context.Context, actor ActorContext, id string) (store.Webhook, error) {
+	if err := validateActor(actor); err != nil {
+		return store.Webhook{}, err
+	}
+	return s.store.GetWebhook(ctx, actor.OrgID, id)
+}
+
+func (s *Service) ListWebhooks(ctx context.Context, actor ActorContext) ([]store.Webhook, error) {
+	if err := validateActor(actor); err != nil {
+		return nil, err
+	}
+	return s.store.ListWebhooks(ctx, actor.OrgID)
+}
+
+func (s *Service) CreateWebhook(ctx context.Context, actor ActorContext, key string, input WebhookInput) (store.Webhook, error) {
+	if err := validateActor(actor); err != nil {
+		return store.Webhook{}, err
+	}
+	if err := validateWebhook(input); err != nil {
+		return store.Webhook{}, err
+	}
+	var replay store.Webhook
+	claimed, err := s.claim(ctx, actor, "webhook.create", key, input, &replay)
+	if err != nil || !claimed {
+		return replay, err
+	}
+	value := store.Webhook{ID: newID(), OrgID: actor.OrgID, TargetURL: input.TargetURL, Events: append([]string(nil), input.Events...), SecretRef: input.SecretRef}
+	body, _ := json.Marshal(value)
+	idem := s.completion(actor, "webhook.create", key, input, body, 201)
+	value, err = s.store.CreateWebhook(ctx, store.SaveWebhookParams{Webhook: value, Idempotency: idem, Audit: audit(actor)})
+	return value, mapError(err)
+}
+
+func (s *Service) UpdateWebhook(ctx context.Context, actor ActorContext, key, id string, input WebhookInput) (store.Webhook, error) {
+	if err := validateActor(actor); err != nil {
+		return store.Webhook{}, err
+	}
+	if err := validateWebhook(input); err != nil {
+		return store.Webhook{}, err
+	}
+	request := struct {
+		ID    string
+		Input WebhookInput
+	}{id, input}
+	var replay store.Webhook
+	claimed, err := s.claim(ctx, actor, "webhook.update", key, request, &replay)
+	if err != nil || !claimed {
+		return replay, err
+	}
+	value := store.Webhook{ID: id, OrgID: actor.OrgID, TargetURL: input.TargetURL, Events: append([]string(nil), input.Events...), SecretRef: input.SecretRef}
+	body, _ := json.Marshal(value)
+	idem := s.completion(actor, "webhook.update", key, request, body, 200)
+	value, err = s.store.UpdateWebhook(ctx, store.SaveWebhookParams{Webhook: value, Idempotency: idem, Audit: audit(actor)}, input.Enabled)
+	return value, mapError(err)
+}
+
+func (s *Service) DeleteWebhook(ctx context.Context, actor ActorContext, key, id string) error {
+	if err := validateActor(actor); err != nil {
+		return err
+	}
+	request := struct{ ID string }{id}
+	var replay struct{}
+	claimed, err := s.claim(ctx, actor, "webhook.delete", key, request, &replay)
+	if err != nil || !claimed {
+		return err
+	}
+	idem := s.completion(actor, "webhook.delete", key, request, json.RawMessage(`{}`), 200)
+	idem.OrgID = actor.OrgID
+	return mapError(s.store.DeleteWebhook(ctx, actor.OrgID, id, idem, audit(actor)))
+}
+
+func validateWebhook(input WebhookInput) error {
+	parsed, err := url.Parse(input.TargetURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return ErrInvalidArgument
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return ErrInvalidArgument
+	}
+	if address := net.ParseIP(host); address != nil && !webhook.PublicIPAllowed(address) {
+		return ErrInvalidArgument
+	}
+	if _, err := secretref.Parse(input.SecretRef); err != nil {
+		return ErrInvalidArgument
+	}
+	allowed := make(map[string]bool, len(store.WebhookEvents))
+	for _, event := range store.WebhookEvents {
+		allowed[event] = true
+	}
+	seen := map[string]bool{}
+	for _, event := range input.Events {
+		if !allowed[event] || seen[event] {
+			return ErrInvalidArgument
+		}
+		seen[event] = true
+	}
+	return nil
 }
 
 type ProjectInput struct {

@@ -16,9 +16,11 @@ import (
 	"github.com/cyclopus-dev/cyclopus/internal/auth"
 	"github.com/cyclopus-dev/cyclopus/internal/config"
 	"github.com/cyclopus-dev/cyclopus/internal/logging"
+	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 	"github.com/cyclopus-dev/cyclopus/internal/server"
 	"github.com/cyclopus-dev/cyclopus/internal/service"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
+	webhookdelivery "github.com/cyclopus-dev/cyclopus/internal/webhook"
 	"github.com/cyclopus-dev/cyclopus/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"k8s.io/client-go/kubernetes"
@@ -79,7 +81,7 @@ func run(args, environ []string) error {
 	services.Authenticator = authenticator
 	services.RateLimiter = server.NewAuthRateLimiter(cfg.Auth.RateLimitPerMinute)
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
-	adapters, err := buildRecoveryAdapters(cfg, productionAdapterConstructors(dataStore, owner))
+	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner))
 	if err != nil {
 		return err
 	}
@@ -113,7 +115,7 @@ type adapterConstructors struct {
 	kubernetes func(config.Kubernetes) (worker.KubernetesRecoveryAdapter, error)
 }
 
-func buildRecoveryAdapters(cfg config.Config, constructors adapterConstructors) (worker.RecoveryAdapters, error) {
+func buildRecoveryAdapters(cfg config.Config, dataStore *store.Store, constructors adapterConstructors) (worker.RecoveryAdapters, error) {
 	var adapters worker.RecoveryAdapters
 	if constructors.kubernetes == nil {
 		return adapters, errors.New("Kubernetes adapter constructor is unavailable")
@@ -133,6 +135,11 @@ func buildRecoveryAdapters(cfg config.Config, constructors adapterConstructors) 
 	adapters.Lifecycle = lifecycle
 	adapters.KubernetesErrorDisposition = kubernetesadapter.RecoveryErrorDisposition
 	adapters.Capabilities.Kubernetes = true
+	webhookClient, ok := kubernetesRecovery.(interface{ KubernetesClient() kubernetes.Interface })
+	if !ok {
+		return worker.RecoveryAdapters{}, errors.New("Kubernetes adapter does not expose a client for webhook delivery")
+	}
+	adapters.Webhook = webhookdelivery.NewSender(dataStore, secretref.NewKubernetesResolver(webhookClient.KubernetesClient()))
 
 	if !cfg.GitHub.Enabled() {
 		return adapters, nil
