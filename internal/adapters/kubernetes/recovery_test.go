@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
@@ -379,7 +380,10 @@ func recoveryState(t *testing.T, failed, previous *appsv1.Deployment) RecoverySt
 
 func newTestAdapter(t *testing.T, client *fake.Clientset, recoveryStore *fakeRecoveryStore) *RecoveryAdapter {
 	t.Helper()
-	adapter, err := NewRecoveryAdapter(Config{PollInterval: time.Nanosecond, ConflictRetries: 3}, client, recoveryStore)
+	listKinds := map[schema.GroupVersionResource]string{scaledObjectGVR: "ScaledObjectList", httpScaledObjectGVR: "HTTPScaledObjectList"}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	allowDynamicResourceLists(dynamicClient)
+	adapter, err := NewRecoveryAdapter(Config{PollInterval: time.Nanosecond, ConflictRetries: 3}, client, recoveryStore, WithDynamicClient(dynamicClient))
 	if err != nil {
 		t.Fatal(err)
 	}

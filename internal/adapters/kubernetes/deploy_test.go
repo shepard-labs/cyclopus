@@ -16,9 +16,12 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
@@ -36,17 +39,222 @@ func TestPreviewDesiredObjectsForceOneReplicaAndDeleteOwnedHPA(t *testing.T) {
 	}
 }
 
-func TestDeployDesiredObjectsBuildAutoscalingV2HPAAndRejectKEDA(t *testing.T) {
+func TestDeployDesiredObjectsBuildAutoscalingV2HPA(t *testing.T) {
 	envelope := deployEnvelope(t, "hpa")
 	execution := deployExecution(t, envelope)
 	objects, err := BuildDesiredObjects(execution, envelope, nil)
 	if err != nil || objects.HPA == nil || objects.HPA.APIVersion != "autoscaling/v2" || objects.HPA.Spec.MaxReplicas != 3 {
 		t.Fatalf("HPA = %+v, %v", objects.HPA, err)
 	}
-	envelope.DesiredState.Scaling = store.ScalingIntent{Version: 1, Kind: "keda", Name: "app", KEDA: &store.KEDAIntent{Mode: "http", MinReplicas: 0, MaxReplicas: 3, TargetCPUPercent: 70}}
-	envelope.DesiredState.Deployment.Replicas = 0
-	if _, err := BuildDesiredObjects(execution, envelope, nil); !errors.Is(err, ErrKEDAUnsupported) {
-		t.Fatalf("KEDA error = %v", err)
+	if objects.ScaledObject != nil || objects.HTTPScaledObject != nil || objects.DeleteScaledObject != "app-cron" || objects.DeleteHTTPScaledObject != "app" || objects.DeleteHPA != "" {
+		t.Fatalf("HPA mode transition deletes = %+v", objects)
+	}
+}
+
+func TestScalingKEDACronBuildsScaledObjectAndDeletesOtherControllers(t *testing.T) {
+	envelope := deployEnvelope(t, "keda-cron")
+	execution := deployExecution(t, envelope)
+	objects, err := BuildDesiredObjects(execution, envelope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if objects.HPA != nil || objects.HTTPScaledObject != nil || objects.DeleteHPA != "app" || objects.DeleteHTTPScaledObject != "app" || objects.DeleteScaledObject != "" {
+		t.Fatalf("keda cron transition objects = %+v", objects)
+	}
+	scaled := objects.ScaledObject
+	if scaled == nil || scaled.GetAPIVersion() != "keda.sh/v1alpha1" || scaled.GetKind() != "ScaledObject" || scaled.GetName() != "app-cron" || scaled.GetNamespace() != "tenant" {
+		t.Fatalf("ScaledObject identity = %v/%v %s/%s", scaled.GetAPIVersion(), scaled.GetKind(), scaled.GetNamespace(), scaled.GetName())
+	}
+	if scaled.GetLabels()[ManagedByLabel] != ManagedByValue || scaled.GetLabels()[EnvironmentIDLabel] != "environment" {
+		t.Fatalf("ScaledObject ownership labels = %v", scaled.GetLabels())
+	}
+	spec := scaled.Object["spec"].(map[string]any)
+	if spec["minReplicaCount"] != int64(0) || spec["maxReplicaCount"] != int64(5) {
+		t.Fatalf("ScaledObject replica bounds = %v", spec)
+	}
+	target := spec["scaleTargetRef"].(map[string]any)
+	if target["name"] != "app" || target["kind"] != "Deployment" || target["apiVersion"] != "apps/v1" {
+		t.Fatalf("ScaledObject target = %v", target)
+	}
+	triggers := spec["triggers"].([]any)
+	if len(triggers) != 3 {
+		t.Fatalf("ScaledObject triggers = %v", triggers)
+	}
+	first := triggers[0].(map[string]any)
+	if first["type"] != "cron" {
+		t.Fatalf("trigger[0] = %v", first)
+	}
+	metadata := first["metadata"].(map[string]any)
+	if metadata["timezone"] != "Europe/Berlin" || metadata["start"] != "0 8 * * 1-5" || metadata["end"] != "0 18 * * 1-5" || metadata["desiredReplicas"] != "4" || metadata["name"] != "cron-0" {
+		t.Fatalf("trigger[0] metadata = %v", metadata)
+	}
+	last := triggers[2].(map[string]any)
+	if last["type"] != "cpu" {
+		t.Fatalf("trigger[2] = %v", last)
+	}
+	cpu := last["metadata"].(map[string]any)
+	if cpu["type"] != "Utilization" || cpu["value"] != "70" {
+		t.Fatalf("cpu trigger metadata = %v", cpu)
+	}
+}
+
+func TestScalingKEDAHTTPBuildsHTTPScaledObjectAndDeletesOtherControllers(t *testing.T) {
+	envelope := deployEnvelope(t, "keda-http")
+	execution := deployExecution(t, envelope)
+	objects, err := BuildDesiredObjects(execution, envelope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if objects.HPA != nil || objects.ScaledObject != nil || objects.DeleteHPA != "app" || objects.DeleteScaledObject != "app-cron" || objects.DeleteHTTPScaledObject != "" {
+		t.Fatalf("keda http transition objects = %+v", objects)
+	}
+	scaled := objects.HTTPScaledObject
+	if scaled == nil || scaled.GetAPIVersion() != "http.keda.sh/v1alpha1" || scaled.GetKind() != "HTTPScaledObject" || scaled.GetName() != "app" {
+		t.Fatalf("HTTPScaledObject identity = %v/%v %s", scaled.GetAPIVersion(), scaled.GetKind(), scaled.GetName())
+	}
+	if scaled.GetLabels()[ManagedByLabel] != ManagedByValue || scaled.GetLabels()[EnvironmentIDLabel] != "environment" {
+		t.Fatalf("HTTPScaledObject ownership labels = %v", scaled.GetLabels())
+	}
+	spec := scaled.Object["spec"].(map[string]any)
+	hosts := spec["hosts"].([]any)
+	if len(hosts) != 1 || hosts[0] != "app.example.test" {
+		t.Fatalf("HTTPScaledObject hosts = %v", hosts)
+	}
+	prefixes := spec["pathPrefixes"].([]any)
+	if len(prefixes) != 1 || prefixes[0] != "/" {
+		t.Fatalf("HTTPScaledObject pathPrefixes = %v", prefixes)
+	}
+	target := spec["scaleTargetRef"].(map[string]any)
+	if target["name"] != "app" || target["service"] != "app" || target["port"] != int64(80) || target["kind"] != "Deployment" {
+		t.Fatalf("HTTPScaledObject scaleTargetRef = %v", target)
+	}
+	replicas := spec["replicas"].(map[string]any)
+	if replicas["min"] != int64(0) || replicas["max"] != int64(5) {
+		t.Fatalf("HTTPScaledObject replicas = %v", replicas)
+	}
+	concurrency := spec["scalingMetric"].(map[string]any)["concurrency"].(map[string]any)
+	if concurrency["targetValue"] != int64(42) {
+		t.Fatalf("HTTPScaledObject concurrency = %v", concurrency)
+	}
+}
+
+func TestScalingModeTransitionsLeaveExactlyOneController(t *testing.T) {
+	for _, kind := range []string{"none", "hpa", "keda-cron", "keda-http"} {
+		t.Run(kind, func(t *testing.T) {
+			envelope := deployEnvelope(t, kind)
+			execution := deployExecution(t, envelope)
+			objects, err := BuildDesiredObjects(execution, envelope, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			created := 0
+			for _, present := range []bool{objects.HPA != nil, objects.ScaledObject != nil, objects.HTTPScaledObject != nil} {
+				if present {
+					created++
+				}
+			}
+			wantCreated := 1
+			if kind == "none" {
+				wantCreated = 0
+			}
+			if created != wantCreated {
+				t.Fatalf("%s created controllers = %d, want %d", kind, created, wantCreated)
+			}
+			deleted := map[string]bool{"hpa": objects.DeleteHPA != "", "scaled": objects.DeleteScaledObject != "", "httpScaled": objects.DeleteHTTPScaledObject != ""}
+			wantDeleted := map[string]bool{"hpa": true, "scaled": true, "httpScaled": true}
+			switch kind {
+			case "hpa":
+				wantDeleted["hpa"] = false
+			case "keda-cron":
+				wantDeleted["scaled"] = false
+			case "keda-http":
+				wantDeleted["httpScaled"] = false
+			default:
+				wantDeleted["hpa"] = true
+				wantDeleted["scaled"] = true
+				wantDeleted["httpScaled"] = true
+			}
+			if !reflect.DeepEqual(deleted, wantDeleted) {
+				t.Fatalf("%s deletes = %v, want %v", kind, deleted, wantDeleted)
+			}
+		})
+	}
+}
+
+func TestScalingDynamicFakeClientApplyDeleteAndForeignOwnership(t *testing.T) {
+	listKinds := map[schema.GroupVersionResource]string{scaledObjectGVR: "ScaledObjectList", httpScaledObjectGVR: "HTTPScaledObjectList"}
+	cron := deployEnvelope(t, "keda-cron")
+	execution := deployExecution(t, cron)
+	objects, err := BuildDesiredObjects(execution, cron, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	allowDynamicResourceLists(dynamicClient)
+	client := fake.NewSimpleClientset()
+	adapter := newForwardAdapterWithDynamic(t, client, dynamicClient, newFakeForwardStore(execution))
+	if err := adapter.applyDesired(context.Background(), &execution, objects); err != nil {
+		t.Fatal(err)
+	}
+	created, err := dynamicClient.Resource(scaledObjectGVR).Namespace("tenant").Get(context.Background(), "app-cron", metav1.GetOptions{})
+	if err != nil || created.GetLabels()[EnvironmentIDLabel] != "environment" || created.GetAnnotations()[DeployFenceAnnotation] == "" {
+		t.Fatalf("created ScaledObject = %+v, %v", created, err)
+	}
+
+	http := deployEnvelope(t, "keda-http")
+	execution = deployExecution(t, http)
+	objects, err = BuildDesiredObjects(execution, http, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.applyDesired(context.Background(), &execution, objects); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dynamicClient.Resource(scaledObjectGVR).Namespace("tenant").Get(context.Background(), "app-cron", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("old cron ScaledObject still exists: %v", err)
+	}
+	if _, err := dynamicClient.Resource(httpScaledObjectGVR).Namespace("tenant").Get(context.Background(), "app", metav1.GetOptions{}); err != nil {
+		t.Fatalf("HTTPScaledObject missing: %v", err)
+	}
+
+	foreign := objects.HTTPScaledObject.DeepCopy()
+	foreign.SetUID(types.UID("foreign-uid"))
+	foreign.SetResourceVersion("1")
+	foreign.SetLabels(map[string]string{ManagedByLabel: "someone-else"})
+	dynamicClient = dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, foreign)
+	allowDynamicResourceLists(dynamicClient)
+	adapter = newForwardAdapterWithDynamic(t, fake.NewSimpleClientset(), dynamicClient, newFakeForwardStore(execution))
+	if err := adapter.applyDesired(context.Background(), &execution, objects); !errors.Is(err, ErrResourceOwnership) {
+		t.Fatalf("foreign ownership error = %v", err)
+	}
+	preserved, err := dynamicClient.Resource(httpScaledObjectGVR).Namespace("tenant").Get(context.Background(), "app", metav1.GetOptions{})
+	if err != nil || preserved.GetLabels()[ManagedByLabel] != "someone-else" {
+		t.Fatalf("foreign object mutated = %+v, %v", preserved, err)
+	}
+}
+
+func TestScalingDynamicClientAndCRDAvailabilityAreRetryable(t *testing.T) {
+	envelope := deployEnvelope(t, "keda-http")
+	execution := deployExecution(t, envelope)
+	objects, err := BuildDesiredObjects(execution, envelope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := NewAdapter(Config{PollInterval: time.Nanosecond, ConflictRetries: 3}, fake.NewSimpleClientset(), newFakeForwardStore(execution))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.applyDesired(context.Background(), &execution, objects); !errors.Is(err, ErrKEDACRDMissing) || !isForwardRetryable(err) {
+		t.Fatalf("missing dynamic client error = %v", err)
+	}
+
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{scaledObjectGVR: "ScaledObjectList", httpScaledObjectGVR: "HTTPScaledObjectList"})
+	dynamicClient.PrependReactor("list", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(action.GetResource().GroupResource(), "")
+	})
+	adapter = newForwardAdapterWithDynamic(t, fake.NewSimpleClientset(), dynamicClient, newFakeForwardStore(execution))
+	if err := adapter.applyDesired(context.Background(), &execution, objects); !errors.Is(err, ErrKEDACRDMissing) || !isForwardRetryable(err) {
+		t.Fatalf("missing CRD error = %v", err)
 	}
 }
 
@@ -633,6 +841,21 @@ func deployEnvelope(t *testing.T, scaling string) store.ReleaseSnapshotEnvelope 
 		snapshot.DesiredState.Scaling.Name = "app"
 		snapshot.DesiredState.Scaling.HPA = &store.HPAIntent{MinReplicas: 1, MaxReplicas: 3, TargetCPUPercent: 70}
 	}
+	if scaling == "keda-cron" {
+		snapshot.DesiredState.Deployment.Replicas = 0
+		snapshot.DesiredState.Scaling.Kind = "keda"
+		snapshot.DesiredState.Scaling.Name = "app"
+		snapshot.DesiredState.Scaling.KEDA = &store.KEDAIntent{Mode: "cron", MinReplicas: 0, MaxReplicas: 5, TargetCPUPercent: 70, CronSchedules: []store.KEDACronScheduleIntent{
+			{Timezone: "Europe/Berlin", Start: "0 8 * * 1-5", End: "0 18 * * 1-5", DesiredReplicas: 4},
+			{Timezone: "UTC", Start: "0 0 * * 0", End: "0 6 * * 1", DesiredReplicas: 1},
+		}}
+	}
+	if scaling == "keda-http" {
+		snapshot.DesiredState.Deployment.Replicas = 0
+		snapshot.DesiredState.Scaling.Kind = "keda"
+		snapshot.DesiredState.Scaling.Name = "app"
+		snapshot.DesiredState.Scaling.KEDA = &store.KEDAIntent{Mode: "http", MinReplicas: 0, MaxReplicas: 5, TargetCPUPercent: 70, HTTPTargetPendingRequests: 42}
+	}
 	if _, _, err := store.EncodeReleaseSnapshot(snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +874,28 @@ func deployExecution(t *testing.T, envelope store.ReleaseSnapshotEnvelope) store
 
 func newForwardAdapter(t *testing.T, client *fake.Clientset, dataStore *fakeForwardStore) *RecoveryAdapter {
 	t.Helper()
-	adapter, err := NewAdapter(Config{PollInterval: time.Nanosecond, ConflictRetries: 3}, client, dataStore)
+	listKinds := map[schema.GroupVersionResource]string{scaledObjectGVR: "ScaledObjectList", httpScaledObjectGVR: "HTTPScaledObjectList"}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	allowDynamicResourceLists(dynamicClient)
+	adapter, err := NewAdapter(Config{PollInterval: time.Nanosecond, ConflictRetries: 3}, client, dataStore, WithDynamicClient(dynamicClient))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter
+}
+
+func allowDynamicResourceLists(client *dynamicfake.FakeDynamicClient) {
+	client.PrependReactor("list", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{}
+		list.SetAPIVersion(action.GetResource().Group + "/" + action.GetResource().Version)
+		list.SetKind("List")
+		return true, list, nil
+	})
+}
+
+func newForwardAdapterWithDynamic(t *testing.T, client *fake.Clientset, dynamicClient *dynamicfake.FakeDynamicClient, dataStore *fakeForwardStore) *RecoveryAdapter {
+	t.Helper()
+	adapter, err := NewAdapter(Config{PollInterval: time.Nanosecond, ConflictRetries: 3}, client, dataStore, WithDynamicClient(dynamicClient))
 	if err != nil {
 		t.Fatal(err)
 	}

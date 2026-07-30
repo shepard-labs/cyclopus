@@ -23,6 +23,7 @@ import (
 	webhookdelivery "github.com/cyclopus-dev/cyclopus/internal/webhook"
 	"github.com/cyclopus-dev/cyclopus/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -182,10 +183,14 @@ func productionAdapterConstructors(dataStore *store.Store, owner string) adapter
 			if err != nil {
 				return nil, fmt.Errorf("create Kubernetes client: %w", err)
 			}
+			dynamicClient, err := dynamic.NewForConfig(clientConfig)
+			if err != nil {
+				return nil, fmt.Errorf("create Kubernetes dynamic client: %w", err)
+			}
 			return kubernetesadapter.NewAdapter(kubernetesadapter.Config{
 				PollInterval: cfg.RecoveryPollInterval, ConflictRetries: cfg.ConflictRetries,
 				PreviewHostnameSuffix: cfg.PreviewHostnameSuffix,
-			}, client, dataStore)
+			}, client, dataStore, kubernetesadapter.WithDynamicClient(dynamicClient))
 		},
 	}
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -90,22 +91,37 @@ func (s *Store) ClaimEnvironmentLifecycleJob(ctx context.Context, orgID, owner s
 func appSelectColumns(alias string) string {
 	return alias + `.id::text,` + alias + `.org_id::text,` + alias + `.project_id::text,` + alias + `.name,` + alias + `.slug,` + alias + `.hostname_label,
 		` + alias + `.registry_id::text,registry.registry_url,` + alias + `.image_repository,` + alias + `.container_port,` + alias + `.health_check_path,` + alias + `.scaling_mode,
-		` + alias + `.min_replicas,` + alias + `.max_replicas,` + alias + `.hpa_target_cpu_percent,` + alias + `.cpu_request_millicores,` + alias + `.cpu_limit_millicores,
+		` + alias + `.min_replicas,` + alias + `.max_replicas,` + alias + `.hpa_target_cpu_percent,` + alias + `.keda_cron_schedules,` + alias + `.keda_http_target_pending_requests,
+		` + alias + `.cpu_request_millicores,` + alias + `.cpu_limit_millicores,
 		` + alias + `.memory_request_mib,` + alias + `.memory_limit_mib,` + alias + `.previews_enabled,` + alias + `.max_preview_environments,` + alias + `.preview_idle_ttl_hours,
 		` + alias + `.deploy_timeout_seconds,` + alias + `.release_retention_count,` + alias + `.runtime_class,` + alias + `.ci_workflow_id,` + alias + `.created_at,` + alias + `.deleted_at`
 }
 
 func scanLifecycleJob(row rowScanner, job *EnvironmentLifecycleJob) error {
-	return row.Scan(&job.ID, &job.OrgID, &job.EnvironmentID, &job.Kind, &job.Status, &job.Checkpoint,
+	var schedules []byte
+	err := row.Scan(&job.ID, &job.OrgID, &job.EnvironmentID, &job.Kind, &job.Status, &job.Checkpoint,
 		&job.Reason, &job.ErrorCode, &job.ErrorMessage, &job.LeaseOwner, &job.LeaseExpiresAt,
 		&job.Fence, &job.Attempt, &job.MaxAttempts, &job.NotBefore, &job.Namespace,
 		&job.App.ID, &job.App.OrgID, &job.App.ProjectID, &job.App.Name, &job.App.Slug, &job.App.HostnameLabel,
 		&job.App.RegistryID, &job.App.RegistryURL, &job.App.ImageRepository, &job.App.ContainerPort,
 		&job.App.HealthCheckPath, &job.App.ScalingMode, &job.App.MinReplicas, &job.App.MaxReplicas,
-		&job.App.HPATargetCPUPercent, &job.App.CPURequestMillicores, &job.App.CPULimitMillicores,
+		&job.App.HPATargetCPUPercent, &schedules, &job.App.KEDAHTTPTargetPendingRequests,
+		&job.App.CPURequestMillicores, &job.App.CPULimitMillicores,
 		&job.App.MemoryRequestMiB, &job.App.MemoryLimitMiB, &job.App.PreviewsEnabled,
 		&job.App.MaxPreviewEnvironments, &job.App.PreviewIdleTTLHours, &job.App.DeployTimeoutSeconds,
 		&job.App.ReleaseRetentionCount, &job.App.RuntimeClass, &job.App.CIWorkflowID, &job.App.CreatedAt, &job.App.DeletedAt)
+	if err != nil {
+		return err
+	}
+	if len(schedules) > 0 {
+		if err := json.Unmarshal(schedules, &job.App.KEDACronSchedules); err != nil {
+			return fmt.Errorf("decode app keda cron schedules: %w", err)
+		}
+	}
+	if job.App.KEDACronSchedules == nil {
+		job.App.KEDACronSchedules = []KEDACronSchedule{}
+	}
+	return nil
 }
 
 func (s *Store) CheckpointEnvironmentLifecycle(ctx context.Context, job EnvironmentLifecycleJob, checkpoint string) error {

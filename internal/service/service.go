@@ -19,6 +19,7 @@ import (
 	"github.com/cyclopus-dev/cyclopus/internal/store"
 	"github.com/cyclopus-dev/cyclopus/internal/webhook"
 	"github.com/google/uuid"
+	cronparser "github.com/robfig/cron/v3"
 )
 
 var (
@@ -30,6 +31,7 @@ var (
 	digestPattern      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	envKeyPattern      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,252}$`)
 	commitPattern      = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	cronShapePattern   = regexp.MustCompile(`^\S+( \S+){4}$`)
 )
 
 const (
@@ -278,6 +280,8 @@ type AppInput struct {
 	ContainerPort                                                                            int
 	HealthCheckPath, ScalingMode                                                             string
 	MinReplicas, MaxReplicas, HPATargetCPUPercent                                            int
+	KEDACronSchedules                                                                        []store.KEDACronSchedule
+	KEDAHTTPTargetPendingRequests                                                            int
 	CPURequestMillicores, CPULimitMillicores, MemoryRequestMiB, MemoryLimitMiB               int
 	PreviewsEnabled                                                                          bool
 	MaxPreviewEnvironments, PreviewIdleTTLHours, DeployTimeoutSeconds, ReleaseRetentionCount int
@@ -285,12 +289,21 @@ type AppInput struct {
 }
 
 func DefaultAppInput() AppInput {
-	return AppInput{ContainerPort: 8080, HealthCheckPath: "/", ScalingMode: "hpa", MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70, CPURequestMillicores: 100, CPULimitMillicores: 1000, MemoryRequestMiB: 128, MemoryLimitMiB: 512, PreviewsEnabled: true, MaxPreviewEnvironments: 10, PreviewIdleTTLHours: 168, DeployTimeoutSeconds: 600, ReleaseRetentionCount: 5}
+	return AppInput{ContainerPort: 8080, HealthCheckPath: "/", ScalingMode: "hpa", MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70, KEDAHTTPTargetPendingRequests: 100, CPURequestMillicores: 100, CPULimitMillicores: 1000, MemoryRequestMiB: 128, MemoryLimitMiB: 512, PreviewsEnabled: true, MaxPreviewEnvironments: 10, PreviewIdleTTLHours: 168, DeployTimeoutSeconds: 600, ReleaseRetentionCount: 5}
 }
+
+func normalizeAppInput(input AppInput) AppInput {
+	if input.KEDAHTTPTargetPendingRequests == 0 {
+		input.KEDAHTTPTargetPendingRequests = DefaultAppInput().KEDAHTTPTargetPendingRequests
+	}
+	return input
+}
+
 func (s *Service) CreateApp(ctx context.Context, actor ActorContext, key string, input AppInput) (store.App, error) {
 	if err := validateActor(actor); err != nil {
 		return store.App{}, err
 	}
+	input = normalizeAppInput(input)
 	runtimeClass := "gvisor"
 	if input.RuntimeClass != nil {
 		if !actor.Operator && *input.RuntimeClass != runtimeClass {
@@ -318,6 +331,7 @@ func (s *Service) UpdateApp(ctx context.Context, actor ActorContext, key, id str
 	if err := validateActor(actor); err != nil {
 		return store.App{}, err
 	}
+	input = normalizeAppInput(input)
 	current, err := s.store.GetApp(ctx, actor.OrgID, id)
 	if err != nil {
 		return store.App{}, mapError(err)
@@ -377,7 +391,7 @@ func (s *Service) deleteResource(ctx context.Context, actor ActorContext, key, i
 	return response, mapError(err)
 }
 func appValue(orgID, id string, i AppInput, runtimeClass string) store.App {
-	return store.App{ID: id, OrgID: orgID, ProjectID: i.ProjectID, Name: i.Name, Slug: i.Slug, HostnameLabel: i.HostnameLabel, RegistryID: i.RegistryID, ImageRepository: i.ImageRepository, CIWorkflowID: i.CIWorkflowID, ContainerPort: i.ContainerPort, HealthCheckPath: i.HealthCheckPath, ScalingMode: i.ScalingMode, MinReplicas: i.MinReplicas, MaxReplicas: i.MaxReplicas, HPATargetCPUPercent: i.HPATargetCPUPercent, CPURequestMillicores: i.CPURequestMillicores, CPULimitMillicores: i.CPULimitMillicores, MemoryRequestMiB: i.MemoryRequestMiB, MemoryLimitMiB: i.MemoryLimitMiB, PreviewsEnabled: i.PreviewsEnabled, MaxPreviewEnvironments: i.MaxPreviewEnvironments, PreviewIdleTTLHours: i.PreviewIdleTTLHours, DeployTimeoutSeconds: i.DeployTimeoutSeconds, ReleaseRetentionCount: i.ReleaseRetentionCount, RuntimeClass: runtimeClass}
+	return store.App{ID: id, OrgID: orgID, ProjectID: i.ProjectID, Name: i.Name, Slug: i.Slug, HostnameLabel: i.HostnameLabel, RegistryID: i.RegistryID, ImageRepository: i.ImageRepository, CIWorkflowID: i.CIWorkflowID, ContainerPort: i.ContainerPort, HealthCheckPath: i.HealthCheckPath, ScalingMode: i.ScalingMode, MinReplicas: i.MinReplicas, MaxReplicas: i.MaxReplicas, HPATargetCPUPercent: i.HPATargetCPUPercent, KEDACronSchedules: i.KEDACronSchedules, KEDAHTTPTargetPendingRequests: i.KEDAHTTPTargetPendingRequests, CPURequestMillicores: i.CPURequestMillicores, CPULimitMillicores: i.CPULimitMillicores, MemoryRequestMiB: i.MemoryRequestMiB, MemoryLimitMiB: i.MemoryLimitMiB, PreviewsEnabled: i.PreviewsEnabled, MaxPreviewEnvironments: i.MaxPreviewEnvironments, PreviewIdleTTLHours: i.PreviewIdleTTLHours, DeployTimeoutSeconds: i.DeployTimeoutSeconds, ReleaseRetentionCount: i.ReleaseRetentionCount, RuntimeClass: runtimeClass}
 }
 
 type AcceptedOperation struct {
@@ -717,6 +731,9 @@ func validateApp(i AppInput, runtimeClass string) error {
 	if i.MinReplicas < 0 || i.MaxReplicas < 1 || i.MaxReplicas < i.MinReplicas || (i.ScalingMode == "hpa" && i.MinReplicas < 1) || i.HPATargetCPUPercent < 1 || i.HPATargetCPUPercent > 100 {
 		return ErrInvalidArgument
 	}
+	if err := validateKEDAAppConfig(i); err != nil {
+		return err
+	}
 	if i.CPURequestMillicores <= 0 || i.CPULimitMillicores < i.CPURequestMillicores || i.MemoryRequestMiB <= 0 || i.MemoryLimitMiB < i.MemoryRequestMiB {
 		return ErrInvalidArgument
 	}
@@ -728,6 +745,53 @@ func validateApp(i AppInput, runtimeClass string) error {
 	}
 	return nil
 }
+func validateKEDAAppConfig(i AppInput) error {
+	if i.KEDAHTTPTargetPendingRequests < 1 {
+		return ErrInvalidArgument
+	}
+	switch i.ScalingMode {
+	case "keda_cron":
+		if len(i.KEDACronSchedules) == 0 || len(i.KEDACronSchedules) > 16 {
+			return ErrInvalidArgument
+		}
+		parser := cronparser.NewParser(cronparser.Minute | cronparser.Hour | cronparser.Dom | cronparser.Month | cronparser.Dow)
+		seen := make(map[string]struct{}, len(i.KEDACronSchedules))
+		for _, schedule := range i.KEDACronSchedules {
+			if strings.TrimSpace(schedule.Timezone) == "" || len(schedule.Timezone) > 64 {
+				return ErrInvalidArgument
+			}
+			if _, err := time.LoadLocation(schedule.Timezone); err != nil {
+				return ErrInvalidArgument
+			}
+			if _, err := parser.Parse(schedule.Start); err != nil {
+				return ErrInvalidArgument
+			}
+			if _, err := parser.Parse(schedule.End); err != nil {
+				return ErrInvalidArgument
+			}
+			if schedule.Start == schedule.End {
+				return ErrInvalidArgument
+			}
+			if schedule.DesiredReplicas < 1 {
+				return ErrInvalidArgument
+			}
+			if int(schedule.DesiredReplicas) > i.MaxReplicas {
+				return ErrInvalidArgument
+			}
+			key := schedule.Timezone + "\x00" + schedule.Start + "\x00" + schedule.End
+			if _, exists := seen[key]; exists {
+				return ErrInvalidArgument
+			}
+			seen[key] = struct{}{}
+		}
+	case "keda_http":
+		if len(i.KEDACronSchedules) != 0 {
+			return ErrInvalidArgument
+		}
+	}
+	return nil
+}
+
 func ValidateImageRef(imageRef string, registryURL, imageRepository *string) error {
 	if registryURL == nil || imageRepository == nil {
 		return fmt.Errorf("%w: app registry is not configured", ErrInvalidArgument)
@@ -793,6 +857,15 @@ func deploymentSnapshot(environment store.Environment, app store.App, imageRef, 
 		scaling.Kind = "keda"
 		mode := strings.TrimPrefix(app.ScalingMode, "keda_")
 		scaling.KEDA = &store.KEDAIntent{Mode: mode, MinReplicas: int32(app.MinReplicas), MaxReplicas: int32(app.MaxReplicas), TargetCPUPercent: int32(app.HPATargetCPUPercent)}
+		if mode == "cron" {
+			schedules := make([]store.KEDACronScheduleIntent, len(app.KEDACronSchedules))
+			for index, schedule := range app.KEDACronSchedules {
+				schedules[index] = store.KEDACronScheduleIntent{Timezone: schedule.Timezone, Start: schedule.Start, End: schedule.End, DesiredReplicas: int32(schedule.DesiredReplicas)}
+			}
+			scaling.KEDA.CronSchedules = schedules
+		} else {
+			scaling.KEDA.HTTPTargetPendingRequests = int32(app.KEDAHTTPTargetPendingRequests)
+		}
 	}
 	identity := func(name string) store.ObjectIdentity {
 		return store.ObjectIdentity{Name: name, Namespace: environment.Namespace, Labels: labels}

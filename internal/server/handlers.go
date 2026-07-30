@@ -432,7 +432,7 @@ func (h *apiHandlers) UpdateApplication(ctx context.Context, req *cyclopusv1.Upd
 		return nil, rpcError(err)
 	}
 	merged := applicationProto(current)
-	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "registry_id": true, "image_repository": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true, "ci_workflow_id": true}
+	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "registry_id": true, "image_repository": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "keda_cron_schedules": true, "keda_http_target_pending_requests": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true, "ci_workflow_id": true}
 	if err := mergeMaskedMessage(merged, req.Application, req.GetUpdateMask(), allowed); err != nil {
 		return nil, err
 	}
@@ -1062,6 +1062,7 @@ func appInput(value *cyclopusv1.Application) service.AppInput {
 	input := service.AppInput{ProjectID: value.GetProjectId(), Name: value.GetName(), Slug: value.GetSlug(), HostnameLabel: value.GetHostnameLabel(),
 		RegistryID: pointer(value.GetRegistryId()), ImageRepository: pointer(value.GetImageRepository()), CIWorkflowID: pointer(value.GetCiWorkflowId()), ContainerPort: int(value.GetContainerPort()),
 		HealthCheckPath: value.GetHealthCheckPath(), ScalingMode: scalingModeString(value.GetScalingMode()), MinReplicas: int(value.GetMinReplicas()), MaxReplicas: int(value.GetMaxReplicas()), HPATargetCPUPercent: int(value.GetHpaTargetCpuPercent()),
+		KEDACronSchedules: kedaCronSchedulesInput(value.GetKedaCronSchedules()), KEDAHTTPTargetPendingRequests: int(value.GetKedaHttpTargetPendingRequests()),
 		CPURequestMillicores: int(value.GetCpuRequestMillicores()), CPULimitMillicores: int(value.GetCpuLimitMillicores()), MemoryRequestMiB: int(value.GetMemoryRequestMib()), MemoryLimitMiB: int(value.GetMemoryLimitMib()),
 		PreviewsEnabled: value.GetPreviewsEnabled(), MaxPreviewEnvironments: int(value.GetMaxPreviewEnvironments()), PreviewIdleTTLHours: int(value.GetPreviewIdleTtlHours()), DeployTimeoutSeconds: int(value.GetDeployTimeoutSeconds()), ReleaseRetentionCount: int(value.GetReleaseRetentionCount())}
 	if runtimeClass != "" {
@@ -1143,7 +1144,23 @@ func projectProto(v store.Project) *cyclopusv1.Project {
 	return &cyclopusv1.Project{Id: v.ID, OrganizationId: v.OrgID, Name: v.Name, Slug: v.Slug, GitConnectionId: stringValue(v.GitConnectionID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
 }
 func applicationProto(v store.App) *cyclopusv1.Application {
-	return &cyclopusv1.Application{Id: v.ID, OrganizationId: v.OrgID, ProjectId: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel, RegistryId: stringValue(v.RegistryID), ImageRepository: stringValue(v.ImageRepository), ContainerPort: int32(v.ContainerPort), HealthCheckPath: v.HealthCheckPath, ScalingMode: scalingModeProto(v.ScalingMode), MinReplicas: int32(v.MinReplicas), MaxReplicas: int32(v.MaxReplicas), HpaTargetCpuPercent: int32(v.HPATargetCPUPercent), CpuRequestMillicores: int32(v.CPURequestMillicores), CpuLimitMillicores: int32(v.CPULimitMillicores), MemoryRequestMib: int32(v.MemoryRequestMiB), MemoryLimitMib: int32(v.MemoryLimitMiB), PreviewsEnabled: v.PreviewsEnabled, MaxPreviewEnvironments: int32(v.MaxPreviewEnvironments), PreviewIdleTtlHours: int32(v.PreviewIdleTTLHours), DeployTimeoutSeconds: int32(v.DeployTimeoutSeconds), ReleaseRetentionCount: int32(v.ReleaseRetentionCount), RuntimeClass: runtimeClassProto(v.RuntimeClass), CiWorkflowId: stringValue(v.CIWorkflowID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
+	return &cyclopusv1.Application{Id: v.ID, OrganizationId: v.OrgID, ProjectId: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel, RegistryId: stringValue(v.RegistryID), ImageRepository: stringValue(v.ImageRepository), ContainerPort: int32(v.ContainerPort), HealthCheckPath: v.HealthCheckPath, ScalingMode: scalingModeProto(v.ScalingMode), MinReplicas: int32(v.MinReplicas), MaxReplicas: int32(v.MaxReplicas), HpaTargetCpuPercent: int32(v.HPATargetCPUPercent), CpuRequestMillicores: int32(v.CPURequestMillicores), CpuLimitMillicores: int32(v.CPULimitMillicores), MemoryRequestMib: int32(v.MemoryRequestMiB), MemoryLimitMib: int32(v.MemoryLimitMiB), PreviewsEnabled: v.PreviewsEnabled, MaxPreviewEnvironments: int32(v.MaxPreviewEnvironments), PreviewIdleTtlHours: int32(v.PreviewIdleTTLHours), DeployTimeoutSeconds: int32(v.DeployTimeoutSeconds), ReleaseRetentionCount: int32(v.ReleaseRetentionCount), RuntimeClass: runtimeClassProto(v.RuntimeClass), CiWorkflowId: stringValue(v.CIWorkflowID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt), KedaCronSchedules: kedaCronSchedulesProto(v.KEDACronSchedules), KedaHttpTargetPendingRequests: int32(v.KEDAHTTPTargetPendingRequests)}
+}
+
+func kedaCronSchedulesInput(values []*cyclopusv1.KedaCronSchedule) []store.KEDACronSchedule {
+	schedules := make([]store.KEDACronSchedule, 0, len(values))
+	for _, value := range values {
+		schedules = append(schedules, store.KEDACronSchedule{Timezone: value.GetTimezone(), Start: value.GetStart(), End: value.GetEnd(), DesiredReplicas: int(value.GetDesiredReplicas())})
+	}
+	return schedules
+}
+
+func kedaCronSchedulesProto(values []store.KEDACronSchedule) []*cyclopusv1.KedaCronSchedule {
+	schedules := make([]*cyclopusv1.KedaCronSchedule, 0, len(values))
+	for _, value := range values {
+		schedules = append(schedules, &cyclopusv1.KedaCronSchedule{Timezone: value.Timezone, Start: value.Start, End: value.End, DesiredReplicas: int32(value.DesiredReplicas)})
+	}
+	return schedules
 }
 func environmentProto(v store.Environment) *cyclopusv1.Environment {
 	return &cyclopusv1.Environment{Id: v.ID, OrganizationId: v.OrgID, ApplicationId: v.AppID, Branch: v.Branch, Kind: environmentKindProto(v.Kind), PreviewSlug: stringValue(v.PreviewSlug), Namespace: v.Namespace, PlannedHostname: stringValue(v.PlannedHostname), CurrentReleaseId: stringValue(v.CurrentReleaseID), InProgressReleaseId: stringValue(v.InProgressReleaseID), CurrentEnvVarRevisionId: stringValue(v.CurrentEnvVarRevisionID), CreatedAt: timeProto(v.CreatedAt), TornDownAt: timeProto(v.TornDownAt), LifecycleStatus: environmentLifecycleStatusProto(v.LifecycleStatus), LifecycleReason: stringValue(v.LifecycleReason), LifecycleErrorCode: stringValue(v.LifecycleErrorCode), LifecycleErrorMessage: stringValue(v.LifecycleErrorMessage), TeardownRequestedAt: timeProto(v.TeardownRequestedAt)}

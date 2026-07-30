@@ -97,8 +97,36 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if application.GetApplication().GetKedaHttpTargetPendingRequests() != 100 {
+		t.Fatalf("omitted KEDA HTTP target = %d, want 100", application.GetApplication().GetKedaHttpTargetPendingRequests())
+	}
+	cronApplication := validApplication(registryID)
+	cronApplication.Name = "Cron API"
+	cronApplication.Slug = "cron-api"
+	cronApplication.HostnameLabel = "cron-api"
+	cronApplication.ScalingMode = cyclopusv1.ScalingMode_SCALING_MODE_KEDA_CRON
+	cronApplication.MinReplicas = 0
+	cronApplication.KedaCronSchedules = []*cyclopusv1.KedaCronSchedule{{Timezone: "UTC", Start: "0 8 * * 1-5", End: "0 18 * * 1-5", DesiredReplicas: 2}}
+	createdCron, err := applicationClient.CreateApplication(sessionCtx, &cyclopusv1.CreateApplicationRequest{ProjectId: projectOne.GetProject().GetId(), IdempotencyKey: "app-cron", Application: cronApplication})
+	if err != nil {
+		t.Fatalf("create keda_cron application: %v", err)
+	}
+	updatedCron, err := applicationClient.UpdateApplication(sessionCtx, &cyclopusv1.UpdateApplicationRequest{
+		Application: &cyclopusv1.Application{Id: createdCron.GetApplication().GetId(), KedaCronSchedules: []*cyclopusv1.KedaCronSchedule{{Timezone: "Europe/Berlin", Start: "0 7 * * 1-5", End: "0 19 * * 1-5", DesiredReplicas: 3}}},
+		UpdateMask:  &fieldmaskpb.FieldMask{Paths: []string{"keda_cron_schedules"}}, IdempotencyKey: "app-cron-update",
+	})
+	if err != nil || len(updatedCron.GetApplication().GetKedaCronSchedules()) != 1 || updatedCron.GetApplication().GetKedaCronSchedules()[0].GetTimezone() != "Europe/Berlin" {
+		t.Fatalf("update keda_cron application = %+v, %v", updatedCron, err)
+	}
+	invalidCron := validApplication(registryID)
+	invalidCron.Name, invalidCron.Slug, invalidCron.HostnameLabel = "Invalid Cron", "invalid-cron", "invalid-cron"
+	invalidCron.ScalingMode = cyclopusv1.ScalingMode_SCALING_MODE_KEDA_CRON
+	invalidCron.MinReplicas = 0
+	if _, err := applicationClient.CreateApplication(sessionCtx, &cyclopusv1.CreateApplicationRequest{ProjectId: projectOne.GetProject().GetId(), IdempotencyKey: "app-cron-invalid", Application: invalidCron}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("keda_cron without schedules error = %v", err)
+	}
 	listedApps, err := applicationClient.ListApplications(sessionCtx, &cyclopusv1.ListApplicationsRequest{ProjectId: projectOne.GetProject().GetId()})
-	if err != nil || len(listedApps.GetApplications()) != 1 {
+	if err != nil || len(listedApps.GetApplications()) != 2 {
 		t.Fatalf("ListApplications() = %+v, %v", listedApps, err)
 	}
 	environmentID := fixture.insertEnvironment(t, createProject.OrganizationId, application.GetApplication().GetId())

@@ -1942,7 +1942,7 @@ func TestProjectAndAppCreateUpdateAreTenantScopedIntegration(t *testing.T) {
 			RequestHash: claim.RequestHash, Owner: claim.Owner, Status: "completed", StatusCode: 201,
 			Body: json.RawMessage(`{"id":"00000000-0000-0000-0000-000000000094"}`)},
 		Audit: testAudit("00000000-0000-0000-0000-000000000095", "ignored", appID)})
-	if err != nil || app.ProjectID != projectID || app.RuntimeClass != "gvisor" {
+	if err != nil || app.ProjectID != projectID || app.RuntimeClass != "gvisor" || app.KEDAHTTPTargetPendingRequests != 100 {
 		t.Fatalf("CreateApp() = %+v, %v", app, err)
 	}
 	var count int

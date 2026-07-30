@@ -118,6 +118,76 @@ func TestPostgres18Migrations(t *testing.T) {
 		}
 	})
 
+	t.Run("keda scaling constraints", func(t *testing.T) {
+		insertApp := func(scalingMode string, minReplicas int, schedules string, pendingRequests int) error {
+			_, err := db.Exec(context.Background(), `
+				INSERT INTO apps (org_id, project_id, name, slug, hostname_label, scaling_mode, min_replicas, keda_cron_schedules, keda_http_target_pending_requests)
+				VALUES ($1, $2, 'KEDA App', $3, $3, $4, $5, $6::jsonb, $7)`,
+				ids.org, ids.project, "keda-"+strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", ""), scalingMode, minReplicas, schedules, pendingRequests)
+			return err
+		}
+		validSchedules := `[{"timezone":"Europe/Berlin","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":3}]`
+		if err := insertApp("keda_cron", 0, validSchedules, 100); err != nil {
+			t.Fatalf("valid keda_cron app rejected: %v", err)
+		}
+		if err := insertApp("keda_http", 0, `[]`, 100); err != nil {
+			t.Fatalf("valid keda_http scale-to-zero app rejected: %v", err)
+		}
+		if err := insertApp("keda_http", 0, validSchedules, 100); err != nil {
+			t.Fatalf("keda_http carrying cron schedules should be stored (service layer rejects): %v", err)
+		}
+		if err := insertApp("hpa", 0, `[]`, 100); err == nil {
+			t.Fatal("hpa scale-to-zero succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[]`, 100); err == nil {
+			t.Fatal("keda_cron without schedules succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"Europe/Berlin","start":"0 8 * * * *","end":"0 18 * * 1-5","desired_replicas":3}]`, 100); err == nil {
+			t.Fatal("6-field cron start succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":3}]`, 100); err == nil {
+			t.Fatal("empty timezone succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"`+strings.Repeat("a", 65)+`","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":3}]`, 100); err == nil {
+			t.Fatal("oversized timezone succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"UTC","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":-1}]`, 100); err == nil {
+			t.Fatal("negative desired_replicas succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"UTC","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":1.5}]`, 100); err == nil {
+			t.Fatal("fractional desired_replicas succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"UTC","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":3,"extra":true}]`, 100); err == nil {
+			t.Fatal("unexpected schedule key succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `[{"timezone":"UTC","start":"0 8 * * 1-5","end":"0 18 * * 1-5"}]`, 100); err == nil {
+			t.Fatal("missing desired_replicas succeeded")
+		}
+		if err := insertApp("keda_cron", 0, `{"timezone":"UTC"}`, 100); err == nil {
+			t.Fatal("non-array schedules succeeded")
+		}
+		oversized := strings.Repeat(`{"timezone":"UTC","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":3},`, 16)
+		if err := insertApp("keda_cron", 0, `[`+oversized+`{"timezone":"UTC","start":"0 8 * * 1-5","end":"0 18 * * 1-5","desired_replicas":3}]`, 100); err == nil {
+			t.Fatal("17 cron schedules succeeded")
+		}
+		if err := insertApp("keda_http", 0, `[]`, 0); err == nil {
+			t.Fatal("zero pending-requests target succeeded")
+		}
+		var defaultTarget int
+		if err := db.QueryRow(context.Background(), `
+			INSERT INTO apps (org_id, project_id, name, slug, hostname_label, scaling_mode, min_replicas)
+			VALUES ($1, $2, 'Default KEDA Target', $3, $3, 'keda_http', 0)
+			RETURNING keda_http_target_pending_requests`, ids.org, ids.project, "keda-default-"+strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")).Scan(&defaultTarget); err != nil {
+			t.Fatalf("database KEDA HTTP default rejected: %v", err)
+		}
+		if defaultTarget != 100 {
+			t.Fatalf("database KEDA HTTP default = %d, want 100", defaultTarget)
+		}
+		if err := insertApp("keda_http", 0, `[]`, -1); err == nil {
+			t.Fatal("negative pending-requests target succeeded")
+		}
+	})
+
 	t.Run("cross organization links are forbidden", func(t *testing.T) {
 		other := seedTenantGraph(t, db, "other", "feature/other", "other-preview", "other-preview-ns")
 		if _, err := db.Exec(context.Background(), `

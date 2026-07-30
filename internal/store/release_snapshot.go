@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -15,8 +16,11 @@ import (
 	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 )
 
+var cronShapePattern = regexp.MustCompile(`^\S+( \S+){4}$`)
+
 const (
-	ReleaseSnapshotVersion      = 2
+	ReleaseSnapshotVersion      = 3
+	ReleaseSnapshotVersionV2    = 2 // HPA/none snapshots from before Phase 4 KEDA support
 	DesiredStateSnapshotVersion = 1
 	EnvVarRevisionVersion       = 1
 )
@@ -141,6 +145,17 @@ type KEDAIntent struct {
 	MinReplicas      int32  `json:"min_replicas"`
 	MaxReplicas      int32  `json:"max_replicas"`
 	TargetCPUPercent int32  `json:"target_cpu_percent"`
+	// CronSchedules drives the keda.sh ScaledObject cron triggers (mode "cron").
+	CronSchedules []KEDACronScheduleIntent `json:"cron_schedules,omitempty"`
+	// HTTPTargetPendingRequests is the HTTP add-on concurrency target (mode "http").
+	HTTPTargetPendingRequests int32 `json:"http_target_pending_requests,omitempty"`
+}
+
+type KEDACronScheduleIntent struct {
+	Timezone        string `json:"timezone"`
+	Start           string `json:"start"`
+	End             string `json:"end"`
+	DesiredReplicas int32  `json:"desired_replicas"`
 }
 
 type EnvVarRevision struct {
@@ -217,7 +232,16 @@ func upgradeLegacyReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnaps
 }
 
 func ValidateReleaseSnapshot(envelope ReleaseSnapshotEnvelope) error {
-	if envelope.Version != ReleaseSnapshotVersion {
+	switch envelope.Version {
+	case ReleaseSnapshotVersionV2:
+		// v2 snapshots pre-date KEDA support. Only HPA and none scaling is valid.
+		// KEDA snapshots were never deployed (code returned ErrKEDAUnsupported).
+		if envelope.DesiredState.Scaling.Kind == "keda" {
+			return errors.New("release snapshot: v2 KEDA snapshots require migration to v3 before deployment")
+		}
+	case ReleaseSnapshotVersion:
+		// v3 is the current version, full validation below.
+	default:
 		return fmt.Errorf("release snapshot: unsupported version %d", envelope.Version)
 	}
 	desired := envelope.DesiredState
@@ -341,8 +365,38 @@ func validateDesiredState(desired DesiredStateSnapshot) error {
 		if scaling.Name != d.Identity.Name || scaling.KEDA == nil || scaling.HPA != nil || (scaling.KEDA.Mode != "cron" && scaling.KEDA.Mode != "http") || scaling.KEDA.MinReplicas < 0 || scaling.KEDA.MaxReplicas < 1 || scaling.KEDA.MaxReplicas < scaling.KEDA.MinReplicas || scaling.KEDA.TargetCPUPercent < 1 || scaling.KEDA.TargetCPUPercent > 100 || d.Replicas != scaling.KEDA.MinReplicas {
 			return errors.New("release snapshot scaling: valid KEDA intent is required")
 		}
+		if err := validateKEDAModeIntent(scaling.KEDA); err != nil {
+			return fmt.Errorf("release snapshot scaling: %w", err)
+		}
 	default:
 		return errors.New("release snapshot scaling: kind must be none, hpa, or keda")
+	}
+	return nil
+}
+
+func validateKEDAModeIntent(keda *KEDAIntent) error {
+	switch keda.Mode {
+	case "cron":
+		if len(keda.CronSchedules) == 0 || len(keda.CronSchedules) > 16 || keda.HTTPTargetPendingRequests != 0 {
+			return errors.New("keda cron mode requires 1-16 cron schedules and no HTTP target")
+		}
+		seen := make(map[string]struct{}, len(keda.CronSchedules))
+		for _, schedule := range keda.CronSchedules {
+			if strings.TrimSpace(schedule.Timezone) == "" || len(schedule.Timezone) > 64 ||
+				!cronShapePattern.MatchString(schedule.Start) || !cronShapePattern.MatchString(schedule.End) ||
+				schedule.DesiredReplicas < 0 {
+				return errors.New("keda cron schedules require a timezone, 5-field cron start/end, and non-negative replicas")
+			}
+			key := schedule.Timezone + "\x00" + schedule.Start + "\x00" + schedule.End
+			if _, exists := seen[key]; exists {
+				return errors.New("keda cron schedule windows must be unique")
+			}
+			seen[key] = struct{}{}
+		}
+	case "http":
+		if keda.HTTPTargetPendingRequests < 1 || len(keda.CronSchedules) != 0 {
+			return errors.New("keda http mode requires a positive pending-requests target and no cron schedules")
+		}
 	}
 	return nil
 }
@@ -373,6 +427,27 @@ func canonicalReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotE
 	copy.DesiredState.Service.Identity.Labels = cloneMap(envelope.DesiredState.Service.Identity.Labels)
 	copy.DesiredState.Service.Selector = cloneMap(envelope.DesiredState.Service.Selector)
 	copy.DesiredState.Ingress.Identity.Labels = cloneMap(envelope.DesiredState.Ingress.Identity.Labels)
+	if envelope.DesiredState.Scaling.KEDA != nil {
+		keda := *envelope.DesiredState.Scaling.KEDA
+		keda.CronSchedules = append([]KEDACronScheduleIntent(nil), envelope.DesiredState.Scaling.KEDA.CronSchedules...)
+		sort.Slice(keda.CronSchedules, func(i, j int) bool {
+			left, right := keda.CronSchedules[i], keda.CronSchedules[j]
+			if left.Timezone != right.Timezone {
+				return left.Timezone < right.Timezone
+			}
+			if left.Start != right.Start {
+				return left.Start < right.Start
+			}
+			if left.End != right.End {
+				return left.End < right.End
+			}
+			return left.DesiredReplicas < right.DesiredReplicas
+		})
+		if keda.Mode == "http" && keda.HTTPTargetPendingRequests == 0 {
+			keda.HTTPTargetPendingRequests = defaultKEDAHTTPTargetPendingRequests
+		}
+		copy.DesiredState.Scaling.KEDA = &keda
+	}
 	if envelope.EnvVarRevision != nil {
 		revision := *envelope.EnvVarRevision
 		revision.Variables = append([]ReleaseEnvironment(nil), revision.Variables...)

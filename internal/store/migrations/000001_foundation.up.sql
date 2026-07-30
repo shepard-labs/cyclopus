@@ -246,6 +246,43 @@ CREATE TABLE projects (
     CHECK (deleted_at IS NULL OR external_credentials_revoked_at IS NOT NULL)
 );
 
+-- Validates apps.keda_cron_schedules: an array of at most 16 objects, each
+-- {timezone, start, end, desired_replicas} with a non-empty IANA timezone
+-- name (<=64 bytes), 5-field cron start/end, and a non-negative integer
+-- replica count. Used by the apps table CHECK below (§3.4).
+CREATE FUNCTION keda_cron_schedules_valid(schedules jsonb) RETURNS boolean
+LANGUAGE plpgsql IMMUTABLE
+AS $$
+DECLARE
+    element jsonb;
+    replicas numeric;
+BEGIN
+    IF jsonb_typeof(schedules) IS DISTINCT FROM 'array' OR jsonb_array_length(schedules) > 16 THEN
+        RETURN false;
+    END IF;
+    FOR element IN SELECT value FROM jsonb_array_elements(schedules) LOOP
+        IF jsonb_typeof(element) IS DISTINCT FROM 'object'
+            OR NOT (element ?& ARRAY['timezone', 'start', 'end', 'desired_replicas'])
+			OR (SELECT count(*) FROM jsonb_object_keys(element)) <> 4
+            OR jsonb_typeof(element->'timezone') IS DISTINCT FROM 'string'
+            OR btrim(element->>'timezone') = ''
+            OR octet_length(element->>'timezone') > 64
+            OR jsonb_typeof(element->'start') IS DISTINCT FROM 'string'
+            OR element->>'start' !~ '^\S+( \S+){4}$'
+            OR jsonb_typeof(element->'end') IS DISTINCT FROM 'string'
+            OR element->>'end' !~ '^\S+( \S+){4}$'
+            OR jsonb_typeof(element->'desired_replicas') IS DISTINCT FROM 'number' THEN
+            RETURN false;
+        END IF;
+        replicas := (element->>'desired_replicas')::numeric;
+        IF replicas <> floor(replicas) OR replicas < 0 THEN
+            RETURN false;
+        END IF;
+    END LOOP;
+    RETURN true;
+END;
+$$;
+
 CREATE TABLE apps (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     org_id uuid NOT NULL,
@@ -261,6 +298,12 @@ CREATE TABLE apps (
     min_replicas integer NOT NULL DEFAULT 1 CHECK (min_replicas >= 0),
     max_replicas integer NOT NULL DEFAULT 3 CHECK (max_replicas >= 1),
     hpa_target_cpu_percent integer NOT NULL DEFAULT 70 CHECK (hpa_target_cpu_percent BETWEEN 1 AND 100),
+    -- KEDA cron schedules (scaling_mode='keda_cron'). Array of
+    -- {timezone, start, end, desired_replicas}; start/end are 5-field cron
+    -- expressions in the given IANA timezone (§3.4).
+    keda_cron_schedules jsonb NOT NULL DEFAULT '[]',
+    -- KEDA HTTP add-on concurrency target (scaling_mode='keda_http').
+    keda_http_target_pending_requests integer NOT NULL DEFAULT 100 CHECK (keda_http_target_pending_requests > 0),
     cpu_request_millicores integer NOT NULL DEFAULT 100 CHECK (cpu_request_millicores > 0),
     cpu_limit_millicores integer NOT NULL DEFAULT 1000 CHECK (cpu_limit_millicores > 0),
     memory_request_mib integer NOT NULL DEFAULT 128 CHECK (memory_request_mib > 0),
@@ -285,6 +328,11 @@ CREATE TABLE apps (
     CHECK (cpu_limit_millicores >= cpu_request_millicores),
     CHECK (memory_limit_mib >= memory_request_mib),
     CONSTRAINT hpa_requires_floor CHECK (scaling_mode <> 'hpa' OR min_replicas >= 1),
+    -- keda_cron drives replicas from its schedules; an empty schedule set
+    -- would silently pin the floor replica count forever.
+    CONSTRAINT keda_cron_requires_schedules CHECK (scaling_mode <> 'keda_cron' OR jsonb_array_length(keda_cron_schedules) >= 1),
+    CONSTRAINT keda_cron_schedules_shape CHECK (keda_cron_schedules_valid(keda_cron_schedules)),
+    CONSTRAINT keda_cron_schedules_mode CHECK (scaling_mode = 'keda_cron' OR keda_cron_schedules = '[]'::jsonb),
     CHECK (max_preview_environments <= 1000),
     CHECK (preview_idle_ttl_hours <= 8760),
     CHECK (deploy_timeout_seconds <= 86400),
@@ -481,14 +529,14 @@ CREATE FUNCTION validate_release_snapshot() RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF NEW.config_snapshot->>'version' IS DISTINCT FROM '2'
+    IF NEW.config_snapshot->>'version' NOT IN ('2', '3')
        OR jsonb_typeof(NEW.config_snapshot->'desired_state') <> 'object'
        OR NEW.config_snapshot#>>'{desired_state,version}' IS DISTINCT FROM '1'
        OR jsonb_typeof(NEW.config_snapshot#>'{desired_state,deployment}') <> 'object'
        OR jsonb_typeof(NEW.config_snapshot#>'{desired_state,service}') <> 'object'
        OR jsonb_typeof(NEW.config_snapshot#>'{desired_state,ingress}') <> 'object'
        OR jsonb_typeof(NEW.config_snapshot#>'{desired_state,scaling}') <> 'object' THEN
-        RAISE EXCEPTION 'release config_snapshot must be a v2 desired-state envelope'
+        RAISE EXCEPTION 'release config_snapshot must be a v2 or v3 desired-state envelope'
             USING ERRCODE = 'check_violation';
     END IF;
     IF NEW.kind = 'env_change' AND (

@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 )
@@ -41,6 +42,12 @@ type Config struct {
 	ConflictRetries       int
 	APITimeout            time.Duration
 	PreviewHostnameSuffix string
+	// H2: KEDA HTTP add-on interceptor routing. The Ingress for keda_http apps
+	// must route traffic to the interceptor proxy so scale-from-zero works.
+	// Defaults match the standard KEDA HTTP add-on v0.15.0 Helm chart.
+	KEDAHTTPInterceptorNamespace string // default "keda"
+	KEDAHTTPInterceptorService   string // default "keda-add-ons-http-interceptor-proxy"
+	KEDAHTTPInterceptorPort      int32  // default 8080
 }
 
 type RecoveryState struct {
@@ -62,26 +69,43 @@ type RecoveryStore interface {
 type RecoveryAdapter struct {
 	config    Config
 	client    kubernetes.Interface
+	dynamic   dynamic.Interface
 	store     RecoveryStore
 	now       func() time.Time
 	lifecycle *LifecycleAdapter
 }
 
-func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStore RecoveryStore) (*RecoveryAdapter, error) {
+// AdapterOption extends adapter construction without breaking the existing
+// NewAdapter/NewRecoveryAdapter signatures.
+type AdapterOption func(*RecoveryAdapter)
+
+// WithDynamicClient wires the dynamic client used for KEDA ScaledObject and
+// HTTPScaledObject apply/delete paths.
+func WithDynamicClient(client dynamic.Interface) AdapterOption {
+	return func(a *RecoveryAdapter) { a.dynamic = client }
+}
+
+func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStore RecoveryStore, opts ...AdapterOption) (*RecoveryAdapter, error) {
 	if client == nil || recoveryStore == nil || config.PollInterval <= 0 || config.ConflictRetries <= 0 {
 		return nil, errors.New("invalid Kubernetes recovery adapter configuration")
 	}
 	if config.APITimeout <= 0 {
 		config.APITimeout = 5 * time.Second
 	}
-	return &RecoveryAdapter{config: config, client: client, store: recoveryStore, now: time.Now}, nil
+	adapter := &RecoveryAdapter{config: config, client: client, store: recoveryStore, now: time.Now}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(adapter)
+		}
+	}
+	return adapter, nil
 }
 
-func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardStore) (*RecoveryAdapter, error) {
+func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardStore, opts ...AdapterOption) (*RecoveryAdapter, error) {
 	if config.PreviewHostnameSuffix == "" {
 		config.PreviewHostnameSuffix = "preview.invalid"
 	}
-	adapter, err := NewRecoveryAdapter(config, client, dataStore)
+	adapter, err := NewRecoveryAdapter(config, client, dataStore, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +192,7 @@ func RecoveryErrorDisposition(err error) (retryable bool, delay time.Duration, c
 	if errors.Is(err, context.Canceled) || errors.Is(err, store.ErrLeaseNotOwned) {
 		return false, 0, ""
 	}
-	if errors.Is(err, context.DeadlineExceeded) || isTransient(err) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrKEDACRDMissing) || isTransient(err) {
 		return true, 5 * time.Second, ""
 	}
 	return false, 0, "recovery_failed"

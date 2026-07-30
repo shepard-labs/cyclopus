@@ -30,6 +30,8 @@ type App struct {
 	ContainerPort                                          int
 	HealthCheckPath, ScalingMode, RuntimeClass             string
 	MinReplicas, MaxReplicas, HPATargetCPUPercent          int
+	KEDACronSchedules                                      []KEDACronSchedule
+	KEDAHTTPTargetPendingRequests                          int
 	CPURequestMillicores, CPULimitMillicores               int
 	MemoryRequestMiB, MemoryLimitMiB                       int
 	PreviewsEnabled                                        bool
@@ -37,6 +39,15 @@ type App struct {
 	DeployTimeoutSeconds, ReleaseRetentionCount            int
 	CreatedAt                                              time.Time
 	DeletedAt                                              *time.Time
+}
+
+// KEDACronSchedule mirrors one row of apps.keda_cron_schedules: a cron window
+// in an IANA timezone during which the scaler holds DesiredReplicas.
+type KEDACronSchedule struct {
+	Timezone        string `json:"timezone"`
+	Start           string `json:"start"`
+	End             string `json:"end"`
+	DesiredReplicas int    `json:"desired_replicas"`
 }
 
 type Environment struct {
@@ -169,7 +180,8 @@ func (s *Store) GetApp(ctx context.Context, orgID, appID string) (App, error) {
 
 const appSelect = `SELECT app.id::text, app.org_id::text, app.project_id::text, app.name, app.slug, app.hostname_label,
 	app.registry_id::text, registry.registry_url, app.image_repository, app.container_port, app.health_check_path, app.scaling_mode,
-	app.min_replicas, app.max_replicas, app.hpa_target_cpu_percent, app.cpu_request_millicores,
+	app.min_replicas, app.max_replicas, app.hpa_target_cpu_percent, app.keda_cron_schedules, app.keda_http_target_pending_requests,
+	app.cpu_request_millicores,
 	app.cpu_limit_millicores, app.memory_request_mib, app.memory_limit_mib, app.previews_enabled,
 	app.max_preview_environments, app.preview_idle_ttl_hours, app.deploy_timeout_seconds,
 	app.release_retention_count, app.runtime_class, app.ci_workflow_id, app.created_at, app.deleted_at FROM apps app
@@ -179,17 +191,43 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanApp(row rowScanner) (App, error) {
 	var v App
-	err := row.Scan(&v.ID, &v.OrgID, &v.ProjectID, &v.Name, &v.Slug, &v.HostnameLabel, &v.RegistryID, &v.RegistryURL, &v.ImageRepository, &v.ContainerPort, &v.HealthCheckPath, &v.ScalingMode, &v.MinReplicas, &v.MaxReplicas, &v.HPATargetCPUPercent, &v.CPURequestMillicores, &v.CPULimitMillicores, &v.MemoryRequestMiB, &v.MemoryLimitMiB, &v.PreviewsEnabled, &v.MaxPreviewEnvironments, &v.PreviewIdleTTLHours, &v.DeployTimeoutSeconds, &v.ReleaseRetentionCount, &v.RuntimeClass, &v.CIWorkflowID, &v.CreatedAt, &v.DeletedAt)
+	var schedules []byte
+	err := row.Scan(&v.ID, &v.OrgID, &v.ProjectID, &v.Name, &v.Slug, &v.HostnameLabel, &v.RegistryID, &v.RegistryURL, &v.ImageRepository, &v.ContainerPort, &v.HealthCheckPath, &v.ScalingMode, &v.MinReplicas, &v.MaxReplicas, &v.HPATargetCPUPercent, &schedules, &v.KEDAHTTPTargetPendingRequests, &v.CPURequestMillicores, &v.CPULimitMillicores, &v.MemoryRequestMiB, &v.MemoryLimitMiB, &v.PreviewsEnabled, &v.MaxPreviewEnvironments, &v.PreviewIdleTTLHours, &v.DeployTimeoutSeconds, &v.ReleaseRetentionCount, &v.RuntimeClass, &v.CIWorkflowID, &v.CreatedAt, &v.DeletedAt)
 	if err != nil {
 		return App{}, err
 	}
+	if len(schedules) > 0 {
+		if err := json.Unmarshal(schedules, &v.KEDACronSchedules); err != nil {
+			return App{}, fmt.Errorf("decode app keda cron schedules: %w", err)
+		}
+	}
+	if v.KEDACronSchedules == nil {
+		v.KEDACronSchedules = []KEDACronSchedule{}
+	}
 	return v, nil
+}
+
+func encodeKEDACronSchedules(schedules []KEDACronSchedule) []byte {
+	if schedules == nil {
+		schedules = []KEDACronSchedule{}
+	}
+	encoded, _ := json.Marshal(schedules)
+	return encoded
 }
 
 type SaveAppParams struct {
 	App         App
 	Idempotency CompleteIdempotencyParams
 	Audit       *AuditEvent
+}
+
+const defaultKEDAHTTPTargetPendingRequests = 100
+
+func normalizeAppDefaults(app App) App {
+	if app.KEDAHTTPTargetPendingRequests == 0 {
+		app.KEDAHTTPTargetPendingRequests = defaultKEDAHTTPTargetPendingRequests
+	}
+	return app
 }
 
 func (s *Store) CreateApp(ctx context.Context, params SaveAppParams) (App, error) {
@@ -199,12 +237,13 @@ func (s *Store) UpdateApp(ctx context.Context, params SaveAppParams) (App, error
 	return s.saveApp(ctx, params, false)
 }
 func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App, error) {
+	p.App = normalizeAppDefaults(p.App)
 	var value App
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		var before json.RawMessage
 		if create {
-			row := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,ci_workflow_id)
-			SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
+			row := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,ci_workflow_id)
+			SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
 			var id string
 			if err := row.Scan(&id); err != nil {
 				return mapMutationError("create app", err)
@@ -214,7 +253,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 				return mapMutationError("lock app", err)
 			}
 			args := appArgs(p.App)
-			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,cpu_request_millicores=$15,cpu_limit_millicores=$16,memory_request_mib=$17,memory_limit_mib=$18,previews_enabled=$19,max_preview_environments=$20,preview_idle_ttl_hours=$21,deploy_timeout_seconds=$22,release_retention_count=$23,runtime_class=$24,ci_workflow_id=$25 WHERE org_id=$2 AND id=$1 AND deleted_at IS NULL RETURNING id::text`, args...)
+			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,ci_workflow_id=$27 WHERE org_id=$2 AND id=$1 AND deleted_at IS NULL RETURNING id::text`, args...)
 			var id string
 			if err := row.Scan(&id); err != nil {
 				return mapMutationError("update app", err)
@@ -238,7 +277,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 	return value, err
 }
 func appArgs(a App) []any {
-	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, a.CIWorkflowID}
+	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, encodeKEDACronSchedules(a.KEDACronSchedules), a.KEDAHTTPTargetPendingRequests, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, a.CIWorkflowID}
 }
 
 func (s *Store) ListEnvironments(ctx context.Context, orgID, appID string, includeTornDown bool) ([]Environment, error) {

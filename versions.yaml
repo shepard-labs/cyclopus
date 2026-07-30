@@ -156,15 +156,25 @@ components:
       evidence: ["https://api.github.com/repos/kyverno/kyverno/releases/latest"]
       rationale: Retain until fail-closed admission policies and CRD/chart changes pass Phase 3 integration gates.
   keda:
-    pin: "v2.17.1"
+    pin: "v2.20.1"
     observed_latest: "v2.20.1"
     probe: "curl -fsSL https://api.github.com/repos/kedacore/keda/releases/latest"
     review:
-      status: intentional_pin
-      reviewer: phase-0-workflow-fixer
-      reviewed_at: "2026-07-29"
+      status: approved
+      reviewer: phase-4-scaling-implementer
+      reviewed_at: "2026-07-30"
       evidence: ["https://api.github.com/repos/kedacore/keda/releases/latest"]
-      rationale: Retain until mutually exclusive HPA/KEDA behavior and upgrade notes are tested in Phase 4.
+      rationale: v2.17.1 was outside its tested Kubernetes window on 1.33; v2.20.1 officially tests Kubernetes 1.33-1.35. RBAC must include events.k8s.io events create/patch and scaledRefKinds restricted to Deployments.
+  keda_http_add_on:
+    pin: "v0.15.0"
+    observed_latest: "v0.15.0"
+    probe: "curl -fsSL https://api.github.com/repos/kedacore/http-add-on/releases/latest"
+    review:
+      status: approved
+      reviewer: phase-4-scaling-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/kedacore/http-add-on/releases/latest"]
+      rationale: Beta accepted per spec 3.4 with hpa-mode fallback. HTTPScaledObject http.keda.sh/v1alpha1; uses scalingMetric concurrency/requestRate rather than deprecated targetPendingRequests.
   opentofu:
     pin: "1.10.1"
     observed_latest: "1.12.5"
@@ -185,3 +195,13 @@ components:
       reviewed_at: "2026-07-29"
       evidence: ["https://api.github.com/repos/helm/helm/releases/latest"]
       rationale: Helm 4 is a major-version change; retain Helm 3 until chart rendering and upgrade/rollback contracts pass Phase 5.
+  robfig_cron:
+    pin: "v3.0.1"
+    observed_latest: "v3.0.1"
+    probe: "go list -m -json github.com/robfig/cron/v3@latest"
+    review:
+      status: approved
+      reviewer: phase-4-scaling-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://pkg.go.dev/github.com/robfig/cron/v3"]
+      rationale: Used for server-side cron expression validation (H6) matching the KEDA v2.20.1 robfig/cron parser; prevents invalid schedules from being accepted that the KEDA operator would reject asynchronously.

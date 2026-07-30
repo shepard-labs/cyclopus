@@ -19,8 +19,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -29,13 +32,18 @@ import (
 const DeployFenceAnnotation = "cyclopus.dev/deploy-fence"
 
 var (
-	ErrKEDAUnsupported         = errors.New("KEDA deploys are unavailable until Phase 4")
+	ErrKEDACRDMissing          = errors.New("Kubernetes KEDA CRDs are unavailable")
 	ErrDesiredStateInvalid     = errors.New("Kubernetes desired state is invalid")
 	ErrResourceOwnership       = errors.New("Kubernetes resource ownership is ambiguous")
 	ErrNewerDeployFence        = errors.New("Kubernetes resource has a newer deploy fence")
 	ErrImmutableSecretMismatch = errors.New("immutable Secret differs from release intent")
 	ErrRolloutTerminal         = errors.New("deployment rollout terminally failed")
 	ErrMutableSourceSecret     = errors.New("environment source Secret must be immutable")
+)
+
+var (
+	scaledObjectGVR     = schema.GroupVersionResource{Group: "keda.sh", Version: "v1alpha1", Resource: "scaledobjects"}
+	httpScaledObjectGVR = schema.GroupVersionResource{Group: "http.keda.sh", Version: "v1alpha1", Resource: "httpscaledobjects"}
 )
 
 type ForwardStore interface {
@@ -45,19 +53,40 @@ type ForwardStore interface {
 }
 
 type DesiredObjects struct {
-	Secret     *corev1.Secret
-	Service    *corev1.Service
-	Deployment *appsv1.Deployment
-	Ingress    *networkingv1.Ingress
-	HPA        *autoscalingv2.HorizontalPodAutoscaler
-	DeleteHPA  string
+	Secret                 *corev1.Secret
+	Service                *corev1.Service
+	BridgeService          *corev1.Service // ExternalName bridge for keda_http interceptor routing
+	Deployment             *appsv1.Deployment
+	Ingress                *networkingv1.Ingress
+	HPA                    *autoscalingv2.HorizontalPodAutoscaler
+	ScaledObject           *unstructured.Unstructured
+	HTTPScaledObject       *unstructured.Unstructured
+	DeleteHPA              string
+	DeleteScaledObject     string
+	DeleteHTTPScaledObject string
+	DeleteBridgeService    string // owned bridge service to remove on mode transitions
 }
 
-func BuildDesiredObjects(execution store.DeployExecution, envelope store.ReleaseSnapshotEnvelope, secretData map[string][]byte) (DesiredObjects, error) {
-	desired := envelope.DesiredState
-	if desired.Scaling.Kind == "keda" {
-		return DesiredObjects{}, ErrKEDAUnsupported
+// KEDAHTTPOptions configures the HTTP add-on interceptor routing for keda_http apps.
+// Traffic from the Ingress must pass through the interceptor proxy so scale-from-zero works.
+type KEDAHTTPOptions struct {
+	// InterceptorFQDN is the full cluster-internal FQDN of the interceptor proxy service,
+	// e.g. "keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local".
+	InterceptorFQDN string
+	// InterceptorPort is the port the interceptor proxy listens on (default 8080).
+	InterceptorPort int32
+}
+
+// defaultKEDAHTTPOptions returns sensible defaults matching the standard KEDA HTTP add-on v0.15.0 Helm chart.
+func defaultKEDAHTTPOptions() KEDAHTTPOptions {
+	return KEDAHTTPOptions{
+		InterceptorFQDN: "keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local",
+		InterceptorPort: 8080,
 	}
+}
+
+func BuildDesiredObjects(execution store.DeployExecution, envelope store.ReleaseSnapshotEnvelope, secretData map[string][]byte, httpOpts ...KEDAHTTPOptions) (DesiredObjects, error) {
+	desired := envelope.DesiredState
 	if execution.Namespace == "" || execution.ReleaseID == "" || execution.FailedRelease.ConfigHash == "" {
 		return DesiredObjects{}, fmt.Errorf("%w: execution identity is incomplete", ErrDesiredStateInvalid)
 	}
@@ -105,7 +134,21 @@ func BuildDesiredObjects(execution store.DeployExecution, envelope store.Release
 			TLS: []networkingv1.IngressTLS{{Hosts: []string{desired.Ingress.Hostname}, SecretName: desired.Ingress.TLS.SecretName}},
 		},
 	}
-	objects := DesiredObjects{Service: service, Deployment: deployment, Ingress: ingress}
+	// Resolve keda_http interceptor options (H2: must route via interceptor for scale-from-zero).
+	httpOptions := defaultKEDAHTTPOptions()
+	if len(httpOpts) > 0 && httpOpts[0].InterceptorFQDN != "" {
+		httpOptions = httpOpts[0]
+	}
+	bridgeSvcName := d.Identity.Name + "-keda-http-proxy"
+	scalerName := desired.Scaling.Name
+	if scalerName == "" {
+		scalerName = d.Identity.Name
+	}
+	// H3: cron ScaledObjects are named "<scalerName>-cron" to avoid colliding
+	// with the HTTP add-on's generated child ScaledObject. Deletes during
+	// transitions must use the correct name for each kind.
+	cronScalerName := scalerName + "-cron"
+	objects := DesiredObjects{Service: service, Deployment: deployment, Ingress: ingress, DeleteHPA: d.Identity.Name, DeleteScaledObject: cronScalerName, DeleteHTTPScaledObject: scalerName, DeleteBridgeService: bridgeSvcName}
 	if desired.Secret != nil {
 		immutable := true
 		secretAnnotations := map[string]string{}
@@ -115,13 +158,112 @@ func BuildDesiredObjects(execution store.DeployExecution, envelope store.Release
 		}
 		objects.Secret = &corev1.Secret{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}, ObjectMeta: metav1.ObjectMeta{Name: desired.Secret.Identity.Name, Namespace: execution.Namespace, Labels: managedLabels(desired.Secret.Identity.Labels, execution.EnvironmentID), Annotations: secretAnnotations}, Immutable: &immutable, Type: corev1.SecretTypeOpaque, Data: cloneBytes(secretData)}
 	}
-	if desired.Scaling.Kind == "hpa" {
-		minReplicas := desired.Scaling.HPA.MinReplicas
-		objects.HPA = &autoscalingv2.HorizontalPodAutoscaler{TypeMeta: metav1.TypeMeta{APIVersion: "autoscaling/v2", Kind: "HorizontalPodAutoscaler"}, ObjectMeta: metav1.ObjectMeta{Name: desired.Scaling.Name, Namespace: execution.Namespace, Labels: labels, Annotations: cloneStrings(annotations)}, Spec: autoscalingv2.HorizontalPodAutoscalerSpec{ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: d.Identity.Name}, MinReplicas: &minReplicas, MaxReplicas: desired.Scaling.HPA.MaxReplicas, Metrics: []autoscalingv2.MetricSpec{{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{Name: corev1.ResourceCPU, Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: &desired.Scaling.HPA.TargetCPUPercent}}}}}}
-	} else {
-		objects.DeleteHPA = d.Identity.Name
+	switch desired.Scaling.Kind {
+	case "hpa":
+		objects.HPA = buildHPA(desired, labels, annotations, execution, d.Identity.Name)
+		objects.DeleteHPA = ""
+	case "keda":
+		switch desired.Scaling.KEDA.Mode {
+		case "cron":
+			objects.ScaledObject = buildKEDACronScaledObject(desired, labels, annotations, execution)
+			objects.DeleteScaledObject = ""
+			objects.DeleteHTTPScaledObject = scalerName
+		case "http":
+			objects.HTTPScaledObject = buildKEDAHTTPScaledObject(desired, labels, annotations, execution)
+			objects.DeleteScaledObject = cronScalerName
+			objects.DeleteHTTPScaledObject = ""
+			// H2: Route ingress through the interceptor bridge so scale-from-zero works.
+			bridge := buildKEDAHTTPBridgeService(d.Identity.Name, execution.Namespace, labels, annotations, execution.EnvironmentID, httpOptions)
+			objects.BridgeService = bridge
+			objects.DeleteBridgeService = ""
+			// Repoint ingress at bridge service on interceptor port.
+			ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name = bridge.Name
+			ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number = httpOptions.InterceptorPort
+		}
 	}
 	return objects, nil
+}
+
+// buildKEDAHTTPBridgeService creates an ExternalName Service that routes the
+// app's Ingress to the HTTP add-on interceptor proxy (H2). The interceptor holds
+// incoming requests and triggers scale-up when min_replicas==0.
+func buildKEDAHTTPBridgeService(deploymentName, namespace string, labels, annotations map[string]string, environmentID string, opts KEDAHTTPOptions) *corev1.Service {
+	bridgeName := deploymentName + "-keda-http-proxy"
+	return &corev1.Service{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{Name: bridgeName, Namespace: namespace, Labels: managedLabels(labels, environmentID), Annotations: cloneStrings(annotations)},
+		Spec: corev1.ServiceSpec{
+			Type:         corev1.ServiceTypeExternalName,
+			ExternalName: opts.InterceptorFQDN,
+			Ports:        []corev1.ServicePort{{Name: "http", Port: opts.InterceptorPort}},
+		},
+	}
+}
+
+func buildHPA(desired store.DesiredStateSnapshot, labels, annotations map[string]string, execution store.DeployExecution, deploymentName string) *autoscalingv2.HorizontalPodAutoscaler {
+	minReplicas := desired.Scaling.HPA.MinReplicas
+	return &autoscalingv2.HorizontalPodAutoscaler{TypeMeta: metav1.TypeMeta{APIVersion: "autoscaling/v2", Kind: "HorizontalPodAutoscaler"}, ObjectMeta: metav1.ObjectMeta{Name: desired.Scaling.Name, Namespace: execution.Namespace, Labels: labels, Annotations: cloneStrings(annotations)}, Spec: autoscalingv2.HorizontalPodAutoscalerSpec{ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: deploymentName}, MinReplicas: &minReplicas, MaxReplicas: desired.Scaling.HPA.MaxReplicas, Metrics: []autoscalingv2.MetricSpec{{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{Name: corev1.ResourceCPU, Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: &desired.Scaling.HPA.TargetCPUPercent}}}}}}
+}
+
+func buildKEDACronScaledObject(desired store.DesiredStateSnapshot, labels, annotations map[string]string, execution store.DeployExecution) *unstructured.Unstructured {
+	keda := desired.Scaling.KEDA
+	triggers := make([]any, 0, len(keda.CronSchedules)+1)
+	for index, schedule := range keda.CronSchedules {
+		triggers = append(triggers, map[string]any{
+			"type":     "cron",
+			"metadata": map[string]any{"name": fmt.Sprintf("cron-%d", index), "timezone": schedule.Timezone, "start": schedule.Start, "end": schedule.End, "desiredReplicas": fmt.Sprintf("%d", schedule.DesiredReplicas)},
+		})
+	}
+	triggers = append(triggers, map[string]any{
+		"type":     "cpu",
+		"metadata": map[string]any{"type": "Utilization", "value": fmt.Sprintf("%d", keda.TargetCPUPercent)},
+	})
+	// H3: cron ScaledObjects use a "-cron" suffix to avoid name collision with
+	// the HTTP add-on's generated child ScaledObject on mode transitions.
+	cronName := desired.Scaling.Name + "-cron"
+	object := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "ScaledObject",
+		"spec": map[string]any{
+			"scaleTargetRef":  map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": desired.Deployment.Identity.Name},
+			"minReplicaCount": int64(keda.MinReplicas),
+			"maxReplicaCount": int64(keda.MaxReplicas),
+			"triggers":        triggers,
+		},
+	}}
+	object.SetName(cronName)
+	object.SetNamespace(execution.Namespace)
+	object.SetLabels(cloneStrings(labels))
+	object.SetAnnotations(cloneStrings(annotations))
+	return object
+}
+
+func buildKEDAHTTPScaledObject(desired store.DesiredStateSnapshot, labels, annotations map[string]string, execution store.DeployExecution) *unstructured.Unstructured {
+	keda := desired.Scaling.KEDA
+	// H1: scaleTargetRef must use "name" (not "deployment") per v0.15.0 CRD.
+	// H1: scalingMetric.concurrency.targetValue must be int64, not string.
+	object := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "http.keda.sh/v1alpha1",
+		"kind":       "HTTPScaledObject",
+		"spec": map[string]any{
+			"hosts":        []any{desired.Ingress.Hostname},
+			"pathPrefixes": []any{desired.Ingress.Path},
+			"scaleTargetRef": map[string]any{
+				"name":       desired.Deployment.Identity.Name,
+				"kind":       "Deployment",
+				"apiVersion": "apps/v1",
+				"service":    desired.Service.Identity.Name,
+				"port":       int64(desired.Service.Port),
+			},
+			"replicas":      map[string]any{"min": int64(keda.MinReplicas), "max": int64(keda.MaxReplicas)},
+			"scalingMetric": map[string]any{"concurrency": map[string]any{"targetValue": int64(keda.HTTPTargetPendingRequests)}},
+		},
+	}}
+	object.SetName(desired.Scaling.Name)
+	object.SetNamespace(execution.Namespace)
+	object.SetLabels(cloneStrings(labels))
+	object.SetAnnotations(cloneStrings(annotations))
+	return object
 }
 
 func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.DeployExecution) (store.DeployRecoveryResult, error) {
@@ -135,9 +277,6 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 	envelope, err := store.DecodeReleaseSnapshot(execution.FailedRelease.ConfigSnapshot)
 	if err != nil {
 		return a.failWithoutMutation(ctx, execution, fmt.Errorf("%w: %v", ErrDesiredStateInvalid, err))
-	}
-	if envelope.DesiredState.Scaling.Kind == "keda" {
-		return a.failWithoutMutation(ctx, execution, ErrKEDAUnsupported)
 	}
 	secretData, err := a.resolveSecretData(ctx, execution, envelope)
 	if err != nil {
@@ -283,6 +422,62 @@ func (a *RecoveryAdapter) preflightDesired(ctx context.Context, execution store.
 			return err
 		}
 	}
+	return a.preflightScaling(ctx, execution, objects)
+}
+
+func (a *RecoveryAdapter) preflightScaling(ctx context.Context, execution store.DeployExecution, objects DesiredObjects) error {
+	if objects.HPA != nil || objects.DeleteHPA != "" {
+		name := objects.DeleteHPA
+		if objects.HPA != nil {
+			name = objects.HPA.Name
+		}
+		current, err := a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+				return err
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	for _, scaler := range []struct {
+		gvr     schema.GroupVersionResource
+		desired *unstructured.Unstructured
+		deleted string
+	}{
+		{gvr: scaledObjectGVR, desired: objects.ScaledObject, deleted: objects.DeleteScaledObject},
+		{gvr: httpScaledObjectGVR, desired: objects.HTTPScaledObject, deleted: objects.DeleteHTTPScaledObject},
+	} {
+		if scaler.desired == nil && scaler.deleted == "" {
+			continue
+		}
+		// A delete-only path means the object should be absent. If the dynamic client
+		// or CRD is unavailable, the object cannot exist — preflight passes.
+		if scaler.desired == nil {
+			if a.dynamic == nil || !a.dynamicHasKind(ctx, scaler.gvr) {
+				continue
+			}
+		} else {
+			if a.dynamic == nil {
+				return fmt.Errorf("%w: dynamic Kubernetes client is not configured", ErrKEDACRDMissing)
+			}
+			if !a.dynamicHasKind(ctx, scaler.gvr) {
+				return ErrKEDACRDMissing
+			}
+		}
+		name := scaler.deleted
+		if scaler.desired != nil {
+			name = scaler.desired.GetName()
+		}
+		current, err := a.dynamic.Resource(scaler.gvr).Namespace(execution.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			if err := verifyObject(current.GetLabels(), current.GetAnnotations(), execution.EnvironmentID, execution.Fence); err != nil {
+				return err
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return classifyDynamicError(err)
+		}
+	}
 	return nil
 }
 
@@ -292,6 +487,9 @@ func (a *RecoveryAdapter) applyDesired(ctx context.Context, execution *store.Dep
 
 func (a *RecoveryAdapter) applyDesiredWithIdentity(ctx context.Context, execution *store.DeployExecution, objects DesiredObjects, releaseID, configHash string) error {
 	setDesiredIdentity(objects, releaseID, configHash)
+	if err := a.preflightScaling(ctx, *execution, objects); err != nil {
+		return err
+	}
 	if objects.Secret != nil {
 		if err := a.applySecret(ctx, execution, objects.Secret, releaseID, configHash); err != nil {
 			return err
@@ -306,12 +504,47 @@ func (a *RecoveryAdapter) applyDesiredWithIdentity(ctx context.Context, executio
 	if err := a.applyIngress(ctx, execution, objects.Ingress); err != nil {
 		return err
 	}
+	// Preflight proves ownership before any scaler mutation. Delete the old
+	// controller before applying the replacement so two controllers never
+	// target the Deployment concurrently (§3.4).
+	if objects.DeleteHPA != "" {
+		if err := a.deleteOwnedHPA(ctx, execution, objects.DeleteHPA); err != nil {
+			return err
+		}
+	}
+	if objects.DeleteScaledObject != "" {
+		if err := a.deleteOwnedScaledObject(ctx, execution, scaledObjectGVR, objects.DeleteScaledObject); err != nil {
+			return err
+		}
+	}
+	if objects.DeleteHTTPScaledObject != "" {
+		if err := a.deleteOwnedScaledObject(ctx, execution, httpScaledObjectGVR, objects.DeleteHTTPScaledObject); err != nil {
+			return err
+		}
+	}
 	if objects.HPA != nil {
 		if err := a.applyHPA(ctx, execution, objects.HPA); err != nil {
 			return err
 		}
-	} else if objects.DeleteHPA != "" {
-		if err := a.deleteOwnedHPA(ctx, execution, objects.DeleteHPA); err != nil {
+	}
+	if objects.ScaledObject != nil {
+		if err := a.applyScaledObject(ctx, execution, scaledObjectGVR, objects.ScaledObject); err != nil {
+			return err
+		}
+	}
+	if objects.HTTPScaledObject != nil {
+		if err := a.applyScaledObject(ctx, execution, httpScaledObjectGVR, objects.HTTPScaledObject); err != nil {
+			return err
+		}
+	}
+	// H2: apply or delete the interceptor bridge Service for keda_http mode.
+	if objects.DeleteBridgeService != "" {
+		if err := a.deleteOwnedService(ctx, execution, objects.DeleteBridgeService); err != nil {
+			return err
+		}
+	}
+	if objects.BridgeService != nil {
+		if err := a.applyService(ctx, execution, objects.BridgeService); err != nil {
 			return err
 		}
 	}
@@ -331,6 +564,15 @@ func setDesiredIdentity(objects DesiredObjects, releaseID, configHash string) {
 	if objects.HPA != nil {
 		setMetadataIdentity(&objects.HPA.ObjectMeta, releaseID, configHash)
 	}
+	if objects.ScaledObject != nil {
+		setUnstructuredIdentity(objects.ScaledObject, releaseID, configHash)
+	}
+	if objects.HTTPScaledObject != nil {
+		setUnstructuredIdentity(objects.HTTPScaledObject, releaseID, configHash)
+	}
+	if objects.BridgeService != nil {
+		setMetadataIdentity(&objects.BridgeService.ObjectMeta, releaseID, configHash)
+	}
 	if objects.Deployment != nil {
 		if objects.Deployment.Spec.Template.Annotations == nil {
 			objects.Deployment.Spec.Template.Annotations = map[string]string{}
@@ -338,6 +580,16 @@ func setDesiredIdentity(objects DesiredObjects, releaseID, configHash string) {
 		objects.Deployment.Spec.Template.Annotations[ReleaseAnnotation] = releaseID
 		objects.Deployment.Spec.Template.Annotations[ConfigHashAnnotation] = configHash
 	}
+}
+
+func setUnstructuredIdentity(object *unstructured.Unstructured, releaseID, configHash string) {
+	annotations := object.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[ReleaseAnnotation] = releaseID
+	annotations[ConfigHashAnnotation] = configHash
+	object.SetAnnotations(annotations)
 }
 
 func setMetadataIdentity(metadata *metav1.ObjectMeta, releaseID, configHash string) {
@@ -455,7 +707,7 @@ func (a *RecoveryAdapter) compensateOrQuarantine(ctx context.Context, execution 
 
 func isForwardRetryable(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, store.ErrLeaseNotOwned) || isTransient(err)
+		errors.Is(err, store.ErrLeaseNotOwned) || errors.Is(err, ErrKEDACRDMissing) || isTransient(err)
 }
 
 func (a *RecoveryAdapter) applyIngress(ctx context.Context, execution *store.DeployExecution, desired *networkingv1.Ingress) error {
@@ -502,6 +754,22 @@ func (a *RecoveryAdapter) applyHPA(ctx context.Context, execution *store.DeployE
 	})
 }
 
+func (a *RecoveryAdapter) deleteOwnedService(ctx context.Context, execution *store.DeployExecution, name string) error {
+	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
+		current, err := a.client.CoreV1().Services(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+			return err
+		}
+		return a.client.CoreV1().Services(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
+	})
+}
+
 func (a *RecoveryAdapter) deleteOwnedHPA(ctx context.Context, execution *store.DeployExecution, name string) error {
 	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
 		current, err := a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
@@ -514,8 +782,117 @@ func (a *RecoveryAdapter) deleteOwnedHPA(ctx context.Context, execution *store.D
 		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
 			return err
 		}
-		return a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{})
+		return a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
 	})
+}
+
+func (a *RecoveryAdapter) applyScaledObject(ctx context.Context, execution *store.DeployExecution, gvr schema.GroupVersionResource, desired *unstructured.Unstructured) error {
+	if a.dynamic == nil {
+		return fmt.Errorf("%w: dynamic Kubernetes client is not configured", ErrKEDACRDMissing)
+	}
+	return a.retryMutation(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
+		if !a.dynamicHasKind(opCtx, gvr) {
+			return ErrKEDACRDMissing
+		}
+		current, err := a.dynamic.Resource(gvr).Namespace(desired.GetNamespace()).Get(opCtx, desired.GetName(), metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			stampUnstructuredFence(desired, lease)
+			_, err = a.dynamic.Resource(gvr).Namespace(desired.GetNamespace()).Create(opCtx, desired, metav1.CreateOptions{})
+			return classifyDynamicError(err)
+		}
+		if err != nil {
+			return classifyDynamicError(err)
+		}
+		if err := verifyObject(current.GetLabels(), current.GetAnnotations(), execution.EnvironmentID, execution.Fence); err != nil {
+			return err
+		}
+		candidate := current.DeepCopy()
+		mergeUnstructuredMetadata(candidate, desired)
+		candidate.Object["spec"] = desired.Object["spec"]
+		_, err = a.dynamic.Resource(gvr).Namespace(desired.GetNamespace()).Update(opCtx, candidate, metav1.UpdateOptions{})
+		return classifyDynamicError(err)
+	})
+}
+
+func (a *RecoveryAdapter) deleteOwnedScaledObject(ctx context.Context, execution *store.DeployExecution, gvr schema.GroupVersionResource, name string) error {
+	// If no dynamic client or CRD absent, the object cannot exist — deletion is complete.
+	if a.dynamic == nil {
+		return nil
+	}
+	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
+		if !a.dynamicHasKind(opCtx, gvr) {
+			return nil
+		}
+		current, err := a.dynamic.Resource(gvr).Namespace(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return classifyDynamicError(err)
+		}
+		if err := verifyObject(current.GetLabels(), current.GetAnnotations(), execution.EnvironmentID, execution.Fence); err != nil {
+			return err
+		}
+		uid := current.GetUID()
+		return classifyDynamicError(a.dynamic.Resource(gvr).Namespace(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}))
+	})
+}
+
+func (a *RecoveryAdapter) dynamicHasKind(ctx context.Context, gvr schema.GroupVersionResource) bool {
+	_, err := a.dynamic.Resource(gvr).Namespace("default").List(ctx, metav1.ListOptions{Limit: 1})
+	return err == nil || !isDynamicKindUnavailable(err)
+}
+
+func classifyDynamicError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isDynamicKindUnavailable(err) {
+		return ErrKEDACRDMissing
+	}
+	return err
+}
+
+func isDynamicKindUnavailable(err error) bool {
+	return meta.IsNoMatchError(err) || apierrors.IsNotFound(err)
+}
+
+func stampUnstructuredFence(object *unstructured.Unstructured, lease store.DeployLease) {
+	annotations := object.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[DeployFenceAnnotation] = lease.Fence.UTC().Format(time.RFC3339Nano)
+	object.SetAnnotations(annotations)
+}
+
+func mergeUnstructuredMetadata(candidate, desired *unstructured.Unstructured) {
+	labels := candidate.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	for key := range labels {
+		if isCyclopusManagedMetadataKey(key) {
+			delete(labels, key)
+		}
+	}
+	for key, value := range desired.GetLabels() {
+		labels[key] = value
+	}
+	candidate.SetLabels(labels)
+	annotations := candidate.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	for key := range annotations {
+		if isCyclopusManagedMetadataKey(key) {
+			delete(annotations, key)
+		}
+	}
+	for key, value := range desired.GetAnnotations() {
+		annotations[key] = value
+	}
+	candidate.SetAnnotations(annotations)
 }
 
 func (a *RecoveryAdapter) retryMutation(ctx context.Context, execution *store.DeployExecution, mutation func(context.Context, store.DeployLease) error) error {

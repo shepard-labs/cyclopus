@@ -147,6 +147,17 @@ message Project {
   google.protobuf.Timestamp deleted_at = 7;
 }
 
+message KedaCronSchedule {
+  // IANA timezone name for the cron window (for example "Europe/Berlin").
+  string timezone = 1;
+  // 5-field cron expression marking the start of the scale-out window.
+  string start = 2;
+  // 5-field cron expression marking the end of the scale-out window.
+  string end = 3;
+  // Replicas to hold during the window.
+  int32 desired_replicas = 4;
+}
+
 message Application {
   string id = 1;
   string organization_id = 2;
@@ -175,6 +186,11 @@ message Application {
   string ci_workflow_id = 25;
   google.protobuf.Timestamp created_at = 26;
   google.protobuf.Timestamp deleted_at = 27;
+  // Cron windows applied when scaling_mode is KEDA_CRON; must be non-empty
+  // for that mode and is ignored otherwise.
+  repeated KedaCronSchedule keda_cron_schedules = 28;
+  // HTTP add-on concurrency target applied when scaling_mode is KEDA_HTTP.
+  int32 keda_http_target_pending_requests = 29;
 }
 
 message Environment {

@@ -62,6 +62,20 @@ func TestAppResourceAndScalingValidation(t *testing.T) {
 	}
 }
 
+func TestScalingKEDAHTTPDefaultIsBackwardSafe(t *testing.T) {
+	input := DefaultAppInput()
+	input.KEDAHTTPTargetPendingRequests = 0
+	input = normalizeAppInput(input)
+	if input.KEDAHTTPTargetPendingRequests != 100 {
+		t.Fatalf("normalized HTTP target = %d, want 100", input.KEDAHTTPTargetPendingRequests)
+	}
+	input.KEDAHTTPTargetPendingRequests = -1
+	input = normalizeAppInput(input)
+	if err := validateApp(input, "gvisor"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("negative HTTP target error = %v", err)
+	}
+}
+
 func TestValidateEnvironmentVariablesRequiresExactSameNamespaceSecretRefs(t *testing.T) {
 	valid := []EnvVarInput{{Key: "DATABASE_URL", SecretRef: "k8s-secret://app-production/runtime#DATABASE_URL"}}
 	variables, err := validateEnvironmentVariables("app-production", valid)

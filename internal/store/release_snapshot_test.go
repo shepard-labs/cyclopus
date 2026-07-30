@@ -85,6 +85,41 @@ func TestReleaseSnapshotRejectsScalerIdentityDifferentFromDeployment(t *testing.
 	}
 }
 
+func TestScalingKEDASnapshotCanonicalizationAndHTTPDefault(t *testing.T) {
+	cron := testSnapshotEnvelope()
+	cron.DesiredState.Deployment.Replicas = 0
+	cron.DesiredState.Scaling = ScalingIntent{Version: 1, Kind: "keda", Name: "app", KEDA: &KEDAIntent{Mode: "cron", MinReplicas: 0, MaxReplicas: 3, TargetCPUPercent: 70, CronSchedules: []KEDACronScheduleIntent{
+		{Timezone: "UTC", Start: "0 8 * * 1-5", End: "0 18 * * 1-5", DesiredReplicas: 2},
+		{Timezone: "Europe/Berlin", Start: "0 8 * * 1-5", End: "0 18 * * 1-5", DesiredReplicas: 3},
+	}}}
+	encoded, hash, err := EncodeReleaseSnapshot(cron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeReleaseSnapshot(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.DesiredState.Scaling.KEDA.CronSchedules[0].Timezone != "Europe/Berlin" {
+		t.Fatalf("canonical schedules = %+v", decoded.DesiredState.Scaling.KEDA.CronSchedules)
+	}
+	reencoded, rehash, err := EncodeReleaseSnapshot(decoded)
+	if err != nil || string(reencoded) != string(encoded) || rehash != hash {
+		t.Fatalf("canonical KEDA snapshot changed: %v", err)
+	}
+
+	http := testSnapshotEnvelope()
+	http.DesiredState.Scaling = ScalingIntent{Version: 1, Kind: "keda", Name: "app", KEDA: &KEDAIntent{Mode: "http", MinReplicas: 1, MaxReplicas: 3, TargetCPUPercent: 70}}
+	encoded, _, err = EncodeReleaseSnapshot(http)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err = DecodeReleaseSnapshot(encoded)
+	if err != nil || decoded.DesiredState.Scaling.KEDA.HTTPTargetPendingRequests != 100 {
+		t.Fatalf("HTTP target = %+v, %v", decoded.DesiredState.Scaling.KEDA, err)
+	}
+}
+
 func TestReleaseSnapshotDecodesExistingNonEnvSnapshot(t *testing.T) {
 	encoded, _, err := EncodeReleaseSnapshot(testSnapshotEnvelope())
 	if err != nil {
