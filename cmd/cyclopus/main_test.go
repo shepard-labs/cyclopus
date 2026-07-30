@@ -106,7 +106,7 @@ func TestStartupWithDueWorkUsesConstructedAdapters(t *testing.T) {
 		deploys: []store.ExpiredDeploy{{OrgID: "org", EnvironmentID: "environment"}},
 		lease:   store.DeployLease{OrgID: "org", EnvironmentID: "environment", ReleaseID: "release"},
 	}
-	runner := worker.New(worker.Config{ScanInterval: time.Second, LeaseDuration: time.Minute, RequestTimeout: time.Second, Owner: "worker"},
+	runner := worker.New(worker.Config{ScanInterval: time.Second, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), recoveryStore, adapters)
 
 	if err := runner.Startup(context.Background()); err != nil {
@@ -138,6 +138,10 @@ func (*fakeGitHubAdapter) ReconcileDispatch(context.Context, *store.Orchestratio
 
 type fakeKubernetesAdapter struct{}
 
+func (*fakeKubernetesAdapter) ExecuteDeploy(_ context.Context, lease store.DeployExecution) (store.DeployRecoveryResult, error) {
+	return store.DeployRecoveryResult{Lease: lease}, nil
+}
+
 func (*fakeKubernetesAdapter) RecoverExpiredDeploy(_ context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
 	return store.DeployRecoveryResult{Lease: lease}, nil
 }
@@ -155,6 +159,11 @@ func (a *countingGitHubAdapter) ReconcileDispatch(context.Context, *store.Orches
 }
 
 type countingKubernetesAdapter struct{ calls int }
+
+func (a *countingKubernetesAdapter) ExecuteDeploy(_ context.Context, lease store.DeployExecution) (store.DeployRecoveryResult, error) {
+	a.calls++
+	return store.DeployRecoveryResult{Lease: lease}, nil
+}
 
 func (a *countingKubernetesAdapter) RecoverExpiredDeploy(_ context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
 	a.calls++
@@ -223,6 +232,18 @@ func (*startupRecoveryStore) RescheduleDeployRecovery(context.Context, store.Dep
 
 func (*startupRecoveryStore) QuarantineDeployRecovery(context.Context, store.DeployLease, string, string) error {
 	return nil
+}
+
+func (*startupRecoveryStore) ListForwardDeployOrgIDs(context.Context, bool) ([]string, error) {
+	return nil, nil
+}
+
+func (*startupRecoveryStore) ClaimPendingDeploy(context.Context, string, []string) (store.DeployExecution, error) {
+	return store.DeployExecution{}, store.ErrNotFound
+}
+
+func (*startupRecoveryStore) ClaimUnexpiredDeploying(context.Context, string, []string) (store.DeployExecution, error) {
+	return store.DeployExecution{}, store.ErrNotFound
 }
 
 func TestRunLifecycleReadinessAndGracefulCancellation(t *testing.T) {

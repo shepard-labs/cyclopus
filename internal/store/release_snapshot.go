@@ -10,6 +10,9 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode"
+
+	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 )
 
 const (
@@ -31,10 +34,23 @@ type ReleaseSnapshotEnvelope struct {
 
 type DesiredStateSnapshot struct {
 	Version    int              `json:"version"`
+	Secret     *SecretIntent    `json:"secret,omitempty"`
 	Deployment DeploymentIntent `json:"deployment"`
 	Service    ServiceIntent    `json:"service"`
 	Ingress    IngressIntent    `json:"ingress"`
 	Scaling    ScalingIntent    `json:"scaling"`
+}
+
+type SecretIntent struct {
+	Version   int                 `json:"version"`
+	Identity  ObjectIdentity      `json:"identity"`
+	Immutable bool                `json:"immutable"`
+	Entries   []SecretEntryIntent `json:"entries"`
+}
+
+type SecretEntryIntent struct {
+	Key       string `json:"key"`
+	SecretRef string `json:"secret_ref"`
 }
 
 type ObjectIdentity struct {
@@ -168,11 +184,36 @@ func DecodeReleaseSnapshot(encoded []byte) (ReleaseSnapshotEnvelope, error) {
 		}
 		return ReleaseSnapshotEnvelope{}, fmt.Errorf("decode release snapshot trailing data: %w", err)
 	}
+	envelope = upgradeLegacyReleaseSnapshot(envelope)
 	envelope = canonicalReleaseSnapshot(envelope)
 	if err := ValidateReleaseSnapshot(envelope); err != nil {
 		return ReleaseSnapshotEnvelope{}, err
 	}
 	return envelope, nil
+}
+
+func upgradeLegacyReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotEnvelope {
+	revision := envelope.EnvVarRevision
+	if revision == nil || envelope.DesiredState.Secret != nil || len(envelope.DesiredState.Deployment.Container.EnvFromSecrets) != 0 {
+		return envelope
+	}
+	name := EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, revision.ID)
+	entries := make([]SecretEntryIntent, len(revision.Variables))
+	for index, variable := range revision.Variables {
+		entries[index] = SecretEntryIntent{Key: variable.Key, SecretRef: variable.SecretRef}
+	}
+	envelope.DesiredState.Secret = &SecretIntent{
+		Version: 1,
+		Identity: ObjectIdentity{
+			Name:      name,
+			Namespace: envelope.DesiredState.Deployment.Identity.Namespace,
+			Labels:    cloneMap(envelope.DesiredState.Deployment.Identity.Labels),
+		},
+		Immutable: true,
+		Entries:   entries,
+	}
+	envelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{name}
+	return envelope
 }
 
 func ValidateReleaseSnapshot(envelope ReleaseSnapshotEnvelope) error {
@@ -192,7 +233,8 @@ func ValidateReleaseSnapshot(envelope ReleaseSnapshotEnvelope) error {
 		}
 		seen := make(map[string]struct{}, len(revision.Variables))
 		for _, variable := range revision.Variables {
-			if variable.Key == "" || variable.SecretRef == "" || !variable.IsSecret {
+			parsed, err := secretref.Parse(variable.SecretRef)
+			if variable.Key == "" || err != nil || !variable.IsSecret || parsed.Namespace != desired.Deployment.Identity.Namespace {
 				return errors.New("release snapshot: env variables require key, secret ref, and secret=true")
 			}
 			if _, exists := seen[variable.Key]; exists {
@@ -207,6 +249,33 @@ func ValidateReleaseSnapshot(envelope ReleaseSnapshotEnvelope) error {
 		if revision.Hash != expectedHash || desired.Deployment.PodAnnotations["cyclopus.dev/env-hash"] != expectedHash {
 			return errors.New("release snapshot: pod env hash annotation must match canonical env revision hash")
 		}
+		if desired.Secret == nil {
+			return errors.New("release snapshot: env revision requires immutable destination Secret intent")
+		}
+		secret := desired.Secret
+		if secret.Version != 1 || !secret.Immutable {
+			return errors.New("release snapshot: env destination Secret must be version 1 and immutable")
+		}
+		if err := validateIdentity(secret.Identity); err != nil {
+			return fmt.Errorf("release snapshot secret: %w", err)
+		}
+		if secret.Identity.Namespace != desired.Deployment.Identity.Namespace || secret.Identity.Name != EnvDestinationSecretName(desired.Deployment.Identity.Name, revision.ID) {
+			return errors.New("release snapshot: env destination Secret identity is not deterministic")
+		}
+		if len(desired.Deployment.Container.EnvFromSecrets) != 1 || desired.Deployment.Container.EnvFromSecrets[0] != secret.Identity.Name {
+			return errors.New("release snapshot: Deployment must envFrom exactly the destination Secret")
+		}
+		if len(secret.Entries) != len(revision.Variables) {
+			return errors.New("release snapshot: destination Secret entries must match env revision")
+		}
+		for index, variable := range revision.Variables {
+			entry := secret.Entries[index]
+			if entry.Key != variable.Key || entry.SecretRef != variable.SecretRef {
+				return errors.New("release snapshot: destination Secret entries must canonically match env revision")
+			}
+		}
+	} else if desired.Secret != nil {
+		return errors.New("release snapshot: destination Secret requires an env revision")
 	}
 	return nil
 }
@@ -265,11 +334,11 @@ func validateDesiredState(desired DesiredStateSnapshot) error {
 			return errors.New("release snapshot scaling: no-scaler identity requires exactly one replica")
 		}
 	case "hpa":
-		if scaling.Name == "" || scaling.HPA == nil || scaling.KEDA != nil || scaling.HPA.MinReplicas < 1 || scaling.HPA.MaxReplicas < scaling.HPA.MinReplicas || scaling.HPA.TargetCPUPercent < 1 || scaling.HPA.TargetCPUPercent > 100 || d.Replicas != scaling.HPA.MinReplicas {
+		if scaling.Name != d.Identity.Name || scaling.HPA == nil || scaling.KEDA != nil || scaling.HPA.MinReplicas < 1 || scaling.HPA.MaxReplicas < scaling.HPA.MinReplicas || scaling.HPA.TargetCPUPercent < 1 || scaling.HPA.TargetCPUPercent > 100 || d.Replicas != scaling.HPA.MinReplicas {
 			return errors.New("release snapshot scaling: valid HPA intent is required")
 		}
 	case "keda":
-		if scaling.Name == "" || scaling.KEDA == nil || scaling.HPA != nil || (scaling.KEDA.Mode != "cron" && scaling.KEDA.Mode != "http") || scaling.KEDA.MinReplicas < 0 || scaling.KEDA.MaxReplicas < 1 || scaling.KEDA.MaxReplicas < scaling.KEDA.MinReplicas || scaling.KEDA.TargetCPUPercent < 1 || scaling.KEDA.TargetCPUPercent > 100 || d.Replicas != scaling.KEDA.MinReplicas {
+		if scaling.Name != d.Identity.Name || scaling.KEDA == nil || scaling.HPA != nil || (scaling.KEDA.Mode != "cron" && scaling.KEDA.Mode != "http") || scaling.KEDA.MinReplicas < 0 || scaling.KEDA.MaxReplicas < 1 || scaling.KEDA.MaxReplicas < scaling.KEDA.MinReplicas || scaling.KEDA.TargetCPUPercent < 1 || scaling.KEDA.TargetCPUPercent > 100 || d.Replicas != scaling.KEDA.MinReplicas {
 			return errors.New("release snapshot scaling: valid KEDA intent is required")
 		}
 	default:
@@ -291,6 +360,13 @@ func validateIdentity(identity ObjectIdentity) error {
 func canonicalReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotEnvelope {
 	copy := envelope
 	copy.DesiredState.Deployment.Identity.Labels = cloneMap(envelope.DesiredState.Deployment.Identity.Labels)
+	if envelope.DesiredState.Secret != nil {
+		secret := *envelope.DesiredState.Secret
+		secret.Identity.Labels = cloneMap(envelope.DesiredState.Secret.Identity.Labels)
+		secret.Entries = append([]SecretEntryIntent(nil), envelope.DesiredState.Secret.Entries...)
+		sort.Slice(secret.Entries, func(i, j int) bool { return secret.Entries[i].Key < secret.Entries[j].Key })
+		copy.DesiredState.Secret = &secret
+	}
 	copy.DesiredState.Deployment.Selector = cloneMap(envelope.DesiredState.Deployment.Selector)
 	copy.DesiredState.Deployment.PodLabels = cloneMap(envelope.DesiredState.Deployment.PodLabels)
 	copy.DesiredState.Deployment.PodAnnotations = cloneMap(envelope.DesiredState.Deployment.PodAnnotations)
@@ -304,6 +380,27 @@ func canonicalReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotE
 		copy.EnvVarRevision = &revision
 	}
 	return copy
+}
+
+func EnvDestinationSecretName(deploymentName, revisionID string) string {
+	base := strings.ToLower(strings.TrimSpace(deploymentName))
+	base = strings.Map(func(r rune) rune {
+		if unicode.IsLower(r) || unicode.IsDigit(r) || r == '-' {
+			return r
+		}
+		return '-'
+	}, base)
+	base = strings.Trim(base, "-")
+	if base == "" {
+		base = "app"
+	}
+	sum := sha256.Sum256([]byte(revisionID))
+	suffix := hex.EncodeToString(sum[:8])
+	maxBase := 253 - len("-env-") - len(suffix)
+	if len(base) > maxBase {
+		base = strings.TrimRight(base[:maxBase], "-")
+	}
+	return base + "-env-" + suffix
 }
 
 func ComputeEnvVarRevisionHash(variables []ReleaseEnvironment) string {

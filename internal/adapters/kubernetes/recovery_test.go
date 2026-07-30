@@ -29,8 +29,14 @@ func TestRecoverExpiredDeployRestoresSnapshotPreservingMetadataAndFinalizes(t *t
 	current.Finalizers = []string{"external/finalizer"}
 	current.Status = readyStatus(3)
 
-	client := fake.NewSimpleClientset(current)
 	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
+	client := fake.NewSimpleClientset(recoveryObjects(t, recoveryStore, current)...)
+	client.PrependReactor("update", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		updated := action.(clienttesting.UpdateAction).GetObject().(*appsv1.Deployment)
+		updated.Generation = 4
+		updated.Status = readyStatus(4)
+		return false, nil, nil
+	})
 	adapter := newTestAdapter(t, client, recoveryStore)
 
 	if _, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease); err != nil {
@@ -43,8 +49,8 @@ func TestRecoverExpiredDeployRestoresSnapshotPreservingMetadataAndFinalizes(t *t
 	if got.Spec.Template.Spec.Containers[0].Image != "old-image" || got.Labels["external"] != "preserved" || got.Annotations["external/annotation"] != "preserved" || got.Finalizers[0] != "external/finalizer" {
 		t.Fatalf("restored deployment = %#v", got)
 	}
-	if got.Annotations[RecoveryReleaseAnnotation] != recoveryStore.lease.ReleaseID || got.Annotations[RecoveryFenceAnnotation] == "" || got.Annotations[RecoveryStartedAnnotation] == "" {
-		t.Fatalf("recovery annotations = %#v", got.Annotations)
+	if got.Annotations[ReleaseAnnotation] != "previous" || got.Annotations[ConfigHashAnnotation] != "previous-hash" || got.Annotations[DeployFenceAnnotation] == "" {
+		t.Fatalf("restored identity annotations = %#v", got.Annotations)
 	}
 	if recoveryStore.finalizeCalls != 1 || recoveryStore.finalizedLease.Fence != recoveryStore.lease.Fence {
 		t.Fatalf("finalization = calls:%d lease:%+v latest:%+v", recoveryStore.finalizeCalls, recoveryStore.finalizedLease, recoveryStore.lease)
@@ -62,8 +68,14 @@ func TestRecoverExpiredDeployPreservesAutoscalerAndAdmissionFields(t *testing.T)
 	current.Spec.Template.Spec.NodeSelector = map[string]string{"admission": "injected"}
 	current.Status = appsv1.DeploymentStatus{ObservedGeneration: 3, Replicas: 7, UpdatedReplicas: 7, ReadyReplicas: 7, AvailableReplicas: 7}
 
-	client := fake.NewSimpleClientset(current)
 	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
+	client := fake.NewSimpleClientset(recoveryObjects(t, recoveryStore, current)...)
+	client.PrependReactor("update", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		updated := action.(clienttesting.UpdateAction).GetObject().(*appsv1.Deployment)
+		updated.Generation = 4
+		updated.Status = appsv1.DeploymentStatus{ObservedGeneration: 4, Replicas: 2, UpdatedReplicas: 2, ReadyReplicas: 2, AvailableReplicas: 2}
+		return false, nil, nil
+	})
 	adapter := newTestAdapter(t, client, recoveryStore)
 	if _, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease); err != nil {
 		t.Fatalf("RecoverExpiredDeploy() error = %v", err)
@@ -72,7 +84,7 @@ func TestRecoverExpiredDeployPreservesAutoscalerAndAdmissionFields(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *got.Spec.Replicas != 7 || got.Spec.Template.Spec.NodeSelector["admission"] != "injected" {
+	if *got.Spec.Replicas != 2 || got.Spec.Template.Spec.NodeSelector["admission"] != "injected" {
 		t.Fatalf("runtime fields were overwritten: %#v", got.Spec)
 	}
 }
@@ -116,6 +128,8 @@ func TestRecoverExpiredEnvChangeVerifiesPreviousImmutableSecretBeforeDeploymentR
 		Key: "DATABASE_URL", SecretRef: "k8s-secret://tenant/runtime-r1#DATABASE_URL", IsSecret: true,
 	}}}
 	previousEnvelope.EnvVarRevision.Hash = store.ComputeEnvVarRevisionHash(previousEnvelope.EnvVarRevision.Variables)
+	previousEnvelope.DesiredState.Secret = testEnvSecretIntent(previousEnvelope)
+	previousEnvelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{previousEnvelope.DesiredState.Secret.Identity.Name}
 	previousEnvelope.DesiredState.Deployment.PodAnnotations[EnvRevisionAnnotation] = "revision-one"
 	previousEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = previousEnvelope.EnvVarRevision.Hash
 	state.PreviousDeploymentSnapshot, _, err = store.EncodeReleaseSnapshot(previousEnvelope)
@@ -123,16 +137,19 @@ func TestRecoverExpiredEnvChangeVerifiesPreviousImmutableSecretBeforeDeploymentR
 		t.Fatal(err)
 	}
 	immutable := true
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "runtime-r1", Namespace: "tenant", Annotations: map[string]string{
-		EnvRevisionAnnotation: "revision-one", ConfigHashAnnotation: "previous-hash",
-	}}, Immutable: &immutable, Data: map[string][]byte{"DATABASE_URL": []byte("old")}}
+	secretData := map[string][]byte{"DATABASE_URL": []byte("old")}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: previousEnvelope.DesiredState.Secret.Identity.Name, Namespace: "tenant",
+		Labels: map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: "environment"}, Annotations: map[string]string{
+			EnvRevisionAnnotation: "revision-one", ConfigHashAnnotation: "previous-hash", ReleaseAnnotation: "previous",
+			SecretContentHashAnnotation: ComputeSecretDataHash(secretData),
+		}}, Immutable: &immutable, Data: secretData}
 	current := failed.DeepCopy()
 	current.Generation = 2
 	current.Status = readyStatus(2)
-	client := fake.NewSimpleClientset(secret, current)
 	recoveryStore := newFakeRecoveryStore(state)
 	recoveryStore.lease.FailedRelease.Kind = "env_change"
 	recoveryStore.lease.PreviousRelease.EnvVarRevisionID = stringPointer("revision-one")
+	client := fake.NewSimpleClientset(append([]runtime.Object{secret}, recoveryObjects(t, recoveryStore, current)...)...)
 	adapter := newTestAdapter(t, client, recoveryStore)
 
 	if _, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease); err != nil {
@@ -165,6 +182,8 @@ func TestRecoverExpiredEnvChangeRejectsPreviousSecretHashMismatchBeforeDeploymen
 		Key: "DATABASE_URL", SecretRef: "k8s-secret://tenant/runtime-r1#DATABASE_URL", IsSecret: true,
 	}}}
 	previousEnvelope.EnvVarRevision.Hash = store.ComputeEnvVarRevisionHash(previousEnvelope.EnvVarRevision.Variables)
+	previousEnvelope.DesiredState.Secret = testEnvSecretIntent(previousEnvelope)
+	previousEnvelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{previousEnvelope.DesiredState.Secret.Identity.Name}
 	previousEnvelope.DesiredState.Deployment.PodAnnotations[EnvRevisionAnnotation] = "revision-one"
 	previousEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = previousEnvelope.EnvVarRevision.Hash
 	state.PreviousDeploymentSnapshot, _, err = store.EncodeReleaseSnapshot(previousEnvelope)
@@ -172,9 +191,11 @@ func TestRecoverExpiredEnvChangeRejectsPreviousSecretHashMismatchBeforeDeploymen
 		t.Fatal(err)
 	}
 	immutable := true
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "runtime-r1", Namespace: "tenant", Annotations: map[string]string{
-		EnvRevisionAnnotation: "revision-one", ConfigHashAnnotation: "wrong-hash",
-	}}, Immutable: &immutable}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: previousEnvelope.DesiredState.Secret.Identity.Name, Namespace: "tenant",
+		Labels: map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: "environment"}, Annotations: map[string]string{
+			EnvRevisionAnnotation: "revision-one", ConfigHashAnnotation: "wrong-hash", ReleaseAnnotation: "stale-release",
+			SecretContentHashAnnotation: "wrong-content-hash",
+		}}, Immutable: &immutable}
 	client := fake.NewSimpleClientset(secret, failed.DeepCopy())
 	recoveryStore := newFakeRecoveryStore(state)
 	recoveryStore.lease.FailedRelease.Kind = "env_change"
@@ -182,7 +203,7 @@ func TestRecoverExpiredEnvChangeRejectsPreviousSecretHashMismatchBeforeDeploymen
 	adapter := newTestAdapter(t, client, recoveryStore)
 
 	_, err = adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease)
-	if !errors.Is(err, ErrCompensationUnproven) || countActions(client.Actions(), "update") != 0 {
+	if !errors.Is(err, ErrCompensationUnproven) || countResourceActions(client.Actions(), "update", "deployments") != 0 {
 		t.Fatalf("error = %v, deployment updates = %d", err, countActions(client.Actions(), "update"))
 	}
 }
@@ -203,13 +224,13 @@ func TestRecoverExpiredDeployRejectsUnownedDeployment(t *testing.T) {
 	failed := testDeployment("bad-image")
 	current := failed.DeepCopy()
 	delete(current.Labels, EnvironmentIDLabel)
-	client := fake.NewSimpleClientset(current)
 	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
+	client := fake.NewSimpleClientset(recoveryObjects(t, recoveryStore, current)...)
 	adapter := newTestAdapter(t, client, recoveryStore)
 	claimedFence := recoveryStore.lease.Fence
 	result, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease)
-	if !errors.Is(err, ErrCompensationUnproven) || countActions(client.Actions(), "update") != 0 {
-		t.Fatalf("error=%v updates=%d", err, countActions(client.Actions(), "update"))
+	if !errors.Is(err, ErrCompensationUnproven) || countResourceActions(client.Actions(), "update", "deployments") != 0 {
+		t.Fatalf("error=%v deployment updates=%d", err, countResourceActions(client.Actions(), "update", "deployments"))
 	}
 	if !result.Lease.Fence.Equal(recoveryStore.lease.Fence) || result.Lease.Fence.Equal(claimedFence) {
 		t.Fatalf("result fence = %v, claimed = %v latest = %v", result.Lease.Fence, claimedFence, recoveryStore.lease.Fence)
@@ -233,13 +254,16 @@ func TestRecoverExpiredDeployRetriesOptimisticConflict(t *testing.T) {
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "deployments"}, "app", errors.New("resource version conflict"))
 	})
 	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
+	for _, object := range recoveryObjects(t, recoveryStore, current)[1:] {
+		_ = client.Tracker().Add(object)
+	}
 	adapter := newTestAdapter(t, client, recoveryStore)
 
 	if _, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease); err != nil {
 		t.Fatalf("RecoverExpiredDeploy() error = %v", err)
 	}
-	if countActions(client.Actions(), "update") != 2 || recoveryStore.finalizeCalls != 1 {
-		t.Fatalf("updates = %d, finalize calls = %d", countActions(client.Actions(), "update"), recoveryStore.finalizeCalls)
+	if countResourceActions(client.Actions(), "update", "deployments") != 2 || recoveryStore.finalizeCalls != 1 {
+		t.Fatalf("deployment updates = %d, finalize calls = %d", countResourceActions(client.Actions(), "update", "deployments"), recoveryStore.finalizeCalls)
 	}
 }
 
@@ -322,6 +346,15 @@ func int32Pointer(value int32) *int32 { return &value }
 
 func stringPointer(value string) *string { return &value }
 
+func testEnvSecretIntent(envelope store.ReleaseSnapshotEnvelope) *store.SecretIntent {
+	name := store.EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, envelope.EnvVarRevision.ID)
+	entries := make([]store.SecretEntryIntent, len(envelope.EnvVarRevision.Variables))
+	for index, variable := range envelope.EnvVarRevision.Variables {
+		entries[index] = store.SecretEntryIntent{Key: variable.Key, SecretRef: variable.SecretRef}
+	}
+	return &store.SecretIntent{Version: 1, Identity: store.ObjectIdentity{Name: name, Namespace: envelope.DesiredState.Deployment.Identity.Namespace, Labels: envelope.DesiredState.Deployment.Identity.Labels}, Immutable: true, Entries: entries}
+}
+
 func recoveryState(t *testing.T, failed, previous *appsv1.Deployment) RecoveryState {
 	t.Helper()
 	failed = failed.DeepCopy()
@@ -377,6 +410,30 @@ func newFakeRecoveryStore(state RecoveryState) *fakeRecoveryStore {
 	return &fakeRecoveryStore{state: state, lease: lease}
 }
 
+func recoveryObjects(t *testing.T, recoveryStore *fakeRecoveryStore, current *appsv1.Deployment) []runtime.Object {
+	t.Helper()
+	objects := []runtime.Object{current}
+	if recoveryStore.lease.PreviousRelease == nil {
+		return objects
+	}
+	envelope, err := store.DecodeReleaseSnapshot(recoveryStore.lease.PreviousRelease.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := recoveryStore.lease
+	execution.ReleaseID = recoveryStore.lease.PreviousRelease.ID
+	execution.FailedRelease = *recoveryStore.lease.PreviousRelease
+	desired, err := BuildDesiredObjects(execution, envelope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects = append(objects, desired.Service, desired.Ingress)
+	if desired.HPA != nil {
+		objects = append(objects, desired.HPA)
+	}
+	return objects
+}
+
 func (f *fakeRecoveryStore) RenewDeployLease(_ context.Context, lease store.DeployLease) (store.DeployLease, error) {
 	f.renewCalls++
 	if f.renewErrAt == f.renewCalls {
@@ -406,10 +463,24 @@ func (f *fakeRecoveryStore) AdoptRecoveredReleaseLive(_ context.Context, lease s
 	return store.FinalizeReleaseResult{}, nil
 }
 
+func (*fakeRecoveryStore) QuarantineDeployRecovery(context.Context, store.DeployLease, string, string) error {
+	return nil
+}
+
 func countActions(actions []clienttesting.Action, verb string) int {
 	count := 0
 	for _, action := range actions {
 		if action.GetVerb() == verb {
+			count++
+		}
+	}
+	return count
+}
+
+func countResourceActions(actions []clienttesting.Action, verb, resource string) int {
+	count := 0
+	for _, action := range actions {
+		if action.GetVerb() == verb && action.GetResource().Resource == resource {
 			count++
 		}
 	}

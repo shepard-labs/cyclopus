@@ -304,6 +304,7 @@ type AcceptReleaseParams struct {
 	TriggeredByUserID                        *string
 	ConfigSnapshot                           json.RawMessage
 	ConfigHash                               string
+	InheritCurrentEnv                        bool
 	RollbackTargetID                         *string
 	Idempotency                              CompleteIdempotencyParams
 	Audit                                    *AuditEvent
@@ -313,13 +314,77 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 	var lease DeployLease
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		imageRef, snapshot, hash := p.ImageRef, p.ConfigSnapshot, p.ConfigHash
+		var envVarRevisionID *string
+		if p.InheritCurrentEnv {
+			var environmentLocked bool
+			if err := tx.QueryRow(ctx, `
+				SELECT true
+				FROM environments environment
+				JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+				JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
+				JOIN orgs org ON org.id=environment.org_id
+				WHERE environment.org_id=$1 AND environment.id=$2
+				  AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL
+				  AND app.deleted_at IS NULL AND project.deleted_at IS NULL AND org.deleted_at IS NULL
+				FOR UPDATE OF environment`, p.OrgID, p.EnvironmentID).Scan(&environmentLocked); err == pgx.ErrNoRows {
+				return ErrConflict
+			} else if err != nil {
+				return fmt.Errorf("lock deploy env inheritance basis: %w", err)
+			}
+			var currentRevisionID *string
+			var liveSnapshot json.RawMessage
+			var liveRevisionID *string
+			if err := tx.QueryRow(ctx, `
+				SELECT environment.current_env_var_revision_id::text,
+				  live.config_snapshot, live.env_var_revision_id::text
+				FROM environments environment
+				LEFT JOIN LATERAL (
+				  SELECT release.config_snapshot, release.env_var_revision_id
+				  FROM releases release
+				  WHERE release.org_id=environment.org_id AND release.environment_id=environment.id
+				    AND release.status='live'
+				  ORDER BY release.created_at DESC,release.id DESC LIMIT 1
+				) live ON true
+				WHERE environment.org_id=$1 AND environment.id=$2`, p.OrgID, p.EnvironmentID).Scan(
+				&currentRevisionID, &liveSnapshot, &liveRevisionID); err == pgx.ErrNoRows {
+				return fmt.Errorf("%w: locked environment disappeared", ErrConflict)
+			} else if err != nil {
+				return fmt.Errorf("read deploy env inheritance basis: %w", err)
+			}
+			if currentRevisionID != nil {
+				if liveRevisionID == nil || *liveRevisionID != *currentRevisionID || len(liveSnapshot) == 0 {
+					return fmt.Errorf("%w: current env-var revision has no matching live snapshot", ErrConflict)
+				}
+				accepted, err := DecodeReleaseSnapshot(snapshot)
+				if err != nil {
+					return fmt.Errorf("decode accepted deploy snapshot: %w", err)
+				}
+				live, err := DecodeReleaseSnapshot(liveSnapshot)
+				if err != nil {
+					return fmt.Errorf("decode live env inheritance snapshot: %w", err)
+				}
+				if live.EnvVarRevision == nil || live.EnvVarRevision.ID != *currentRevisionID || live.DesiredState.Secret == nil {
+					return fmt.Errorf("%w: live snapshot does not contain authoritative env-var revision", ErrConflict)
+				}
+				accepted.EnvVarRevision = live.EnvVarRevision
+				accepted.DesiredState.Secret = live.DesiredState.Secret
+				accepted.DesiredState.Deployment.Container.EnvFromSecrets = append([]string(nil), live.DesiredState.Deployment.Container.EnvFromSecrets...)
+				accepted.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"] = live.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"]
+				accepted.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = live.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"]
+				snapshot, hash, err = EncodeReleaseSnapshot(accepted)
+				if err != nil {
+					return fmt.Errorf("encode inherited deploy snapshot: %w", err)
+				}
+				envVarRevisionID = currentRevisionID
+			}
+		}
 		if p.RollbackTargetID != nil {
-			err := tx.QueryRow(ctx, `SELECT target.image_ref,target.config_snapshot,target.config_hash FROM (SELECT release.*,row_number() OVER(ORDER BY release.created_at DESC,release.id DESC) retention_rank FROM releases release WHERE release.org_id=$1 AND release.environment_id=$2) target JOIN environments environment ON environment.org_id=target.org_id AND environment.id=target.environment_id JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id WHERE target.id=$3 AND target.status IN ('live','superseded') AND target.retention_rank<=app.release_retention_count`, p.OrgID, p.EnvironmentID, *p.RollbackTargetID).Scan(&imageRef, &snapshot, &hash)
+			err := tx.QueryRow(ctx, `SELECT target.image_ref,target.config_snapshot,target.config_hash,target.env_var_revision_id::text FROM (SELECT release.*,row_number() OVER(ORDER BY release.created_at DESC,release.id DESC) retention_rank FROM releases release WHERE release.org_id=$1 AND release.environment_id=$2) target JOIN environments environment ON environment.org_id=target.org_id AND environment.id=target.environment_id JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id WHERE target.id=$3 AND target.status IN ('live','superseded') AND target.retention_rank<=app.release_retention_count`, p.OrgID, p.EnvironmentID, *p.RollbackTargetID).Scan(&imageRef, &snapshot, &hash, &envVarRevisionID)
 			if err != nil {
 				return mapMutationError("select rollback target", err)
 			}
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,git_commit_sha,triggered_by_user_id,kind,config_snapshot,config_hash,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')`, p.ID, p.OrgID, p.EnvironmentID, imageRef, p.GitCommitSHA, p.TriggeredByUserID, p.Kind, snapshot, hash)
+		_, err := tx.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,git_commit_sha,triggered_by_user_id,kind,env_var_revision_id,config_snapshot,config_hash,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')`, p.ID, p.OrgID, p.EnvironmentID, imageRef, p.GitCommitSHA, p.TriggeredByUserID, p.Kind, envVarRevisionID, snapshot, hash)
 		if err != nil {
 			return mapMutationError("insert accepted release", err)
 		}

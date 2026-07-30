@@ -273,6 +273,8 @@ func TestDeployLeaseRequiresDedicatedFencedRecoveryIntegration(t *testing.T) {
 	if err := store.SetPendingCommitSHA(ctx, recovery, commitSHA('b')); err != nil {
 		t.Fatal(err)
 	}
+	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000024", commitSHA('1'), "expired-finalize-route")
 	result, err := store.FinalizeReleaseFailed(ctx, FailReleaseParams{
 		Lease: recovery, FailureReason: "orphaned deploy",
 		Audit: testAudit("00000000-0000-0000-0000-000000000023", "deploy.lease_swept", releaseOneID),
@@ -328,6 +330,136 @@ func TestExpiredDeployRecoveryReturnsCompleteAtomicContractIntegration(t *testin
 	}
 	if !persistedFence.Equal(recovery.Fence) {
 		t.Fatalf("persisted recovery fence = %v, returned %v", persistedFence, recovery.Fence)
+	}
+}
+
+func TestDeployClaimPendingAndCrashResumeReturnImmutableExecutionContractIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+	previousSnapshot := testReleaseSnapshot("ghcr.io/acme/test@sha256:" + strings.Repeat("a", 64))
+	currentSnapshot := testReleaseSnapshot("ghcr.io/acme/test@sha256:" + strings.Repeat("b", 64))
+	seedReleaseSnapshot(t, pool, orgOneID, environmentOneID, releaseOneID, "live", commitSHA('1'), previousSnapshot)
+	seedReleaseSnapshot(t, pool, orgOneID, environmentOneID, releaseTwoID, "pending", commitSHA('2'), currentSnapshot)
+	if _, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseTwoID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := dataStore.ClaimPendingDeploy(ctx, orgOneID, nil)
+	if err != nil || claimed.Namespace != "app-one-production" || claimed.PlannedHostname != "planned-one.example.test" || claimed.Timeout != time.Second || claimed.FailedRelease.ID != releaseTwoID || claimed.PreviousRelease == nil || claimed.PreviousRelease.ID != releaseOneID {
+		t.Fatalf("ClaimPendingDeploy() = %+v, %v", claimed, err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM releases WHERE id=$1`, releaseTwoID).Scan(&status); err != nil || status != "deploying" {
+		t.Fatalf("release status = %q, %v", status, err)
+	}
+	resumed, err := dataStore.ClaimUnexpiredDeploying(ctx, orgOneID, nil)
+	if err != nil || !resumed.Fence.After(claimed.Fence) || resumed.FailedRelease.ConfigHash != claimed.FailedRelease.ConfigHash {
+		t.Fatalf("ClaimUnexpiredDeploying() = %+v, %v", resumed, err)
+	}
+	if _, err := dataStore.RenewDeployLease(ctx, claimed); !errors.Is(err, ErrLeaseNotOwned) {
+		t.Fatalf("stale forward fence renewed: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE environments SET lock_acquired_at=now()-interval '2 seconds' WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.ClaimUnexpiredDeploying(ctx, orgOneID, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired deploying work was forward claimed: %v", err)
+	}
+}
+
+func TestDeployClaimExclusionsTreatNilAsEmptyAndHonorNonEmptyIntegration(t *testing.T) {
+	t.Run("nil exclusion claims candidate", func(t *testing.T) {
+		dataStore, pool := newIntegrationStore(t)
+		seedTenant(t, pool, tenantOne())
+		seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "pending")
+		if _, err := dataStore.AcquireDeployLease(t.Context(), orgOneID, environmentOneID, releaseOneID); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := dataStore.ClaimPendingDeploy(t.Context(), orgOneID, nil)
+		if err != nil || claimed.EnvironmentID != environmentOneID {
+			t.Fatalf("ClaimPendingDeploy(nil) = %+v, %v", claimed, err)
+		}
+	})
+	t.Run("non-empty exclusion skips candidate", func(t *testing.T) {
+		dataStore, pool := newIntegrationStore(t)
+		seedTenant(t, pool, tenantOne())
+		seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "pending")
+		if _, err := dataStore.AcquireDeployLease(t.Context(), orgOneID, environmentOneID, releaseOneID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := dataStore.ClaimPendingDeploy(t.Context(), orgOneID, []string{environmentOneID}); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("ClaimPendingDeploy(excluded) error = %v, want ErrNotFound", err)
+		}
+		var status string
+		if err := pool.QueryRow(t.Context(), `SELECT status FROM releases WHERE id=$1`, releaseOneID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "pending" {
+			t.Fatalf("excluded release status = %q, want pending", status)
+		}
+	})
+}
+
+func TestDeployLeaseConcurrentPendingClaimsUseSkipLockedIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "pending")
+	if _, err := dataStore.AcquireDeployLease(t.Context(), orgOneID, environmentOneID, releaseOneID); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	start := make(chan struct{})
+	for range 2 {
+		go func() {
+			<-start
+			_, err := dataStore.ClaimPendingDeploy(context.Background(), orgOneID, nil)
+			results <- err
+		}()
+	}
+	close(start)
+	claimed, notFound := 0, 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			claimed++
+		} else if errors.Is(err, ErrNotFound) {
+			notFound++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if claimed != 1 || notFound != 1 {
+		t.Fatalf("concurrent claims = claimed:%d not-found:%d", claimed, notFound)
+	}
+}
+
+func TestDeployClaimSnapshotValidationFailureRollsBackFenceAndStatusIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "pending")
+	lease, err := dataStore.AcquireDeployLease(t.Context(), orgOneID, environmentOneID, releaseOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `ALTER TABLE releases DISABLE TRIGGER releases_snapshot_valid`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `ALTER TABLE releases DISABLE TRIGGER releases_snapshot_immutable`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE releases SET config_snapshot='{"version":2,"desired_state":{}}' WHERE id=$1`, releaseOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.ClaimPendingDeploy(t.Context(), orgOneID, nil); err == nil {
+		t.Fatal("invalid snapshot claim succeeded")
+	}
+	var status string
+	var fence time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT release.status,environment.lock_acquired_at FROM releases release JOIN environments environment ON environment.in_progress_release_id=release.id WHERE release.id=$1`, releaseOneID).Scan(&status, &fence); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" || !fence.Equal(lease.Fence) {
+		t.Fatalf("claim rollback status=%s fence=%v want=%v", status, fence, lease.Fence)
 	}
 }
 
@@ -407,6 +539,8 @@ func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t 
 	if err := store.SetPendingCommitSHA(context.Background(), lease, commitSHA('c')); err != nil {
 		t.Fatal(err)
 	}
+	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000032", commitSHA('1'), "live-finalize-route")
 	result, err := store.FinalizeReleaseLive(context.Background(), FinalizeReleaseParams{
 		Lease: lease, Hostname: "new.example.test",
 		Audit: testAudit("00000000-0000-0000-0000-000000000031", "deploy.succeeded", releaseTwoID),
@@ -432,6 +566,96 @@ func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t 
 			oldStatus, newStatus, aliasRelease, hostname, leaseOwner, pending)
 	}
 	assertCount(t, pool, "audit_events", 1)
+}
+
+func TestFinalizeReleaseLivePromotesPendingSHAAtomicallyIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	ctx := context.Background()
+	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000072", commitSHA('1'), "live-route")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET status='completed' WHERE environment_id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('2')); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test",
+		Audit: testAudit("00000000-0000-0000-0000-000000000074", "deploy.succeeded", releaseOneID)}); err != nil {
+		t.Fatal(err)
+	}
+	var status, commit string
+	if err := pool.QueryRow(ctx, `SELECT status,commit_sha FROM orchestration_jobs WHERE environment_id=$1 AND status='queued'`, environmentOneID).Scan(&status, &commit); err != nil || commit != commitSHA('2') {
+		t.Fatalf("promotion=%s/%s %v", status, commit, err)
+	}
+}
+
+func TestFinalizeReleaseFailedPromotesPendingSHAAndRejectsStaleFenceIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	ctx := context.Background()
+	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000073", commitSHA('1'), "failed-route")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET status='completed' WHERE environment_id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := lease
+	lease, err = dataStore.RenewDeployLease(ctx, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.FinalizeReleaseFailed(ctx, FailReleaseParams{Lease: stale, FailureReason: "stale",
+		Audit: testAudit("00000000-0000-0000-0000-000000000075", "deploy.failed", releaseOneID)}); !errors.Is(err, ErrLeaseNotOwned) {
+		t.Fatalf("stale finalization error=%v", err)
+	}
+	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('3')); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.FinalizeReleaseFailed(ctx, FailReleaseParams{Lease: lease, FailureReason: "terminal",
+		Audit: testAudit("00000000-0000-0000-0000-000000000076", "deploy.failed", releaseOneID)}); err != nil {
+		t.Fatal(err)
+	}
+	var releaseStatus, commit string
+	if err := pool.QueryRow(ctx, `SELECT release.status,job.commit_sha FROM releases release JOIN orchestration_jobs job ON job.environment_id=release.environment_id AND job.status='queued' WHERE release.id=$1`, releaseOneID).Scan(&releaseStatus, &commit); err != nil || releaseStatus != "failed" || commit != commitSHA('3') {
+		t.Fatalf("failed promotion=%s/%s %v", releaseStatus, commit, err)
+	}
+}
+
+func TestFinalizeReleasePromotionFailureRollsBackReleaseAliasAndLeaseIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	ctx := context.Background()
+	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('4')); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("promotion failure=%v", err)
+	}
+	var status, owner, pending string
+	var aliases int
+	if err := pool.QueryRow(ctx, `SELECT release.status,environment.in_progress_release_id::text,environment.pending_commit_sha,(SELECT count(*) FROM aliases WHERE environment_id=$2) FROM releases release JOIN environments environment ON environment.id=release.environment_id WHERE release.id=$1`, releaseOneID, environmentOneID).Scan(&status, &owner, &pending, &aliases); err != nil {
+		t.Fatal(err)
+	}
+	if status != "deploying" || owner != releaseOneID || pending != commitSHA('4') || aliases != 0 {
+		t.Fatalf("rollback=%s/%s/%s aliases=%d", status, owner, pending, aliases)
+	}
 }
 
 func TestFinalizeReleaseAuditFailureRollsBackEverythingIntegration(t *testing.T) {
@@ -1391,6 +1615,157 @@ func TestTenantScopedResourceQueriesAndAcceptedDeployIntegration(t *testing.T) {
 	}
 }
 
+func TestAcceptDeployInheritsCurrentEnvRevisionAtomicallyIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := t.Context()
+	revisionID := "00000000-0000-0000-0000-0000000000a1"
+	liveReleaseID := "00000000-0000-0000-0000-0000000000a2"
+	deployReleaseID := "00000000-0000-0000-0000-0000000000a3"
+	variables := []ReleaseEnvironment{{Key: "DATABASE_URL", SecretRef: "k8s-secret://app-one-production/runtime#DATABASE_URL", IsSecret: true}}
+	liveEnvelope, err := DecodeReleaseSnapshot(testReleaseSnapshot("ghcr.io/acme/test@sha256:" + strings.Repeat("a", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveEnvelope.EnvVarRevision = &EnvVarRevision{Version: 1, ID: revisionID, Revision: 1, Hash: ComputeEnvVarRevisionHash(variables), Variables: variables}
+	destinationName := EnvDestinationSecretName(liveEnvelope.DesiredState.Deployment.Identity.Name, revisionID)
+	liveEnvelope.DesiredState.Secret = &SecretIntent{Version: 1, Identity: ObjectIdentity{Name: destinationName, Namespace: "app-one-production", Labels: liveEnvelope.DesiredState.Deployment.Identity.Labels}, Immutable: true, Entries: []SecretEntryIntent{{Key: variables[0].Key, SecretRef: variables[0].SecretRef}}}
+	liveEnvelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{destinationName}
+	liveEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"] = revisionID
+	liveEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = liveEnvelope.EnvVarRevision.Hash
+	liveSnapshot, liveHash, err := EncodeReleaseSnapshot(liveEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO env_var_revisions(id,org_id,environment_id,revision) VALUES($1,$2,$3,1)`, revisionID, orgOneID, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO env_var_revision_entries(org_id,environment_id,env_var_revision_id,key,secret_ref,is_secret) VALUES($1,$2,$3,$4,$5,true)`, orgOneID, environmentOneID, revisionID, variables[0].Key, variables[0].SecretRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,kind,env_var_revision_id,config_snapshot,config_hash,status) VALUES($1,$2,$3,$4,'env_change',$5,$6,$7,'live')`, liveReleaseID, orgOneID, environmentOneID, liveEnvelope.DesiredState.Deployment.Container.Image, revisionID, liveSnapshot, liveHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE environments SET current_env_var_revision_id=$2 WHERE id=$1`, environmentOneID, revisionID); err != nil {
+		t.Fatal(err)
+	}
+
+	newEnvelope, err := DecodeReleaseSnapshot(testReleaseSnapshot("ghcr.io/acme/test@sha256:" + strings.Repeat("c", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newEnvelope.DesiredState.Deployment.Container.Port = 9090
+	newEnvelope.DesiredState.Service.TargetPort = 9090
+	newEnvelope.DesiredState.Deployment.Container.ReadinessProbe.Port = 9090
+	newSnapshot, newHash, err := EncodeReleaseSnapshot(newEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := IdempotencyClaimParams{OrgID: orgOneID, Scope: "deploy.accept", Key: "inherit-env", RequestHash: requestHash("inherit-env"), Owner: "user", LeaseDuration: time.Minute, Retention: time.Hour}
+	if _, err := dataStore.ClaimIdempotency(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := dataStore.AcceptRelease(ctx, AcceptReleaseParams{ID: deployReleaseID, OrgID: orgOneID, EnvironmentID: environmentOneID, ImageRef: newEnvelope.DesiredState.Deployment.Container.Image, Kind: "deploy", ConfigSnapshot: newSnapshot, ConfigHash: newHash, InheritCurrentEnv: true, Idempotency: CompleteIdempotencyParams{Scope: claim.Scope, Key: claim.Key, RequestHash: claim.RequestHash, Owner: claim.Owner, Status: "completed", StatusCode: 202, Body: json.RawMessage(`{"status":"queued"}`)}, Audit: testAudit("00000000-0000-0000-0000-0000000000a4", "ignored", deployReleaseID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := dataStore.GetRelease(ctx, orgOneID, deployReleaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptedEnvelope, err := DecodeReleaseSnapshot(accepted.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.EnvVarRevisionID == nil || *accepted.EnvVarRevisionID != revisionID || acceptedEnvelope.EnvVarRevision == nil || acceptedEnvelope.EnvVarRevision.ID != revisionID || acceptedEnvelope.DesiredState.Secret == nil || acceptedEnvelope.DesiredState.Secret.Identity.Name != destinationName || !reflect.DeepEqual(acceptedEnvelope.DesiredState.Deployment.Container.EnvFromSecrets, []string{destinationName}) || acceptedEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"] != revisionID || acceptedEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] != liveEnvelope.EnvVarRevision.Hash {
+		t.Fatalf("accepted deploy did not inherit env state: release=%+v envelope=%+v", accepted, acceptedEnvelope)
+	}
+	if acceptedEnvelope.DesiredState.Deployment.Container.Image != newEnvelope.DesiredState.Deployment.Container.Image || acceptedEnvelope.DesiredState.Service.TargetPort != 9090 || acceptedEnvelope.DesiredState.Deployment.Container.Port != 9090 {
+		t.Fatalf("accepted deploy lost new mutable basis: %+v", acceptedEnvelope.DesiredState)
+	}
+	seedCompletedOrchestrationRoute(t, dataStore, pool, orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-0000000000a5", commitSHA('a'), "inherit-finalize-route")
+	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test", Audit: testAudit("00000000-0000-0000-0000-0000000000a6", "ignored", deployReleaseID)}); err != nil {
+		t.Fatal(err)
+	}
+	var currentRevision string
+	if err := pool.QueryRow(ctx, `SELECT current_env_var_revision_id::text FROM environments WHERE id=$1`, environmentOneID).Scan(&currentRevision); err != nil {
+		t.Fatal(err)
+	}
+	if currentRevision != revisionID {
+		t.Fatalf("current revision=%s want=%s", currentRevision, revisionID)
+	}
+}
+
+func TestAcceptDeployEnvInheritanceSerializesAgainstRevisionChangeIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := t.Context()
+	baseRevision := "00000000-0000-0000-0000-0000000000b1"
+	newRevision := "00000000-0000-0000-0000-0000000000b2"
+	liveID := "00000000-0000-0000-0000-0000000000b3"
+	deployID := "00000000-0000-0000-0000-0000000000b4"
+	seedLiveEnvRevision(t, pool, baseRevision, liveID, "ONE")
+	claim := IdempotencyClaimParams{OrgID: orgOneID, Scope: "deploy.accept", Key: "serialized-env", RequestHash: requestHash("serialized-env"), Owner: "user", LeaseDuration: time.Minute, Retention: time.Hour}
+	if _, err := dataStore.ClaimIdempotency(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	basis := testReleaseSnapshot("ghcr.io/acme/test@sha256:" + strings.Repeat("d", 64))
+	_, basisHash, err := EncodeReleaseSnapshot(mustDecodeSnapshot(t, basis))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(ctx, `SELECT id FROM environments WHERE id=$1 FOR UPDATE`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := dataStore.AcceptRelease(context.Background(), AcceptReleaseParams{ID: deployID, OrgID: orgOneID, EnvironmentID: environmentOneID, ImageRef: "ghcr.io/acme/test@sha256:" + strings.Repeat("d", 64), Kind: "deploy", ConfigSnapshot: basis, ConfigHash: basisHash, InheritCurrentEnv: true, Idempotency: CompleteIdempotencyParams{Scope: claim.Scope, Key: claim.Key, RequestHash: claim.RequestHash, Owner: claim.Owner, Status: "completed", StatusCode: 202, Body: json.RawMessage(`{"status":"queued"}`)}, Audit: testAudit("00000000-0000-0000-0000-0000000000b5", "ignored", deployID)})
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("accept completed while environment lock held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	newSnapshot, newHash := envRevisionSnapshot(t, newRevision, "TWO")
+	if _, err := lockTx.Exec(ctx, `UPDATE releases SET status='superseded' WHERE id=$1`, liveID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(ctx, `INSERT INTO env_var_revisions(id,org_id,environment_id,revision) VALUES($1,$2,$3,2)`, newRevision, orgOneID, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(ctx, `INSERT INTO env_var_revision_entries(org_id,environment_id,env_var_revision_id,key,secret_ref,is_secret) VALUES($1,$2,$3,'TOKEN',$4,true)`, orgOneID, environmentOneID, newRevision, "k8s-secret://app-one-production/runtime#TWO"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,kind,env_var_revision_id,config_snapshot,config_hash,status) VALUES('00000000-0000-0000-0000-0000000000b6',$1,$2,$3,'env_change',$4,$5,$6,'live')`, orgOneID, environmentOneID, "ghcr.io/acme/test@sha256:"+strings.Repeat("a", 64), newRevision, newSnapshot, newHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(ctx, `UPDATE environments SET current_env_var_revision_id=$2 WHERE id=$1`, environmentOneID, newRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := dataStore.GetRelease(ctx, orgOneID, deployID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := DecodeReleaseSnapshot(accepted.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.EnvVarRevisionID == nil || *accepted.EnvVarRevisionID != newRevision || envelope.EnvVarRevision == nil || envelope.EnvVarRevision.ID != newRevision || envelope.DesiredState.Secret.Identity.Name != EnvDestinationSecretName("app", newRevision) || envelope.EnvVarRevision.Variables[0].SecretRef != "k8s-secret://app-one-production/runtime#TWO" {
+		t.Fatalf("mixed inherited snapshot: release=%+v envelope=%+v", accepted, envelope)
+	}
+}
+
 func TestProjectAndAppCreateUpdateAreTenantScopedIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
@@ -1583,6 +1958,62 @@ func orchestrationParams(orgID, repositoryID, environmentID, id, sha, key string
 	return EnqueueOrchestrationParams{ID: id, OrgID: orgID, RepositoryID: repositoryID,
 		WorkflowID: "deploy.yml", GitRef: "refs/heads/main", EnvironmentID: environmentID,
 		CommitSHA: sha, IdempotencyKey: key}
+}
+
+func seedCompletedOrchestrationRoute(t *testing.T, dataStore *Store, pool *pgxpool.Pool,
+	orgID, repositoryID, environmentID, id, sha, key string) {
+	t.Helper()
+	if _, err := dataStore.EnqueueOrCoalesceOrchestration(t.Context(), orchestrationParams(
+		orgID, repositoryID, environmentID, id, sha, key)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE orchestration_jobs SET status='completed'
+		WHERE org_id=$1 AND environment_id=$2 AND id=$3`, orgID, environmentID, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustDecodeSnapshot(t *testing.T, snapshot json.RawMessage) ReleaseSnapshotEnvelope {
+	t.Helper()
+	envelope, err := DecodeReleaseSnapshot(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return envelope
+}
+
+func envRevisionSnapshot(t *testing.T, revisionID, sourceKey string) (json.RawMessage, string) {
+	t.Helper()
+	envelope := mustDecodeSnapshot(t, testReleaseSnapshot("ghcr.io/acme/test@sha256:"+strings.Repeat("a", 64)))
+	variables := []ReleaseEnvironment{{Key: "TOKEN", SecretRef: "k8s-secret://app-one-production/runtime#" + sourceKey, IsSecret: true}}
+	envelope.EnvVarRevision = &EnvVarRevision{Version: 1, ID: revisionID, Revision: 1, Hash: ComputeEnvVarRevisionHash(variables), Variables: variables}
+	name := EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, revisionID)
+	envelope.DesiredState.Secret = &SecretIntent{Version: 1, Identity: ObjectIdentity{Name: name, Namespace: "app-one-production", Labels: envelope.DesiredState.Deployment.Identity.Labels}, Immutable: true, Entries: []SecretEntryIntent{{Key: "TOKEN", SecretRef: variables[0].SecretRef}}}
+	envelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{name}
+	envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"] = revisionID
+	envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = envelope.EnvVarRevision.Hash
+	snapshot, hash, err := EncodeReleaseSnapshot(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot, hash
+}
+
+func seedLiveEnvRevision(t *testing.T, pool *pgxpool.Pool, revisionID, releaseID, sourceKey string) {
+	t.Helper()
+	snapshot, hash := envRevisionSnapshot(t, revisionID, sourceKey)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO env_var_revisions(id,org_id,environment_id,revision) VALUES($1,$2,$3,1)`, revisionID, orgOneID, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO env_var_revision_entries(org_id,environment_id,env_var_revision_id,key,secret_ref,is_secret) VALUES($1,$2,$3,'TOKEN',$4,true)`, orgOneID, environmentOneID, revisionID, "k8s-secret://app-one-production/runtime#"+sourceKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO releases(id,org_id,environment_id,image_ref,kind,env_var_revision_id,config_snapshot,config_hash,status) VALUES($1,$2,$3,$4,'env_change',$5,$6,$7,'live')`, releaseID, orgOneID, environmentOneID, "ghcr.io/acme/test@sha256:"+strings.Repeat("a", 64), revisionID, snapshot, hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET current_env_var_revision_id=$2 WHERE id=$1`, environmentOneID, revisionID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func prepareDispatchedRecoveryJob(t *testing.T, store *Store, pool *pgxpool.Pool, id, key string) OrchestrationJob {

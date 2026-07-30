@@ -4,7 +4,6 @@ package kubernetes
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +20,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -65,11 +65,17 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 		failedRevisionID   = "10000000-0000-0000-0000-000000000009"
 	)
 	seedK3sRecoveryScope(t, pool, orgID, projectID, appID, environmentID, repositoryID, namespace)
+	recoveryImage := os.Getenv("CYCLOPUS_DEPLOY_TEST_IMAGE")
+	if recoveryImage == "" {
+		t.Fatal("CYCLOPUS_DEPLOY_TEST_IMAGE is required for live recovery readiness")
+	}
 
 	immutable := true
-	secretName := "runtime-r1"
+	sourceSecretName := "runtime-source-r1"
+	secretName := store.EnvDestinationSecretName("app", previousRevisionID)
+	previousSecretData := map[string][]byte{"DATABASE_URL": []byte("postgres://previous")}
 	previousSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: namespace}, Immutable: &immutable,
-		Data: map[string][]byte{"DATABASE_URL": []byte("postgres://previous")}}
+		Data: previousSecretData}
 	replicas := int32(1)
 	previous := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -79,13 +85,17 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 		Spec: appsv1.DeploymentSpec{Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "recovery-worker"}},
 			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "recovery-worker"}},
-				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "registry.k8s.io/pause:3.10",
-					EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}}}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: recoveryImage,
+					Ports:          []corev1.ContainerPort{{Name: "http", ContainerPort: 80}},
+					ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/", Port: intstr.FromString("http")}}},
+					EnvFrom:        []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}}}},
 				}}}},
 		},
 	}
-	previousEnvelope, previousSnapshot, previousHash := k3sEnvReleaseSnapshot(t, previous, previousRevisionID, namespace, secretName)
-	previousSecret.Annotations = map[string]string{EnvRevisionAnnotation: previousRevisionID, ConfigHashAnnotation: previousHash}
+	previousEnvelope, previousSnapshot, previousHash := k3sEnvReleaseSnapshot(t, previous, previousRevisionID, namespace, sourceSecretName)
+	previousSecret.Labels = map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: environmentID}
+	previousSecret.Annotations = map[string]string{EnvRevisionAnnotation: previousRevisionID, ConfigHashAnnotation: "legacy-config",
+		ReleaseAnnotation: "legacy-release", SecretContentHashAnnotation: ComputeSecretDataHash(previousSecretData)}
 	if _, err := client.CoreV1().Secrets(namespace).Create(ctx, previousSecret, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create previous Secret revision: %v", err)
 	}
@@ -99,16 +109,20 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 
 	failed := previous.DeepCopy()
 	failed.Spec.Template.Spec.Containers[0].Image = "registry.invalid/cyclopus/recovery:not-found"
-	failed.Spec.Template.Spec.Containers[0].EnvFrom[0].SecretRef.Name = "runtime-r2"
+	failedSecretName := store.EnvDestinationSecretName("app", failedRevisionID)
+	failed.Spec.Template.Spec.Containers[0].EnvFrom[0].SecretRef.Name = failedSecretName
 	failed.Annotations[ReleaseAnnotation] = failedID
 	failed.Spec.Template.Annotations[ReleaseAnnotation] = failedID
 	failedEnvelope := previousEnvelope
 	failedEnvelope.EnvVarRevision = &store.EnvVarRevision{Version: store.EnvVarRevisionVersion, ID: failedRevisionID, Revision: 2, Variables: []store.ReleaseEnvironment{{
-		Key: "DATABASE_URL", SecretRef: "k8s-secret://" + namespace + "/runtime-r2#DATABASE_URL", IsSecret: true,
+		Key: "DATABASE_URL", SecretRef: "k8s-secret://" + namespace + "/runtime-source-r2#DATABASE_URL", IsSecret: true,
 	}}}
 	failedEnvelope.EnvVarRevision.Hash = store.ComputeEnvVarRevisionHash(failedEnvelope.EnvVarRevision.Variables)
 	failedEnvelope.DesiredState.Deployment.Container.Image = failed.Spec.Template.Spec.Containers[0].Image
-	failedEnvelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{"runtime-r2"}
+	failedEnvelope.DesiredState.Secret = &store.SecretIntent{Version: 1, Identity: store.ObjectIdentity{
+		Name: failedSecretName, Namespace: namespace, Labels: failedEnvelope.DesiredState.Deployment.Identity.Labels,
+	}, Immutable: true, Entries: []store.SecretEntryIntent{{Key: "DATABASE_URL", SecretRef: failedEnvelope.EnvVarRevision.Variables[0].SecretRef}}}
+	failedEnvelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{failedSecretName}
 	failedEnvelope.DesiredState.Deployment.PodAnnotations[EnvRevisionAnnotation] = failedRevisionID
 	failedEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = failedEnvelope.EnvVarRevision.Hash
 	failedSnapshot, failedHash, err := store.EncodeReleaseSnapshot(failedEnvelope)
@@ -117,9 +131,12 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 	}
 	failed.Annotations[ConfigHashAnnotation] = failedHash
 	failed.Spec.Template.Annotations[ConfigHashAnnotation] = failedHash
-	failedSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "runtime-r2", Namespace: namespace, Annotations: map[string]string{
-		EnvRevisionAnnotation: failedRevisionID, ConfigHashAnnotation: failedHash,
-	}}, Immutable: &immutable, Data: map[string][]byte{"DATABASE_URL": []byte("postgres://failed")}}
+	failedSecretData := map[string][]byte{"DATABASE_URL": []byte("postgres://failed")}
+	failedSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: failedSecretName, Namespace: namespace,
+		Labels: map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: environmentID}, Annotations: map[string]string{
+			EnvRevisionAnnotation: failedRevisionID, ConfigHashAnnotation: failedHash, ReleaseAnnotation: failedID,
+			SecretContentHashAnnotation: ComputeSecretDataHash(failedSecretData),
+		}}, Immutable: &immutable, Data: failedSecretData}
 	if _, err := client.CoreV1().Secrets(namespace).Create(ctx, failedSecret, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create failed Secret revision: %v", err)
 	}
@@ -140,7 +157,10 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 	if err := dataStore.SetPendingCommitSHA(ctx, lease, fmt.Sprintf("%040d", 2)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE environments SET lock_acquired_at = now() - interval '3 seconds'
+	if _, err := pool.Exec(ctx, `UPDATE apps SET deploy_timeout_seconds = 30 WHERE id = $1`, appID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE environments SET lock_acquired_at = now() - interval '31 seconds'
 		WHERE id = $1`, environmentID); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +169,7 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := worker.New(worker.Config{ScanInterval: time.Second, LeaseDuration: time.Minute, RequestTimeout: time.Second, Owner: "k3s-worker"},
+	runner := worker.New(worker.Config{ScanInterval: time.Second, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "k3s-worker"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), dataStore, worker.RecoveryAdapters{
 			Capabilities: worker.RecoveryCapabilities{Kubernetes: true}, Kubernetes: adapter, KubernetesErrorDisposition: RecoveryErrorDisposition,
 		})
@@ -157,23 +177,54 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 		t.Fatalf("worker startup recovery: %v", err)
 	}
 	recovered := waitForK3sDeploymentReady(t, ctx, client, namespace, "app")
-	if recovered.Spec.Template.Spec.Containers[0].Image != "registry.k8s.io/pause:3.10" ||
+	if recovered.Spec.Template.Spec.Containers[0].Image != recoveryImage ||
 		recovered.Annotations[ReleaseAnnotation] != previousID || recovered.Annotations[ConfigHashAnnotation] != previousHash {
 		t.Fatalf("recovered deployment identity = image:%s annotations:%v", recovered.Spec.Template.Spec.Containers[0].Image, recovered.Annotations)
 	}
-	var releaseStatus, auditAction, queuedStatus, queuedCommit, currentRevision string
-	var inProgress *string
-	if err := pool.QueryRow(ctx, `SELECT failed.status, audit.action, environment.in_progress_release_id::text,
-		job.status, job.commit_sha, environment.current_env_var_revision_id::text FROM releases failed
-		JOIN environments environment ON environment.id = failed.environment_id
-		JOIN audit_events audit ON audit.target_id = failed.id
-		JOIN orchestration_jobs job ON job.environment_id = environment.id AND job.status = 'queued'
-		WHERE failed.id = $1`, failedID).Scan(&releaseStatus, &auditAction, &inProgress, &queuedStatus, &queuedCommit, &currentRevision); err != nil {
-		t.Fatal(err)
+	service, err := client.CoreV1().Services(namespace).Get(ctx, "app", metav1.GetOptions{})
+	if err != nil || service.Spec.Ports[0].TargetPort.StrVal != "http" || recovered.Spec.Template.Spec.Containers[0].Ports[0].Name != "http" {
+		t.Fatalf("recovered named port contract service=%+v deployment=%+v err=%v", service, recovered.Spec.Template.Spec.Containers[0].Ports, err)
 	}
-	if releaseStatus != "failed" || auditAction != "release.recovery_finalized_failed" || inProgress != nil ||
-		queuedStatus != "queued" || queuedCommit != fmt.Sprintf("%040d", 2) || currentRevision != previousRevisionID {
-		t.Fatalf("persisted recovery = release:%s audit:%s lease:%v queued:%s/%s revision:%s", releaseStatus, auditAction, inProgress, queuedStatus, queuedCommit, currentRevision)
+	if _, err := client.NetworkingV1().Ingresses(namespace).Get(ctx, "app", metav1.GetOptions{}); err != nil {
+		t.Fatalf("recovered Ingress missing: %v", err)
+	}
+	var releaseStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM releases WHERE id=$1`, failedID).Scan(&releaseStatus); err != nil {
+		t.Fatalf("read failed release status: %v", err)
+	}
+	if releaseStatus != "failed" {
+		var checkpoint, quarantineCode, quarantineMessage string
+		var fence *time.Time
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(deploy_recovery_checkpoint,''),
+			COALESCE(deploy_recovery_error_code,''),COALESCE(deploy_recovery_error_message,''),
+			lock_acquired_at FROM environments WHERE id=$1`, environmentID).Scan(
+			&checkpoint, &quarantineCode, &quarantineMessage, &fence); err != nil {
+			t.Fatalf("failed release status=%q; read recovery diagnostics: %v", releaseStatus, err)
+		}
+		t.Fatalf("failed release status=%q checkpoint=%q quarantine=%q message=%q fence=%v",
+			releaseStatus, checkpoint, quarantineCode, quarantineMessage, fence)
+	}
+	var auditAction string
+	if err := pool.QueryRow(ctx, `SELECT action FROM audit_events WHERE target_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1`, failedID).Scan(&auditAction); err != nil {
+		t.Fatalf("read recovery audit: %v", err)
+	}
+	if auditAction != "release.recovery_finalized_failed" {
+		t.Fatalf("recovery audit action=%q", auditAction)
+	}
+	var currentRevision string
+	var inProgress *string
+	if err := pool.QueryRow(ctx, `SELECT in_progress_release_id::text,current_env_var_revision_id::text FROM environments WHERE id=$1`, environmentID).Scan(&inProgress, &currentRevision); err != nil {
+		t.Fatalf("read recovered environment state: %v", err)
+	}
+	if inProgress != nil || currentRevision != previousRevisionID {
+		t.Fatalf("recovered environment lease=%v revision=%s", inProgress, currentRevision)
+	}
+	var queuedStatus, queuedCommit string
+	if err := pool.QueryRow(ctx, `SELECT status,commit_sha FROM orchestration_jobs WHERE environment_id=$1 AND status='queued' ORDER BY created_at DESC,id DESC LIMIT 1`, environmentID).Scan(&queuedStatus, &queuedCommit); err != nil {
+		t.Fatalf("read promoted queued orchestration job: %v", err)
+	}
+	if queuedStatus != "queued" || queuedCommit != fmt.Sprintf("%040d", 2) {
+		t.Fatalf("promoted orchestration=%s/%s", queuedStatus, queuedCommit)
 	}
 }
 
@@ -227,7 +278,7 @@ func TestRecoveryWorkerUsesRenewedFenceForErrorPersistence(t *testing.T) {
 				t.Fatal(err)
 			}
 			adapter := &renewingFailureAdapter{store: dataStore, err: test.err}
-			runner := worker.New(worker.Config{ScanInterval: time.Second, LeaseDuration: time.Minute, RequestTimeout: time.Second, Owner: "fence-worker"},
+			runner := worker.New(worker.Config{ScanInterval: time.Second, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "fence-worker"},
 				slog.New(slog.NewTextHandler(io.Discard, nil)), dataStore, worker.RecoveryAdapters{
 					Capabilities: worker.RecoveryCapabilities{Kubernetes: true}, Kubernetes: adapter,
 					KubernetesErrorDisposition: func(error) (bool, time.Duration, string) { return test.retryable, 5 * time.Second, test.code },
@@ -260,6 +311,10 @@ type renewingFailureAdapter struct {
 	renewed store.DeployLease
 }
 
+func (a *renewingFailureAdapter) ExecuteDeploy(_ context.Context, execution store.DeployExecution) (store.DeployRecoveryResult, error) {
+	return store.DeployRecoveryResult{Lease: execution}, nil
+}
+
 func (a *renewingFailureAdapter) RecoverExpiredDeploy(ctx context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
 	renewed, err := a.store.RenewDeployLease(ctx, lease)
 	if err != nil {
@@ -283,6 +338,11 @@ func k3sEnvReleaseSnapshot(t *testing.T, deployment *appsv1.Deployment, revision
 		Key: "DATABASE_URL", SecretRef: "k8s-secret://" + namespace + "/" + secretName + "#DATABASE_URL", IsSecret: true,
 	}}}
 	envelope.EnvVarRevision.Hash = store.ComputeEnvVarRevisionHash(envelope.EnvVarRevision.Variables)
+	destinationName := store.EnvDestinationSecretName(deployment.Name, revisionID)
+	envelope.DesiredState.Secret = &store.SecretIntent{Version: 1, Identity: store.ObjectIdentity{
+		Name: destinationName, Namespace: namespace, Labels: envelope.DesiredState.Deployment.Identity.Labels,
+	}, Immutable: true, Entries: []store.SecretEntryIntent{{Key: "DATABASE_URL", SecretRef: envelope.EnvVarRevision.Variables[0].SecretRef}}}
+	envelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{destinationName}
 	envelope.DesiredState.Deployment.PodAnnotations[EnvRevisionAnnotation] = revisionID
 	envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = envelope.EnvVarRevision.Hash
 	snapshot, hash, err := store.EncodeReleaseSnapshot(envelope)
@@ -373,8 +433,8 @@ func seedK3sRecoveryReleases(t *testing.T, pool *pgxpool.Pool, orgID, environmen
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO env_var_revision_entries (org_id, environment_id, env_var_revision_id, key, secret_ref)
-		VALUES ($1, $2, $3, 'DATABASE_URL', 'k8s-secret://' || (SELECT namespace FROM environments WHERE id = $2) || '/runtime-r1#DATABASE_URL'),
-		       ($1, $2, $4, 'DATABASE_URL', 'k8s-secret://' || (SELECT namespace FROM environments WHERE id = $2) || '/runtime-r2#DATABASE_URL')`,
+		VALUES ($1, $2, $3, 'DATABASE_URL', 'k8s-secret://' || (SELECT namespace FROM environments WHERE id = $2) || '/runtime-source-r1#DATABASE_URL'),
+		       ($1, $2, $4, 'DATABASE_URL', 'k8s-secret://' || (SELECT namespace FROM environments WHERE id = $2) || '/runtime-source-r2#DATABASE_URL')`,
 		orgID, environmentID, previousRevisionID, failedRevisionID); err != nil {
 		t.Fatal(err)
 	}
@@ -411,6 +471,10 @@ func TestRecoveryAdapterK3sIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Kubernetes client: %v", err)
 	}
+	recoveryImage := os.Getenv("CYCLOPUS_DEPLOY_TEST_IMAGE")
+	if recoveryImage == "" {
+		t.Fatal("CYCLOPUS_DEPLOY_TEST_IMAGE is required for live recovery readiness")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -437,7 +501,9 @@ func TestRecoveryAdapterK3sIntegration(t *testing.T) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "recovery-test"}},
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{
-					Name: "app", Image: "registry.k8s.io/pause:3.10",
+					Name: "app", Image: recoveryImage,
+					Ports:          []corev1.ContainerPort{{Name: "http", ContainerPort: 80}},
+					ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/", Port: intstr.FromString("http")}}},
 				}}},
 			},
 		},
@@ -498,15 +564,13 @@ func TestRecoveryAdapterK3sIntegration(t *testing.T) {
 	}
 
 	recovered := waitForK3sDeploymentReady(t, ctx, client, namespace, deployment.Name)
-	if got := recovered.Spec.Template.Spec.Containers[0].Image; got != "registry.k8s.io/pause:3.10" {
+	if got := recovered.Spec.Template.Spec.Containers[0].Image; got != recoveryImage {
 		t.Fatalf("recovered image = %q", got)
 	}
-	if recovered.Annotations[RecoveryReleaseAnnotation] != recoveryStore.lease.ReleaseID ||
-		recovered.Annotations[RecoveryFenceAnnotation] == "" ||
-		recovered.Annotations[RecoveryStartedAnnotation] == "" {
-		t.Fatalf("recovery annotations = %#v", recovered.Annotations)
+	if recovered.Annotations[ReleaseAnnotation] != "previous" || recovered.Annotations[ConfigHashAnnotation] != "previous-hash" || recovered.Annotations[DeployFenceAnnotation] == "" {
+		t.Fatalf("restored identity annotations = %#v", recovered.Annotations)
 	}
-	if recovered.Spec.Replicas == nil || *recovered.Spec.Replicas != 2 || recovered.Spec.Template.Spec.NodeSelector["kubernetes.io/os"] != "linux" {
+	if recovered.Spec.Replicas == nil || *recovered.Spec.Replicas != 1 || recovered.Spec.Template.Spec.NodeSelector["kubernetes.io/os"] != "linux" {
 		t.Fatalf("runtime/admission fields were not preserved: %#v", recovered.Spec)
 	}
 	if recoveryStore.finalizeCalls != 1 || recoveryStore.failureReason == "" {
@@ -567,4 +631,8 @@ func (s *k3sRecoveryStore) CheckpointDeployRecovery(_ context.Context, lease sto
 
 func (s *k3sRecoveryStore) AdoptRecoveredReleaseLive(_ context.Context, _ store.DeployLease) (store.FinalizeReleaseResult, error) {
 	return store.FinalizeReleaseResult{}, nil
+}
+
+func (*k3sRecoveryStore) QuarantineDeployRecovery(context.Context, store.DeployLease, string, string) error {
+	return nil
 }

@@ -71,6 +71,11 @@ func (s *Store) FinalizeReleaseLive(ctx context.Context, params FinalizeReleaseP
 		if err := takePendingAndReleaseLease(ctx, tx, params.Lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
+		if result.PendingCommitSHA != nil {
+			if err := promotePendingCommit(ctx, tx, params.Lease, *result.PendingCommitSHA); err != nil {
+				return err
+			}
+		}
 		after, _ := json.Marshal(map[string]any{"status": "live", "hostname": params.Hostname})
 		return insertAuditEvent(ctx, tx, params.Lease.OrgID, params.Audit,
 			"release.finalized_live", "release", params.Lease.ReleaseID, before, after)
@@ -193,7 +198,7 @@ func (s *Store) finalizeReleaseFailed(ctx context.Context, params FailReleasePar
 		if err := takePendingAndReleaseLease(ctx, tx, params.Lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if recovery && result.PendingCommitSHA != nil {
+		if result.PendingCommitSHA != nil {
 			if err := promotePendingCommit(ctx, tx, params.Lease, *result.PendingCommitSHA); err != nil {
 				return err
 			}

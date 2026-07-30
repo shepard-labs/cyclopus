@@ -138,6 +138,21 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 		}
 		envHash := ComputeEnvVarRevisionHash(variables)
 		envelope.EnvVarRevision = &EnvVarRevision{Version: EnvVarRevisionVersion, ID: revisionID, Revision: revisionNumber, Hash: envHash, Variables: variables}
+		destinationName := EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, revisionID)
+		entries := make([]SecretEntryIntent, len(variables))
+		for index, variable := range variables {
+			entries[index] = SecretEntryIntent{Key: variable.Key, SecretRef: variable.SecretRef}
+		}
+		envelope.DesiredState.Secret = &SecretIntent{
+			Version: 1,
+			Identity: ObjectIdentity{
+				Name: destinationName, Namespace: namespace,
+				Labels: cloneMap(envelope.DesiredState.Deployment.Identity.Labels),
+			},
+			Immutable: true,
+			Entries:   entries,
+		}
+		envelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{destinationName}
 		envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-revision-id"] = revisionID
 		envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/env-hash"] = envHash
 		result.ConfigSnapshot, result.ConfigHash, err = EncodeReleaseSnapshot(envelope)

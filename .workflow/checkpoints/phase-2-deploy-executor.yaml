@@ -1,0 +1,33 @@
+schema_version: 1
+workflow: cyclopus-api-platform-v1
+phase: phase-2
+checkpoint: deploy-executor
+status: completed
+completed_at: "2026-07-29T22:00:00Z"
+deliverables:
+  - durable pending deploy claim and startup resume with fenced leases
+  - immutable env revision Secret materialization and ordinary-deploy inheritance
+  - idempotent Service, Deployment, Ingress, HPA, and Secret application
+  - named-port mixed-revision rollout safety
+  - complete forward and expired-recovery compensation
+  - atomic live/failed finalization and pending commit promotion
+  - bounded concurrent deploy tasks with graceful shutdown
+verification:
+  go_unit_tests: 203
+  go_race_tests: 203
+  go_vet: passed
+  postgres_18_integration: passed
+  postgres_version: 18.4
+  k3s_version: v1.33.13+k3s1
+  orbstack_debian_12: passed
+  orbstack_ubuntu_24_04: passed
+  live_forward_deploy: passed
+  live_startup_resume: passed
+  live_expired_recovery: passed
+  generation_verification: passed
+  workflow_validation: passed
+  adversarial_review: passed
+next_action: >-
+  Complete Phase 2 preview reservation, coalescing, blocked namespace lifecycle,
+  branch-delete teardown, and idle reaping. Preview activation remains blocked
+  until Phase 3 verifies network policies and resolves a hostname provider.

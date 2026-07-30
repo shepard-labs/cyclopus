@@ -320,7 +320,7 @@ func (s *Service) AcceptDeploy(ctx context.Context, actor ActorContext, key, env
 		value := strings.TrimSpace(input.GitCommitSHA)
 		gitCommitSHA = &value
 	}
-	_, err = s.store.AcceptRelease(ctx, store.AcceptReleaseParams{ID: id, OrgID: actor.OrgID, EnvironmentID: environmentID, ImageRef: input.ImageRef, GitCommitSHA: gitCommitSHA, Kind: "deploy", TriggeredByUserID: &actor.UserID, ConfigSnapshot: snapshot, ConfigHash: hash, Idempotency: idem, Audit: audit(actor)})
+	_, err = s.store.AcceptRelease(ctx, store.AcceptReleaseParams{ID: id, OrgID: actor.OrgID, EnvironmentID: environmentID, ImageRef: input.ImageRef, GitCommitSHA: gitCommitSHA, Kind: "deploy", TriggeredByUserID: &actor.UserID, ConfigSnapshot: snapshot, ConfigHash: hash, InheritCurrentEnv: true, Idempotency: idem, Audit: audit(actor)})
 	return response, mapError(err)
 }
 func (s *Service) AcceptRollback(ctx context.Context, actor ActorContext, key, environmentID, targetReleaseID string) (AcceptedOperation, error) {

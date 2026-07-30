@@ -2,13 +2,16 @@
 set -eu
 
 case "${1:-}" in
+  deploy)
+    exec sh "$(dirname -- "$0")/integration/deploy_orbstack.sh"
+    ;;
   security)
     exec sh "$(dirname -- "$0")/integration/security_orbstack.sh"
     ;;
   recovery|disaster-recovery)
     exec sh "$(dirname -- "$0")/integration/recovery_orbstack.sh"
     ;;
-  deploy|runtime|hostname-provider|install|ovh-public-cloud|ovh-vps-constrained|ovh-capabilities) ;;
+  runtime|hostname-provider|install|ovh-public-cloud|ovh-vps-constrained|ovh-capabilities) ;;
   *)
     printf '%s\n' "usage: $0 {deploy|security|runtime|hostname-provider|install|ovh-public-cloud|ovh-vps-constrained|ovh-capabilities|recovery|disaster-recovery}" >&2
     exit 64

@@ -84,10 +84,11 @@ func run(args, environ []string) error {
 		return err
 	}
 	recovery := worker.New(worker.Config{
-		ScanInterval:   cfg.Worker.ScanInterval,
-		LeaseDuration:  cfg.Worker.LeaseDuration,
-		Owner:          owner,
-		RequestTimeout: cfg.GitHub.RequestTimeout,
+		ScanInterval:         cfg.Worker.ScanInterval,
+		LeaseDuration:        cfg.Worker.LeaseDuration,
+		MaxConcurrentDeploys: cfg.Worker.MaxConcurrentDeploys,
+		Owner:                owner,
+		RequestTimeout:       cfg.GitHub.RequestTimeout,
 	}, logger, dataStore, adapters)
 	var ready atomic.Bool
 	readiness := func(ctx context.Context) error {
@@ -169,7 +170,7 @@ func productionAdapterConstructors(dataStore *store.Store, owner string) adapter
 			if err != nil {
 				return nil, fmt.Errorf("create Kubernetes client: %w", err)
 			}
-			return kubernetesadapter.NewRecoveryAdapter(kubernetesadapter.Config{
+			return kubernetesadapter.NewAdapter(kubernetesadapter.Config{
 				PollInterval: cfg.RecoveryPollInterval, ConflictRetries: cfg.ConflictRetries,
 			}, client, dataStore)
 		},
@@ -224,7 +225,12 @@ func runLifecycle(ctx context.Context, api lifecycleServer, recovery lifecycleWo
 	ready.Store(true)
 
 	workerErr := make(chan error, 1)
-	go func() { workerErr <- recovery.Run(runCtx) }()
+	workerStarted := make(chan struct{})
+	go func() {
+		close(workerStarted)
+		workerErr <- recovery.Run(runCtx)
+	}()
+	<-workerStarted
 
 	select {
 	case err := <-apiErr:

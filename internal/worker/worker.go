@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/cyclopus-dev/cyclopus/internal/store"
@@ -24,6 +25,9 @@ type RecoveryStore interface {
 	ClaimExpiredDeployLease(context.Context, string, string) (store.DeployLease, error)
 	RescheduleDeployRecovery(context.Context, store.DeployLease, time.Duration) error
 	QuarantineDeployRecovery(context.Context, store.DeployLease, string, string) error
+	ListForwardDeployOrgIDs(context.Context, bool) ([]string, error)
+	ClaimPendingDeploy(context.Context, string, []string) (store.DeployExecution, error)
+	ClaimUnexpiredDeploying(context.Context, string, []string) (store.DeployExecution, error)
 }
 
 type GitHubRecoveryAdapter interface {
@@ -33,6 +37,7 @@ type GitHubRecoveryAdapter interface {
 
 type KubernetesRecoveryAdapter interface {
 	RecoverExpiredDeploy(context.Context, store.DeployLease) (store.DeployRecoveryResult, error)
+	ExecuteDeploy(context.Context, store.DeployExecution) (store.DeployRecoveryResult, error)
 }
 
 type RecoveryAdapters struct {
@@ -65,21 +70,27 @@ func (e *BlockedRecoveryError) Error() string {
 }
 
 type Config struct {
-	ScanInterval   time.Duration
-	LeaseDuration  time.Duration
-	Owner          string
-	RequestTimeout time.Duration
+	ScanInterval         time.Duration
+	LeaseDuration        time.Duration
+	MaxConcurrentDeploys int
+	Owner                string
+	RequestTimeout       time.Duration
 }
 
 type Runner struct {
-	config   Config
-	logger   *slog.Logger
-	store    RecoveryStore
-	adapters RecoveryAdapters
+	config    Config
+	logger    *slog.Logger
+	store     RecoveryStore
+	adapters  RecoveryAdapters
+	deployMu  sync.Mutex
+	inFlight  map[string]struct{}
+	deployWG  sync.WaitGroup
+	deploySem chan struct{}
 }
 
 func New(config Config, logger *slog.Logger, recoveryStore RecoveryStore, adapters RecoveryAdapters) *Runner {
-	return &Runner{config: config, logger: logger, store: recoveryStore, adapters: adapters}
+	return &Runner{config: config, logger: logger, store: recoveryStore, adapters: adapters,
+		inFlight: make(map[string]struct{}), deploySem: make(chan struct{}, config.MaxConcurrentDeploys)}
 }
 
 func (r *Runner) Startup(ctx context.Context) error {
@@ -95,6 +106,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	ticker := time.NewTicker(r.config.ScanInterval)
 	defer ticker.Stop()
+	defer r.deployWG.Wait()
 	for {
 		select {
 		case <-ctx.Done():
@@ -111,7 +123,7 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) validate() error {
-	if r.store == nil || r.logger == nil || r.config.ScanInterval <= 0 || r.config.LeaseDuration <= 0 || r.config.RequestTimeout <= 0 || r.config.RequestTimeout >= r.config.LeaseDuration || r.config.Owner == "" {
+	if r.store == nil || r.logger == nil || r.config.ScanInterval <= 0 || r.config.LeaseDuration <= 0 || r.config.MaxConcurrentDeploys <= 0 || r.config.RequestTimeout <= 0 || r.config.RequestTimeout >= r.config.LeaseDuration || r.config.Owner == "" {
 		return errors.New("invalid recovery worker configuration")
 	}
 	return nil
@@ -142,6 +154,14 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 		return fmt.Errorf("scan orchestration recovery: %w", err)
 	}
 	orgIDs := mergeOrgIDs(queuedOrgIDs, recoveryOrgIDs)
+	resumeDeployOrgIDs, err := r.store.ListForwardDeployOrgIDs(ctx, true)
+	if err != nil {
+		return fmt.Errorf("scan resumable deploys: %w", err)
+	}
+	pendingDeployOrgIDs, err := r.store.ListForwardDeployOrgIDs(ctx, false)
+	if err != nil {
+		return fmt.Errorf("scan pending deploys: %w", err)
+	}
 	deploys, err := r.store.ListExpiredDeploys(ctx)
 	if err != nil {
 		return fmt.Errorf("scan expired deploys: %w", err)
@@ -149,48 +169,33 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 	if len(orgIDs) > 0 && (!r.adapters.Capabilities.GitHub || r.adapters.GitHub == nil) {
 		return &BlockedRecoveryError{Capability: GitHubRecoveryCapability, Kind: "dispatch reconciliation"}
 	}
-	if len(deploys) > 0 && (!r.adapters.Capabilities.Kubernetes || r.adapters.Kubernetes == nil) {
-		return &BlockedRecoveryError{Capability: KubernetesRecoveryCapability, Kind: "expired deploy"}
+	if (len(resumeDeployOrgIDs) > 0 || len(pendingDeployOrgIDs) > 0 || len(deploys) > 0) && (!r.adapters.Capabilities.Kubernetes || r.adapters.Kubernetes == nil) {
+		kind := "forward deploy"
+		if len(resumeDeployOrgIDs) == 0 && len(pendingDeployOrgIDs) == 0 {
+			kind = "expired deploy"
+		}
+		return &BlockedRecoveryError{Capability: KubernetesRecoveryCapability, Kind: kind}
 	}
 
-	for _, orgID := range orgIDs {
+	if startup {
 		for {
-			job, err := r.store.ClaimOrchestration(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
-			if errors.Is(err, store.ErrNotFound) {
+			claimed, err := r.scheduleForwardDeploys(ctx, resumeDeployOrgIDs, true, true)
+			if err != nil {
+				return err
+			}
+			r.deployWG.Wait()
+			if claimed == 0 {
 				break
 			}
-			if err != nil {
-				return fmt.Errorf("claim queued orchestration for organization %s: %w", orgID, err)
-			}
-			requestCtx, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
-			err = r.adapters.GitHub.Dispatch(requestCtx, job)
-			cancel()
-			if err != nil {
-				if handleErr := r.handleGitHubJobError(ctx, job, false, err); handleErr != nil {
-					return handleErr
-				}
-			}
 		}
-		for {
-			job, err := r.store.ClaimDispatchReconciliation(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
-			if errors.Is(err, store.ErrNotFound) {
-				break
-			}
-			if err != nil {
-				return fmt.Errorf("claim orchestration recovery for organization %s: %w", orgID, err)
-			}
-			requestCtx, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
-			err = r.adapters.GitHub.ReconcileDispatch(requestCtx, job)
-			cancel()
-			if err != nil {
-				if handleErr := r.handleGitHubJobError(ctx, job, true, err); handleErr != nil {
-					return handleErr
-				}
-			}
-		}
+	} else if _, err := r.scheduleForwardDeploys(ctx, resumeDeployOrgIDs, true, false); err != nil {
+		return err
 	}
 
 	for _, deploy := range deploys {
+		if r.environmentInFlight(deploy.EnvironmentID) {
+			continue
+		}
 		lease, err := r.store.ClaimExpiredDeployLease(ctx, deploy.OrgID, deploy.EnvironmentID)
 		if errors.Is(err, store.ErrNotFound) {
 			continue
@@ -228,9 +233,116 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 				"environment_id", lease.EnvironmentID, "retry_after", delay, "error", err)
 		}
 	}
+
+	for _, orgID := range recoveryOrgIDs {
+		for {
+			job, err := r.store.ClaimDispatchReconciliation(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("claim orchestration recovery for organization %s: %w", orgID, err)
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
+			err = r.adapters.GitHub.ReconcileDispatch(requestCtx, job)
+			cancel()
+			if err != nil {
+				if handleErr := r.handleGitHubJobError(ctx, job, true, err); handleErr != nil {
+					return handleErr
+				}
+			}
+		}
+	}
+
+	for _, orgID := range queuedOrgIDs {
+		for {
+			job, err := r.store.ClaimOrchestration(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("claim queued orchestration for organization %s: %w", orgID, err)
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
+			err = r.adapters.GitHub.Dispatch(requestCtx, job)
+			cancel()
+			if err != nil {
+				if handleErr := r.handleGitHubJobError(ctx, job, false, err); handleErr != nil {
+					return handleErr
+				}
+			}
+		}
+	}
+
+	if _, err := r.scheduleForwardDeploys(ctx, pendingDeployOrgIDs, false, startup); err != nil {
+		return err
+	}
 	return nil
 }
 
+func (r *Runner) scheduleForwardDeploys(ctx context.Context, orgIDs []string, resume, startup bool) (int, error) {
+	claimed := 0
+	for _, orgID := range orgIDs {
+		for {
+			select {
+			case r.deploySem <- struct{}{}:
+			default:
+				return claimed, nil
+			}
+			execution, err := r.claimAndMarkForwardDeploy(ctx, orgID, resume)
+			if errors.Is(err, store.ErrNotFound) {
+				<-r.deploySem
+				break
+			}
+			if err != nil {
+				<-r.deploySem
+				return claimed, fmt.Errorf("claim forward deploy for organization %s: %w", orgID, err)
+			}
+			claimed++
+			r.deployWG.Add(1)
+			go func(execution store.DeployExecution) {
+				defer r.deployWG.Done()
+				defer func() { <-r.deploySem; r.clearEnvironmentInFlight(execution.EnvironmentID) }()
+				result, err := r.adapters.Kubernetes.ExecuteDeploy(ctx, execution)
+				if err != nil {
+					r.logger.Warn("Kubernetes forward deploy remains durable", "org_id", execution.OrgID, "environment_id", execution.EnvironmentID, "release_id", execution.ReleaseID, "fence", result.Lease.Fence, "resumed", resume, "startup", startup, "error", err)
+				}
+			}(execution)
+		}
+	}
+	return claimed, nil
+}
+
+func (r *Runner) claimAndMarkForwardDeploy(ctx context.Context, orgID string, resume bool) (store.DeployExecution, error) {
+	r.deployMu.Lock()
+	defer r.deployMu.Unlock()
+	excluded := make([]string, 0, len(r.inFlight))
+	for environmentID := range r.inFlight {
+		excluded = append(excluded, environmentID)
+	}
+	var execution store.DeployExecution
+	var err error
+	if resume {
+		execution, err = r.store.ClaimUnexpiredDeploying(ctx, orgID, excluded)
+	} else {
+		execution, err = r.store.ClaimPendingDeploy(ctx, orgID, excluded)
+	}
+	if err == nil {
+		r.inFlight[execution.EnvironmentID] = struct{}{}
+	}
+	return execution, err
+}
+func (r *Runner) clearEnvironmentInFlight(environmentID string) {
+	r.deployMu.Lock()
+	delete(r.inFlight, environmentID)
+	r.deployMu.Unlock()
+}
+func (r *Runner) environmentInFlight(environmentID string) bool {
+	r.deployMu.Lock()
+	defer r.deployMu.Unlock()
+	_, ok := r.inFlight[environmentID]
+	return ok
+}
 func mergeOrgIDs(groups ...[]string) []string {
 	seen := make(map[string]struct{})
 	var merged []string

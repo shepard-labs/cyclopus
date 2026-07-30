@@ -50,7 +50,7 @@ func TestLoadPrecedence(t *testing.T) {
 	if cfg.DB.MigrationLockTimeout != 30*time.Second {
 		t.Fatalf("migration lock timeout = %s, want default value", cfg.DB.MigrationLockTimeout)
 	}
-	if cfg.Worker.ScanInterval != 30*time.Second || cfg.Worker.LeaseDuration != time.Minute {
+	if cfg.Worker.ScanInterval != 30*time.Second || cfg.Worker.LeaseDuration != time.Minute || cfg.Worker.MaxConcurrentDeploys != 4 {
 		t.Fatalf("worker config = %+v, want default values", cfg.Worker)
 	}
 	if cfg.Auth.MaxConcurrentHashes != 4 || cfg.Auth.RateLimitPerMinute != 10 || cfg.Auth.RequestBodyBytes != 65536 {
@@ -149,13 +149,13 @@ func TestLoadRequiresBootstrapSecretOfAtLeast32Bytes(t *testing.T) {
 
 func TestLoadValidation(t *testing.T) {
 	_, err := Load(
-		[]string{"--http-address", "invalid", "--grpc-address", "also-invalid", "--http-read-timeout", "0s", "--log-level", "verbose", "--worker-scan-interval", "0s", "--github-api-base-url", "relative", "--github-dispatch-observation-interval", "0s", "--kubernetes-recovery-poll-interval", "0s", "--kubernetes-conflict-retries", "-1"},
+		[]string{"--http-address", "invalid", "--grpc-address", "also-invalid", "--http-read-timeout", "0s", "--log-level", "verbose", "--worker-scan-interval", "0s", "--worker-max-concurrent-deploys", "0", "--github-api-base-url", "relative", "--github-dispatch-observation-interval", "0s", "--kubernetes-recovery-poll-interval", "0s", "--kubernetes-conflict-retries", "-1"},
 		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
 	)
 	if err == nil {
 		t.Fatal("Load() error = nil, want validation error")
 	}
-	for _, want := range []string{"http.address", "grpc.address", "read_timeout", "log.level", "worker.scan_interval", "github.api_base_url", "github.dispatch_observation_interval", "kubernetes.recovery_poll_interval", "kubernetes.conflict_retries"} {
+	for _, want := range []string{"http.address", "grpc.address", "read_timeout", "log.level", "worker.scan_interval", "worker.max_concurrent_deploys", "github.api_base_url", "github.dispatch_observation_interval", "kubernetes.recovery_poll_interval", "kubernetes.conflict_retries"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}

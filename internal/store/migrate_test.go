@@ -32,6 +32,7 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"environments_active_branch",
 		"audit_events_append_only",
 		"enforce_reconciliation_scope_single_flight",
+		"desired_state_restored",
 		"k8s-secret://",
 		"UNIQUE (org_id, scope, idempotency_key)",
 		"status text NOT NULL DEFAULT 'queued'",

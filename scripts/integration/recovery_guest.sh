@@ -126,6 +126,7 @@ step "running Kubernetes adapter tests"
 go test -count=1 ./internal/adapters/kubernetes || fail "Kubernetes adapter tests failed"
 
 step "running live k3s recovery integration test"
+sudo k3s kubectl get namespaces -o name | grep '^namespace/cyclopus-recovery-' | xargs -r sudo k3s kubectl delete --wait=false >/dev/null
 go test -tags k3s_integration ./internal/adapters/kubernetes -run '^TestRecoveryWorker' -count=1 -v || fail "live k3s PostgreSQL worker recovery integration tests failed"
 
 step "recovery scenario passed on $EXPECTED_DISTRO"

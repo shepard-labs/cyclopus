@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -20,15 +19,16 @@ import (
 )
 
 const (
-	RecoveryReleaseAnnotation = "cyclopus.dev/recovery-release-id"
-	RecoveryFenceAnnotation   = "cyclopus.dev/recovery-fence"
-	RecoveryStartedAnnotation = "cyclopus.dev/recovery-started-at"
-	ReleaseAnnotation         = "cyclopus.dev/release-id"
-	ConfigHashAnnotation      = "cyclopus.dev/config-hash"
-	EnvRevisionAnnotation     = "cyclopus.dev/env-revision-id"
-	ManagedByLabel            = "app.kubernetes.io/managed-by"
-	EnvironmentIDLabel        = "cyclopus.dev/environment-id"
-	ManagedByValue            = "cyclopus"
+	RecoveryReleaseAnnotation   = "cyclopus.dev/recovery-release-id"
+	RecoveryFenceAnnotation     = "cyclopus.dev/recovery-fence"
+	RecoveryStartedAnnotation   = "cyclopus.dev/recovery-started-at"
+	ReleaseAnnotation           = "cyclopus.dev/release-id"
+	ConfigHashAnnotation        = "cyclopus.dev/config-hash"
+	EnvRevisionAnnotation       = "cyclopus.dev/env-revision-id"
+	SecretContentHashAnnotation = "cyclopus.dev/secret-content-hash"
+	ManagedByLabel              = "app.kubernetes.io/managed-by"
+	EnvironmentIDLabel          = "cyclopus.dev/environment-id"
+	ManagedByValue              = "cyclopus"
 )
 
 var (
@@ -55,6 +55,7 @@ type RecoveryStore interface {
 	CheckpointDeployRecovery(context.Context, store.DeployLease, string) error
 	AdoptRecoveredReleaseLive(context.Context, store.DeployLease) (store.FinalizeReleaseResult, error)
 	FinalizeRecoveredReleaseFailed(context.Context, store.DeployLease, string) (store.FinalizeReleaseResult, error)
+	QuarantineDeployRecovery(context.Context, store.DeployLease, string, string) error
 }
 
 type RecoveryAdapter struct {
@@ -72,6 +73,10 @@ func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStor
 		config.APITimeout = 5 * time.Second
 	}
 	return &RecoveryAdapter{config: config, client: client, store: recoveryStore, now: time.Now}, nil
+}
+
+func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardStore) (*RecoveryAdapter, error) {
+	return NewRecoveryAdapter(config, client, dataStore)
 }
 
 func (a *RecoveryAdapter) RecoverExpiredDeploy(ctx context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
@@ -105,21 +110,9 @@ func (a *RecoveryAdapter) RecoverExpiredDeploy(ctx context.Context, lease store.
 			return result, nil
 		}
 	} else {
-		if err := a.restorePreviousSecretRevision(ctx, lease); err != nil {
-			return result, err
-		}
-		lease, err = a.restore(ctx, lease, state, previous)
+		lease, previous, err = a.restorePreviousDesiredState(ctx, lease, state.FailureReason)
 		result.Lease = lease
 		if err != nil {
-			return result, err
-		}
-		if err := a.store.CheckpointDeployRecovery(ctx, lease, "deployment_restored"); err != nil {
-			return result, fmt.Errorf("checkpoint restored deployment: %w", err)
-		}
-		lease.RecoveryCheckpoint = "deployment_restored"
-		result.Lease = lease
-		if err := a.observeReady(ctx, &lease, state, previous); err != nil {
-			result.Lease = lease
 			return result, err
 		}
 		result.Lease = lease
@@ -324,7 +317,7 @@ func (a *RecoveryAdapter) observe(ctx context.Context, lease *store.DeployLease,
 }
 
 func (a *RecoveryAdapter) restorePreviousSecretRevision(ctx context.Context, lease store.DeployLease) error {
-	if lease.PreviousRelease == nil || lease.FailedRelease.Kind != "env_change" || lease.PreviousRelease.EnvVarRevisionID == nil {
+	if lease.PreviousRelease == nil || lease.PreviousRelease.EnvVarRevisionID == nil {
 		return nil
 	}
 	envelope, err := store.DecodeReleaseSnapshot(lease.PreviousRelease.ConfigSnapshot)
@@ -334,28 +327,22 @@ func (a *RecoveryAdapter) restorePreviousSecretRevision(ctx context.Context, lea
 	if envelope.EnvVarRevision == nil || envelope.EnvVarRevision.ID != *lease.PreviousRelease.EnvVarRevisionID {
 		return fmt.Errorf("%w: previous env-var revision is missing from release snapshot", ErrRecoveryStateInvalid)
 	}
-	seen := make(map[string]struct{})
-	for _, variable := range envelope.EnvVarRevision.Variables {
-		namespace, name, err := parseSecretRef(variable.SecretRef)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrRecoveryStateInvalid, err)
-		}
-		if namespace != lease.Namespace {
-			return fmt.Errorf("%w: secret namespace %q does not match environment namespace", ErrCompensationUnproven, namespace)
-		}
+	if envelope.DesiredState.Secret == nil || envelope.DesiredState.Secret.Identity.Namespace != lease.Namespace {
+		return fmt.Errorf("%w: previous destination Secret intent is missing", ErrRecoveryStateInvalid)
+	}
+	for _, identity := range []store.ObjectIdentity{envelope.DesiredState.Secret.Identity} {
+		namespace, name := identity.Namespace, identity.Name
 		key := namespace + "/" + name
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
 		opCtx, cancel := a.operationContext(ctx, lease)
 		secret, err := a.client.CoreV1().Secrets(namespace).Get(opCtx, name, metav1.GetOptions{})
 		cancel()
 		if err != nil {
 			return fmt.Errorf("verify previous immutable Secret %s: %w", key, err)
 		}
-		if secret.Immutable == nil || !*secret.Immutable || secret.Annotations[EnvRevisionAnnotation] != envelope.EnvVarRevision.ID ||
-			secret.Annotations[ConfigHashAnnotation] != lease.PreviousRelease.ConfigHash {
+		if secret.Immutable == nil || !*secret.Immutable || secret.Labels[ManagedByLabel] != ManagedByValue ||
+			secret.Labels[EnvironmentIDLabel] != lease.EnvironmentID ||
+			secret.Annotations[EnvRevisionAnnotation] != envelope.EnvVarRevision.ID ||
+			secret.Annotations[SecretContentHashAnnotation] != ComputeSecretDataHash(secret.Data) {
 			return fmt.Errorf("%w: previous Secret %s revision/hash is not verified", ErrCompensationUnproven, key)
 		}
 	}
@@ -363,11 +350,6 @@ func (a *RecoveryAdapter) restorePreviousSecretRevision(ctx context.Context, lea
 		return fmt.Errorf("checkpoint previous Secret revision: %w", err)
 	}
 	return nil
-}
-
-func parseSecretRef(ref string) (string, string, error) {
-	parsed, err := secretref.Parse(ref)
-	return parsed.Namespace, parsed.Name, err
 }
 
 func (a *RecoveryAdapter) renew(ctx context.Context, lease store.DeployLease) (store.DeployLease, error) {

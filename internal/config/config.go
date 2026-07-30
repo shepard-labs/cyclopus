@@ -66,8 +66,9 @@ type DB struct {
 }
 
 type Worker struct {
-	ScanInterval  time.Duration
-	LeaseDuration time.Duration
+	ScanInterval         time.Duration
+	LeaseDuration        time.Duration
+	MaxConcurrentDeploys int
 }
 
 type GitHub struct {
@@ -117,6 +118,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.Duration("database-migration-lock-timeout", 0, "database migration advisory lock timeout")
 	flags.Duration("worker-scan-interval", 0, "recovery worker scan interval")
 	flags.Duration("worker-lease-duration", 0, "recovery worker lease duration")
+	flags.Int("worker-max-concurrent-deploys", 0, "maximum concurrent Kubernetes deploy observations")
 	flags.Int64("github-app-id", 0, "GitHub App ID")
 	flags.String("github-private-key-file", "", "GitHub App private key file")
 	flags.String("github-api-base-url", "", "GitHub REST API base URL")
@@ -171,6 +173,7 @@ func Load(args, environ []string) (Config, error) {
 		"database-migration-lock-timeout":      "database.migration_lock_timeout",
 		"worker-scan-interval":                 "worker.scan_interval",
 		"worker-lease-duration":                "worker.lease_duration",
+		"worker-max-concurrent-deploys":        "worker.max_concurrent_deploys",
 		"github-app-id":                        "github.app_id",
 		"github-private-key-file":              "github.private_key_file",
 		"github-api-base-url":                  "github.api_base_url",
@@ -215,8 +218,9 @@ func Load(args, environ []string) (Config, error) {
 			MigrationLockTimeout: v.GetDuration("database.migration_lock_timeout"),
 		},
 		Worker: Worker{
-			ScanInterval:  v.GetDuration("worker.scan_interval"),
-			LeaseDuration: v.GetDuration("worker.lease_duration"),
+			ScanInterval:         v.GetDuration("worker.scan_interval"),
+			LeaseDuration:        v.GetDuration("worker.lease_duration"),
+			MaxConcurrentDeploys: v.GetInt("worker.max_concurrent_deploys"),
 		},
 		GitHub: GitHub{
 			AppID:                       v.GetInt64("github.app_id"),
@@ -260,6 +264,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.migration_lock_timeout", "30s")
 	v.SetDefault("worker.scan_interval", "30s")
 	v.SetDefault("worker.lease_duration", "60s")
+	v.SetDefault("worker.max_concurrent_deploys", 4)
 	v.SetDefault("github.api_base_url", "https://api.github.com/")
 	v.SetDefault("github.upload_url", "https://uploads.github.com/")
 	v.SetDefault("github.api_version", "2026-03-10")
@@ -298,6 +303,7 @@ func environment(environ []string) map[string]string {
 		"DATABASE_MIGRATION_LOCK_TIMEOUT":      "database.migration_lock_timeout",
 		"WORKER_SCAN_INTERVAL":                 "worker.scan_interval",
 		"WORKER_LEASE_DURATION":                "worker.lease_duration",
+		"WORKER_MAX_CONCURRENT_DEPLOYS":        "worker.max_concurrent_deploys",
 		"GITHUB_APP_ID":                        "github.app_id",
 		"GITHUB_PRIVATE_KEY_FILE":              "github.private_key_file",
 		"GITHUB_API_BASE_URL":                  "github.api_base_url",
@@ -407,6 +413,9 @@ func (c Config) Validate() error {
 	}
 	if c.Worker.LeaseDuration <= 0 {
 		errs = append(errs, fmt.Errorf("worker.lease_duration must be greater than zero"))
+	}
+	if c.Worker.MaxConcurrentDeploys <= 0 || c.Worker.MaxConcurrentDeploys > 32 {
+		errs = append(errs, fmt.Errorf("worker.max_concurrent_deploys must be between 1 and 32"))
 	}
 	githubConfigured := c.GitHub.AppID != 0 || strings.TrimSpace(c.GitHub.PrivateKeyFile) != ""
 	if githubConfigured {

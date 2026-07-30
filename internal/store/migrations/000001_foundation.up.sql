@@ -306,7 +306,7 @@ CREATE TABLE environments (
     lock_acquired_at timestamptz,
     deploy_recovery_checkpoint text CHECK (deploy_recovery_checkpoint IS NULL OR deploy_recovery_checkpoint IN (
         'claimed', 'first_deployment_missing', 'late_ready_observed',
-        'secret_revision_verified', 'deployment_restored'
+        'secret_revision_verified', 'deployment_restored', 'desired_state_restored'
     )),
     pending_commit_sha text CHECK (pending_commit_sha IS NULL OR pending_commit_sha ~ '^[0-9a-f]{40}$'),
     deploy_recovery_error_code text CHECK (deploy_recovery_error_code IS NULL OR octet_length(deploy_recovery_error_code) <= 200),
