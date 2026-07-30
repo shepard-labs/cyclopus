@@ -71,7 +71,7 @@ func (s *Store) FinalizeReleaseLive(ctx context.Context, params FinalizeReleaseP
 		if err := takePendingAndReleaseLease(ctx, tx, params.Lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if result.PendingCommitSHA != nil {
+		if result.PendingCommitSHA != nil && !teardownRequested(ctx, tx, params.Lease) {
 			if err := promotePendingCommit(ctx, tx, params.Lease, *result.PendingCommitSHA); err != nil {
 				return err
 			}
@@ -130,7 +130,7 @@ func (s *Store) AdoptRecoveredReleaseLive(ctx context.Context, lease DeployLease
 		if err := takePendingAndReleaseLease(ctx, tx, lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if result.PendingCommitSHA != nil {
+		if result.PendingCommitSHA != nil && !teardownRequested(ctx, tx, lease) {
 			if err := promotePendingCommit(ctx, tx, lease, *result.PendingCommitSHA); err != nil {
 				return err
 			}
@@ -198,7 +198,7 @@ func (s *Store) finalizeReleaseFailed(ctx context.Context, params FailReleasePar
 		if err := takePendingAndReleaseLease(ctx, tx, params.Lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if result.PendingCommitSHA != nil {
+		if result.PendingCommitSHA != nil && !teardownRequested(ctx, tx, params.Lease) {
 			if err := promotePendingCommit(ctx, tx, params.Lease, *result.PendingCommitSHA); err != nil {
 				return err
 			}
@@ -300,4 +300,13 @@ func takePendingAndReleaseLease(ctx context.Context, tx pgx.Tx, lease DeployLeas
 		return fmt.Errorf("finalize deploy lease: %w", err)
 	}
 	return nil
+}
+
+func teardownRequested(ctx context.Context, tx pgx.Tx, lease DeployLease) bool {
+	var requested bool
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_status='teardown_requested' FROM environments
+		WHERE org_id=$1 AND id=$2`, lease.OrgID, lease.EnvironmentID).Scan(&requested); err != nil {
+		return true
+	}
+	return requested
 }

@@ -126,6 +126,11 @@ func buildRecoveryAdapters(cfg config.Config, constructors adapterConstructors) 
 		return adapters, errors.New("construct Kubernetes recovery adapter: constructor returned nil")
 	}
 	adapters.Kubernetes = kubernetesRecovery
+	lifecycle, ok := kubernetesRecovery.(worker.KubernetesLifecycleAdapter)
+	if !ok {
+		return adapters, errors.New("Kubernetes lifecycle adapter is unavailable")
+	}
+	adapters.Lifecycle = lifecycle
 	adapters.KubernetesErrorDisposition = kubernetesadapter.RecoveryErrorDisposition
 	adapters.Capabilities.Kubernetes = true
 
@@ -172,6 +177,7 @@ func productionAdapterConstructors(dataStore *store.Store, owner string) adapter
 			}
 			return kubernetesadapter.NewAdapter(kubernetesadapter.Config{
 				PollInterval: cfg.RecoveryPollInterval, ConflictRetries: cfg.ConflictRetries,
+				PreviewHostnameSuffix: cfg.PreviewHostnameSuffix,
 			}, client, dataStore)
 		},
 	}

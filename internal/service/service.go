@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,7 @@ var (
 	slugPattern        = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	digestPattern      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	envKeyPattern      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,252}$`)
+	commitPattern      = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 const (
@@ -40,11 +42,14 @@ type ActorContext struct {
 }
 
 type Service struct {
-	store *store.Store
-	now   func() time.Time
+	store        *store.Store
+	now          func() time.Time
+	previewSlugs PreviewSlugGenerator
 }
 
-func New(dataStore *store.Store) *Service { return &Service{store: dataStore, now: time.Now} }
+func New(dataStore *store.Store) *Service {
+	return &Service{store: dataStore, now: time.Now, previewSlugs: randomPreviewSlugGenerator{source: rand.Reader}}
+}
 
 func (s *Service) CurrentUser(ctx context.Context, actor ActorContext) (store.User, error) {
 	if err := validateActor(actor); err != nil {
@@ -284,6 +289,9 @@ func (s *Service) AcceptDeploy(ctx context.Context, actor ActorContext, key, env
 	environment, err := s.store.GetEnvironment(ctx, actor.OrgID, environmentID)
 	if err != nil {
 		return AcceptedOperation{}, mapError(err)
+	}
+	if environment.LifecycleStatus != "ready" || environment.PlannedHostname == nil {
+		return AcceptedOperation{}, store.ErrFailedPrecondition
 	}
 	app, err := s.store.GetApp(ctx, actor.OrgID, environment.AppID)
 	if err != nil {
@@ -695,7 +703,7 @@ func deploymentSnapshot(environment store.Environment, app store.App, imageRef, 
 				ReadinessProbe: store.ReadinessIntent{Path: app.HealthCheckPath, Port: int32(app.ContainerPort)}},
 		},
 		Service: store.ServiceIntent{Version: 1, Identity: identity(app.Slug), Selector: selector, Port: 80, TargetPort: int32(app.ContainerPort)},
-		Ingress: store.IngressIntent{Version: 1, Identity: identity(app.Slug), Hostname: environment.PlannedHostname, Path: "/", ServiceName: app.Slug, ServicePort: 80, TLS: store.TLSIntent{Enabled: true, SecretName: app.Slug + "-tls"}},
+		Ingress: store.IngressIntent{Version: 1, Identity: identity(app.Slug), Hostname: *environment.PlannedHostname, Path: "/", ServiceName: app.Slug, ServicePort: 80, TLS: store.TLSIntent{Enabled: true, SecretName: app.Slug + "-tls"}},
 		Scaling: scaling,
 	}}
 	encoded, _, err := store.EncodeReleaseSnapshot(envelope)

@@ -61,7 +61,9 @@ func (s *Store) RequeueExpiredOrchestrationLeases(ctx context.Context) (int64, e
 			JOIN orgs AS org ON org.id = environment.org_id
 			WHERE job.org_id = environment.org_id AND job.environment_id = environment.id
 			  AND job.status = 'leased' AND job.lease_expires_at <= now()
-			  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+			  AND environment.torn_down_at IS NULL
+			  AND environment.lifecycle_status NOT IN ('teardown_requested','torn_down','failed')
+			  AND app.deleted_at IS NULL
 			  AND project.deleted_at IS NULL AND org.deleted_at IS NULL`)
 		if err != nil {
 			return fmt.Errorf("requeue expired orchestration leases: %w", err)
@@ -83,7 +85,8 @@ func (s *Store) ListOrchestrationRecoveryOrgIDs(ctx context.Context) ([]string, 
 			JOIN projects project ON project.org_id = app.org_id AND project.id = app.project_id
 			JOIN orgs org ON org.id = job.org_id
 			WHERE job.status IN ('dispatch_reconciling', 'dispatched')
-			  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+			  AND environment.torn_down_at IS NULL AND environment.lifecycle_status IN ('ready','teardown_requested')
+			  AND environment.planned_hostname IS NOT NULL AND app.deleted_at IS NULL
 			  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 			  AND (reconciliation_lease_expires_at IS NULL OR reconciliation_lease_expires_at <= now())
 			  AND (reconcile_after <= now() OR run_deadline_at <= now())
@@ -115,7 +118,8 @@ func (s *Store) ListOrchestrationOrgIDs(ctx context.Context) ([]string, error) {
 			JOIN projects project ON project.org_id = app.org_id AND project.id = app.project_id
 			JOIN orgs org ON org.id = job.org_id
 			WHERE job.status = 'queued' AND (job.reconcile_after IS NULL OR job.reconcile_after <= now())
-			  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+			  AND environment.torn_down_at IS NULL AND environment.lifecycle_status = 'ready'
+			  AND environment.planned_hostname IS NOT NULL AND app.deleted_at IS NULL
 			  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 			ORDER BY job.org_id::text`)
 		if err != nil {
@@ -137,14 +141,26 @@ func (s *Store) ListOrchestrationOrgIDs(ctx context.Context) ([]string, error) {
 func (s *Store) EnqueueOrCoalesceOrchestration(ctx context.Context, params EnqueueOrchestrationParams) (OrchestrationJob, error) {
 	var job OrchestrationJob
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1380270412))`, params.OrgID); err != nil {
-			return fmt.Errorf("lock orchestration tombstone boundary: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1330205774))`, params.OrgID); err != nil {
-			return fmt.Errorf("lock orchestration idempotency namespace: %w", err)
-		}
-		var active bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		var err error
+		job, err = enqueueOrCoalesceOrchestrationTx(ctx, tx, params)
+		return err
+	})
+	if err != nil {
+		return OrchestrationJob{}, fmt.Errorf("enqueue orchestration job: %w", err)
+	}
+	return job, nil
+}
+
+func enqueueOrCoalesceOrchestrationTx(ctx context.Context, tx pgx.Tx, params EnqueueOrchestrationParams) (OrchestrationJob, error) {
+	var job OrchestrationJob
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1380270412))`, params.OrgID); err != nil {
+		return job, fmt.Errorf("lock orchestration tombstone boundary: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1330205774))`, params.OrgID); err != nil {
+		return job, fmt.Errorf("lock orchestration idempotency namespace: %w", err)
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM environments environment
 			JOIN apps app ON app.org_id = environment.org_id AND app.id = environment.app_id
 			JOIN projects project ON project.org_id = app.org_id AND project.id = app.project_id
@@ -153,13 +169,13 @@ func (s *Store) EnqueueOrCoalesceOrchestration(ctx context.Context, params Enque
 			  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
 			  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 			FOR KEY SHARE OF environment, app, project, org)`, params.OrgID, params.EnvironmentID).Scan(&active); err != nil {
-			return fmt.Errorf("validate orchestration scope: %w", err)
-		}
-		if !active {
-			return ErrConflict
-		}
-		var historical OrchestrationJob
-		err := tx.QueryRow(ctx, `
+		return job, fmt.Errorf("validate orchestration scope: %w", err)
+	}
+	if !active {
+		return job, ErrConflict
+	}
+	var historical OrchestrationJob
+	err := tx.QueryRow(ctx, `
 			SELECT job.id::text, job.org_id::text, request.idempotency_key, request.repository_id::text,
 				request.workflow_id, request.git_ref, request.environment_id::text, request.commit_sha,
 				job.pending_commit_sha, job.pending_idempotency_key, job.status
@@ -167,24 +183,23 @@ func (s *Store) EnqueueOrCoalesceOrchestration(ctx context.Context, params Enque
 			JOIN orchestration_jobs AS job
 			  ON job.org_id = request.org_id AND job.id = request.orchestration_job_id
 			WHERE request.org_id = $1 AND request.idempotency_key = $2`,
-			params.OrgID, params.IdempotencyKey).Scan(&historical.ID, &historical.OrgID,
-			&historical.IdempotencyKey, &historical.RepositoryID, &historical.WorkflowID,
-			&historical.GitRef, &historical.EnvironmentID, &historical.CommitSHA,
-			&historical.PendingCommitSHA, &historical.PendingIdempotencyKey, &historical.Status)
-		if err == nil {
-			if historical.RepositoryID != params.RepositoryID || historical.WorkflowID != params.WorkflowID ||
-				historical.GitRef != params.GitRef || historical.EnvironmentID != params.EnvironmentID ||
-				historical.CommitSHA != params.CommitSHA {
-				return ErrConflict
-			}
-			job = historical
-			return nil
+		params.OrgID, params.IdempotencyKey).Scan(&historical.ID, &historical.OrgID,
+		&historical.IdempotencyKey, &historical.RepositoryID, &historical.WorkflowID,
+		&historical.GitRef, &historical.EnvironmentID, &historical.CommitSHA,
+		&historical.PendingCommitSHA, &historical.PendingIdempotencyKey, &historical.Status)
+	if err == nil {
+		if historical.RepositoryID != params.RepositoryID || historical.WorkflowID != params.WorkflowID ||
+			historical.GitRef != params.GitRef || historical.EnvironmentID != params.EnvironmentID ||
+			historical.CommitSHA != params.CommitSHA {
+			return job, ErrConflict
 		}
-		if err != pgx.ErrNoRows {
-			return fmt.Errorf("read historical orchestration key: %w", err)
-		}
+		return historical, nil
+	}
+	if err != pgx.ErrNoRows {
+		return job, fmt.Errorf("read historical orchestration key: %w", err)
+	}
 
-		if err := tx.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 			INSERT INTO orchestration_jobs (
 				id, org_id, repository_id, workflow_id, git_ref, environment_id,
 				commit_sha, idempotency_key, status
@@ -200,24 +215,22 @@ func (s *Store) EnqueueOrCoalesceOrchestration(ctx context.Context, params Enque
 			RETURNING id::text, org_id::text, idempotency_key, repository_id::text,
 				workflow_id, git_ref, environment_id::text, commit_sha, pending_commit_sha,
 				pending_idempotency_key, status`,
-			params.ID, params.OrgID, params.RepositoryID, params.WorkflowID, params.GitRef,
-			params.EnvironmentID, params.CommitSHA, params.IdempotencyKey).Scan(&job.ID,
-			&job.OrgID, &job.IdempotencyKey, &job.RepositoryID, &job.WorkflowID, &job.GitRef,
-			&job.EnvironmentID, &job.CommitSHA, &job.PendingCommitSHA, &job.PendingIdempotencyKey,
-			&job.Status); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `
+		params.ID, params.OrgID, params.RepositoryID, params.WorkflowID, params.GitRef,
+		params.EnvironmentID, params.CommitSHA, params.IdempotencyKey).Scan(&job.ID,
+		&job.OrgID, &job.IdempotencyKey, &job.RepositoryID, &job.WorkflowID, &job.GitRef,
+		&job.EnvironmentID, &job.CommitSHA, &job.PendingCommitSHA, &job.PendingIdempotencyKey,
+		&job.Status); err != nil {
+		return job, err
+	}
+	_, err = tx.Exec(ctx, `
 			INSERT INTO orchestration_requests (
 				org_id, idempotency_key, orchestration_job_id, repository_id,
 				workflow_id, git_ref, environment_id, commit_sha
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, params.OrgID,
-			params.IdempotencyKey, job.ID, params.RepositoryID, params.WorkflowID,
-			params.GitRef, params.EnvironmentID, params.CommitSHA)
-		return err
-	})
+		params.IdempotencyKey, job.ID, params.RepositoryID, params.WorkflowID,
+		params.GitRef, params.EnvironmentID, params.CommitSHA)
 	if err != nil {
-		return OrchestrationJob{}, fmt.Errorf("enqueue orchestration job: %w", err)
+		return job, err
 	}
 	return job, nil
 }
@@ -242,7 +255,8 @@ func (s *Store) ClaimOrchestration(ctx context.Context, orgID, owner string, lea
 				JOIN orgs org ON org.id = job.org_id
 				WHERE job.org_id = $1 AND ((job.status = 'queued' AND (job.reconcile_after IS NULL OR job.reconcile_after <= now()))
 				  OR (job.status = 'leased' AND job.lease_expires_at <= now()))
-				  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+				  AND environment.torn_down_at IS NULL AND environment.lifecycle_status = 'ready'
+				  AND environment.planned_hostname IS NOT NULL AND app.deleted_at IS NULL
 				  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 				ORDER BY job.created_at, job.id FOR UPDATE OF job SKIP LOCKED LIMIT 1
 			)
@@ -431,9 +445,12 @@ func (s *Store) FailOrchestration(ctx context.Context, params FailOrchestrationP
 				RETURNING orchestration_job_id
 			)
 			UPDATE orchestration_jobs AS job
-			SET status = CASE WHEN pending_commit_sha IS NOT NULL THEN 'queued' ELSE 'failed' END,
-				commit_sha = COALESCE(pending_commit_sha, commit_sha),
-				idempotency_key = COALESCE(pending_idempotency_key, idempotency_key),
+			SET status = CASE WHEN pending_commit_sha IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM environments environment WHERE environment.org_id=job.org_id
+				AND environment.id=job.environment_id AND environment.lifecycle_status='teardown_requested'
+			) THEN 'queued' ELSE 'failed' END,
+				commit_sha = CASE WHEN EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=job.org_id AND environment.id=job.environment_id AND environment.lifecycle_status='teardown_requested') THEN commit_sha ELSE COALESCE(pending_commit_sha, commit_sha) END,
+				idempotency_key = CASE WHEN EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=job.org_id AND environment.id=job.environment_id AND environment.lifecycle_status='teardown_requested') THEN idempotency_key ELSE COALESCE(pending_idempotency_key, idempotency_key) END,
 				pending_commit_sha = NULL, pending_idempotency_key = NULL,
 				lease_owner = NULL, lease_expires_at = NULL, dispatch_requested_at = NULL,
 				reconcile_after = NULL, dispatch_deadline_at = NULL, run_deadline_at = NULL,
@@ -605,10 +622,13 @@ func (s *Store) ResolveOrchestration(ctx context.Context, params ResolveOrchestr
 				RETURNING orchestration_job_id
 			)
 			UPDATE orchestration_jobs AS job
-			SET status = CASE WHEN pending_commit_sha IS NOT NULL THEN 'queued'
+			SET status = CASE WHEN pending_commit_sha IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM environments environment WHERE environment.org_id=job.org_id
+				AND environment.id=job.environment_id AND environment.lifecycle_status='teardown_requested'
+			) THEN 'queued'
 				WHEN $5 = 'success' THEN 'completed' ELSE 'failed' END,
-				commit_sha = COALESCE(pending_commit_sha, commit_sha),
-				idempotency_key = COALESCE(pending_idempotency_key, idempotency_key),
+				commit_sha = CASE WHEN EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=job.org_id AND environment.id=job.environment_id AND environment.lifecycle_status='teardown_requested') THEN commit_sha ELSE COALESCE(pending_commit_sha, commit_sha) END,
+				idempotency_key = CASE WHEN EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=job.org_id AND environment.id=job.environment_id AND environment.lifecycle_status='teardown_requested') THEN idempotency_key ELSE COALESCE(pending_idempotency_key, idempotency_key) END,
 				pending_commit_sha = NULL, pending_idempotency_key = NULL,
 				dispatch_requested_at = NULL, reconcile_after = NULL,
 				dispatch_deadline_at = NULL, run_deadline_at = NULL,

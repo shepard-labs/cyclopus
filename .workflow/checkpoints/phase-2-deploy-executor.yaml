@@ -3,7 +3,7 @@ workflow: cyclopus-api-platform-v1
 phase: phase-2
 checkpoint: deploy-executor
 status: completed
-completed_at: "2026-07-29T22:00:00Z"
+completed_at: "2026-07-29T23:45:00Z"
 deliverables:
   - durable pending deploy claim and startup resume with fenced leases
   - immutable env revision Secret materialization and ordinary-deploy inheritance
@@ -12,9 +12,14 @@ deliverables:
   - complete forward and expired-recovery compensation
   - atomic live/failed finalization and pending commit promotion
   - bounded concurrent deploy tasks with graceful shutdown
+  - durable preview reservation, branch reuse, coalescing, and cap enforcement
+  - fail-closed namespace lifecycle with quota, limits, and verified NetworkPolicies
+  - configured preview hostname provider with sslip.io launch block preserved
+  - branch-delete, operator, and idle-expiry teardown with ownership-safe deletion
+  - lifecycle fencing, bounded retries, restart recovery, and atomic audit records
 verification:
-  go_unit_tests: 203
-  go_race_tests: 203
+  go_unit_tests: 214
+  go_race_tests: 214
   go_vet: passed
   postgres_18_integration: passed
   postgres_version: 18.4
@@ -28,6 +33,6 @@ verification:
   workflow_validation: passed
   adversarial_review: passed
 next_action: >-
-  Complete Phase 2 preview reservation, coalescing, blocked namespace lifecycle,
-  branch-delete teardown, and idle reaping. Preview activation remains blocked
-  until Phase 3 verifies network policies and resolves a hostname provider.
+  Begin Phase 4 verified GitHub webhook ingestion and durable per-app/branch
+  dispatch ceilings. The preview lifecycle entry points remain internal control
+  plane operations until signed push/delete payload provenance is implemented.

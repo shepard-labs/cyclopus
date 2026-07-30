@@ -22,6 +22,16 @@ enum EnvironmentKind {
   ENVIRONMENT_KIND_PREVIEW = 2;
 }
 
+enum EnvironmentLifecycleStatus {
+  ENVIRONMENT_LIFECYCLE_STATUS_UNSPECIFIED = 0;
+  ENVIRONMENT_LIFECYCLE_STATUS_RESERVED = 1;
+  ENVIRONMENT_LIFECYCLE_STATUS_POLICY_BLOCKED = 2;
+  ENVIRONMENT_LIFECYCLE_STATUS_READY = 3;
+  ENVIRONMENT_LIFECYCLE_STATUS_TEARDOWN_REQUESTED = 4;
+  ENVIRONMENT_LIFECYCLE_STATUS_TORN_DOWN = 5;
+  ENVIRONMENT_LIFECYCLE_STATUS_FAILED = 6;
+}
+
 enum ScalingMode {
   SCALING_MODE_UNSPECIFIED = 0;
   SCALING_MODE_HPA = 1;
@@ -181,7 +191,38 @@ message Environment {
   string current_env_var_revision_id = 11;
   google.protobuf.Timestamp created_at = 12;
   google.protobuf.Timestamp torn_down_at = 13;
+  EnvironmentLifecycleStatus lifecycle_status = 14;
+  string lifecycle_reason = 15;
+  string lifecycle_error_code = 16;
+  string lifecycle_error_message = 17;
+  google.protobuf.Timestamp teardown_requested_at = 18;
 }
+
+message PreviewPushRequest {
+  string application_id = 1;
+  string branch = 2;
+  string commit_sha = 3;
+  string idempotency_key = 4;
+}
+message PreviewPushResponse {
+  Environment environment = 1;
+  string disposition = 2;
+  bool dropped = 3;
+}
+
+message PreviewBranchDeleteRequest {
+  string application_id = 1;
+  string branch = 2;
+  string idempotency_key = 3;
+}
+message PreviewBranchDeleteResponse { Environment environment = 1; }
+
+message TeardownEnvironmentRequest {
+  string environment_id = 1;
+  string reason = 2;
+  string idempotency_key = 3;
+}
+message TeardownEnvironmentResponse { Environment environment = 1; }
 
 message Release {
   string id = 1;
@@ -602,6 +643,15 @@ service EnvironmentService {
   }
   rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsResponse) {
     option (google.api.http) = { get: "/v1/applications/{application_id}/environments" };
+  }
+  rpc AcceptPreviewPush(PreviewPushRequest) returns (PreviewPushResponse) {
+    option (google.api.http) = { post: "/v1/internal/preview-pushes" body: "*" };
+  }
+  rpc AcceptPreviewBranchDelete(PreviewBranchDeleteRequest) returns (PreviewBranchDeleteResponse) {
+    option (google.api.http) = { post: "/v1/internal/preview-branch-deletes" body: "*" };
+  }
+  rpc TeardownEnvironment(TeardownEnvironmentRequest) returns (TeardownEnvironmentResponse) {
+    option (google.api.http) = { post: "/v1/environments/{environment_id}:teardown" body: "*" };
   }
 }
 

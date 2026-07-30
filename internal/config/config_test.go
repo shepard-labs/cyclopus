@@ -61,7 +61,7 @@ func TestLoadPrecedence(t *testing.T) {
 		cfg.GitHub.RunPollInterval != 30*time.Second || cfg.GitHub.RequestTimeout != 20*time.Second {
 		t.Fatalf("github config = %+v, want default values", cfg.GitHub)
 	}
-	if cfg.Kubernetes.RecoveryPollInterval != 2*time.Second || cfg.Kubernetes.ConflictRetries != 5 {
+	if cfg.Kubernetes.RecoveryPollInterval != 2*time.Second || cfg.Kubernetes.ConflictRetries != 5 || cfg.Kubernetes.PreviewHostnameSuffix != "preview.invalid" {
 		t.Fatalf("kubernetes config = %+v, want default values", cfg.Kubernetes)
 	}
 }
@@ -98,13 +98,13 @@ func TestLoadGitHubPartialConfigValidation(t *testing.T) {
 
 func TestLoadKubernetesRecoveryConfigPrecedence(t *testing.T) {
 	cfg, err := Load(
-		[]string{"--kubeconfig", "/flag/kubeconfig", "--kubernetes-conflict-retries", "9"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBECONFIG=/env/kubeconfig", "CYCLOPUS_KUBERNETES_RECOVERY_POLL_INTERVAL=250ms", "CYCLOPUS_KUBERNETES_CONFLICT_RETRIES=7"},
+		[]string{"--kubeconfig", "/flag/kubeconfig", "--kubernetes-conflict-retries", "9", "--kubernetes-preview-hostname-suffix", "flag.example.test"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBECONFIG=/env/kubeconfig", "CYCLOPUS_KUBERNETES_RECOVERY_POLL_INTERVAL=250ms", "CYCLOPUS_KUBERNETES_CONFLICT_RETRIES=7", "CYCLOPUS_KUBERNETES_PREVIEW_HOSTNAME_SUFFIX=env.example.test"},
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Kubernetes.Kubeconfig != "/flag/kubeconfig" || cfg.Kubernetes.RecoveryPollInterval != 250*time.Millisecond || cfg.Kubernetes.ConflictRetries != 9 {
+	if cfg.Kubernetes.Kubeconfig != "/flag/kubeconfig" || cfg.Kubernetes.RecoveryPollInterval != 250*time.Millisecond || cfg.Kubernetes.ConflictRetries != 9 || cfg.Kubernetes.PreviewHostnameSuffix != "flag.example.test" {
 		t.Fatalf("kubernetes config = %+v", cfg.Kubernetes)
 	}
 }

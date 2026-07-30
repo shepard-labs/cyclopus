@@ -84,9 +84,10 @@ type GitHub struct {
 }
 
 type Kubernetes struct {
-	Kubeconfig           string
-	RecoveryPollInterval time.Duration
-	ConflictRetries      int
+	Kubeconfig            string
+	RecoveryPollInterval  time.Duration
+	ConflictRetries       int
+	PreviewHostnameSuffix string
 }
 
 func Load(args, environ []string) (Config, error) {
@@ -131,6 +132,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.String("kubeconfig", "", "path to a Kubernetes client configuration file")
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
 	flags.Int("kubernetes-conflict-retries", 0, "Kubernetes optimistic update conflict retries")
+	flags.String("kubernetes-preview-hostname-suffix", "", "verified DNS suffix appended to generated preview slugs")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, fmt.Errorf("parse flags: %w", err)
 	}
@@ -186,6 +188,7 @@ func Load(args, environ []string) (Config, error) {
 		"kubeconfig":                           "kubernetes.kubeconfig",
 		"kubernetes-recovery-poll-interval":    "kubernetes.recovery_poll_interval",
 		"kubernetes-conflict-retries":          "kubernetes.conflict_retries",
+		"kubernetes-preview-hostname-suffix":   "kubernetes.preview_hostname_suffix",
 	}
 	for flagName, key := range flagKeys {
 		if flags.Changed(flagName) {
@@ -234,9 +237,10 @@ func Load(args, environ []string) (Config, error) {
 			TrustedHosts:                v.GetStringSlice("github.trusted_hosts"),
 		},
 		Kubernetes: Kubernetes{
-			Kubeconfig:           v.GetString("kubernetes.kubeconfig"),
-			RecoveryPollInterval: v.GetDuration("kubernetes.recovery_poll_interval"),
-			ConflictRetries:      v.GetInt("kubernetes.conflict_retries"),
+			Kubeconfig:            v.GetString("kubernetes.kubeconfig"),
+			RecoveryPollInterval:  v.GetDuration("kubernetes.recovery_poll_interval"),
+			ConflictRetries:       v.GetInt("kubernetes.conflict_retries"),
+			PreviewHostnameSuffix: v.GetString("kubernetes.preview_hostname_suffix"),
 		},
 		InsecurePublicListeners: v.GetBool("insecure_public_listeners"),
 	}
@@ -274,6 +278,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("github.trusted_hosts", []string{"api.github.com", "uploads.github.com"})
 	v.SetDefault("kubernetes.recovery_poll_interval", "2s")
 	v.SetDefault("kubernetes.conflict_retries", 5)
+	v.SetDefault("kubernetes.preview_hostname_suffix", "preview.invalid")
 }
 
 func environment(environ []string) map[string]string {
@@ -316,6 +321,7 @@ func environment(environ []string) map[string]string {
 		"KUBECONFIG":                           "kubernetes.kubeconfig",
 		"KUBERNETES_RECOVERY_POLL_INTERVAL":    "kubernetes.recovery_poll_interval",
 		"KUBERNETES_CONFLICT_RETRIES":          "kubernetes.conflict_retries",
+		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":   "kubernetes.preview_hostname_suffix",
 	}
 	values := make(map[string]string)
 	for _, item := range environ {
@@ -466,6 +472,9 @@ func (c Config) Validate() error {
 	}
 	if c.Kubernetes.ConflictRetries <= 0 {
 		errs = append(errs, fmt.Errorf("kubernetes.conflict_retries must be greater than zero"))
+	}
+	if suffix := strings.TrimSpace(c.Kubernetes.PreviewHostnameSuffix); suffix == "" || len(suffix) > 253 || strings.ContainsAny(suffix, "/:@") {
+		errs = append(errs, fmt.Errorf("kubernetes.preview_hostname_suffix must be a DNS suffix"))
 	}
 	return errors.Join(errs...)
 }

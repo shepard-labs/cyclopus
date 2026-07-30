@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,6 +56,144 @@ func TestOrchestrationHardDeadlines(t *testing.T) {
 	if orchestrationRunDeadline != 45*time.Minute {
 		t.Fatalf("run deadline = %s, want 45m", orchestrationRunDeadline)
 	}
+}
+
+func TestPreviewDisabledAcknowledgesWithoutEnvironmentIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET previews_enabled=false,ci_workflow_id='deploy.yml' WHERE id=$1`, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := dataStore.AcceptPreviewPush(t.Context(), previewPushParams("disabled", "feature/disabled", commitSHA('1')))
+	if err != nil || !result.Dropped || result.Disposition != "dropped" {
+		t.Fatalf("AcceptPreviewPush() = %+v, %v", result, err)
+	}
+	var count int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM environments WHERE app_id=$1 AND kind='preview'`, appOneID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("preview count = %d, %v", count, err)
+	}
+}
+
+func TestPreviewConcurrentCapAndIdentityReuseIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET max_preview_environments=1,ci_workflow_id='deploy.yml' WHERE id=$1`, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	errorsOut := make(chan error, 2)
+	var wait sync.WaitGroup
+	for index, branch := range []string{"feature/one", "feature/two"} {
+		wait.Add(1)
+		go func(index int, branch string) {
+			defer wait.Done()
+			<-start
+			_, err := dataStore.AcceptPreviewPush(context.Background(), previewPushParams(fmt.Sprintf("cap-%d", index), branch, commitSHA(byte('1'+index))))
+			errorsOut <- err
+		}(index, branch)
+	}
+	close(start)
+	wait.Wait()
+	close(errorsOut)
+	succeeded, capped := 0, 0
+	for err := range errorsOut {
+		if err == nil {
+			succeeded++
+		} else if errors.Is(err, ErrFailedPrecondition) {
+			capped++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if succeeded != 1 || capped != 1 {
+		t.Fatalf("concurrent cap = succeeded:%d capped:%d", succeeded, capped)
+	}
+	environments, err := dataStore.ListEnvironments(t.Context(), orgOneID, appOneID, false)
+	if err != nil || len(environments) != 2 {
+		t.Fatalf("environments = %d, %v", len(environments), err)
+	}
+	var preview Environment
+	for _, environment := range environments {
+		if environment.Kind == "preview" {
+			preview = environment
+		}
+	}
+	result, err := dataStore.AcceptPreviewPush(t.Context(), previewPushParams("reuse", preview.Branch, commitSHA('9')))
+	if err != nil || result.Environment.ID != preview.ID || result.Environment.PreviewSlug == nil || *result.Environment.PreviewSlug != *preview.PreviewSlug {
+		t.Fatalf("reuse = %+v, %v", result, err)
+	}
+}
+
+func TestPreviewTornDownBranchGetsFreshIdentityAndNoSlugReuseIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET ci_workflow_id='deploy.yml' WHERE id=$1`, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	first, err := dataStore.AcceptPreviewPush(t.Context(), previewPushParams("first", "feature/recreate", commitSHA('1')))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET torn_down_at=now() WHERE id=$1`, first.Environment.ID); err != nil {
+		t.Fatal(err)
+	}
+	secondParams := previewPushParams("second", "feature/recreate", commitSHA('2'))
+	secondParams.Identities[0].Slug = *first.Environment.PreviewSlug
+	secondParams.Identities[0].Namespace = first.Environment.Namespace
+	second, err := dataStore.AcceptPreviewPush(t.Context(), secondParams)
+	if err != nil || second.Environment.ID == first.Environment.ID || second.Environment.PreviewSlug == nil || *second.Environment.PreviewSlug == *first.Environment.PreviewSlug {
+		t.Fatalf("fresh identity = %+v, %v", second, err)
+	}
+}
+
+func TestPreviewPolicyBlockedCoalescesWithoutDispatchAndStaleLifecycleFenceIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET ci_workflow_id='deploy.yml' WHERE id=$1`, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	first, err := dataStore.AcceptPreviewPush(t.Context(), previewPushParams("blocked-one", "feature/blocked", commitSHA('1')))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET lifecycle_status='policy_blocked' WHERE id=$1`, first.Environment.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := dataStore.AcceptPreviewPush(t.Context(), previewPushParams("blocked-two", "feature/blocked", commitSHA('2')))
+	if err != nil || second.Disposition != "queued" {
+		t.Fatalf("blocked coalesce = %+v, %v", second, err)
+	}
+	if jobs, err := dataStore.ListOrchestrationOrgIDs(t.Context()); err != nil || len(jobs) != 0 {
+		t.Fatalf("blocked jobs became dispatchable: %v, %v", jobs, err)
+	}
+	job, err := dataStore.ClaimEnvironmentLifecycleJob(t.Context(), orgOneID, "worker-one", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE environment_lifecycle_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	newJob, err := dataStore.ClaimEnvironmentLifecycleJob(t.Context(), orgOneID, "worker-two", time.Minute)
+	if err != nil || newJob.Fence <= job.Fence {
+		t.Fatalf("new lifecycle fence = %+v, %v", newJob, err)
+	}
+	if err := dataStore.CheckpointEnvironmentLifecycle(t.Context(), job, "stale"); !errors.Is(err, ErrLeaseNotOwned) {
+		t.Fatalf("stale lifecycle fence error = %v", err)
+	}
+}
+
+func previewPushParams(key, branch, commit string) PreviewPushParams {
+	identities := make([]PreviewIdentity, 0, PreviewIdentityAttempts)
+	for index := range PreviewIdentityAttempts {
+		identities = append(identities, PreviewIdentity{
+			EnvironmentID: fmt.Sprintf("00000000-0000-0000-1000-%012d", index+1),
+			Slug:          fmt.Sprintf("calm-otter-%04x", index),
+			Namespace:     fmt.Sprintf("preview-calm-otter-%04x", index),
+		})
+	}
+	return PreviewPushParams{OrgID: orgOneID, AppID: appOneID, Branch: branch, CommitSHA: commit,
+		IdempotencyKey: key, OrchestrationJobID: "00000000-0000-0000-2000-" + requestHash(key)[:12], Identities: identities,
+		Audit: &AuditEvent{ID: "00000000-0000-0000-3000-" + requestHash(key)[:12]}}
 }
 
 func TestOrchestrationResolutionValidation(t *testing.T) {

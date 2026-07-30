@@ -708,6 +708,18 @@ func (f *fakeForwardStore) QuarantineDeployRecovery(_ context.Context, lease sto
 	f.quarantineReason = reason
 	return nil
 }
+func (*fakeForwardStore) CheckpointEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, string) error {
+	return nil
+}
+func (*fakeForwardStore) BlockEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, string, string, string) error {
+	return nil
+}
+func (*fakeForwardStore) CompleteEnvironmentProvision(context.Context, store.EnvironmentLifecycleJob, *string) error {
+	return nil
+}
+func (*fakeForwardStore) CompleteEnvironmentTeardown(context.Context, store.EnvironmentLifecycleJob) error {
+	return nil
+}
 
 var _ = autoscalingv2.HorizontalPodAutoscaler{}
 var _ = networkingv1.Ingress{}

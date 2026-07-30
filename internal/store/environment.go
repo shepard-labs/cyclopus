@@ -106,7 +106,8 @@ func (s *Store) claimForwardDeploy(ctx context.Context, orgID, status string, ex
 				  AND NOT (environment.id::text = ANY(COALESCE($3::text[], ARRAY[]::text[])))
 				  AND environment.lock_acquired_at > now() - make_interval(secs => app.deploy_timeout_seconds)
 				  AND environment.deploy_recovery_quarantined_at IS NULL
-				  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+			  AND environment.torn_down_at IS NULL AND environment.lifecycle_status IN ('ready','teardown_requested')
+				  AND environment.planned_hostname IS NOT NULL AND app.deleted_at IS NULL
 				  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 				ORDER BY release.created_at, release.id
 				FOR UPDATE OF environment, release SKIP LOCKED LIMIT 1
@@ -189,8 +190,9 @@ func (s *Store) ListExpiredDeploys(ctx context.Context) ([]ExpiredDeploy, error)
 			JOIN projects AS project ON project.org_id = app.org_id AND project.id = app.project_id
 			JOIN orgs AS org ON org.id = environment.org_id
 			WHERE environment.in_progress_release_id IS NOT NULL
-			  AND environment.deploy_recovery_quarantined_at IS NULL
-			  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+				  AND environment.deploy_recovery_quarantined_at IS NULL
+				  AND environment.torn_down_at IS NULL AND environment.lifecycle_status IN ('ready','teardown_requested')
+				  AND environment.planned_hostname IS NOT NULL AND app.deleted_at IS NULL
 			  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 			  AND environment.lock_acquired_at <= now() - make_interval(secs => app.deploy_timeout_seconds)
 			ORDER BY environment.org_id, environment.id`)

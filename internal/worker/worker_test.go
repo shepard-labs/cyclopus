@@ -336,6 +336,22 @@ func (f *fakeRecoveryStore) FailOrchestration(context.Context, store.FailOrchest
 func (f *fakeRecoveryStore) RequeueExpiredOrchestrationLeases(context.Context) (int64, error) {
 	return f.requeued, f.requeueErr
 }
+func (*fakeRecoveryStore) RequeueExpiredLifecycleLeases(context.Context) (int64, error) {
+	return 0, nil
+}
+func (*fakeRecoveryStore) ListLifecycleOrgIDs(context.Context) ([]string, error) { return nil, nil }
+func (*fakeRecoveryStore) ClaimEnvironmentLifecycleJob(context.Context, string, string, time.Duration) (store.EnvironmentLifecycleJob, error) {
+	return store.EnvironmentLifecycleJob{}, store.ErrNotFound
+}
+func (*fakeRecoveryStore) RescheduleEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, time.Duration, string, string) error {
+	return nil
+}
+func (*fakeRecoveryStore) ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error) {
+	return nil, nil
+}
+func (*fakeRecoveryStore) RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error) {
+	return false, nil
+}
 
 func (f *fakeRecoveryStore) ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error) {
 	return f.orgIDs, nil
@@ -587,6 +603,24 @@ func (*concurrentForwardStore) DeleteExpiredIdempotencyRecords(context.Context, 
 }
 func (*concurrentForwardStore) RequeueExpiredOrchestrationLeases(context.Context) (int64, error) {
 	return 0, nil
+}
+func (*concurrentForwardStore) RequeueExpiredLifecycleLeases(context.Context) (int64, error) {
+	return 0, nil
+}
+func (*concurrentForwardStore) ListLifecycleOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (*concurrentForwardStore) ClaimEnvironmentLifecycleJob(context.Context, string, string, time.Duration) (store.EnvironmentLifecycleJob, error) {
+	return store.EnvironmentLifecycleJob{}, store.ErrNotFound
+}
+func (*concurrentForwardStore) RescheduleEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, time.Duration, string, string) error {
+	return nil
+}
+func (*concurrentForwardStore) ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error) {
+	return nil, nil
+}
+func (*concurrentForwardStore) RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error) {
+	return false, nil
 }
 func (*concurrentForwardStore) ListOrchestrationOrgIDs(context.Context) ([]string, error) {
 	return nil, nil

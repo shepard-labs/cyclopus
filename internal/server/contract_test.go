@@ -52,6 +52,44 @@ func TestRESTPaginationMapping(t *testing.T) {
 	}
 }
 
+func TestRESTPreviewLifecycleMappings(t *testing.T) {
+	environments := &contractEnvironmentService{}
+	handler, err := Handler(nil, Services{Environment: environments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path  string
+		body  string
+		check func()
+	}{
+		{path: "/v1/internal/preview-pushes", body: `{"applicationId":"app","branch":"feature/api","commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","idempotencyKey":"push-1"}`, check: func() {
+			if environments.push == nil || environments.push.Branch != "feature/api" || environments.push.IdempotencyKey != "push-1" {
+				t.Fatalf("push mapping = %+v", environments.push)
+			}
+		}},
+		{path: "/v1/internal/preview-branch-deletes", body: `{"applicationId":"app","branch":"feature/api","idempotencyKey":"delete-1"}`, check: func() {
+			if environments.deleted == nil || environments.deleted.Branch != "feature/api" {
+				t.Fatalf("delete mapping = %+v", environments.deleted)
+			}
+		}},
+		{path: "/v1/environments/environment:teardown", body: `{"reason":"operator_requested","idempotencyKey":"teardown-1"}`, check: func() {
+			if environments.teardown == nil || environments.teardown.EnvironmentId != "environment" || environments.teardown.Reason != "operator_requested" {
+				t.Fatalf("teardown mapping = %+v", environments.teardown)
+			}
+		}},
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+		request.Header.Set("Content-Type", "application/json")
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", test.path, response.Code, response.Body.String())
+		}
+		test.check()
+	}
+}
+
 func TestBootstrapContractHasNoIdempotencyKey(t *testing.T) {
 	fields := (&cyclopusv1.BootstrapRequest{}).ProtoReflect().Descriptor().Fields()
 	if fields.ByName("idempotency_key") != nil || fields.ByNumber(3) != nil {
@@ -130,6 +168,26 @@ type contractProjectService struct {
 	cyclopusv1.UnimplementedProjectServiceServer
 	list     *cyclopusv1.ListProjectsRequest
 	getError error
+}
+
+type contractEnvironmentService struct {
+	cyclopusv1.UnimplementedEnvironmentServiceServer
+	push     *cyclopusv1.PreviewPushRequest
+	deleted  *cyclopusv1.PreviewBranchDeleteRequest
+	teardown *cyclopusv1.TeardownEnvironmentRequest
+}
+
+func (s *contractEnvironmentService) AcceptPreviewPush(_ context.Context, request *cyclopusv1.PreviewPushRequest) (*cyclopusv1.PreviewPushResponse, error) {
+	s.push = request
+	return &cyclopusv1.PreviewPushResponse{Disposition: "queued"}, nil
+}
+func (s *contractEnvironmentService) AcceptPreviewBranchDelete(_ context.Context, request *cyclopusv1.PreviewBranchDeleteRequest) (*cyclopusv1.PreviewBranchDeleteResponse, error) {
+	s.deleted = request
+	return &cyclopusv1.PreviewBranchDeleteResponse{}, nil
+}
+func (s *contractEnvironmentService) TeardownEnvironment(_ context.Context, request *cyclopusv1.TeardownEnvironmentRequest) (*cyclopusv1.TeardownEnvironmentResponse, error) {
+	s.teardown = request
+	return &cyclopusv1.TeardownEnvironmentResponse{}, nil
 }
 
 type contractReconciliationService struct {

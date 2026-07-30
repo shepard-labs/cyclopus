@@ -145,6 +145,9 @@ func (*fakeKubernetesAdapter) ExecuteDeploy(_ context.Context, lease store.Deplo
 func (*fakeKubernetesAdapter) RecoverExpiredDeploy(_ context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {
 	return store.DeployRecoveryResult{Lease: lease}, nil
 }
+func (*fakeKubernetesAdapter) ExecuteEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob) error {
+	return nil
+}
 
 type countingGitHubAdapter struct{ calls int }
 
@@ -169,6 +172,10 @@ func (a *countingKubernetesAdapter) RecoverExpiredDeploy(_ context.Context, leas
 	a.calls++
 	return store.DeployRecoveryResult{Lease: lease}, nil
 }
+func (a *countingKubernetesAdapter) ExecuteEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob) error {
+	a.calls++
+	return nil
+}
 
 type startupRecoveryStore struct {
 	orgIDs  []string
@@ -183,6 +190,22 @@ func (*startupRecoveryStore) DeleteExpiredIdempotencyRecords(context.Context, in
 
 func (*startupRecoveryStore) RequeueExpiredOrchestrationLeases(context.Context) (int64, error) {
 	return 0, nil
+}
+func (*startupRecoveryStore) RequeueExpiredLifecycleLeases(context.Context) (int64, error) {
+	return 0, nil
+}
+func (*startupRecoveryStore) ListLifecycleOrgIDs(context.Context) ([]string, error) { return nil, nil }
+func (*startupRecoveryStore) ClaimEnvironmentLifecycleJob(context.Context, string, string, time.Duration) (store.EnvironmentLifecycleJob, error) {
+	return store.EnvironmentLifecycleJob{}, store.ErrNotFound
+}
+func (*startupRecoveryStore) RescheduleEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, time.Duration, string, string) error {
+	return nil
+}
+func (*startupRecoveryStore) ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error) {
+	return nil, nil
+}
+func (*startupRecoveryStore) RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error) {
+	return false, nil
 }
 
 func (*startupRecoveryStore) ClaimOrchestration(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {

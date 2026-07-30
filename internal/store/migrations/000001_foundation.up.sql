@@ -302,7 +302,14 @@ CREATE TABLE environments (
     kind text NOT NULL CHECK (kind IN ('production', 'preview')),
     preview_slug text,
     namespace text NOT NULL CHECK (namespace ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'),
-    planned_hostname text NOT NULL UNIQUE CHECK (planned_hostname = lower(planned_hostname) AND btrim(planned_hostname) <> '' AND octet_length(planned_hostname) <= 253),
+    planned_hostname text UNIQUE CHECK (planned_hostname IS NULL OR (planned_hostname = lower(planned_hostname) AND btrim(planned_hostname) <> '' AND octet_length(planned_hostname) <= 253)),
+    lifecycle_status text NOT NULL DEFAULT 'ready' CHECK (lifecycle_status IN (
+        'reserved', 'policy_blocked', 'ready', 'teardown_requested', 'torn_down', 'failed'
+    )),
+    lifecycle_reason text CHECK (lifecycle_reason IS NULL OR octet_length(lifecycle_reason) <= 200),
+    lifecycle_error_code text CHECK (lifecycle_error_code IS NULL OR octet_length(lifecycle_error_code) <= 200),
+    lifecycle_error_message text CHECK (lifecycle_error_message IS NULL OR octet_length(lifecycle_error_message) <= 8192),
+    teardown_requested_at timestamptz,
     lock_acquired_at timestamptz,
     deploy_recovery_checkpoint text CHECK (deploy_recovery_checkpoint IS NULL OR deploy_recovery_checkpoint IN (
         'claimed', 'first_deployment_missing', 'late_ready_observed',
@@ -321,8 +328,31 @@ CREATE TABLE environments (
     CHECK ((deploy_recovery_quarantined_at IS NULL AND deploy_recovery_error_code IS NULL AND deploy_recovery_error_message IS NULL)
         OR (deploy_recovery_quarantined_at IS NOT NULL AND deploy_recovery_error_code IS NOT NULL AND deploy_recovery_error_message IS NOT NULL)),
     CHECK (preview_slug IS NULL OR preview_slug ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'),
-    CHECK (torn_down_at IS NULL OR torn_down_at >= created_at)
+    CHECK (torn_down_at IS NULL OR torn_down_at >= created_at),
+    CHECK ((lifecycle_status = 'torn_down') = (torn_down_at IS NOT NULL)),
+    CHECK (kind <> 'preview' OR lifecycle_status <> 'ready' OR planned_hostname IS NOT NULL),
+    CHECK (teardown_requested_at IS NULL OR teardown_requested_at >= created_at),
+    CHECK (lifecycle_status NOT IN ('teardown_requested', 'torn_down') OR teardown_requested_at IS NOT NULL),
+    CHECK ((lifecycle_status = 'failed') OR (lifecycle_error_code IS NULL AND lifecycle_error_message IS NULL))
 );
+
+CREATE FUNCTION normalize_environment_lifecycle() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.torn_down_at IS NOT NULL THEN
+        NEW.lifecycle_status := 'torn_down';
+        NEW.teardown_requested_at := COALESCE(NEW.teardown_requested_at, NEW.torn_down_at);
+    ELSIF NEW.lifecycle_status = 'teardown_requested' THEN
+        NEW.teardown_requested_at := COALESCE(NEW.teardown_requested_at, now());
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER environments_normalize_lifecycle
+BEFORE INSERT OR UPDATE OF lifecycle_status, teardown_requested_at, torn_down_at ON environments
+FOR EACH ROW EXECUTE FUNCTION normalize_environment_lifecycle();
 
 CREATE TRIGGER orgs_tombstone_ready
 BEFORE UPDATE OF deleted_at ON orgs
@@ -929,6 +959,58 @@ CREATE INDEX orchestration_jobs_reconciliation_due
 CREATE UNIQUE INDEX orchestration_jobs_github_run
     ON orchestration_jobs (github_run_id)
     WHERE github_run_id IS NOT NULL;
+
+CREATE TABLE environment_lifecycle_jobs (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    org_id uuid NOT NULL,
+    environment_id uuid NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('provision', 'teardown')),
+    status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'leased', 'blocked', 'completed', 'failed')),
+    lease_owner text CHECK (lease_owner IS NULL OR (btrim(lease_owner) <> '' AND octet_length(lease_owner) <= 255)),
+    lease_expires_at timestamptz,
+    fence bigint NOT NULL DEFAULT 0 CHECK (fence >= 0),
+    checkpoint text CHECK (checkpoint IS NULL OR octet_length(checkpoint) <= 200),
+    attempt integer NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+    max_attempts integer NOT NULL DEFAULT 8 CHECK (max_attempts BETWEEN 1 AND 100),
+    not_before timestamptz NOT NULL DEFAULT now(),
+    reason text CHECK (reason IS NULL OR octet_length(reason) <= 200),
+    error_code text CHECK (error_code IS NULL OR octet_length(error_code) <= 200),
+    error_message text CHECK (error_message IS NULL OR octet_length(error_message) <= 8192),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz,
+    UNIQUE (org_id, id),
+    FOREIGN KEY (org_id, environment_id) REFERENCES environments(org_id, id) ON DELETE RESTRICT,
+    CHECK ((status = 'leased') = (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)),
+    CHECK (status <> 'blocked' OR error_code IS NOT NULL),
+    CHECK (status NOT IN ('completed', 'failed') OR completed_at IS NOT NULL)
+);
+
+CREATE UNIQUE INDEX environment_lifecycle_jobs_single_flight
+    ON environment_lifecycle_jobs (environment_id, kind)
+    WHERE status IN ('queued', 'leased', 'blocked');
+
+CREATE INDEX environment_lifecycle_jobs_claimable
+    ON environment_lifecycle_jobs (not_before, created_at, id)
+    WHERE status IN ('queued', 'leased');
+
+CREATE TABLE preview_lifecycle_requests (
+    org_id uuid NOT NULL,
+    idempotency_key text NOT NULL CHECK (btrim(idempotency_key) <> '' AND octet_length(idempotency_key) <= 255),
+    event_kind text NOT NULL CHECK (event_kind IN ('push', 'delete', 'teardown')),
+    app_id uuid NOT NULL,
+    branch text NOT NULL CHECK (btrim(branch) <> '' AND octet_length(branch) <= 255),
+    commit_sha text CHECK (commit_sha IS NULL OR commit_sha ~ '^[0-9a-f]{40}$'),
+    environment_id uuid,
+    requested_environment_id uuid,
+    reason text CHECK (reason IS NULL OR octet_length(reason) <= 200),
+    disposition text NOT NULL CHECK (disposition IN ('dropped', 'reserved', 'coalesced', 'queued', 'teardown_requested')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, idempotency_key),
+    FOREIGN KEY (org_id, app_id) REFERENCES apps(org_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (org_id, environment_id) REFERENCES environments(org_id, id) ON DELETE RESTRICT
+    ,FOREIGN KEY (org_id, requested_environment_id) REFERENCES environments(org_id, id) ON DELETE RESTRICT
+);
 
 CREATE FUNCTION enforce_active_work_scope() RETURNS trigger
 LANGUAGE plpgsql

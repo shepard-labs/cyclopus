@@ -28,6 +28,12 @@ type RecoveryStore interface {
 	ListForwardDeployOrgIDs(context.Context, bool) ([]string, error)
 	ClaimPendingDeploy(context.Context, string, []string) (store.DeployExecution, error)
 	ClaimUnexpiredDeploying(context.Context, string, []string) (store.DeployExecution, error)
+	RequeueExpiredLifecycleLeases(context.Context) (int64, error)
+	ListLifecycleOrgIDs(context.Context) ([]string, error)
+	ClaimEnvironmentLifecycleJob(context.Context, string, string, time.Duration) (store.EnvironmentLifecycleJob, error)
+	RescheduleEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, time.Duration, string, string) error
+	ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error)
+	RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error)
 }
 
 type GitHubRecoveryAdapter interface {
@@ -40,11 +46,16 @@ type KubernetesRecoveryAdapter interface {
 	ExecuteDeploy(context.Context, store.DeployExecution) (store.DeployRecoveryResult, error)
 }
 
+type KubernetesLifecycleAdapter interface {
+	ExecuteEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob) error
+}
+
 type RecoveryAdapters struct {
 	Capabilities               RecoveryCapabilities
 	GitHub                     GitHubRecoveryAdapter
 	GitHubErrorDisposition     func(error) (bool, time.Duration, string, bool)
 	Kubernetes                 KubernetesRecoveryAdapter
+	Lifecycle                  KubernetesLifecycleAdapter
 	KubernetesErrorDisposition func(error) (bool, time.Duration, string)
 }
 
@@ -144,6 +155,22 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 	if requeued > 0 {
 		r.logger.Info("requeued expired orchestration leases", "count", requeued)
 	}
+	if _, err := r.store.RequeueExpiredLifecycleLeases(ctx); err != nil {
+		return fmt.Errorf("recover environment lifecycle leases: %w", err)
+	}
+	idleCandidates, err := r.store.ListIdlePreviewCandidates(ctx, 100)
+	if err != nil {
+		return fmt.Errorf("scan idle preview environments: %w", err)
+	}
+	for _, candidate := range idleCandidates {
+		if _, err := r.store.RequestIdlePreviewTeardown(ctx, candidate); err != nil {
+			return fmt.Errorf("request idle preview teardown %s/%s: %w", candidate.OrgID, candidate.EnvironmentID, err)
+		}
+	}
+	lifecycleOrgIDs, err := r.store.ListLifecycleOrgIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("scan environment lifecycle: %w", err)
+	}
 
 	queuedOrgIDs, err := r.store.ListOrchestrationOrgIDs(ctx)
 	if err != nil {
@@ -175,6 +202,35 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 			kind = "expired deploy"
 		}
 		return &BlockedRecoveryError{Capability: KubernetesRecoveryCapability, Kind: kind}
+	}
+	if len(lifecycleOrgIDs) > 0 && (!r.adapters.Capabilities.Kubernetes || r.adapters.Lifecycle == nil) {
+		return &BlockedRecoveryError{Capability: KubernetesRecoveryCapability, Kind: "environment lifecycle"}
+	}
+	for _, orgID := range lifecycleOrgIDs {
+		for {
+			job, err := r.store.ClaimEnvironmentLifecycleJob(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("claim environment lifecycle for organization %s: %w", orgID, err)
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
+			err = r.adapters.Lifecycle.ExecuteEnvironmentLifecycle(requestCtx, job)
+			cancel()
+			if err == nil {
+				continue
+			}
+			if errors.Is(err, store.ErrConflict) {
+				if rescheduleErr := r.store.RescheduleEnvironmentLifecycle(ctx, job, time.Second, "active_work", err.Error()); rescheduleErr != nil {
+					return rescheduleErr
+				}
+				continue
+			}
+			if rescheduleErr := r.store.RescheduleEnvironmentLifecycle(ctx, job, retryDelay(job.Attempt, 0, r.config.LeaseDuration), "lifecycle_retry", err.Error()); rescheduleErr != nil {
+				return fmt.Errorf("reschedule environment lifecycle %s: %w", job.ID, rescheduleErr)
+			}
+		}
 	}
 
 	if startup {

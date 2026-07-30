@@ -40,10 +40,12 @@ type App struct {
 }
 
 type Environment struct {
-	ID, OrgID, AppID, Branch, Kind, Namespace, PlannedHostname string
-	PreviewSlug, CurrentReleaseID, InProgressReleaseID         *string
-	CurrentEnvVarRevisionID, PendingCommitSHA                  *string
-	CreatedAt, TornDownAt                                      *time.Time
+	ID, OrgID, AppID, Branch, Kind, Namespace, LifecycleStatus string
+	PreviewSlug, PlannedHostname, CurrentReleaseID             *string
+	InProgressReleaseID, CurrentEnvVarRevisionID               *string
+	PendingCommitSHA, LifecycleReason, LifecycleErrorCode      *string
+	LifecycleErrorMessage                                      *string
+	CreatedAt, TeardownRequestedAt, TornDownAt                 *time.Time
 }
 
 type Release struct {
@@ -261,12 +263,12 @@ func (s *Store) GetEnvironment(ctx context.Context, orgID, id string) (Environme
 	return v, resourceQueryError("get environment", err)
 }
 
-const environmentSelect = `SELECT environment.id::text,environment.org_id::text,environment.app_id::text,environment.branch,environment.kind,environment.preview_slug,environment.namespace,environment.planned_hostname,
+const environmentSelect = `SELECT environment.id::text,environment.org_id::text,environment.app_id::text,environment.branch,environment.kind,environment.preview_slug,environment.namespace,environment.planned_hostname,environment.lifecycle_status,environment.lifecycle_reason,environment.lifecycle_error_code,environment.lifecycle_error_message,
 	(SELECT release.id::text FROM releases release WHERE release.org_id=environment.org_id AND release.environment_id=environment.id AND release.status='live' ORDER BY release.created_at DESC,release.id DESC LIMIT 1),
-	environment.in_progress_release_id::text,environment.current_env_var_revision_id::text,environment.pending_commit_sha,environment.created_at,environment.torn_down_at FROM environments environment`
+	environment.in_progress_release_id::text,environment.current_env_var_revision_id::text,environment.pending_commit_sha,environment.created_at,environment.teardown_requested_at,environment.torn_down_at FROM environments environment`
 
 func scanEnvironment(row rowScanner, v *Environment) error {
-	return row.Scan(&v.ID, &v.OrgID, &v.AppID, &v.Branch, &v.Kind, &v.PreviewSlug, &v.Namespace, &v.PlannedHostname, &v.CurrentReleaseID, &v.InProgressReleaseID, &v.CurrentEnvVarRevisionID, &v.PendingCommitSHA, &v.CreatedAt, &v.TornDownAt)
+	return row.Scan(&v.ID, &v.OrgID, &v.AppID, &v.Branch, &v.Kind, &v.PreviewSlug, &v.Namespace, &v.PlannedHostname, &v.LifecycleStatus, &v.LifecycleReason, &v.LifecycleErrorCode, &v.LifecycleErrorMessage, &v.CurrentReleaseID, &v.InProgressReleaseID, &v.CurrentEnvVarRevisionID, &v.PendingCommitSHA, &v.CreatedAt, &v.TeardownRequestedAt, &v.TornDownAt)
 }
 
 func (s *Store) ListReleases(ctx context.Context, orgID, environmentID string, statuses []string) ([]Release, error) {
@@ -325,6 +327,7 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 				JOIN orgs org ON org.id=environment.org_id
 				WHERE environment.org_id=$1 AND environment.id=$2
 				  AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL
+				  AND environment.lifecycle_status = 'ready' AND environment.planned_hostname IS NOT NULL
 				  AND app.deleted_at IS NULL AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 				FOR UPDATE OF environment`, p.OrgID, p.EnvironmentID).Scan(&environmentLocked); err == pgx.ErrNoRows {
 				return ErrConflict
@@ -388,7 +391,7 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 		if err != nil {
 			return mapMutationError("insert accepted release", err)
 		}
-		err = tx.QueryRow(ctx, `UPDATE environments environment SET in_progress_release_id=$3,lock_acquired_at=clock_timestamp(),deploy_recovery_checkpoint=NULL FROM apps app,projects project,orgs org WHERE environment.org_id=$1 AND environment.id=$2 AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.deleted_at IS NULL AND project.org_id=app.org_id AND project.id=app.project_id AND project.deleted_at IS NULL AND org.id=environment.org_id AND org.deleted_at IS NULL RETURNING environment.org_id::text,environment.id::text,environment.in_progress_release_id::text,environment.lock_acquired_at,environment.lock_acquired_at+make_interval(secs=>app.deploy_timeout_seconds)`, p.OrgID, p.EnvironmentID, p.ID).Scan(&lease.OrgID, &lease.EnvironmentID, &lease.ReleaseID, &lease.Fence, &lease.ExpiresAt)
+		err = tx.QueryRow(ctx, `UPDATE environments environment SET in_progress_release_id=$3,lock_acquired_at=clock_timestamp(),deploy_recovery_checkpoint=NULL FROM apps app,projects project,orgs org WHERE environment.org_id=$1 AND environment.id=$2 AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL AND environment.lifecycle_status='ready' AND environment.planned_hostname IS NOT NULL AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.deleted_at IS NULL AND project.org_id=app.org_id AND project.id=app.project_id AND project.deleted_at IS NULL AND org.id=environment.org_id AND org.deleted_at IS NULL RETURNING environment.org_id::text,environment.id::text,environment.in_progress_release_id::text,environment.lock_acquired_at,environment.lock_acquired_at+make_interval(secs=>app.deploy_timeout_seconds)`, p.OrgID, p.EnvironmentID, p.ID).Scan(&lease.OrgID, &lease.EnvironmentID, &lease.ReleaseID, &lease.Fence, &lease.ExpiresAt)
 		if err != nil {
 			return mapMutationError("acquire accepted deploy lease", err)
 		}

@@ -37,9 +37,10 @@ var (
 )
 
 type Config struct {
-	PollInterval    time.Duration
-	ConflictRetries int
-	APITimeout      time.Duration
+	PollInterval          time.Duration
+	ConflictRetries       int
+	APITimeout            time.Duration
+	PreviewHostnameSuffix string
 }
 
 type RecoveryState struct {
@@ -59,10 +60,11 @@ type RecoveryStore interface {
 }
 
 type RecoveryAdapter struct {
-	config Config
-	client kubernetes.Interface
-	store  RecoveryStore
-	now    func() time.Time
+	config    Config
+	client    kubernetes.Interface
+	store     RecoveryStore
+	now       func() time.Time
+	lifecycle *LifecycleAdapter
 }
 
 func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStore RecoveryStore) (*RecoveryAdapter, error) {
@@ -76,7 +78,27 @@ func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStor
 }
 
 func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardStore) (*RecoveryAdapter, error) {
-	return NewRecoveryAdapter(config, client, dataStore)
+	if config.PreviewHostnameSuffix == "" {
+		config.PreviewHostnameSuffix = "preview.invalid"
+	}
+	adapter, err := NewRecoveryAdapter(config, client, dataStore)
+	if err != nil {
+		return nil, err
+	}
+	lifecycleStore, ok := dataStore.(LifecycleStore)
+	if !ok {
+		return nil, errors.New("Kubernetes lifecycle store is unavailable")
+	}
+	hostnames, err := NewPreviewHostnameProvider(config.PreviewHostnameSuffix)
+	if err != nil {
+		return nil, err
+	}
+	adapter.lifecycle, err = NewLifecycleAdapter(client, lifecycleStore, NewNetworkPolicyProvisioner(client), hostnames, config.PollInterval)
+	return adapter, err
+}
+
+func (a *RecoveryAdapter) ExecuteEnvironmentLifecycle(ctx context.Context, job store.EnvironmentLifecycleJob) error {
+	return a.lifecycle.ExecuteEnvironmentLifecycle(ctx, job)
 }
 
 func (a *RecoveryAdapter) RecoverExpiredDeploy(ctx context.Context, lease store.DeployLease) (store.DeployRecoveryResult, error) {

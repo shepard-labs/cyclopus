@@ -502,6 +502,80 @@ func (h *apiHandlers) ListEnvironments(ctx context.Context, req *cyclopusv1.List
 	return response, nil
 }
 
+func (h *apiHandlers) AcceptPreviewPush(ctx context.Context, req *cyclopusv1.PreviewPushRequest) (*cyclopusv1.PreviewPushResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("application_id", req.GetApplicationId())
+	for field, value := range map[string]string{"branch": req.GetBranch(), "commit_sha": req.GetCommitSha(), "idempotency_key": req.GetIdempotencyKey()} {
+		if strings.TrimSpace(value) == "" {
+			violations.add(field, "is required")
+		}
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	result, err := h.service.AcceptPreviewPush(ctx, actor, req.GetIdempotencyKey(), service.PreviewPushInput{
+		AppID: req.GetApplicationId(), Branch: req.GetBranch(), CommitSHA: req.GetCommitSha(),
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	response := &cyclopusv1.PreviewPushResponse{Disposition: result.Disposition, Dropped: result.Dropped}
+	if !result.Dropped {
+		response.Environment = environmentProto(result.Environment)
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) AcceptPreviewBranchDelete(ctx context.Context, req *cyclopusv1.PreviewBranchDeleteRequest) (*cyclopusv1.PreviewBranchDeleteResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("application_id", req.GetApplicationId())
+	if strings.TrimSpace(req.GetBranch()) == "" {
+		violations.add("branch", "is required")
+	}
+	if strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		violations.add("idempotency_key", "is required")
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	environment, err := h.service.RequestPreviewBranchDelete(ctx, actor, req.GetIdempotencyKey(), req.GetApplicationId(), req.GetBranch())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.PreviewBranchDeleteResponse{Environment: environmentProto(environment)}, nil
+}
+
+func (h *apiHandlers) TeardownEnvironment(ctx context.Context, req *cyclopusv1.TeardownEnvironmentRequest) (*cyclopusv1.TeardownEnvironmentResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	violations := validationViolations{}
+	violations.uuid("environment_id", req.GetEnvironmentId())
+	if strings.TrimSpace(req.GetReason()) == "" {
+		violations.add("reason", "is required")
+	}
+	if strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		violations.add("idempotency_key", "is required")
+	}
+	if err := violations.err(); err != nil {
+		return nil, err
+	}
+	environment, err := h.service.RequestEnvironmentTeardown(ctx, actor, req.GetIdempotencyKey(), req.GetEnvironmentId(), req.GetReason())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.TeardownEnvironmentResponse{Environment: environmentProto(environment)}, nil
+}
+
 func (h *apiHandlers) Deploy(ctx context.Context, req *cyclopusv1.DeployRequest) (*cyclopusv1.DeployResponse, error) {
 	actor, err := actorFromContext(ctx)
 	if err != nil {
@@ -954,7 +1028,18 @@ func applicationProto(v store.App) *cyclopusv1.Application {
 	return &cyclopusv1.Application{Id: v.ID, OrganizationId: v.OrgID, ProjectId: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel, RegistryId: stringValue(v.RegistryID), ImageRepository: stringValue(v.ImageRepository), ContainerPort: int32(v.ContainerPort), HealthCheckPath: v.HealthCheckPath, ScalingMode: scalingModeProto(v.ScalingMode), MinReplicas: int32(v.MinReplicas), MaxReplicas: int32(v.MaxReplicas), HpaTargetCpuPercent: int32(v.HPATargetCPUPercent), CpuRequestMillicores: int32(v.CPURequestMillicores), CpuLimitMillicores: int32(v.CPULimitMillicores), MemoryRequestMib: int32(v.MemoryRequestMiB), MemoryLimitMib: int32(v.MemoryLimitMiB), PreviewsEnabled: v.PreviewsEnabled, MaxPreviewEnvironments: int32(v.MaxPreviewEnvironments), PreviewIdleTtlHours: int32(v.PreviewIdleTTLHours), DeployTimeoutSeconds: int32(v.DeployTimeoutSeconds), ReleaseRetentionCount: int32(v.ReleaseRetentionCount), RuntimeClass: runtimeClassProto(v.RuntimeClass), CiWorkflowId: stringValue(v.CIWorkflowID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
 }
 func environmentProto(v store.Environment) *cyclopusv1.Environment {
-	return &cyclopusv1.Environment{Id: v.ID, OrganizationId: v.OrgID, ApplicationId: v.AppID, Branch: v.Branch, Kind: environmentKindProto(v.Kind), PreviewSlug: stringValue(v.PreviewSlug), Namespace: v.Namespace, PlannedHostname: v.PlannedHostname, CurrentReleaseId: stringValue(v.CurrentReleaseID), InProgressReleaseId: stringValue(v.InProgressReleaseID), CurrentEnvVarRevisionId: stringValue(v.CurrentEnvVarRevisionID), CreatedAt: timeProto(v.CreatedAt), TornDownAt: timeProto(v.TornDownAt)}
+	return &cyclopusv1.Environment{Id: v.ID, OrganizationId: v.OrgID, ApplicationId: v.AppID, Branch: v.Branch, Kind: environmentKindProto(v.Kind), PreviewSlug: stringValue(v.PreviewSlug), Namespace: v.Namespace, PlannedHostname: stringValue(v.PlannedHostname), CurrentReleaseId: stringValue(v.CurrentReleaseID), InProgressReleaseId: stringValue(v.InProgressReleaseID), CurrentEnvVarRevisionId: stringValue(v.CurrentEnvVarRevisionID), CreatedAt: timeProto(v.CreatedAt), TornDownAt: timeProto(v.TornDownAt), LifecycleStatus: environmentLifecycleStatusProto(v.LifecycleStatus), LifecycleReason: stringValue(v.LifecycleReason), LifecycleErrorCode: stringValue(v.LifecycleErrorCode), LifecycleErrorMessage: stringValue(v.LifecycleErrorMessage), TeardownRequestedAt: timeProto(v.TeardownRequestedAt)}
+}
+
+func environmentLifecycleStatusProto(value string) cyclopusv1.EnvironmentLifecycleStatus {
+	return map[string]cyclopusv1.EnvironmentLifecycleStatus{
+		"reserved":           cyclopusv1.EnvironmentLifecycleStatus_ENVIRONMENT_LIFECYCLE_STATUS_RESERVED,
+		"policy_blocked":     cyclopusv1.EnvironmentLifecycleStatus_ENVIRONMENT_LIFECYCLE_STATUS_POLICY_BLOCKED,
+		"ready":              cyclopusv1.EnvironmentLifecycleStatus_ENVIRONMENT_LIFECYCLE_STATUS_READY,
+		"teardown_requested": cyclopusv1.EnvironmentLifecycleStatus_ENVIRONMENT_LIFECYCLE_STATUS_TEARDOWN_REQUESTED,
+		"torn_down":          cyclopusv1.EnvironmentLifecycleStatus_ENVIRONMENT_LIFECYCLE_STATUS_TORN_DOWN,
+		"failed":             cyclopusv1.EnvironmentLifecycleStatus_ENVIRONMENT_LIFECYCLE_STATUS_FAILED,
+	}[value]
 }
 func releaseProto(v store.Release) *cyclopusv1.Release {
 	return &cyclopusv1.Release{Id: v.ID, OrganizationId: v.OrgID, EnvironmentId: v.EnvironmentID, ImageRef: v.ImageRef, GitCommitSha: stringValue(v.GitCommitSHA), TriggeredByUserId: stringValue(v.TriggeredByUserID), Kind: releaseKindProto(v.Kind), EnvVarRevisionId: stringValue(v.EnvVarRevisionID), Status: releaseStatusProto(v.Status), FailureReason: v.FailureReason, CreatedAt: timestamppb.New(v.CreatedAt)}
