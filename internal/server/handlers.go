@@ -54,7 +54,7 @@ func NewServices(authService *internalauth.Service, domainService *service.Servi
 }
 
 func (h *apiHandlers) Bootstrap(ctx context.Context, req *cyclopusv1.BootstrapRequest) (*cyclopusv1.BootstrapResponse, error) {
-	if err := requiredFields(map[string]string{"email": req.GetEmail(), "password": req.GetPassword(), "idempotency_key": req.GetIdempotencyKey()}); err != nil {
+	if err := requiredFields(map[string]string{"email": req.GetEmail(), "password": req.GetPassword()}); err != nil {
 		return nil, err
 	}
 	principal, err := h.auth.ClaimFirstUser(ctx, req.GetEmail(), req.GetPassword(), req.GetBootstrapToken())
@@ -162,11 +162,12 @@ func (h *apiHandlers) ListApiTokens(ctx context.Context, req *cyclopusv1.ListApi
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "api_tokens", values, func(v store.APIToken) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	scope := pageScope("api_tokens", actor.OrgID, actor.UserID)
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.APIToken) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	if err != nil {
 		return nil, err
 	}
-	page, next := pageValues(values, start, size, "api_tokens", func(v store.APIToken) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	page, next := pageValues(values, start, size, scope, func(v store.APIToken) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	response := &cyclopusv1.ListApiTokensResponse{ApiTokens: make([]*cyclopusv1.ApiToken, 0, len(page)), NextPageToken: next}
 	for _, value := range page {
 		response.ApiTokens = append(response.ApiTokens, apiTokenProto(value))
@@ -286,11 +287,12 @@ func (h *apiHandlers) ListProjects(ctx context.Context, req *cyclopusv1.ListProj
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "projects", values, func(v store.Project) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	scope := pageScope("projects", actor.OrgID, req.GetOrganizationId(), req.GetIncludeDeleted())
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Project) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	if err != nil {
 		return nil, err
 	}
-	page, next := pageValues(values, start, size, "projects", func(v store.Project) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	page, next := pageValues(values, start, size, scope, func(v store.Project) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	response := &cyclopusv1.ListProjectsResponse{Projects: make([]*cyclopusv1.Project, 0, len(page)), NextPageToken: next}
 	for _, value := range page {
 		response.Projects = append(response.Projects, projectProto(value))
@@ -397,11 +399,12 @@ func (h *apiHandlers) ListApplications(ctx context.Context, req *cyclopusv1.List
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "applications", values, func(v store.App) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	scope := pageScope("applications", actor.OrgID, req.GetProjectId(), req.GetIncludeDeleted())
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.App) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	if err != nil {
 		return nil, err
 	}
-	page, next := pageValues(values, start, size, "applications", func(v store.App) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	page, next := pageValues(values, start, size, scope, func(v store.App) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	response := &cyclopusv1.ListApplicationsResponse{Applications: make([]*cyclopusv1.Application, 0, len(page)), NextPageToken: next}
 	for _, value := range page {
 		response.Applications = append(response.Applications, applicationProto(value))
@@ -486,11 +489,12 @@ func (h *apiHandlers) ListEnvironments(ctx context.Context, req *cyclopusv1.List
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "environments", values, func(v store.Environment) cursorKey { return cursorKey{CreatedAt: timeValue(v.CreatedAt), ID: v.ID} })
+	scope := pageScope("environments", actor.OrgID, req.GetApplicationId(), req.GetIncludeTornDown())
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Environment) cursorKey { return cursorKey{CreatedAt: timeValue(v.CreatedAt), ID: v.ID} })
 	if err != nil {
 		return nil, err
 	}
-	page, next := pageValues(values, start, size, "environments", func(v store.Environment) cursorKey { return cursorKey{CreatedAt: timeValue(v.CreatedAt), ID: v.ID} })
+	page, next := pageValues(values, start, size, scope, func(v store.Environment) cursorKey { return cursorKey{CreatedAt: timeValue(v.CreatedAt), ID: v.ID} })
 	response := &cyclopusv1.ListEnvironmentsResponse{Environments: make([]*cyclopusv1.Environment, 0, len(page)), NextPageToken: next}
 	for _, value := range page {
 		response.Environments = append(response.Environments, environmentProto(value))
@@ -581,11 +585,12 @@ func (h *apiHandlers) ListReleases(ctx context.Context, req *cyclopusv1.ListRele
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "releases", values, func(v store.Release) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	scope := pageScope("releases", actor.OrgID, req.GetEnvironmentId(), statuses)
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Release) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	if err != nil {
 		return nil, err
 	}
-	page, next := pageValues(values, start, size, "releases", func(v store.Release) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	page, next := pageValues(values, start, size, scope, func(v store.Release) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	response := &cyclopusv1.ListReleasesResponse{Releases: make([]*cyclopusv1.Release, 0, len(page)), NextPageToken: next}
 	for _, value := range page {
 		response.Releases = append(response.Releases, releaseProto(value))
@@ -717,11 +722,12 @@ func (h *apiHandlers) ListReconciliations(ctx context.Context, req *cyclopusv1.L
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), "reconciliations", values, func(v store.ReconciliationRun) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	scope := pageScope("reconciliations", actor.OrgID, req.GetApplicationId(), req.GetEnvironmentId())
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.ReconciliationRun) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	if err != nil {
 		return nil, err
 	}
-	page, next := pageValues(values, start, size, "reconciliations", func(v store.ReconciliationRun) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	page, next := pageValues(values, start, size, scope, func(v store.ReconciliationRun) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
 	response := &cyclopusv1.ListReconciliationsResponse{Reconciliations: make([]*cyclopusv1.ReconciliationRun, 0, len(page)), NextPageToken: next}
 	for _, value := range page {
 		projected, err := reconciliationProto(value)
@@ -745,7 +751,7 @@ func (h *apiHandlers) ListReconciliationEvidence(ctx context.Context, req *cyclo
 	if err != nil {
 		return nil, err
 	}
-	afterSequence, err := reconciliationEvidenceCursor(req.GetPageToken(), req.GetReconciliationId())
+	afterSequence, err := reconciliationEvidenceCursor(req.GetPageToken(), pageScope("reconciliation_evidence", actor.OrgID, req.GetReconciliationId()))
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +772,7 @@ func (h *apiHandlers) ListReconciliationEvidence(ctx context.Context, req *cyclo
 		response.Evidence = append(response.Evidence, projected)
 	}
 	if hasNext {
-		response.NextPageToken = encodeReconciliationEvidenceCursor(req.GetReconciliationId(), values[len(values)-1].Sequence)
+		response.NextPageToken = encodeReconciliationEvidenceCursor(pageScope("reconciliation_evidence", actor.OrgID, req.GetReconciliationId()), values[len(values)-1].Sequence)
 	}
 	return response, nil
 }
@@ -1252,8 +1258,8 @@ type pageCursor struct {
 }
 
 type reconciliationEvidencePageCursor struct {
-	ReconciliationID string `json:"reconciliation_id"`
-	Sequence         int64  `json:"sequence"`
+	Scope    string `json:"scope"`
+	Sequence int64  `json:"sequence"`
 }
 
 func boundedPageSize(requested int32) (int, error) {
@@ -1270,7 +1276,7 @@ func boundedPageSize(requested int32) (int, error) {
 	return size, nil
 }
 
-func reconciliationEvidenceCursor(token, reconciliationID string) (int64, error) {
+func reconciliationEvidenceCursor(token, scope string) (int64, error) {
 	if token == "" {
 		return 0, nil
 	}
@@ -1279,14 +1285,19 @@ func reconciliationEvidenceCursor(token, reconciliationID string) (int64, error)
 		return 0, fieldError("page_token", "is invalid")
 	}
 	var cursor reconciliationEvidencePageCursor
-	if json.Unmarshal(raw, &cursor) != nil || cursor.ReconciliationID != reconciliationID || cursor.Sequence <= 0 {
+	if json.Unmarshal(raw, &cursor) != nil || cursor.Scope != scope || cursor.Sequence <= 0 {
 		return 0, fieldError("page_token", "is invalid")
 	}
 	return cursor.Sequence, nil
 }
 
-func encodeReconciliationEvidenceCursor(reconciliationID string, sequence int64) string {
-	raw, _ := json.Marshal(reconciliationEvidencePageCursor{ReconciliationID: reconciliationID, Sequence: sequence})
+func encodeReconciliationEvidenceCursor(scope string, sequence int64) string {
+	raw, _ := json.Marshal(reconciliationEvidencePageCursor{Scope: scope, Sequence: sequence})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func pageScope(values ...any) string {
+	raw, _ := json.Marshal(values)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
@@ -1380,6 +1391,7 @@ func releaseStatusFilters(values []cyclopusv1.ReleaseStatus) ([]string, error) {
 			filters = append(filters, name)
 		}
 	}
+	sort.Strings(filters)
 	return filters, violations.err()
 }
 func reconcileCategoryString(value cyclopusv1.ReconcileCategory) string {

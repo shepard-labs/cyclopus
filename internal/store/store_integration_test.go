@@ -1272,6 +1272,72 @@ func TestEnvVarMutationRollsBackProtectedMutationWhenIdempotencyLeaseIsLostInteg
 	}
 }
 
+func TestEnvVarMutationRejectsInvalidSecretReferenceBeforeMutationIntegration(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		orgID     string
+		envID     string
+		secretRef string
+		tearDown  bool
+		want      error
+	}{
+		{name: "malformed", orgID: orgOneID, envID: environmentOneID, secretRef: "runtime", want: ErrInvalidArgument},
+		{name: "foreign namespace", orgID: orgOneID, envID: environmentOneID, secretRef: "k8s-secret://other/runtime#DATABASE_URL", want: ErrInvalidArgument},
+		{name: "cross organization", orgID: orgTwoID, envID: environmentOneID, secretRef: "k8s-secret://app-one-production/runtime#DATABASE_URL", want: ErrConflict},
+		{name: "not found", orgID: orgOneID, envID: "00000000-0000-0000-0000-000000000099", secretRef: "k8s-secret://app-one-production/runtime#DATABASE_URL", want: ErrConflict},
+		{name: "torn down", orgID: orgOneID, envID: environmentOneID, secretRef: "k8s-secret://app-one-production/runtime#DATABASE_URL", tearDown: true, want: ErrConflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dataStore, pool := newIntegrationStore(t)
+			seedTenant(t, pool, tenantOne())
+			seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "live")
+			if test.tearDown {
+				if _, err := pool.Exec(t.Context(), `UPDATE environments SET torn_down_at=now() WHERE id=$1`, environmentOneID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := dataStore.ReplaceEnvVarsAndCreateRelease(t.Context(), ReplaceEnvVarsParams{
+				OrgID: test.orgID, EnvironmentID: test.envID, ReleaseID: releaseTwoID,
+				Variables: []EnvironmentVariableValue{{Key: "DATABASE_URL", SecretRef: test.secretRef, IsSecret: true}},
+			})
+			if !errors.Is(err, test.want) {
+				t.Fatalf("ReplaceEnvVarsAndCreateRelease() error = %v, want %v", err, test.want)
+			}
+			assertCount(t, pool, "env_vars", 0)
+		})
+	}
+}
+
+func TestRollbackTargetsMustHavePreviouslyServedIntegration(t *testing.T) {
+	for _, status := range []string{"failed", "pending", "deploying", "live", "superseded"} {
+		t.Run(status, func(t *testing.T) {
+			dataStore, pool := newIntegrationStore(t)
+			seedTenant(t, pool, tenantOne())
+			seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, status)
+			hash := requestHash("rollback-" + status)
+			claim := IdempotencyClaimParams{OrgID: orgOneID, Scope: "rollback.accept", Key: "rollback-" + status,
+				RequestHash: hash, Owner: "user", LeaseDuration: time.Minute, Retention: time.Hour}
+			if _, err := dataStore.ClaimIdempotency(t.Context(), claim); err != nil {
+				t.Fatal(err)
+			}
+			_, err := dataStore.AcceptRelease(t.Context(), AcceptReleaseParams{
+				ID: releaseTwoID, OrgID: orgOneID, EnvironmentID: environmentOneID, Kind: "rollback",
+				RollbackTargetID: stringPointer(releaseOneID),
+				Idempotency: CompleteIdempotencyParams{Scope: claim.Scope, Key: claim.Key, RequestHash: hash,
+					Owner: claim.Owner, Status: "completed", StatusCode: 202, Body: json.RawMessage(`{"status":"queued"}`)},
+				Audit: testAudit("00000000-0000-0000-0000-000000000098", "ignored", releaseTwoID),
+			})
+			valid := status == "live" || status == "superseded"
+			if valid && err != nil {
+				t.Fatalf("valid %s rollback target rejected: %v", status, err)
+			}
+			if !valid && !errors.Is(err, ErrNotFound) {
+				t.Fatalf("invalid %s rollback target error = %v, want ErrNotFound", status, err)
+			}
+		})
+	}
+}
+
 func TestTenantScopedResourceQueriesAndAcceptedDeployIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())

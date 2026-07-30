@@ -52,6 +52,13 @@ func TestRESTPaginationMapping(t *testing.T) {
 	}
 }
 
+func TestBootstrapContractHasNoIdempotencyKey(t *testing.T) {
+	fields := (&cyclopusv1.BootstrapRequest{}).ProtoReflect().Descriptor().Fields()
+	if fields.ByName("idempotency_key") != nil || fields.ByNumber(3) != nil {
+		t.Fatal("BootstrapRequest still exposes idempotency_key")
+	}
+}
+
 func TestRESTReconciliationEvidencePaginationMapping(t *testing.T) {
 	reconciliations := &contractReconciliationService{}
 	handler, err := Handler(nil, Services{Reconciliation: reconciliations})

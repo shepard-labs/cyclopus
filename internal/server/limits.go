@@ -5,6 +5,7 @@ import (
 	"context"
 	"math"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,35 +53,112 @@ func (l *authRateLimiter) allow(client, account string) (bool, time.Duration) {
 	if client == "unknown" {
 		client = ""
 	}
-	key := "account:" + account
-	if client != "" {
-		key += "\x00client:" + client
+	keys := make([]string, 0, 2)
+	if account != "" {
+		keys = append(keys, "account:"+account)
 	}
+	if client != "" {
+		keys = append(keys, "client:"+client)
+	}
+	if len(keys) == 0 {
+		return true, 0
+	}
+	missing := 0
+	protected := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		protected[key] = struct{}{}
+		if _, ok := l.perKey[key]; !ok {
+			missing++
+		}
+	}
+	if retryAfter := l.reserveCapacity(now, missing, protected); retryAfter > 0 {
+		return false, retryAfter
+	}
+	buckets := make([]rateBucket, 0, len(keys))
+	var retryAfter time.Duration
+	for _, key := range keys {
+		bucket := l.loadBucket(key, now)
+		buckets = append(buckets, bucket)
+		if bucket.tokens < 1 {
+			retry := time.Duration(math.Ceil((1-bucket.tokens)/l.rate*1000)) * time.Millisecond
+			if retry > retryAfter {
+				retryAfter = retry
+			}
+		}
+	}
+	if retryAfter > 0 {
+		for _, bucket := range buckets {
+			if _, ok := l.perKey[bucket.key]; ok {
+				l.storeBucket(bucket)
+			}
+		}
+		return false, retryAfter
+	}
+	for _, bucket := range buckets {
+		bucket.tokens--
+		l.storeBucket(bucket)
+	}
+	return true, 0
+}
+
+func (l *authRateLimiter) reserveCapacity(now time.Time, missing int, protected map[string]struct{}) time.Duration {
+	needed := len(l.perKey) + missing - l.maxEntries
+	if needed <= 0 {
+		return 0
+	}
+	candidates := make([]*list.Element, 0, needed)
+	waits := make([]time.Duration, 0, needed)
+	available := 0
+	for element := l.recency.Back(); element != nil; element = element.Prev() {
+		bucket := element.Value.(rateBucket)
+		if _, keep := protected[bucket.key]; keep {
+			continue
+		}
+		available++
+		tokens := l.tokensAt(bucket, now)
+		if tokens >= 1 {
+			candidates = append(candidates, element)
+			continue
+		}
+		waits = append(waits, time.Duration(math.Ceil((1-tokens)/l.rate*1000))*time.Millisecond)
+	}
+	if len(candidates) >= needed {
+		for _, element := range candidates[:needed] {
+			bucket := element.Value.(rateBucket)
+			delete(l.perKey, bucket.key)
+			l.recency.Remove(element)
+		}
+		return 0
+	}
+	if available < needed {
+		return time.Minute
+	}
+	sort.Slice(waits, func(i, j int) bool { return waits[i] < waits[j] })
+	return waits[needed-len(candidates)-1]
+}
+
+func (l *authRateLimiter) tokensAt(bucket rateBucket, now time.Time) float64 {
+	if bucket.updated.IsZero() {
+		return l.burst
+	}
+	return math.Min(l.burst, bucket.tokens+now.Sub(bucket.updated).Seconds()*l.rate)
+}
+
+func (l *authRateLimiter) loadBucket(key string, now time.Time) rateBucket {
 	var bucket rateBucket
 	if element, ok := l.perKey[key]; ok {
 		bucket = element.Value.(rateBucket)
 		l.recency.MoveToFront(element)
 	} else {
-		if len(l.perKey) >= l.maxEntries {
-			oldest := l.recency.Back()
-			delete(l.perKey, oldest.Value.(rateBucket).key)
-			l.recency.Remove(oldest)
-		}
 		bucket.key = key
 	}
 	if bucket.updated.IsZero() {
 		bucket.tokens = l.burst
 	} else {
-		bucket.tokens = math.Min(l.burst, bucket.tokens+now.Sub(bucket.updated).Seconds()*l.rate)
+		bucket.tokens = l.tokensAt(bucket, now)
 	}
 	bucket.updated = now
-	if bucket.tokens < 1 {
-		l.storeBucket(bucket)
-		return false, time.Duration(math.Ceil((1-bucket.tokens)/l.rate*1000)) * time.Millisecond
-	}
-	bucket.tokens--
-	l.storeBucket(bucket)
-	return true, 0
+	return bucket
 }
 
 func (l *authRateLimiter) storeBucket(bucket rateBucket) {

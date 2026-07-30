@@ -69,13 +69,17 @@ func TestReconciliationProtoRejectsUnknownTypedData(t *testing.T) {
 }
 
 func TestReconciliationEvidenceCursorIsRunScoped(t *testing.T) {
-	token := encodeReconciliationEvidenceCursor("run-one", 42)
-	sequence, err := reconciliationEvidenceCursor(token, "run-one")
+	scope := pageScope("reconciliation_evidence", "org-one", "run-one")
+	token := encodeReconciliationEvidenceCursor(scope, 42)
+	sequence, err := reconciliationEvidenceCursor(token, scope)
 	if err != nil || sequence != 42 {
 		t.Fatalf("cursor = %d, %v", sequence, err)
 	}
-	if _, err := reconciliationEvidenceCursor(token, "run-two"); err == nil {
+	if _, err := reconciliationEvidenceCursor(token, pageScope("reconciliation_evidence", "org-one", "run-two")); err == nil {
 		t.Fatal("cursor from another run was accepted")
+	}
+	if _, err := reconciliationEvidenceCursor(token, pageScope("reconciliation_evidence", "org-two", "run-one")); err == nil {
+		t.Fatal("cursor from another organization was accepted")
 	}
 }
 

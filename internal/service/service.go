@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
 	"github.com/google/uuid"
 )
@@ -353,14 +354,16 @@ func (s *Service) SetEnvironmentVariables(ctx context.Context, actor ActorContex
 	if err := validateActor(actor); err != nil {
 		return AcceptedOperation{}, err
 	}
-	seen := map[string]bool{}
-	variables := make([]store.EnvironmentVariableValue, 0, len(inputs))
-	for _, input := range inputs {
-		if !envKeyPattern.MatchString(input.Key) || strings.TrimSpace(input.SecretRef) == "" || seen[input.Key] {
-			return AcceptedOperation{}, ErrInvalidArgument
-		}
-		seen[input.Key] = true
-		variables = append(variables, store.EnvironmentVariableValue{Key: input.Key, SecretRef: input.SecretRef, IsSecret: true})
+	environment, err := s.store.GetEnvironment(ctx, actor.OrgID, environmentID)
+	if err != nil {
+		return AcceptedOperation{}, mapError(err)
+	}
+	if environment.TornDownAt != nil {
+		return AcceptedOperation{}, store.ErrNotFound
+	}
+	variables, err := validateEnvironmentVariables(environment.Namespace, inputs)
+	if err != nil {
+		return AcceptedOperation{}, err
 	}
 	sort.Slice(variables, func(i, j int) bool { return variables[i].Key < variables[j].Key })
 	request := struct {
@@ -384,7 +387,14 @@ func (s *Service) ChangeEnvironmentVariable(ctx context.Context, actor ActorCont
 	if err := validateActor(actor); err != nil {
 		return AcceptedOperation{}, err
 	}
-	if !envKeyPattern.MatchString(input.Key) || strings.TrimSpace(input.SecretRef) == "" {
+	environment, err := s.store.GetEnvironment(ctx, actor.OrgID, environmentID)
+	if err != nil {
+		return AcceptedOperation{}, mapError(err)
+	}
+	if environment.TornDownAt != nil {
+		return AcceptedOperation{}, store.ErrNotFound
+	}
+	if _, err := validateEnvironmentVariables(environment.Namespace, []EnvVarInput{input}); err != nil {
 		return AcceptedOperation{}, ErrInvalidArgument
 	}
 	request := struct {
@@ -402,6 +412,20 @@ func (s *Service) ChangeEnvironmentVariable(ctx context.Context, actor ActorCont
 	idem := s.completion(actor, "environment.env_var.upsert", key, request, body, 202)
 	_, err = s.store.MutateEnvVarAndCreateRelease(ctx, store.MutateEnvVarParams{OrgID: actor.OrgID, EnvironmentID: environmentID, EnvVarID: newID(), Key: input.Key, SecretRef: input.SecretRef, ReleaseID: releaseID, TriggeredByUserID: &actor.UserID, Idempotency: idem, Audit: audit(actor)})
 	return response, mapError(err)
+}
+
+func validateEnvironmentVariables(namespace string, inputs []EnvVarInput) ([]store.EnvironmentVariableValue, error) {
+	seen := map[string]bool{}
+	variables := make([]store.EnvironmentVariableValue, 0, len(inputs))
+	for _, input := range inputs {
+		parsed, err := secretref.Parse(input.SecretRef)
+		if !envKeyPattern.MatchString(input.Key) || err != nil || parsed.Namespace != namespace || seen[input.Key] {
+			return nil, ErrInvalidArgument
+		}
+		seen[input.Key] = true
+		variables = append(variables, store.EnvironmentVariableValue{Key: input.Key, SecretRef: input.SecretRef, IsSecret: true})
+	}
+	return variables, nil
 }
 
 func (s *Service) ListAPITokens(ctx context.Context, actor ActorContext) ([]store.APIToken, error) {

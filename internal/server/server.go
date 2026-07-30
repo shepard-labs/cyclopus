@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
@@ -42,25 +43,61 @@ var serviceNames = []string{
 	cyclopusv1.ReconciliationService_ServiceDesc.ServiceName,
 }
 
+const (
+	readinessRefreshInterval = time.Second
+	readinessProbeTimeout    = 2 * time.Second
+)
+
+var errNotReady = errors.New("service is not ready")
+
 type ReadinessCheck func(context.Context) error
 
 type Server struct {
-	httpServer      *http.Server
-	grpcServer      *grpc.Server
-	grpcAddress     string
-	shutdownTimeout time.Duration
-	listenHTTP      func(network, address string) (net.Listener, error)
-	listenGRPC      func(network, address string) (net.Listener, error)
-	shutdownHTTP    func(context.Context) error
-	httpTLSCertFile string
-	httpTLSKeyFile  string
-	healthServer    *health.Server
-	readiness       ReadinessCheck
+	httpServer       *http.Server
+	grpcServer       *grpc.Server
+	grpcAddress      string
+	shutdownTimeout  time.Duration
+	listenHTTP       func(network, address string) (net.Listener, error)
+	listenGRPC       func(network, address string) (net.Listener, error)
+	shutdownHTTP     func(context.Context) error
+	gracefulStopGRPC func()
+	forceStopGRPC    func()
+	httpTLSCertFile  string
+	httpTLSKeyFile   string
+	healthServer     *health.Server
+	readiness        *readinessState
+}
+
+type readinessState struct {
+	probe        ReadinessCheck
+	probeTimeout time.Duration
+	ready        atomic.Bool
+}
+
+func newReadinessState(probe ReadinessCheck) *readinessState {
+	if probe == nil {
+		probe = func(context.Context) error { return nil }
+	}
+	return &readinessState{probe: probe, probeTimeout: readinessProbeTimeout}
+}
+
+func (r *readinessState) check(context.Context) error {
+	if !r.ready.Load() {
+		return errNotReady
+	}
+	return nil
+}
+
+func (r *readinessState) refresh(ctx context.Context) {
+	probeCtx, cancel := context.WithTimeout(ctx, r.probeTimeout)
+	defer cancel()
+	r.ready.Store(r.probe(probeCtx) == nil)
 }
 
 func New(httpConfig config.HTTP, grpcConfig config.GRPC, logger *slog.Logger, readiness ReadinessCheck, services Services) (*Server, error) {
 	services = withDefaults(services)
-	handler, err := Handler(readiness, services)
+	readinessState := newReadinessState(readiness)
+	handler, err := buildHandler(readinessState.check, services, httpConfig.MaxBodyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -72,19 +109,25 @@ func New(httpConfig config.HTTP, grpcConfig config.GRPC, logger *slog.Logger, re
 	if httpConfig.TLSCertFile != "" {
 		httpServer.TLSConfig = minimumTLSConfig()
 	}
-	grpcServer, healthServer, err := buildGRPCServer(services, readiness, grpcConfig)
+	grpcServer, healthServer, err := buildGRPCServer(services, readinessState.check, grpcConfig)
 	if err != nil {
 		return nil, err
 	}
 	server := &Server{httpServer: httpServer, grpcServer: grpcServer, grpcAddress: grpcConfig.Address,
 		shutdownTimeout: httpConfig.ShutdownTimeout, listenHTTP: net.Listen, listenGRPC: net.Listen}
 	server.httpTLSCertFile, server.httpTLSKeyFile = httpConfig.TLSCertFile, httpConfig.TLSKeyFile
-	server.healthServer, server.readiness = healthServer, readiness
+	server.healthServer, server.readiness = healthServer, readinessState
 	server.shutdownHTTP = httpServer.Shutdown
+	server.gracefulStopGRPC = grpcServer.GracefulStop
+	server.forceStopGRPC = grpcServer.Stop
 	return server, nil
 }
 
 func Handler(readiness ReadinessCheck, services Services) (http.Handler, error) {
+	return buildHandler(readiness, services, 0)
+}
+
+func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int64) (http.Handler, error) {
 	if readiness == nil {
 		readiness = func(context.Context) error { return nil }
 	}
@@ -132,11 +175,7 @@ func Handler(readiness ReadinessCheck, services Services) (http.Handler, error) 
 		api = services.Authenticator.HTTPMiddleware(api)
 	}
 	api = authRateLimitHTTPMiddleware(services.RateLimiter, api)
-	limit := services.RequestBodyBytes
-	if limit <= 0 {
-		limit = 65536
-	}
-	api = bodyLimitMiddleware(limit, api)
+	api = requestBodyLimitHTTPMiddleware(maxBodyBytes, services.RequestBodyBytes, api)
 	api = readinessHTTPMiddleware(readiness, api)
 	api = clientContextHTTPMiddleware(api)
 	router.Mount("/", api)
@@ -203,7 +242,7 @@ func (s *Server) Run(ctx context.Context) error {
 	serveErr := make(chan error, 2)
 	s.refreshHealth(context.Background())
 	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(readinessRefreshInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -233,8 +272,9 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) refreshHealth(ctx context.Context) {
+	s.readiness.refresh(ctx)
 	statusValue := healthv1.HealthCheckResponse_SERVING
-	if s.readiness != nil && s.readiness(ctx) != nil {
+	if s.readiness.check(ctx) != nil {
 		statusValue = healthv1.HealthCheckResponse_NOT_SERVING
 	}
 	s.healthServer.SetServingStatus("", statusValue)
@@ -270,6 +310,23 @@ func bodyLimitMiddleware(limit int64, next http.Handler) http.Handler {
 	})
 }
 
+func requestBodyLimitHTTPMiddleware(globalLimit, authLimit int64, next http.Handler) http.Handler {
+	if authLimit <= 0 {
+		authLimit = 65536
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit := globalLimit
+		if isPublicAuthPath(r.URL.Path) && (limit <= 0 || authLimit < limit) {
+			limit = authLimit
+		}
+		if limit <= 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		bodyLimitMiddleware(limit, next).ServeHTTP(w, r)
+	})
+}
+
 func readinessHTTPMiddleware(readiness ReadinessCheck, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := readiness(r.Context()); err != nil {
@@ -288,7 +345,7 @@ func clientContextHTTPMiddleware(next http.Handler) http.Handler {
 
 func authRateLimitHTTPMiddleware(limiter *authRateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/auth/bootstrap" && r.URL.Path != "/v1/auth/login" {
+		if !isPublicAuthPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -304,6 +361,10 @@ func authRateLimitHTTPMiddleware(limiter *authRateLimiter, next http.Handler) ht
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isPublicAuthPath(path string) bool {
+	return path == "/v1/auth/bootstrap" || path == "/v1/auth/login"
 }
 
 func unaryBoundaryInterceptor(readiness ReadinessCheck, services Services) grpc.UnaryServerInterceptor {
@@ -337,18 +398,34 @@ func (s *Server) stop() error {
 	s.healthServer.Shutdown()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
+	httpDone := make(chan error, 1)
+	grpcDone := make(chan struct{})
+	go func() { httpDone <- s.shutdownHTTP(shutdownCtx) }()
+	go func() { s.gracefulStopGRPC(); close(grpcDone) }()
+
 	var shutdownErr error
-	if err := s.shutdownHTTP(shutdownCtx); err != nil {
-		shutdownErr = fmt.Errorf("shutdown HTTP: %w", err)
-		_ = s.httpServer.Close()
-	}
-	stopped := make(chan struct{})
-	go func() { s.grpcServer.GracefulStop(); close(stopped) }()
-	select {
-	case <-stopped:
-	case <-shutdownCtx.Done():
-		s.grpcServer.Stop()
-		<-stopped
+	for httpDone != nil || grpcDone != nil {
+		select {
+		case err := <-httpDone:
+			httpDone = nil
+			if err != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown HTTP: %w", err))
+				_ = s.httpServer.Close()
+			}
+		case <-grpcDone:
+			grpcDone = nil
+		case <-shutdownCtx.Done():
+			_ = s.httpServer.Close()
+			s.forceStopGRPC()
+			if httpDone != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown HTTP: %w", shutdownCtx.Err()))
+			}
+			if grpcDone != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown gRPC: %w", shutdownCtx.Err()))
+				<-grpcDone
+			}
+			return shutdownErr
+		}
 	}
 	return shutdownErr
 }

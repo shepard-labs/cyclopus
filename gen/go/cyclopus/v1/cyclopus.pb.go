@@ -2547,7 +2547,6 @@ type BootstrapRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Email          string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
 	Password       string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
-	IdempotencyKey string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	BootstrapToken string                 `protobuf:"bytes,4,opt,name=bootstrap_token,json=bootstrapToken,proto3" json:"bootstrap_token,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -2593,13 +2592,6 @@ func (x *BootstrapRequest) GetEmail() string {
 func (x *BootstrapRequest) GetPassword() string {
 	if x != nil {
 		return x.Password
-	}
-	return ""
-}
-
-func (x *BootstrapRequest) GetIdempotencyKey() string {
-	if x != nil {
-		return x.IdempotencyKey
 	}
 	return ""
 }
@@ -5927,12 +5919,11 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x0e \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x0f \x01(\tR\ferrorMessage\"\x96\x01\n" +
+	"\rerror_message\x18\x0f \x01(\tR\ferrorMessage\"\x84\x01\n" +
 	"\x10BootstrapRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12'\n" +
-	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\x12'\n" +
-	"\x0fbootstrap_token\x18\x04 \x01(\tR\x0ebootstrapToken\"C\n" +
+	"\x0fbootstrap_token\x18\x04 \x01(\tR\x0ebootstrapTokenJ\x04\b\x03\x10\x04R\x0fidempotency_key\"C\n" +
 	"\x11BootstrapResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.cyclopus.v1.SessionR\asession\"@\n" +
 	"\fLoginRequest\x12\x14\n" +

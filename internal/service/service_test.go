@@ -61,3 +61,20 @@ func TestAppResourceAndScalingValidation(t *testing.T) {
 		t.Fatalf("HPA scale-to-zero error = %v", err)
 	}
 }
+
+func TestValidateEnvironmentVariablesRequiresExactSameNamespaceSecretRefs(t *testing.T) {
+	valid := []EnvVarInput{{Key: "DATABASE_URL", SecretRef: "k8s-secret://app-production/runtime#DATABASE_URL"}}
+	variables, err := validateEnvironmentVariables("app-production", valid)
+	if err != nil || len(variables) != 1 || variables[0].SecretRef != valid[0].SecretRef {
+		t.Fatalf("valid variables = %+v, %v", variables, err)
+	}
+	for _, input := range []EnvVarInput{
+		{Key: "DATABASE_URL", SecretRef: "runtime"},
+		{Key: "DATABASE_URL", SecretRef: "k8s-secret://other/runtime#DATABASE_URL"},
+		{Key: "bad-key", SecretRef: "k8s-secret://app-production/runtime#DATABASE_URL"},
+	} {
+		if _, err := validateEnvironmentVariables("app-production", []EnvVarInput{input}); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("invalid input %+v error = %v", input, err)
+		}
+	}
+}

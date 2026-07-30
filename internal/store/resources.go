@@ -314,7 +314,7 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		imageRef, snapshot, hash := p.ImageRef, p.ConfigSnapshot, p.ConfigHash
 		if p.RollbackTargetID != nil {
-			err := tx.QueryRow(ctx, `SELECT target.image_ref,target.config_snapshot,target.config_hash FROM (SELECT release.*,row_number() OVER(ORDER BY release.created_at DESC,release.id DESC) retention_rank FROM releases release WHERE release.org_id=$1 AND release.environment_id=$2) target JOIN environments environment ON environment.org_id=target.org_id AND environment.id=target.environment_id JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id WHERE target.id=$3 AND target.retention_rank<=app.release_retention_count`, p.OrgID, p.EnvironmentID, *p.RollbackTargetID).Scan(&imageRef, &snapshot, &hash)
+			err := tx.QueryRow(ctx, `SELECT target.image_ref,target.config_snapshot,target.config_hash FROM (SELECT release.*,row_number() OVER(ORDER BY release.created_at DESC,release.id DESC) retention_rank FROM releases release WHERE release.org_id=$1 AND release.environment_id=$2) target JOIN environments environment ON environment.org_id=target.org_id AND environment.id=target.environment_id JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id WHERE target.id=$3 AND target.status IN ('live','superseded') AND target.retention_rank<=app.release_retention_count`, p.OrgID, p.EnvironmentID, *p.RollbackTargetID).Scan(&imageRef, &snapshot, &hash)
 			if err != nil {
 				return mapMutationError("select rollback target", err)
 			}

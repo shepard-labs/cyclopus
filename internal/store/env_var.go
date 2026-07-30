@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -56,11 +57,11 @@ type ReplaceEnvVarsParams struct {
 func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params ReplaceEnvVarsParams) (MutateEnvVarResult, error) {
 	var result MutateEnvVarResult
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		var imageRef string
+		var imageRef, namespace string
 		var gitCommitSHA *string
 		var liveSnapshot json.RawMessage
 		if err := tx.QueryRow(ctx, `
-			SELECT release.image_ref, release.git_commit_sha, release.config_snapshot
+			SELECT release.image_ref, release.git_commit_sha, release.config_snapshot, environment.namespace
 			FROM environments AS environment
 			JOIN apps AS app ON app.org_id = environment.org_id AND app.id = environment.app_id
 			JOIN projects AS project ON project.org_id = app.org_id AND project.id = app.project_id
@@ -70,10 +71,16 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 			WHERE environment.org_id = $1 AND environment.id = $2
 			  AND environment.torn_down_at IS NULL AND environment.in_progress_release_id IS NULL
 			  AND app.deleted_at IS NULL AND project.deleted_at IS NULL AND org.deleted_at IS NULL
-			FOR UPDATE OF environment`, params.OrgID, params.EnvironmentID).Scan(&imageRef, &gitCommitSHA, &liveSnapshot); err == pgx.ErrNoRows {
+			FOR UPDATE OF environment`, params.OrgID, params.EnvironmentID).Scan(&imageRef, &gitCommitSHA, &liveSnapshot, &namespace); err == pgx.ErrNoRows {
 			return ErrConflict
 		} else if err != nil {
 			return fmt.Errorf("lock environment for env-var mutation: %w", err)
+		}
+		for _, variable := range params.Variables {
+			parsed, err := secretref.Parse(variable.SecretRef)
+			if err != nil || parsed.Namespace != namespace {
+				return ErrInvalidArgument
+			}
 		}
 
 		var before json.RawMessage

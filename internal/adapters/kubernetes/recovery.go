@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
+	"github.com/cyclopus-dev/cyclopus/internal/secretref"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -366,16 +366,8 @@ func (a *RecoveryAdapter) restorePreviousSecretRevision(ctx context.Context, lea
 }
 
 func parseSecretRef(ref string) (string, string, error) {
-	const prefix = "k8s-secret://"
-	if !strings.HasPrefix(ref, prefix) {
-		return "", "", fmt.Errorf("invalid Kubernetes secret reference %q", ref)
-	}
-	path := strings.SplitN(strings.TrimPrefix(ref, prefix), "#", 2)[0]
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid Kubernetes secret reference %q", ref)
-	}
-	return parts[0], parts[1], nil
+	parsed, err := secretref.Parse(ref)
+	return parsed.Namespace, parsed.Name, err
 }
 
 func (a *RecoveryAdapter) renew(ctx context.Context, lease store.DeployLease) (store.DeployLease, error) {

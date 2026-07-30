@@ -1,0 +1,46 @@
+schema_version: 1
+workflow: cyclopus-api-platform-v1
+phase: typed-api-authentication
+status: completed
+blocked_at: "2026-07-29T23:59:00Z"
+reason_code: SECURITY_REVIEW_PASSED_AFTER_REPLACEMENT
+reason: >-
+  Replacement authentication and transport security reviewers returned explicit
+  PASS verdicts after the discovered findings were fixed. A tenant reviewer
+  objected to the one-user-one-organization schema, but that objection conflicts
+  with binding Phase 0 decision 5 and the Phase 1 acceptance contract, so it is
+  recorded as rejected rather than treated as a release blocker.
+completed:
+  - protobuf and grpc-gateway contract
+  - concrete gRPC and REST handlers
+  - PostgreSQL-backed authentication and tenant authorization
+  - bootstrap proof and persisted operator role
+  - loopback-safe listeners and TLS support
+  - readiness-gated API traffic and gRPC health transitions
+  - Argon2 concurrency limits and shared REST/gRPC auth rate limits
+  - non-replayable one-time API token secrets
+  - update masks, cursor pagination, filters, tombstones, env-var APIs
+  - strict release snapshot v2
+  - reconciliation plan, report, findings, and paginated evidence API
+verification:
+  go_unit_tests: 169
+  go_race_tests: 169
+  postgres_18_integration: passed
+  debian_12_orbstack_api_gate: passed
+  postgres_version: 18.4
+  go_version_probe: 1.26.5
+  generation_verification: passed
+  workflow_assertions: 54
+  api_contract_adversarial_gate: passed
+  api_acceptance_adversarial_gate: passed
+  api_authentication_security_gate: passed
+  api_transport_security_gate: passed
+  api_tenant_contract_gate: passed_with_phase_0_singleton_exception
+resume_action: >-
+  Begin Phase 2 with the forward Kubernetes deploy/reconciliation executor,
+  reusing immutable release snapshots, fenced leases, and recovery primitives.
+do_not_repeat:
+  - API implementation
+  - protobuf generation
+  - PostgreSQL integration setup
+  - OrbStack recovery integration

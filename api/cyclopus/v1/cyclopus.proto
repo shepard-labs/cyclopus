@@ -305,7 +305,8 @@ message ReconciliationRun {
 message BootstrapRequest {
   string email = 1;
   string password = 2;
-  string idempotency_key = 3;
+  reserved 3;
+  reserved "idempotency_key";
   string bootstrap_token = 4;
 }
 

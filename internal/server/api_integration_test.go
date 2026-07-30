@@ -51,11 +51,11 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 	authClient := cyclopusv1.NewAuthenticationServiceClient(conn)
 	legacyHeaderCtx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-cyclopus-bootstrap-token", serverIntegrationBootstrap))
 	if _, err := authClient.Bootstrap(legacyHeaderCtx, &cyclopusv1.BootstrapRequest{
-		Email: "operator@example.com", Password: "local password", IdempotencyKey: "claim-header",
+		Email: "operator@example.com", Password: "local password",
 	}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("Bootstrap() legacy header error = %v", err)
 	}
-	bootstrap, err := authClient.Bootstrap(t.Context(), &cyclopusv1.BootstrapRequest{Email: "operator@example.com", Password: "local password", IdempotencyKey: "claim-1", BootstrapToken: serverIntegrationBootstrap})
+	bootstrap, err := authClient.Bootstrap(t.Context(), &cyclopusv1.BootstrapRequest{Email: "operator@example.com", Password: "local password", BootstrapToken: serverIntegrationBootstrap})
 	if err != nil || bootstrap.GetSession().GetAccessToken() == "" || bootstrap.GetSession().GetExpiresAt() == nil {
 		t.Fatalf("Bootstrap() = %+v, %v; %s", bootstrap, err, fixture.bootstrapFailureState(t))
 	}
@@ -79,6 +79,15 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 	if err != nil || len(listedProjects.GetProjects()) != 1 {
 		t.Fatalf("ListProjects() = %+v, %v", listedProjects, err)
 	}
+	if _, err := projectClient.CreateProject(sessionCtx, &cyclopusv1.CreateProjectRequest{OrganizationId: createProject.OrganizationId, IdempotencyKey: "project-2", Project: &cyclopusv1.Project{Name: "Services", Slug: "services"}}); err != nil {
+		t.Fatal(err)
+	}
+	firstProjectPage, err := projectClient.ListProjects(sessionCtx, &cyclopusv1.ListProjectsRequest{OrganizationId: createProject.OrganizationId, PageSize: 1})
+	if err != nil || firstProjectPage.GetNextPageToken() == "" {
+		t.Fatalf("first project page = %+v, %v", firstProjectPage, err)
+	}
+	_, err = projectClient.ListProjects(sessionCtx, &cyclopusv1.ListProjectsRequest{OrganizationId: createProject.OrganizationId, PageSize: 1, PageToken: firstProjectPage.GetNextPageToken(), IncludeDeleted: true})
+	assertTypedFieldError(t, err, "page_token")
 
 	registryID := fixture.insertRegistry(t, createProject.OrganizationId)
 	applicationClient := cyclopusv1.NewApplicationServiceClient(conn)
@@ -93,6 +102,43 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 		t.Fatalf("ListApplications() = %+v, %v", listedApps, err)
 	}
 	environmentID := fixture.insertEnvironment(t, createProject.OrganizationId, application.GetApplication().GetId())
+	environmentClient := cyclopusv1.NewReleaseServiceClient(conn)
+	for index, secretRef := range []string{"runtime", "k8s-secret://other/runtime#DATABASE_URL"} {
+		key := fmt.Sprintf("env-invalid-%d", index)
+		_, err := environmentClient.SetEnvironmentVariables(sessionCtx, &cyclopusv1.SetEnvironmentVariablesRequest{
+			EnvironmentId: environmentID, IdempotencyKey: key,
+			Variables: []*cyclopusv1.EnvironmentVariable{{Key: "DATABASE_URL", Secret: true, Value: secretRef}},
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("invalid secret ref %q error = %v", secretRef, err)
+		}
+		var claimed bool
+		if err := fixture.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM api_idempotency_records WHERE idempotency_key=$1)`, key).Scan(&claimed); err != nil {
+			t.Fatal(err)
+		}
+		if claimed {
+			t.Fatalf("invalid secret ref %q claimed idempotency", secretRef)
+		}
+	}
+	if _, err := environmentClient.SetEnvironmentVariables(sessionCtx, &cyclopusv1.SetEnvironmentVariablesRequest{
+		EnvironmentId: "00000000-0000-0000-0000-000000000099", IdempotencyKey: "env-not-found",
+		Variables: []*cyclopusv1.EnvironmentVariable{{Key: "DATABASE_URL", Secret: true, Value: "k8s-secret://app-production/runtime#DATABASE_URL"}},
+	}); status.Code(err) != codes.NotFound {
+		t.Fatalf("not-found environment secret mutation error = %v", err)
+	}
+	var tornDownEnvironmentID string
+	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO environments (org_id,app_id,branch,kind,preview_slug,namespace,planned_hostname) VALUES ($1,$2,'feature/torn-down','preview','torn-down','app-torn-down','torn-down.example.test') RETURNING id::text`, createProject.OrganizationId, application.GetApplication().GetId()).Scan(&tornDownEnvironmentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE environments SET torn_down_at=now() WHERE id=$1`, tornDownEnvironmentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := environmentClient.SetEnvironmentVariables(sessionCtx, &cyclopusv1.SetEnvironmentVariablesRequest{
+		EnvironmentId: tornDownEnvironmentID, IdempotencyKey: "env-torn-down",
+		Variables: []*cyclopusv1.EnvironmentVariable{{Key: "DATABASE_URL", Secret: true, Value: "k8s-secret://app-production/runtime#DATABASE_URL"}},
+	}); status.Code(err) != codes.NotFound {
+		t.Fatalf("torn-down environment secret mutation error = %v", err)
+	}
 
 	scope, err := internalauth.DeployAppScope(application.GetApplication().GetId())
 	if err != nil {
@@ -165,6 +211,19 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 	if desired.Deployment.Container.Resources.CPURequestMillicores != 100 || desired.Deployment.Container.ReadinessProbe.Path != "/healthz" || desired.Deployment.RuntimeClassName != "gvisor" || desired.Ingress.Hostname != "api.example.test" || desired.Scaling.Kind != "hpa" {
 		t.Fatalf("accepted desired state was not preserved: %+v", desired)
 	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE releases SET status='live' WHERE id=$1`, deploy.GetOperation().GetId()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE environments SET in_progress_release_id=NULL, lock_acquired_at=NULL WHERE id=$1`, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	validEnvChange, err := environmentClient.SetEnvironmentVariables(sessionCtx, &cyclopusv1.SetEnvironmentVariablesRequest{
+		EnvironmentId: environmentID, IdempotencyKey: "env-valid",
+		Variables: []*cyclopusv1.EnvironmentVariable{{Key: "DATABASE_URL", Secret: true, Value: "k8s-secret://app-production/runtime#DATABASE_URL"}},
+	})
+	if err != nil || validEnvChange.GetOperation().GetStatus() != cyclopusv1.OperationStatus_OPERATION_STATUS_QUEUED {
+		t.Fatalf("valid same-namespace secret ref = %+v, %v", validEnvChange, err)
+	}
 
 	otherProjectID := fixture.insertOtherTenant(t)
 	if _, err := projectClient.GetProject(sessionCtx, &cyclopusv1.GetProjectRequest{ProjectId: otherProjectID}); status.Code(err) != codes.NotFound || status.Convert(err).Message() != "resource not found" {
@@ -183,7 +242,7 @@ func TestPostgresRESTAPI(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	bootstrap := restJSON(t, server.URL, http.MethodPost, "/v1/auth/bootstrap", "", `{"email":"rest@example.com","password":"local password","idempotencyKey":"claim-rest","bootstrapToken":"`+serverIntegrationBootstrap+`"}`)
+	bootstrap := restJSON(t, server.URL, http.MethodPost, "/v1/auth/bootstrap", "", `{"email":"rest@example.com","password":"local password","bootstrapToken":"`+serverIntegrationBootstrap+`"}`)
 	if bootstrap.Code != http.StatusOK {
 		t.Fatalf("bootstrap status=%d body=%s; %s", bootstrap.Code, bootstrap.Body.String(), fixture.bootstrapFailureState(t))
 	}

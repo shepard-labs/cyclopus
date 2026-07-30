@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -211,6 +212,35 @@ func TestHTTPBodyLimit(t *testing.T) {
 	}
 }
 
+func TestProductionHTTPBodyLimitsSeparateGlobalAndAuthCaps(t *testing.T) {
+	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 128},
+		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil,
+		Services{Authentication: rateLimitAuthenticationService{}, RequestBodyBytes: 32})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.refreshHealth(context.Background())
+
+	nonAuth := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(nonAuth, httptest.NewRequest(http.MethodPost, "/v1/projects", strings.NewReader("{}"+strings.Repeat(" ", 62))))
+	if nonAuth.Code == http.StatusRequestEntityTooLarge {
+		t.Fatalf("non-auth REST incorrectly used auth limit: status=%d body=%s", nonAuth.Code, nonAuth.Body.String())
+	}
+
+	auth := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(auth, httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader("{}"+strings.Repeat(" ", 62))))
+	if auth.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("auth REST status = %d, want 413; body=%s", auth.Code, auth.Body.String())
+	}
+
+	global := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(global, httptest.NewRequest(http.MethodPost, "/v1/projects", strings.NewReader(strings.Repeat("x", 129))))
+	if global.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("non-auth REST global-limit status = %d, want 413; body=%s", global.Code, global.Body.String())
+	}
+}
+
 func TestAuthRateLimitRESTReturnsTooManyRequests(t *testing.T) {
 	services := Services{Authentication: rateLimitAuthenticationService{}, RateLimiter: NewAuthRateLimiter(1), RequestBodyBytes: 65536}
 	handler, err := Handler(nil, services)
@@ -335,38 +365,163 @@ func TestAuthRateLimitGRPCIgnoresSpoofedClientMetadata(t *testing.T) {
 
 func TestAuthRateLimiterCardinalityIsStrictlyBounded(t *testing.T) {
 	limiter := NewAuthRateLimiter(1)
-	for index := range authRateLimiterMaxEntries {
+	for index := range authRateLimiterMaxEntries * 2 {
 		client := fmt.Sprintf("192.0.2.%d", index)
 		account := fmt.Sprintf("user-%d@example.com", index)
-		if allowed, _ := limiter.allow(client, account); !allowed {
-			t.Fatalf("new key %d was unexpectedly limited", index)
-		}
-	}
-	if allowed, _ := limiter.allow("192.0.2.0", "user-0@example.com"); allowed {
-		t.Fatal("existing exhausted key was unexpectedly allowed")
-	}
-	for index := authRateLimiterMaxEntries; index < authRateLimiterMaxEntries+100; index++ {
-		client := fmt.Sprintf("192.0.2.%d", index)
-		account := fmt.Sprintf("user-%d@example.com", index)
-		if allowed, _ := limiter.allow(client, account); !allowed {
-			t.Fatalf("new key %d was unexpectedly limited", index)
-		}
+		limiter.allow(client, account)
 	}
 	if got := len(limiter.perKey); got != authRateLimiterMaxEntries {
 		t.Fatalf("limiter entries = %d, want %d", got, authRateLimiterMaxEntries)
 	}
-	oldestKey := "account:user-1@example.com\x00client:192.0.2.1"
-	if _, ok := limiter.perKey[oldestKey]; ok {
-		t.Fatalf("oldest limiter entry was not evicted")
+	for element := limiter.recency.Front(); element != nil; element = element.Next() {
+		key := element.Value.(rateBucket).key
+		if !strings.HasPrefix(key, "account:") && !strings.HasPrefix(key, "client:") {
+			t.Fatalf("unexpected limiter key %q", key)
+		}
 	}
-	refreshedKey := "account:user-0@example.com\x00client:192.0.2.0"
-	if _, ok := limiter.perKey[refreshedKey]; !ok {
-		t.Fatalf("recently used limiter entry was unexpectedly evicted")
+}
+
+func TestAuthRateLimiterSprayCannotResetExhaustedBucket(t *testing.T) {
+	limiter := NewAuthRateLimiter(1)
+	limiter.maxEntries = 4
+	if allowed, _ := limiter.allow("192.0.2.10", "target@example.com"); !allowed {
+		t.Fatal("target request was unexpectedly limited")
 	}
-	newestIndex := authRateLimiterMaxEntries + 99
-	newestKey := fmt.Sprintf("account:user-%d@example.com\x00client:192.0.2.%d", newestIndex, newestIndex)
-	if _, ok := limiter.perKey[newestKey]; !ok {
-		t.Fatalf("newest limiter entry was unexpectedly evicted")
+	if allowed, _ := limiter.allow("192.0.2.11", "spray-1@example.com"); !allowed {
+		t.Fatal("request filling remaining capacity was unexpectedly limited")
+	}
+	for index := range 100 {
+		allowed, retryAfter := limiter.allow(fmt.Sprintf("198.51.100.%d", index), fmt.Sprintf("spray-%d@example.com", index+2))
+		if allowed || retryAfter <= 0 {
+			t.Fatalf("spray request %d = allowed %t retry %s, want fail closed", index, allowed, retryAfter)
+		}
+	}
+	if _, ok := limiter.perKey["account:target@example.com"]; !ok {
+		t.Fatal("spray evicted exhausted target account bucket")
+	}
+	if _, ok := limiter.perKey["client:192.0.2.10"]; !ok {
+		t.Fatal("spray evicted exhausted target client bucket")
+	}
+	if allowed, _ := limiter.allow("192.0.2.10", "target@example.com"); allowed {
+		t.Fatal("spray reset exhausted target buckets")
+	}
+}
+
+func TestAuthRateLimiterSaturationEvictsLRUBucketWithUsableToken(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	limiter := NewAuthRateLimiter(2)
+	limiter.maxEntries = 4
+	limiter.now = func() time.Time { return now }
+	if allowed, _ := limiter.allow("192.0.2.10", "old@example.com"); !allowed {
+		t.Fatal("initial request was unexpectedly limited")
+	}
+	if allowed, _ := limiter.allow("192.0.2.11", "recent@example.com"); !allowed {
+		t.Fatal("capacity-filling request was unexpectedly limited")
+	}
+	if allowed, retryAfter := limiter.allow("192.0.2.12", "new@example.com"); !allowed {
+		t.Fatalf("unseen identity was globally denied with usable buckets: retry after %s", retryAfter)
+	}
+	if len(limiter.perKey) != limiter.maxEntries {
+		t.Fatalf("limiter entries = %d, want %d", len(limiter.perKey), limiter.maxEntries)
+	}
+	if _, ok := limiter.perKey["account:old@example.com"]; ok {
+		t.Fatal("least-recently-used usable account bucket was not evicted")
+	}
+	if _, ok := limiter.perKey["client:192.0.2.10"]; ok {
+		t.Fatal("least-recently-used usable client bucket was not evicted")
+	}
+}
+
+func TestAuthRateLimiterSaturationProtectsExhaustedAndEvictsUsable(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	limiter := NewAuthRateLimiter(2)
+	limiter.maxEntries = 4
+	limiter.now = func() time.Time { return now }
+	if allowed, _ := limiter.allow("192.0.2.10", "exhausted@example.com"); !allowed {
+		t.Fatal("first target request was unexpectedly limited")
+	}
+	if allowed, _ := limiter.allow("192.0.2.10", "exhausted@example.com"); !allowed {
+		t.Fatal("second target request was unexpectedly limited")
+	}
+	if allowed, _ := limiter.allow("192.0.2.11", "usable@example.com"); !allowed {
+		t.Fatal("usable request was unexpectedly limited")
+	}
+	if allowed, retryAfter := limiter.allow("192.0.2.12", "new@example.com"); !allowed {
+		t.Fatalf("unseen identity was denied despite usable eviction candidates: %s", retryAfter)
+	}
+	for _, key := range []string{"account:exhausted@example.com", "client:192.0.2.10"} {
+		if _, ok := limiter.perKey[key]; !ok {
+			t.Fatalf("exhausted bucket %q was evicted", key)
+		}
+	}
+	if allowed, _ := limiter.allow("192.0.2.10", "exhausted@example.com"); allowed {
+		t.Fatal("exhausted protected identity was reset")
+	}
+}
+
+func TestAuthRateLimiterFailedReservationDoesNotPartiallyEvict(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	limiter := NewAuthRateLimiter(2)
+	limiter.maxEntries = 3
+	limiter.now = func() time.Time { return now }
+	if allowed, _ := limiter.allow("192.0.2.10", "exhausted@example.com"); !allowed {
+		t.Fatal("first request was unexpectedly limited")
+	}
+	if allowed, _ := limiter.allow("192.0.2.10", "exhausted@example.com"); !allowed {
+		t.Fatal("second request was unexpectedly limited")
+	}
+	limiter.storeBucket(rateBucket{key: "account:usable@example.com", tokens: 1, updated: now})
+	if allowed, retryAfter := limiter.allow("192.0.2.11", "new@example.com"); allowed || retryAfter <= 0 {
+		t.Fatalf("reservation = allowed %t retry %s, want fail closed", allowed, retryAfter)
+	}
+	if _, ok := limiter.perKey["account:usable@example.com"]; !ok {
+		t.Fatal("failed reservation partially evicted a usable bucket")
+	}
+	if len(limiter.perKey) != 3 {
+		t.Fatalf("limiter entries = %d, want 3", len(limiter.perKey))
+	}
+}
+
+func TestAuthRateLimiterReclaimsFullyRefilledBuckets(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	limiter := NewAuthRateLimiter(1)
+	limiter.maxEntries = 2
+	limiter.now = func() time.Time { return now }
+	if allowed, _ := limiter.allow("192.0.2.10", "old@example.com"); !allowed {
+		t.Fatal("initial request was unexpectedly limited")
+	}
+	now = now.Add(time.Minute)
+	if allowed, retryAfter := limiter.allow("192.0.2.11", "new@example.com"); !allowed {
+		t.Fatalf("stale buckets were not reclaimed: retry after %s", retryAfter)
+	}
+	if len(limiter.perKey) != 2 {
+		t.Fatalf("limiter entries = %d, want 2", len(limiter.perKey))
+	}
+	if _, ok := limiter.perKey["account:old@example.com"]; ok {
+		t.Fatal("fully refilled account bucket was not reclaimed")
+	}
+	if _, ok := limiter.perKey["client:192.0.2.10"]; ok {
+		t.Fatal("fully refilled client bucket was not reclaimed")
+	}
+}
+
+func TestAuthRateLimiterClientBucketSurvivesAccountRotation(t *testing.T) {
+	limiter := NewAuthRateLimiter(1)
+	if allowed, _ := limiter.allow("192.0.2.10", "first@example.com"); !allowed {
+		t.Fatal("first request was unexpectedly limited")
+	}
+	if allowed, _ := limiter.allow("192.0.2.10", "second@example.com"); allowed {
+		t.Fatal("rotating account bypassed direct-client limit")
+	}
+}
+
+func TestAuthRateLimiterAccountBucketSurvivesClientRotation(t *testing.T) {
+	limiter := NewAuthRateLimiter(1)
+	if allowed, _ := limiter.allow("192.0.2.10", "user@example.com"); !allowed {
+		t.Fatal("first request was unexpectedly limited")
+	}
+	if allowed, _ := limiter.allow("192.0.2.11", " USER@example.com "); allowed {
+		t.Fatal("rotating client bypassed normalized account limit")
 	}
 }
 
@@ -397,6 +552,52 @@ func TestAuthRequestBodyLimitAcrossTransports(t *testing.T) {
 	})
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("gRPC oversized login error = %v", err)
+	}
+}
+
+func TestProductionReadinessRequestsUseCachedProbeState(t *testing.T) {
+	var calls atomic.Int32
+	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 1 << 20},
+		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context) error { calls.Add(1); return nil }, Services{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.refreshHealth(context.Background())
+	for index := range 10 {
+		for _, path := range []string{"/readyz", "/v1/projects/project-id"} {
+			response := httptest.NewRecorder()
+			server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			if response.Code == http.StatusServiceUnavailable {
+				t.Fatalf("request %d to %s was unexpectedly unready", index, path)
+			}
+		}
+	}
+	for range 10 {
+		if _, err := server.healthServer.Check(context.Background(), &healthv1.HealthCheckRequest{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("underlying readiness probe calls = %d, want 1", got)
+	}
+}
+
+func TestReadinessProbeIsBoundedByTimeout(t *testing.T) {
+	probeErr := make(chan error, 1)
+	state := newReadinessState(func(ctx context.Context) error {
+		<-ctx.Done()
+		probeErr <- ctx.Err()
+		return ctx.Err()
+	})
+	state.probeTimeout = 10 * time.Millisecond
+	state.refresh(context.Background())
+	if err := <-probeErr; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("probe context error = %v, want DeadlineExceeded", err)
+	}
+	if err := state.check(context.Background()); !errors.Is(err, errNotReady) {
+		t.Fatalf("readiness check error = %v, want not ready", err)
 	}
 }
 
@@ -431,6 +632,31 @@ func TestRunReturnsShutdownError(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, want) {
 		t.Fatalf("Run() error = %v, want %v", err, want)
+	}
+}
+
+func TestStopStartsGRPCDrainWhileHTTPShutdownIsBlocked(t *testing.T) {
+	server := newTestServer(t)
+	httpStarted := make(chan struct{})
+	releaseHTTP := make(chan struct{})
+	grpcStarted := make(chan struct{})
+	server.shutdownHTTP = func(context.Context) error {
+		close(httpStarted)
+		<-releaseHTTP
+		return nil
+	}
+	server.gracefulStopGRPC = func() { close(grpcStarted) }
+	done := make(chan error, 1)
+	go func() { done <- server.stop() }()
+	<-httpStarted
+	select {
+	case <-grpcStarted:
+	case <-time.After(time.Second):
+		t.Fatal("gRPC drain did not start while HTTP shutdown was blocked")
+	}
+	close(releaseHTTP)
+	if err := <-done; err != nil {
+		t.Fatalf("stop() error = %v", err)
 	}
 }
 
