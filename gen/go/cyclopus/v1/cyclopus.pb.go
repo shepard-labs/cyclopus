@@ -637,6 +637,119 @@ func (ReconcileFindingStatus) EnumDescriptor() ([]byte, []int) {
 	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{10}
 }
 
+// LogSeverity is the coarse severity band a log query may filter on. Cyclopus
+// maps it to an OpenObserve severity predicate that is ANDed onto the mandatory
+// tenant filter; it can never widen scope.
+type LogSeverity int32
+
+const (
+	LogSeverity_LOG_SEVERITY_UNSPECIFIED LogSeverity = 0
+	LogSeverity_LOG_SEVERITY_TRACE       LogSeverity = 1
+	LogSeverity_LOG_SEVERITY_DEBUG       LogSeverity = 2
+	LogSeverity_LOG_SEVERITY_INFO        LogSeverity = 3
+	LogSeverity_LOG_SEVERITY_WARN        LogSeverity = 4
+	LogSeverity_LOG_SEVERITY_ERROR       LogSeverity = 5
+	LogSeverity_LOG_SEVERITY_FATAL       LogSeverity = 6
+)
+
+// Enum value maps for LogSeverity.
+var (
+	LogSeverity_name = map[int32]string{
+		0: "LOG_SEVERITY_UNSPECIFIED",
+		1: "LOG_SEVERITY_TRACE",
+		2: "LOG_SEVERITY_DEBUG",
+		3: "LOG_SEVERITY_INFO",
+		4: "LOG_SEVERITY_WARN",
+		5: "LOG_SEVERITY_ERROR",
+		6: "LOG_SEVERITY_FATAL",
+	}
+	LogSeverity_value = map[string]int32{
+		"LOG_SEVERITY_UNSPECIFIED": 0,
+		"LOG_SEVERITY_TRACE":       1,
+		"LOG_SEVERITY_DEBUG":       2,
+		"LOG_SEVERITY_INFO":        3,
+		"LOG_SEVERITY_WARN":        4,
+		"LOG_SEVERITY_ERROR":       5,
+		"LOG_SEVERITY_FATAL":       6,
+	}
+)
+
+func (x LogSeverity) Enum() *LogSeverity {
+	p := new(LogSeverity)
+	*p = x
+	return p
+}
+
+func (x LogSeverity) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LogSeverity) Descriptor() protoreflect.EnumDescriptor {
+	return file_cyclopus_v1_cyclopus_proto_enumTypes[11].Descriptor()
+}
+
+func (LogSeverity) Type() protoreflect.EnumType {
+	return &file_cyclopus_v1_cyclopus_proto_enumTypes[11]
+}
+
+func (x LogSeverity) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LogSeverity.Descriptor instead.
+func (LogSeverity) EnumDescriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{11}
+}
+
+type TraceStatus int32
+
+const (
+	TraceStatus_TRACE_STATUS_UNSPECIFIED TraceStatus = 0
+	TraceStatus_TRACE_STATUS_OK          TraceStatus = 1
+	TraceStatus_TRACE_STATUS_ERROR       TraceStatus = 2
+)
+
+// Enum value maps for TraceStatus.
+var (
+	TraceStatus_name = map[int32]string{
+		0: "TRACE_STATUS_UNSPECIFIED",
+		1: "TRACE_STATUS_OK",
+		2: "TRACE_STATUS_ERROR",
+	}
+	TraceStatus_value = map[string]int32{
+		"TRACE_STATUS_UNSPECIFIED": 0,
+		"TRACE_STATUS_OK":          1,
+		"TRACE_STATUS_ERROR":       2,
+	}
+)
+
+func (x TraceStatus) Enum() *TraceStatus {
+	p := new(TraceStatus)
+	*p = x
+	return p
+}
+
+func (x TraceStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TraceStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_cyclopus_v1_cyclopus_proto_enumTypes[12].Descriptor()
+}
+
+func (TraceStatus) Type() protoreflect.EnumType {
+	return &file_cyclopus_v1_cyclopus_proto_enumTypes[12]
+}
+
+func (x TraceStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TraceStatus.Descriptor instead.
+func (TraceStatus) EnumDescriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{12}
+}
+
 // The imported error detail messages are the required typed error vocabulary.
 type ErrorDetailTypes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -6859,6 +6972,729 @@ func (x *ListReconciliationEvidenceResponse) GetNextPageToken() string {
 	return ""
 }
 
+// LogEntry is a single tenant-scoped log record returned from OpenObserve. The
+// tenant fields that determine ownership are stamped by the OpenTelemetry
+// Collector at ingest (spec 8.1), never claimed by the app.
+type LogEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Severity      LogSeverity            `protobuf:"varint,2,opt,name=severity,proto3,enum=cyclopus.v1.LogSeverity" json:"severity,omitempty"`
+	Body          string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	Attributes    map[string]string      `protobuf:"bytes,4,rep,name=attributes,proto3" json:"attributes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogEntry) Reset() {
+	*x = LogEntry{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[102]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogEntry) ProtoMessage() {}
+
+func (x *LogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[102]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
+func (*LogEntry) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{102}
+}
+
+func (x *LogEntry) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *LogEntry) GetSeverity() LogSeverity {
+	if x != nil {
+		return x.Severity
+	}
+	return LogSeverity_LOG_SEVERITY_UNSPECIFIED
+}
+
+func (x *LogEntry) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *LogEntry) GetAttributes() map[string]string {
+	if x != nil {
+		return x.Attributes
+	}
+	return nil
+}
+
+type QueryApplicationLogsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Required: the application whose logs are requested. Ownership is validated
+	// against the caller's organization before any upstream query is issued.
+	ApplicationId string `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	// Optional additional scoping. When set they must belong to application_id.
+	EnvironmentId string                 `protobuf:"bytes,2,opt,name=environment_id,json=environmentId,proto3" json:"environment_id,omitempty"`
+	ReleaseId     string                 `protobuf:"bytes,3,opt,name=release_id,json=releaseId,proto3" json:"release_id,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	// Optional coarse severity floor. Records below it are excluded.
+	MinSeverity LogSeverity `protobuf:"varint,6,opt,name=min_severity,json=minSeverity,proto3,enum=cyclopus.v1.LogSeverity" json:"min_severity,omitempty"`
+	// Optional free-text substring filter. Validated as a safe literal and ANDed
+	// onto the mandatory tenant filter; it cannot remove or widen tenant scope.
+	Query         string `protobuf:"bytes,7,opt,name=query,proto3" json:"query,omitempty"`
+	Limit         int32  `protobuf:"varint,8,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string `protobuf:"bytes,9,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryApplicationLogsRequest) Reset() {
+	*x = QueryApplicationLogsRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[103]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryApplicationLogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryApplicationLogsRequest) ProtoMessage() {}
+
+func (x *QueryApplicationLogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[103]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryApplicationLogsRequest.ProtoReflect.Descriptor instead.
+func (*QueryApplicationLogsRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *QueryApplicationLogsRequest) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
+func (x *QueryApplicationLogsRequest) GetEnvironmentId() string {
+	if x != nil {
+		return x.EnvironmentId
+	}
+	return ""
+}
+
+func (x *QueryApplicationLogsRequest) GetReleaseId() string {
+	if x != nil {
+		return x.ReleaseId
+	}
+	return ""
+}
+
+func (x *QueryApplicationLogsRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *QueryApplicationLogsRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *QueryApplicationLogsRequest) GetMinSeverity() LogSeverity {
+	if x != nil {
+		return x.MinSeverity
+	}
+	return LogSeverity_LOG_SEVERITY_UNSPECIFIED
+}
+
+func (x *QueryApplicationLogsRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *QueryApplicationLogsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *QueryApplicationLogsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type QueryApplicationLogsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*LogEntry            `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryApplicationLogsResponse) Reset() {
+	*x = QueryApplicationLogsResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[104]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryApplicationLogsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryApplicationLogsResponse) ProtoMessage() {}
+
+func (x *QueryApplicationLogsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[104]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryApplicationLogsResponse.ProtoReflect.Descriptor instead.
+func (*QueryApplicationLogsResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{104}
+}
+
+func (x *QueryApplicationLogsResponse) GetEntries() []*LogEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *QueryApplicationLogsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type TraceSummary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TraceId       string                 `protobuf:"bytes,1,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	RootName      string                 `protobuf:"bytes,2,opt,name=root_name,json=rootName,proto3" json:"root_name,omitempty"`
+	DurationMs    int64                  `protobuf:"varint,3,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	Status        TraceStatus            `protobuf:"varint,5,opt,name=status,proto3,enum=cyclopus.v1.TraceStatus" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TraceSummary) Reset() {
+	*x = TraceSummary{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[105]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TraceSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceSummary) ProtoMessage() {}
+
+func (x *TraceSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[105]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceSummary.ProtoReflect.Descriptor instead.
+func (*TraceSummary) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{105}
+}
+
+func (x *TraceSummary) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
+func (x *TraceSummary) GetRootName() string {
+	if x != nil {
+		return x.RootName
+	}
+	return ""
+}
+
+func (x *TraceSummary) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *TraceSummary) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *TraceSummary) GetStatus() TraceStatus {
+	if x != nil {
+		return x.Status
+	}
+	return TraceStatus_TRACE_STATUS_UNSPECIFIED
+}
+
+type ListApplicationTracesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApplicationId string                 `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	EnvironmentId string                 `protobuf:"bytes,2,opt,name=environment_id,json=environmentId,proto3" json:"environment_id,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	Limit         int32                  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,6,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListApplicationTracesRequest) Reset() {
+	*x = ListApplicationTracesRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[106]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListApplicationTracesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListApplicationTracesRequest) ProtoMessage() {}
+
+func (x *ListApplicationTracesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[106]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListApplicationTracesRequest.ProtoReflect.Descriptor instead.
+func (*ListApplicationTracesRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{106}
+}
+
+func (x *ListApplicationTracesRequest) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
+func (x *ListApplicationTracesRequest) GetEnvironmentId() string {
+	if x != nil {
+		return x.EnvironmentId
+	}
+	return ""
+}
+
+func (x *ListApplicationTracesRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *ListApplicationTracesRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *ListApplicationTracesRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListApplicationTracesRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListApplicationTracesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Traces        []*TraceSummary        `protobuf:"bytes,1,rep,name=traces,proto3" json:"traces,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListApplicationTracesResponse) Reset() {
+	*x = ListApplicationTracesResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[107]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListApplicationTracesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListApplicationTracesResponse) ProtoMessage() {}
+
+func (x *ListApplicationTracesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[107]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListApplicationTracesResponse.ProtoReflect.Descriptor instead.
+func (*ListApplicationTracesResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{107}
+}
+
+func (x *ListApplicationTracesResponse) GetTraces() []*TraceSummary {
+	if x != nil {
+		return x.Traces
+	}
+	return nil
+}
+
+func (x *ListApplicationTracesResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type GetApplicationTraceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApplicationId string                 `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	TraceId       string                 `protobuf:"bytes,2,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	EnvironmentId string                 `protobuf:"bytes,3,opt,name=environment_id,json=environmentId,proto3" json:"environment_id,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetApplicationTraceRequest) Reset() {
+	*x = GetApplicationTraceRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[108]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetApplicationTraceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetApplicationTraceRequest) ProtoMessage() {}
+
+func (x *GetApplicationTraceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[108]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetApplicationTraceRequest.ProtoReflect.Descriptor instead.
+func (*GetApplicationTraceRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{108}
+}
+
+func (x *GetApplicationTraceRequest) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
+func (x *GetApplicationTraceRequest) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
+func (x *GetApplicationTraceRequest) GetEnvironmentId() string {
+	if x != nil {
+		return x.EnvironmentId
+	}
+	return ""
+}
+
+func (x *GetApplicationTraceRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *GetApplicationTraceRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+type GetApplicationTraceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Trace         *TraceSummary          `protobuf:"bytes,1,opt,name=trace,proto3" json:"trace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetApplicationTraceResponse) Reset() {
+	*x = GetApplicationTraceResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[109]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetApplicationTraceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetApplicationTraceResponse) ProtoMessage() {}
+
+func (x *GetApplicationTraceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[109]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetApplicationTraceResponse.ProtoReflect.Descriptor instead.
+func (*GetApplicationTraceResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *GetApplicationTraceResponse) GetTrace() *TraceSummary {
+	if x != nil {
+		return x.Trace
+	}
+	return nil
+}
+
+// OperatorMetric is one install-level host/system metric proxied from Beszel.
+// These are NOT tenant-scoped: they describe the operator's own hosts and carry
+// no per-application attribution (spec 8, design note: Beszel is operator/
+// install-level bounded metrics, not a transparent per-tenant proxy).
+type OperatorMetric struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value         float64                `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
+	Unit          string                 `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
+	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OperatorMetric) Reset() {
+	*x = OperatorMetric{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[110]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OperatorMetric) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OperatorMetric) ProtoMessage() {}
+
+func (x *OperatorMetric) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[110]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OperatorMetric.ProtoReflect.Descriptor instead.
+func (*OperatorMetric) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{110}
+}
+
+func (x *OperatorMetric) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *OperatorMetric) GetValue() float64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
+func (x *OperatorMetric) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *OperatorMetric) GetObservedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return nil
+}
+
+type GetOperatorMetricsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOperatorMetricsRequest) Reset() {
+	*x = GetOperatorMetricsRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[111]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOperatorMetricsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOperatorMetricsRequest) ProtoMessage() {}
+
+func (x *GetOperatorMetricsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[111]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOperatorMetricsRequest.ProtoReflect.Descriptor instead.
+func (*GetOperatorMetricsRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{111}
+}
+
+type GetOperatorMetricsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Operator-level only. Any authenticated org member may read these; they are
+	// deliberately install-scoped and expose no tenant data.
+	Metrics       []*OperatorMetric `protobuf:"bytes,1,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOperatorMetricsResponse) Reset() {
+	*x = GetOperatorMetricsResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[112]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOperatorMetricsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOperatorMetricsResponse) ProtoMessage() {}
+
+func (x *GetOperatorMetricsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[112]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOperatorMetricsResponse.ProtoReflect.Descriptor instead.
+func (*GetOperatorMetricsResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{112}
+}
+
+func (x *GetOperatorMetricsResponse) GetMetrics() []*OperatorMetric {
+	if x != nil {
+		return x.Metrics
+	}
+	return nil
+}
+
 var File_cyclopus_v1_cyclopus_proto protoreflect.FileDescriptor
 
 const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
@@ -7344,7 +8180,71 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\"\x8d\x01\n" +
 	"\"ListReconciliationEvidenceResponse\x12?\n" +
 	"\bevidence\x18\x01 \x03(\v2#.cyclopus.v1.ReconciliationEvidenceR\bevidence\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken*r\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x94\x02\n" +
+	"\bLogEntry\x128\n" +
+	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x124\n" +
+	"\bseverity\x18\x02 \x01(\x0e2\x18.cyclopus.v1.LogSeverityR\bseverity\x12\x12\n" +
+	"\x04body\x18\x03 \x01(\tR\x04body\x12E\n" +
+	"\n" +
+	"attributes\x18\x04 \x03(\v2%.cyclopus.v1.LogEntry.AttributesEntryR\n" +
+	"attributes\x1a=\n" +
+	"\x0fAttributesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xfd\x02\n" +
+	"\x1bQueryApplicationLogsRequest\x12%\n" +
+	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12%\n" +
+	"\x0eenvironment_id\x18\x02 \x01(\tR\renvironmentId\x12\x1d\n" +
+	"\n" +
+	"release_id\x18\x03 \x01(\tR\treleaseId\x129\n" +
+	"\n" +
+	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
+	"\bend_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12;\n" +
+	"\fmin_severity\x18\x06 \x01(\x0e2\x18.cyclopus.v1.LogSeverityR\vminSeverity\x12\x14\n" +
+	"\x05query\x18\a \x01(\tR\x05query\x12\x14\n" +
+	"\x05limit\x18\b \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\t \x01(\tR\x06cursor\"p\n" +
+	"\x1cQueryApplicationLogsResponse\x12/\n" +
+	"\aentries\x18\x01 \x03(\v2\x15.cyclopus.v1.LogEntryR\aentries\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xd4\x01\n" +
+	"\fTraceSummary\x12\x19\n" +
+	"\btrace_id\x18\x01 \x01(\tR\atraceId\x12\x1b\n" +
+	"\troot_name\x18\x02 \x01(\tR\brootName\x12\x1f\n" +
+	"\vduration_ms\x18\x03 \x01(\x03R\n" +
+	"durationMs\x129\n" +
+	"\n" +
+	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x120\n" +
+	"\x06status\x18\x05 \x01(\x0e2\x18.cyclopus.v1.TraceStatusR\x06status\"\x8c\x02\n" +
+	"\x1cListApplicationTracesRequest\x12%\n" +
+	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12%\n" +
+	"\x0eenvironment_id\x18\x02 \x01(\tR\renvironmentId\x129\n" +
+	"\n" +
+	"start_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
+	"\bend_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x06 \x01(\tR\x06cursor\"s\n" +
+	"\x1dListApplicationTracesResponse\x121\n" +
+	"\x06traces\x18\x01 \x03(\v2\x19.cyclopus.v1.TraceSummaryR\x06traces\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xf7\x01\n" +
+	"\x1aGetApplicationTraceRequest\x12%\n" +
+	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12\x19\n" +
+	"\btrace_id\x18\x02 \x01(\tR\atraceId\x12%\n" +
+	"\x0eenvironment_id\x18\x03 \x01(\tR\renvironmentId\x129\n" +
+	"\n" +
+	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
+	"\bend_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\"N\n" +
+	"\x1bGetApplicationTraceResponse\x12/\n" +
+	"\x05trace\x18\x01 \x01(\v2\x19.cyclopus.v1.TraceSummaryR\x05trace\"\x8b\x01\n" +
+	"\x0eOperatorMetric\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value\x12\x12\n" +
+	"\x04unit\x18\x03 \x01(\tR\x04unit\x12;\n" +
+	"\vobserved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"observedAt\"\x1b\n" +
+	"\x19GetOperatorMetricsRequest\"S\n" +
+	"\x1aGetOperatorMetricsResponse\x125\n" +
+	"\ametrics\x18\x01 \x03(\v2\x1b.cyclopus.v1.OperatorMetricR\ametrics*r\n" +
 	"\x0fEnvironmentKind\x12 \n" +
 	"\x1cENVIRONMENT_KIND_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bENVIRONMENT_KIND_PRODUCTION\x10\x01\x12\x1c\n" +
@@ -7412,7 +8312,19 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	" RECONCILE_FINDING_STATUS_DRIFTED\x10\x02\x12$\n" +
 	" RECONCILE_FINDING_STATUS_MISSING\x10\x03\x12%\n" +
 	"!RECONCILE_FINDING_STATUS_ORPHANED\x10\x04\x12\"\n" +
-	"\x1eRECONCILE_FINDING_STATUS_ERROR\x10\x052\xa1\x06\n" +
+	"\x1eRECONCILE_FINDING_STATUS_ERROR\x10\x05*\xb9\x01\n" +
+	"\vLogSeverity\x12\x1c\n" +
+	"\x18LOG_SEVERITY_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12LOG_SEVERITY_TRACE\x10\x01\x12\x16\n" +
+	"\x12LOG_SEVERITY_DEBUG\x10\x02\x12\x15\n" +
+	"\x11LOG_SEVERITY_INFO\x10\x03\x12\x15\n" +
+	"\x11LOG_SEVERITY_WARN\x10\x04\x12\x16\n" +
+	"\x12LOG_SEVERITY_ERROR\x10\x05\x12\x16\n" +
+	"\x12LOG_SEVERITY_FATAL\x10\x06*X\n" +
+	"\vTraceStatus\x12\x1c\n" +
+	"\x18TRACE_STATUS_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fTRACE_STATUS_OK\x10\x01\x12\x16\n" +
+	"\x12TRACE_STATUS_ERROR\x10\x022\xa1\x06\n" +
 	"\x15AuthenticationService\x12i\n" +
 	"\tBootstrap\x12\x1d.cyclopus.v1.BootstrapRequest\x1a\x1e.cyclopus.v1.BootstrapResponse\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/auth/bootstrap\x12Y\n" +
 	"\x05Login\x12\x19.cyclopus.v1.LoginRequest\x1a\x1a.cyclopus.v1.LoginResponse\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/v1/auth/login\x12]\n" +
@@ -7463,7 +8375,12 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"GetWebhook\x12\x1e.cyclopus.v1.GetWebhookRequest\x1a\x1f.cyclopus.v1.GetWebhookResponse\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/webhooks/{webhook_id}\x12\x89\x01\n" +
 	"\fListWebhooks\x12 .cyclopus.v1.ListWebhooksRequest\x1a!.cyclopus.v1.ListWebhooksResponse\"4\x82\xd3\xe4\x93\x02.\x12,/v1/organizations/{organization_id}/webhooks\x12\x82\x01\n" +
 	"\rUpdateWebhook\x12!.cyclopus.v1.UpdateWebhookRequest\x1a\".cyclopus.v1.UpdateWebhookResponse\"*\x82\xd3\xe4\x93\x02$:\awebhook2\x19/v1/webhooks/{webhook.id}\x12y\n" +
-	"\rDeleteWebhook\x12!.cyclopus.v1.DeleteWebhookRequest\x1a\".cyclopus.v1.DeleteWebhookResponse\"!\x82\xd3\xe4\x93\x02\x1b*\x19/v1/webhooks/{webhook_id}B@Z>github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1;cyclopusv1b\x06proto3"
+	"\rDeleteWebhook\x12!.cyclopus.v1.DeleteWebhookRequest\x1a\".cyclopus.v1.DeleteWebhookResponse\"!\x82\xd3\xe4\x93\x02\x1b*\x19/v1/webhooks/{webhook_id}2\x85\x05\n" +
+	"\x14ObservabilityService\x12\x9b\x01\n" +
+	"\x14QueryApplicationLogs\x12(.cyclopus.v1.QueryApplicationLogsRequest\x1a).cyclopus.v1.QueryApplicationLogsResponse\".\x82\xd3\xe4\x93\x02(\x12&/v1/applications/{application_id}/logs\x12\xa0\x01\n" +
+	"\x15ListApplicationTraces\x12).cyclopus.v1.ListApplicationTracesRequest\x1a*.cyclopus.v1.ListApplicationTracesResponse\"0\x82\xd3\xe4\x93\x02*\x12(/v1/applications/{application_id}/traces\x12\xa5\x01\n" +
+	"\x13GetApplicationTrace\x12'.cyclopus.v1.GetApplicationTraceRequest\x1a(.cyclopus.v1.GetApplicationTraceResponse\";\x82\xd3\xe4\x93\x025\x123/v1/applications/{application_id}/traces/{trace_id}\x12\x83\x01\n" +
+	"\x12GetOperatorMetrics\x12&.cyclopus.v1.GetOperatorMetricsRequest\x1a'.cyclopus.v1.GetOperatorMetricsResponse\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/operator/metricsB@Z>github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1;cyclopusv1b\x06proto3"
 
 var (
 	file_cyclopus_v1_cyclopus_proto_rawDescOnce sync.Once
@@ -7477,8 +8394,8 @@ func file_cyclopus_v1_cyclopus_proto_rawDescGZIP() []byte {
 	return file_cyclopus_v1_cyclopus_proto_rawDescData
 }
 
-var file_cyclopus_v1_cyclopus_proto_enumTypes = make([]protoimpl.EnumInfo, 11)
-var file_cyclopus_v1_cyclopus_proto_msgTypes = make([]protoimpl.MessageInfo, 102)
+var file_cyclopus_v1_cyclopus_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
+var file_cyclopus_v1_cyclopus_proto_msgTypes = make([]protoimpl.MessageInfo, 114)
 var file_cyclopus_v1_cyclopus_proto_goTypes = []any{
 	(EnvironmentKind)(0),                       // 0: cyclopus.v1.EnvironmentKind
 	(EnvironmentLifecycleStatus)(0),            // 1: cyclopus.v1.EnvironmentLifecycleStatus
@@ -7491,305 +8408,344 @@ var file_cyclopus_v1_cyclopus_proto_goTypes = []any{
 	(ReconcileScopeKind)(0),                    // 8: cyclopus.v1.ReconcileScopeKind
 	(ReconcileCategory)(0),                     // 9: cyclopus.v1.ReconcileCategory
 	(ReconcileFindingStatus)(0),                // 10: cyclopus.v1.ReconcileFindingStatus
-	(*ErrorDetailTypes)(nil),                   // 11: cyclopus.v1.ErrorDetailTypes
-	(*User)(nil),                               // 12: cyclopus.v1.User
-	(*Session)(nil),                            // 13: cyclopus.v1.Session
-	(*ApiToken)(nil),                           // 14: cyclopus.v1.ApiToken
-	(*Organization)(nil),                       // 15: cyclopus.v1.Organization
-	(*Project)(nil),                            // 16: cyclopus.v1.Project
-	(*KedaCronSchedule)(nil),                   // 17: cyclopus.v1.KedaCronSchedule
-	(*Application)(nil),                        // 18: cyclopus.v1.Application
-	(*Environment)(nil),                        // 19: cyclopus.v1.Environment
-	(*PreviewPushRequest)(nil),                 // 20: cyclopus.v1.PreviewPushRequest
-	(*PreviewPushResponse)(nil),                // 21: cyclopus.v1.PreviewPushResponse
-	(*PreviewBranchDeleteRequest)(nil),         // 22: cyclopus.v1.PreviewBranchDeleteRequest
-	(*PreviewBranchDeleteResponse)(nil),        // 23: cyclopus.v1.PreviewBranchDeleteResponse
-	(*TeardownEnvironmentRequest)(nil),         // 24: cyclopus.v1.TeardownEnvironmentRequest
-	(*TeardownEnvironmentResponse)(nil),        // 25: cyclopus.v1.TeardownEnvironmentResponse
-	(*Release)(nil),                            // 26: cyclopus.v1.Release
-	(*EnvironmentVariable)(nil),                // 27: cyclopus.v1.EnvironmentVariable
-	(*EnvironmentVariableRevision)(nil),        // 28: cyclopus.v1.EnvironmentVariableRevision
-	(*WebhookEndpoint)(nil),                    // 29: cyclopus.v1.WebhookEndpoint
-	(*CreateWebhookRequest)(nil),               // 30: cyclopus.v1.CreateWebhookRequest
-	(*CreateWebhookResponse)(nil),              // 31: cyclopus.v1.CreateWebhookResponse
-	(*GetWebhookRequest)(nil),                  // 32: cyclopus.v1.GetWebhookRequest
-	(*GetWebhookResponse)(nil),                 // 33: cyclopus.v1.GetWebhookResponse
-	(*ListWebhooksRequest)(nil),                // 34: cyclopus.v1.ListWebhooksRequest
-	(*ListWebhooksResponse)(nil),               // 35: cyclopus.v1.ListWebhooksResponse
-	(*UpdateWebhookRequest)(nil),               // 36: cyclopus.v1.UpdateWebhookRequest
-	(*UpdateWebhookResponse)(nil),              // 37: cyclopus.v1.UpdateWebhookResponse
-	(*DeleteWebhookRequest)(nil),               // 38: cyclopus.v1.DeleteWebhookRequest
-	(*DeleteWebhookResponse)(nil),              // 39: cyclopus.v1.DeleteWebhookResponse
-	(*Operation)(nil),                          // 40: cyclopus.v1.Operation
-	(*ReconcileScope)(nil),                     // 41: cyclopus.v1.ReconcileScope
-	(*ReconcileFinding)(nil),                   // 42: cyclopus.v1.ReconcileFinding
-	(*RuntimeClassDriftFinding)(nil),           // 43: cyclopus.v1.RuntimeClassDriftFinding
-	(*NetworkPolicyDriftFinding)(nil),          // 44: cyclopus.v1.NetworkPolicyDriftFinding
-	(*ReconciliationObject)(nil),               // 45: cyclopus.v1.ReconciliationObject
-	(*ReconciliationPlanOperation)(nil),        // 46: cyclopus.v1.ReconciliationPlanOperation
-	(*ReconciliationPlan)(nil),                 // 47: cyclopus.v1.ReconciliationPlan
-	(*ReconciliationReport)(nil),               // 48: cyclopus.v1.ReconciliationReport
-	(*ReconciliationEvidence)(nil),             // 49: cyclopus.v1.ReconciliationEvidence
-	(*ReconciliationRun)(nil),                  // 50: cyclopus.v1.ReconciliationRun
-	(*BootstrapRequest)(nil),                   // 51: cyclopus.v1.BootstrapRequest
-	(*BootstrapResponse)(nil),                  // 52: cyclopus.v1.BootstrapResponse
-	(*LoginRequest)(nil),                       // 53: cyclopus.v1.LoginRequest
-	(*LoginResponse)(nil),                      // 54: cyclopus.v1.LoginResponse
-	(*LogoutRequest)(nil),                      // 55: cyclopus.v1.LogoutRequest
-	(*LogoutResponse)(nil),                     // 56: cyclopus.v1.LogoutResponse
-	(*GetCurrentUserRequest)(nil),              // 57: cyclopus.v1.GetCurrentUserRequest
-	(*GetCurrentUserResponse)(nil),             // 58: cyclopus.v1.GetCurrentUserResponse
-	(*CreateApiTokenRequest)(nil),              // 59: cyclopus.v1.CreateApiTokenRequest
-	(*CreateApiTokenResponse)(nil),             // 60: cyclopus.v1.CreateApiTokenResponse
-	(*ListApiTokensRequest)(nil),               // 61: cyclopus.v1.ListApiTokensRequest
-	(*ListApiTokensResponse)(nil),              // 62: cyclopus.v1.ListApiTokensResponse
-	(*RevokeApiTokenRequest)(nil),              // 63: cyclopus.v1.RevokeApiTokenRequest
-	(*RevokeApiTokenResponse)(nil),             // 64: cyclopus.v1.RevokeApiTokenResponse
-	(*GetOrganizationRequest)(nil),             // 65: cyclopus.v1.GetOrganizationRequest
-	(*GetOrganizationResponse)(nil),            // 66: cyclopus.v1.GetOrganizationResponse
-	(*DeleteOrganizationRequest)(nil),          // 67: cyclopus.v1.DeleteOrganizationRequest
-	(*DeleteOrganizationResponse)(nil),         // 68: cyclopus.v1.DeleteOrganizationResponse
-	(*CreateProjectRequest)(nil),               // 69: cyclopus.v1.CreateProjectRequest
-	(*CreateProjectResponse)(nil),              // 70: cyclopus.v1.CreateProjectResponse
-	(*GetProjectRequest)(nil),                  // 71: cyclopus.v1.GetProjectRequest
-	(*GetProjectResponse)(nil),                 // 72: cyclopus.v1.GetProjectResponse
-	(*ListProjectsRequest)(nil),                // 73: cyclopus.v1.ListProjectsRequest
-	(*ListProjectsResponse)(nil),               // 74: cyclopus.v1.ListProjectsResponse
-	(*UpdateProjectRequest)(nil),               // 75: cyclopus.v1.UpdateProjectRequest
-	(*UpdateProjectResponse)(nil),              // 76: cyclopus.v1.UpdateProjectResponse
-	(*DeleteProjectRequest)(nil),               // 77: cyclopus.v1.DeleteProjectRequest
-	(*DeleteProjectResponse)(nil),              // 78: cyclopus.v1.DeleteProjectResponse
-	(*CreateApplicationRequest)(nil),           // 79: cyclopus.v1.CreateApplicationRequest
-	(*CreateApplicationResponse)(nil),          // 80: cyclopus.v1.CreateApplicationResponse
-	(*GetApplicationRequest)(nil),              // 81: cyclopus.v1.GetApplicationRequest
-	(*GetApplicationResponse)(nil),             // 82: cyclopus.v1.GetApplicationResponse
-	(*ListApplicationsRequest)(nil),            // 83: cyclopus.v1.ListApplicationsRequest
-	(*ListApplicationsResponse)(nil),           // 84: cyclopus.v1.ListApplicationsResponse
-	(*UpdateApplicationRequest)(nil),           // 85: cyclopus.v1.UpdateApplicationRequest
-	(*UpdateApplicationResponse)(nil),          // 86: cyclopus.v1.UpdateApplicationResponse
-	(*DeleteApplicationRequest)(nil),           // 87: cyclopus.v1.DeleteApplicationRequest
-	(*DeleteApplicationResponse)(nil),          // 88: cyclopus.v1.DeleteApplicationResponse
-	(*GetEnvironmentRequest)(nil),              // 89: cyclopus.v1.GetEnvironmentRequest
-	(*GetEnvironmentResponse)(nil),             // 90: cyclopus.v1.GetEnvironmentResponse
-	(*ListEnvironmentsRequest)(nil),            // 91: cyclopus.v1.ListEnvironmentsRequest
-	(*ListEnvironmentsResponse)(nil),           // 92: cyclopus.v1.ListEnvironmentsResponse
-	(*DeployRequest)(nil),                      // 93: cyclopus.v1.DeployRequest
-	(*DeployResponse)(nil),                     // 94: cyclopus.v1.DeployResponse
-	(*RollbackRequest)(nil),                    // 95: cyclopus.v1.RollbackRequest
-	(*RollbackResponse)(nil),                   // 96: cyclopus.v1.RollbackResponse
-	(*GetReleaseRequest)(nil),                  // 97: cyclopus.v1.GetReleaseRequest
-	(*GetReleaseResponse)(nil),                 // 98: cyclopus.v1.GetReleaseResponse
-	(*ListReleasesRequest)(nil),                // 99: cyclopus.v1.ListReleasesRequest
-	(*ListReleasesResponse)(nil),               // 100: cyclopus.v1.ListReleasesResponse
-	(*GetEnvironmentVariablesRequest)(nil),     // 101: cyclopus.v1.GetEnvironmentVariablesRequest
-	(*GetEnvironmentVariablesResponse)(nil),    // 102: cyclopus.v1.GetEnvironmentVariablesResponse
-	(*SetEnvironmentVariablesRequest)(nil),     // 103: cyclopus.v1.SetEnvironmentVariablesRequest
-	(*SetEnvironmentVariablesResponse)(nil),    // 104: cyclopus.v1.SetEnvironmentVariablesResponse
-	(*StartReconciliationRequest)(nil),         // 105: cyclopus.v1.StartReconciliationRequest
-	(*StartReconciliationResponse)(nil),        // 106: cyclopus.v1.StartReconciliationResponse
-	(*GetReconciliationRequest)(nil),           // 107: cyclopus.v1.GetReconciliationRequest
-	(*GetReconciliationResponse)(nil),          // 108: cyclopus.v1.GetReconciliationResponse
-	(*ListReconciliationsRequest)(nil),         // 109: cyclopus.v1.ListReconciliationsRequest
-	(*ListReconciliationsResponse)(nil),        // 110: cyclopus.v1.ListReconciliationsResponse
-	(*ListReconciliationEvidenceRequest)(nil),  // 111: cyclopus.v1.ListReconciliationEvidenceRequest
-	(*ListReconciliationEvidenceResponse)(nil), // 112: cyclopus.v1.ListReconciliationEvidenceResponse
-	(*errdetails.ErrorInfo)(nil),               // 113: google.rpc.ErrorInfo
-	(*errdetails.BadRequest)(nil),              // 114: google.rpc.BadRequest
-	(*timestamppb.Timestamp)(nil),              // 115: google.protobuf.Timestamp
-	(*fieldmaskpb.FieldMask)(nil),              // 116: google.protobuf.FieldMask
-	(*structpb.Value)(nil),                     // 117: google.protobuf.Value
+	(LogSeverity)(0),                           // 11: cyclopus.v1.LogSeverity
+	(TraceStatus)(0),                           // 12: cyclopus.v1.TraceStatus
+	(*ErrorDetailTypes)(nil),                   // 13: cyclopus.v1.ErrorDetailTypes
+	(*User)(nil),                               // 14: cyclopus.v1.User
+	(*Session)(nil),                            // 15: cyclopus.v1.Session
+	(*ApiToken)(nil),                           // 16: cyclopus.v1.ApiToken
+	(*Organization)(nil),                       // 17: cyclopus.v1.Organization
+	(*Project)(nil),                            // 18: cyclopus.v1.Project
+	(*KedaCronSchedule)(nil),                   // 19: cyclopus.v1.KedaCronSchedule
+	(*Application)(nil),                        // 20: cyclopus.v1.Application
+	(*Environment)(nil),                        // 21: cyclopus.v1.Environment
+	(*PreviewPushRequest)(nil),                 // 22: cyclopus.v1.PreviewPushRequest
+	(*PreviewPushResponse)(nil),                // 23: cyclopus.v1.PreviewPushResponse
+	(*PreviewBranchDeleteRequest)(nil),         // 24: cyclopus.v1.PreviewBranchDeleteRequest
+	(*PreviewBranchDeleteResponse)(nil),        // 25: cyclopus.v1.PreviewBranchDeleteResponse
+	(*TeardownEnvironmentRequest)(nil),         // 26: cyclopus.v1.TeardownEnvironmentRequest
+	(*TeardownEnvironmentResponse)(nil),        // 27: cyclopus.v1.TeardownEnvironmentResponse
+	(*Release)(nil),                            // 28: cyclopus.v1.Release
+	(*EnvironmentVariable)(nil),                // 29: cyclopus.v1.EnvironmentVariable
+	(*EnvironmentVariableRevision)(nil),        // 30: cyclopus.v1.EnvironmentVariableRevision
+	(*WebhookEndpoint)(nil),                    // 31: cyclopus.v1.WebhookEndpoint
+	(*CreateWebhookRequest)(nil),               // 32: cyclopus.v1.CreateWebhookRequest
+	(*CreateWebhookResponse)(nil),              // 33: cyclopus.v1.CreateWebhookResponse
+	(*GetWebhookRequest)(nil),                  // 34: cyclopus.v1.GetWebhookRequest
+	(*GetWebhookResponse)(nil),                 // 35: cyclopus.v1.GetWebhookResponse
+	(*ListWebhooksRequest)(nil),                // 36: cyclopus.v1.ListWebhooksRequest
+	(*ListWebhooksResponse)(nil),               // 37: cyclopus.v1.ListWebhooksResponse
+	(*UpdateWebhookRequest)(nil),               // 38: cyclopus.v1.UpdateWebhookRequest
+	(*UpdateWebhookResponse)(nil),              // 39: cyclopus.v1.UpdateWebhookResponse
+	(*DeleteWebhookRequest)(nil),               // 40: cyclopus.v1.DeleteWebhookRequest
+	(*DeleteWebhookResponse)(nil),              // 41: cyclopus.v1.DeleteWebhookResponse
+	(*Operation)(nil),                          // 42: cyclopus.v1.Operation
+	(*ReconcileScope)(nil),                     // 43: cyclopus.v1.ReconcileScope
+	(*ReconcileFinding)(nil),                   // 44: cyclopus.v1.ReconcileFinding
+	(*RuntimeClassDriftFinding)(nil),           // 45: cyclopus.v1.RuntimeClassDriftFinding
+	(*NetworkPolicyDriftFinding)(nil),          // 46: cyclopus.v1.NetworkPolicyDriftFinding
+	(*ReconciliationObject)(nil),               // 47: cyclopus.v1.ReconciliationObject
+	(*ReconciliationPlanOperation)(nil),        // 48: cyclopus.v1.ReconciliationPlanOperation
+	(*ReconciliationPlan)(nil),                 // 49: cyclopus.v1.ReconciliationPlan
+	(*ReconciliationReport)(nil),               // 50: cyclopus.v1.ReconciliationReport
+	(*ReconciliationEvidence)(nil),             // 51: cyclopus.v1.ReconciliationEvidence
+	(*ReconciliationRun)(nil),                  // 52: cyclopus.v1.ReconciliationRun
+	(*BootstrapRequest)(nil),                   // 53: cyclopus.v1.BootstrapRequest
+	(*BootstrapResponse)(nil),                  // 54: cyclopus.v1.BootstrapResponse
+	(*LoginRequest)(nil),                       // 55: cyclopus.v1.LoginRequest
+	(*LoginResponse)(nil),                      // 56: cyclopus.v1.LoginResponse
+	(*LogoutRequest)(nil),                      // 57: cyclopus.v1.LogoutRequest
+	(*LogoutResponse)(nil),                     // 58: cyclopus.v1.LogoutResponse
+	(*GetCurrentUserRequest)(nil),              // 59: cyclopus.v1.GetCurrentUserRequest
+	(*GetCurrentUserResponse)(nil),             // 60: cyclopus.v1.GetCurrentUserResponse
+	(*CreateApiTokenRequest)(nil),              // 61: cyclopus.v1.CreateApiTokenRequest
+	(*CreateApiTokenResponse)(nil),             // 62: cyclopus.v1.CreateApiTokenResponse
+	(*ListApiTokensRequest)(nil),               // 63: cyclopus.v1.ListApiTokensRequest
+	(*ListApiTokensResponse)(nil),              // 64: cyclopus.v1.ListApiTokensResponse
+	(*RevokeApiTokenRequest)(nil),              // 65: cyclopus.v1.RevokeApiTokenRequest
+	(*RevokeApiTokenResponse)(nil),             // 66: cyclopus.v1.RevokeApiTokenResponse
+	(*GetOrganizationRequest)(nil),             // 67: cyclopus.v1.GetOrganizationRequest
+	(*GetOrganizationResponse)(nil),            // 68: cyclopus.v1.GetOrganizationResponse
+	(*DeleteOrganizationRequest)(nil),          // 69: cyclopus.v1.DeleteOrganizationRequest
+	(*DeleteOrganizationResponse)(nil),         // 70: cyclopus.v1.DeleteOrganizationResponse
+	(*CreateProjectRequest)(nil),               // 71: cyclopus.v1.CreateProjectRequest
+	(*CreateProjectResponse)(nil),              // 72: cyclopus.v1.CreateProjectResponse
+	(*GetProjectRequest)(nil),                  // 73: cyclopus.v1.GetProjectRequest
+	(*GetProjectResponse)(nil),                 // 74: cyclopus.v1.GetProjectResponse
+	(*ListProjectsRequest)(nil),                // 75: cyclopus.v1.ListProjectsRequest
+	(*ListProjectsResponse)(nil),               // 76: cyclopus.v1.ListProjectsResponse
+	(*UpdateProjectRequest)(nil),               // 77: cyclopus.v1.UpdateProjectRequest
+	(*UpdateProjectResponse)(nil),              // 78: cyclopus.v1.UpdateProjectResponse
+	(*DeleteProjectRequest)(nil),               // 79: cyclopus.v1.DeleteProjectRequest
+	(*DeleteProjectResponse)(nil),              // 80: cyclopus.v1.DeleteProjectResponse
+	(*CreateApplicationRequest)(nil),           // 81: cyclopus.v1.CreateApplicationRequest
+	(*CreateApplicationResponse)(nil),          // 82: cyclopus.v1.CreateApplicationResponse
+	(*GetApplicationRequest)(nil),              // 83: cyclopus.v1.GetApplicationRequest
+	(*GetApplicationResponse)(nil),             // 84: cyclopus.v1.GetApplicationResponse
+	(*ListApplicationsRequest)(nil),            // 85: cyclopus.v1.ListApplicationsRequest
+	(*ListApplicationsResponse)(nil),           // 86: cyclopus.v1.ListApplicationsResponse
+	(*UpdateApplicationRequest)(nil),           // 87: cyclopus.v1.UpdateApplicationRequest
+	(*UpdateApplicationResponse)(nil),          // 88: cyclopus.v1.UpdateApplicationResponse
+	(*DeleteApplicationRequest)(nil),           // 89: cyclopus.v1.DeleteApplicationRequest
+	(*DeleteApplicationResponse)(nil),          // 90: cyclopus.v1.DeleteApplicationResponse
+	(*GetEnvironmentRequest)(nil),              // 91: cyclopus.v1.GetEnvironmentRequest
+	(*GetEnvironmentResponse)(nil),             // 92: cyclopus.v1.GetEnvironmentResponse
+	(*ListEnvironmentsRequest)(nil),            // 93: cyclopus.v1.ListEnvironmentsRequest
+	(*ListEnvironmentsResponse)(nil),           // 94: cyclopus.v1.ListEnvironmentsResponse
+	(*DeployRequest)(nil),                      // 95: cyclopus.v1.DeployRequest
+	(*DeployResponse)(nil),                     // 96: cyclopus.v1.DeployResponse
+	(*RollbackRequest)(nil),                    // 97: cyclopus.v1.RollbackRequest
+	(*RollbackResponse)(nil),                   // 98: cyclopus.v1.RollbackResponse
+	(*GetReleaseRequest)(nil),                  // 99: cyclopus.v1.GetReleaseRequest
+	(*GetReleaseResponse)(nil),                 // 100: cyclopus.v1.GetReleaseResponse
+	(*ListReleasesRequest)(nil),                // 101: cyclopus.v1.ListReleasesRequest
+	(*ListReleasesResponse)(nil),               // 102: cyclopus.v1.ListReleasesResponse
+	(*GetEnvironmentVariablesRequest)(nil),     // 103: cyclopus.v1.GetEnvironmentVariablesRequest
+	(*GetEnvironmentVariablesResponse)(nil),    // 104: cyclopus.v1.GetEnvironmentVariablesResponse
+	(*SetEnvironmentVariablesRequest)(nil),     // 105: cyclopus.v1.SetEnvironmentVariablesRequest
+	(*SetEnvironmentVariablesResponse)(nil),    // 106: cyclopus.v1.SetEnvironmentVariablesResponse
+	(*StartReconciliationRequest)(nil),         // 107: cyclopus.v1.StartReconciliationRequest
+	(*StartReconciliationResponse)(nil),        // 108: cyclopus.v1.StartReconciliationResponse
+	(*GetReconciliationRequest)(nil),           // 109: cyclopus.v1.GetReconciliationRequest
+	(*GetReconciliationResponse)(nil),          // 110: cyclopus.v1.GetReconciliationResponse
+	(*ListReconciliationsRequest)(nil),         // 111: cyclopus.v1.ListReconciliationsRequest
+	(*ListReconciliationsResponse)(nil),        // 112: cyclopus.v1.ListReconciliationsResponse
+	(*ListReconciliationEvidenceRequest)(nil),  // 113: cyclopus.v1.ListReconciliationEvidenceRequest
+	(*ListReconciliationEvidenceResponse)(nil), // 114: cyclopus.v1.ListReconciliationEvidenceResponse
+	(*LogEntry)(nil),                           // 115: cyclopus.v1.LogEntry
+	(*QueryApplicationLogsRequest)(nil),        // 116: cyclopus.v1.QueryApplicationLogsRequest
+	(*QueryApplicationLogsResponse)(nil),       // 117: cyclopus.v1.QueryApplicationLogsResponse
+	(*TraceSummary)(nil),                       // 118: cyclopus.v1.TraceSummary
+	(*ListApplicationTracesRequest)(nil),       // 119: cyclopus.v1.ListApplicationTracesRequest
+	(*ListApplicationTracesResponse)(nil),      // 120: cyclopus.v1.ListApplicationTracesResponse
+	(*GetApplicationTraceRequest)(nil),         // 121: cyclopus.v1.GetApplicationTraceRequest
+	(*GetApplicationTraceResponse)(nil),        // 122: cyclopus.v1.GetApplicationTraceResponse
+	(*OperatorMetric)(nil),                     // 123: cyclopus.v1.OperatorMetric
+	(*GetOperatorMetricsRequest)(nil),          // 124: cyclopus.v1.GetOperatorMetricsRequest
+	(*GetOperatorMetricsResponse)(nil),         // 125: cyclopus.v1.GetOperatorMetricsResponse
+	nil,                                        // 126: cyclopus.v1.LogEntry.AttributesEntry
+	(*errdetails.ErrorInfo)(nil),               // 127: google.rpc.ErrorInfo
+	(*errdetails.BadRequest)(nil),              // 128: google.rpc.BadRequest
+	(*timestamppb.Timestamp)(nil),              // 129: google.protobuf.Timestamp
+	(*fieldmaskpb.FieldMask)(nil),              // 130: google.protobuf.FieldMask
+	(*structpb.Value)(nil),                     // 131: google.protobuf.Value
 }
 var file_cyclopus_v1_cyclopus_proto_depIdxs = []int32{
-	113, // 0: cyclopus.v1.ErrorDetailTypes.error_info:type_name -> google.rpc.ErrorInfo
-	114, // 1: cyclopus.v1.ErrorDetailTypes.bad_request:type_name -> google.rpc.BadRequest
-	115, // 2: cyclopus.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	115, // 3: cyclopus.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
-	12,  // 4: cyclopus.v1.Session.user:type_name -> cyclopus.v1.User
-	115, // 5: cyclopus.v1.ApiToken.expires_at:type_name -> google.protobuf.Timestamp
-	115, // 6: cyclopus.v1.ApiToken.created_at:type_name -> google.protobuf.Timestamp
-	115, // 7: cyclopus.v1.ApiToken.last_used_at:type_name -> google.protobuf.Timestamp
-	115, // 8: cyclopus.v1.Organization.created_at:type_name -> google.protobuf.Timestamp
-	115, // 9: cyclopus.v1.Organization.deleted_at:type_name -> google.protobuf.Timestamp
-	115, // 10: cyclopus.v1.Project.created_at:type_name -> google.protobuf.Timestamp
-	115, // 11: cyclopus.v1.Project.deleted_at:type_name -> google.protobuf.Timestamp
+	127, // 0: cyclopus.v1.ErrorDetailTypes.error_info:type_name -> google.rpc.ErrorInfo
+	128, // 1: cyclopus.v1.ErrorDetailTypes.bad_request:type_name -> google.rpc.BadRequest
+	129, // 2: cyclopus.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	129, // 3: cyclopus.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	14,  // 4: cyclopus.v1.Session.user:type_name -> cyclopus.v1.User
+	129, // 5: cyclopus.v1.ApiToken.expires_at:type_name -> google.protobuf.Timestamp
+	129, // 6: cyclopus.v1.ApiToken.created_at:type_name -> google.protobuf.Timestamp
+	129, // 7: cyclopus.v1.ApiToken.last_used_at:type_name -> google.protobuf.Timestamp
+	129, // 8: cyclopus.v1.Organization.created_at:type_name -> google.protobuf.Timestamp
+	129, // 9: cyclopus.v1.Organization.deleted_at:type_name -> google.protobuf.Timestamp
+	129, // 10: cyclopus.v1.Project.created_at:type_name -> google.protobuf.Timestamp
+	129, // 11: cyclopus.v1.Project.deleted_at:type_name -> google.protobuf.Timestamp
 	2,   // 12: cyclopus.v1.Application.scaling_mode:type_name -> cyclopus.v1.ScalingMode
 	3,   // 13: cyclopus.v1.Application.runtime_class:type_name -> cyclopus.v1.RuntimeClass
-	115, // 14: cyclopus.v1.Application.created_at:type_name -> google.protobuf.Timestamp
-	115, // 15: cyclopus.v1.Application.deleted_at:type_name -> google.protobuf.Timestamp
-	17,  // 16: cyclopus.v1.Application.keda_cron_schedules:type_name -> cyclopus.v1.KedaCronSchedule
+	129, // 14: cyclopus.v1.Application.created_at:type_name -> google.protobuf.Timestamp
+	129, // 15: cyclopus.v1.Application.deleted_at:type_name -> google.protobuf.Timestamp
+	19,  // 16: cyclopus.v1.Application.keda_cron_schedules:type_name -> cyclopus.v1.KedaCronSchedule
 	0,   // 17: cyclopus.v1.Environment.kind:type_name -> cyclopus.v1.EnvironmentKind
-	115, // 18: cyclopus.v1.Environment.created_at:type_name -> google.protobuf.Timestamp
-	115, // 19: cyclopus.v1.Environment.torn_down_at:type_name -> google.protobuf.Timestamp
+	129, // 18: cyclopus.v1.Environment.created_at:type_name -> google.protobuf.Timestamp
+	129, // 19: cyclopus.v1.Environment.torn_down_at:type_name -> google.protobuf.Timestamp
 	1,   // 20: cyclopus.v1.Environment.lifecycle_status:type_name -> cyclopus.v1.EnvironmentLifecycleStatus
-	115, // 21: cyclopus.v1.Environment.teardown_requested_at:type_name -> google.protobuf.Timestamp
-	19,  // 22: cyclopus.v1.PreviewPushResponse.environment:type_name -> cyclopus.v1.Environment
-	19,  // 23: cyclopus.v1.PreviewBranchDeleteResponse.environment:type_name -> cyclopus.v1.Environment
-	19,  // 24: cyclopus.v1.TeardownEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
+	129, // 21: cyclopus.v1.Environment.teardown_requested_at:type_name -> google.protobuf.Timestamp
+	21,  // 22: cyclopus.v1.PreviewPushResponse.environment:type_name -> cyclopus.v1.Environment
+	21,  // 23: cyclopus.v1.PreviewBranchDeleteResponse.environment:type_name -> cyclopus.v1.Environment
+	21,  // 24: cyclopus.v1.TeardownEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
 	4,   // 25: cyclopus.v1.Release.kind:type_name -> cyclopus.v1.ReleaseKind
 	5,   // 26: cyclopus.v1.Release.status:type_name -> cyclopus.v1.ReleaseStatus
-	115, // 27: cyclopus.v1.Release.created_at:type_name -> google.protobuf.Timestamp
-	27,  // 28: cyclopus.v1.EnvironmentVariableRevision.variables:type_name -> cyclopus.v1.EnvironmentVariable
-	115, // 29: cyclopus.v1.EnvironmentVariableRevision.created_at:type_name -> google.protobuf.Timestamp
-	115, // 30: cyclopus.v1.WebhookEndpoint.disabled_at:type_name -> google.protobuf.Timestamp
-	115, // 31: cyclopus.v1.WebhookEndpoint.created_at:type_name -> google.protobuf.Timestamp
-	115, // 32: cyclopus.v1.WebhookEndpoint.updated_at:type_name -> google.protobuf.Timestamp
-	29,  // 33: cyclopus.v1.CreateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	29,  // 34: cyclopus.v1.CreateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	29,  // 35: cyclopus.v1.GetWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	29,  // 36: cyclopus.v1.ListWebhooksResponse.webhooks:type_name -> cyclopus.v1.WebhookEndpoint
-	29,  // 37: cyclopus.v1.UpdateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	116, // 38: cyclopus.v1.UpdateWebhookRequest.update_mask:type_name -> google.protobuf.FieldMask
-	29,  // 39: cyclopus.v1.UpdateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	129, // 27: cyclopus.v1.Release.created_at:type_name -> google.protobuf.Timestamp
+	29,  // 28: cyclopus.v1.EnvironmentVariableRevision.variables:type_name -> cyclopus.v1.EnvironmentVariable
+	129, // 29: cyclopus.v1.EnvironmentVariableRevision.created_at:type_name -> google.protobuf.Timestamp
+	129, // 30: cyclopus.v1.WebhookEndpoint.disabled_at:type_name -> google.protobuf.Timestamp
+	129, // 31: cyclopus.v1.WebhookEndpoint.created_at:type_name -> google.protobuf.Timestamp
+	129, // 32: cyclopus.v1.WebhookEndpoint.updated_at:type_name -> google.protobuf.Timestamp
+	31,  // 33: cyclopus.v1.CreateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	31,  // 34: cyclopus.v1.CreateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	31,  // 35: cyclopus.v1.GetWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	31,  // 36: cyclopus.v1.ListWebhooksResponse.webhooks:type_name -> cyclopus.v1.WebhookEndpoint
+	31,  // 37: cyclopus.v1.UpdateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	130, // 38: cyclopus.v1.UpdateWebhookRequest.update_mask:type_name -> google.protobuf.FieldMask
+	31,  // 39: cyclopus.v1.UpdateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
 	6,   // 40: cyclopus.v1.Operation.status:type_name -> cyclopus.v1.OperationStatus
 	8,   // 41: cyclopus.v1.ReconcileScope.kind:type_name -> cyclopus.v1.ReconcileScopeKind
 	9,   // 42: cyclopus.v1.ReconcileFinding.category:type_name -> cyclopus.v1.ReconcileCategory
 	10,  // 43: cyclopus.v1.ReconcileFinding.status:type_name -> cyclopus.v1.ReconcileFindingStatus
-	43,  // 44: cyclopus.v1.ReconcileFinding.runtime_class_drift:type_name -> cyclopus.v1.RuntimeClassDriftFinding
-	44,  // 45: cyclopus.v1.ReconcileFinding.network_policy_drift:type_name -> cyclopus.v1.NetworkPolicyDriftFinding
-	115, // 46: cyclopus.v1.ReconcileFinding.observed_at:type_name -> google.protobuf.Timestamp
-	45,  // 47: cyclopus.v1.ReconciliationPlanOperation.object:type_name -> cyclopus.v1.ReconciliationObject
-	117, // 48: cyclopus.v1.ReconciliationPlanOperation.details:type_name -> google.protobuf.Value
-	46,  // 49: cyclopus.v1.ReconciliationPlan.create:type_name -> cyclopus.v1.ReconciliationPlanOperation
-	46,  // 50: cyclopus.v1.ReconciliationPlan.patch:type_name -> cyclopus.v1.ReconciliationPlanOperation
-	46,  // 51: cyclopus.v1.ReconciliationPlan.delete:type_name -> cyclopus.v1.ReconciliationPlanOperation
-	45,  // 52: cyclopus.v1.ReconciliationReport.orphans:type_name -> cyclopus.v1.ReconciliationObject
-	45,  // 53: cyclopus.v1.ReconciliationReport.pruned:type_name -> cyclopus.v1.ReconciliationObject
-	45,  // 54: cyclopus.v1.ReconciliationEvidence.object:type_name -> cyclopus.v1.ReconciliationObject
-	117, // 55: cyclopus.v1.ReconciliationEvidence.details:type_name -> google.protobuf.Value
-	115, // 56: cyclopus.v1.ReconciliationEvidence.observed_at:type_name -> google.protobuf.Timestamp
-	41,  // 57: cyclopus.v1.ReconciliationRun.scope:type_name -> cyclopus.v1.ReconcileScope
+	45,  // 44: cyclopus.v1.ReconcileFinding.runtime_class_drift:type_name -> cyclopus.v1.RuntimeClassDriftFinding
+	46,  // 45: cyclopus.v1.ReconcileFinding.network_policy_drift:type_name -> cyclopus.v1.NetworkPolicyDriftFinding
+	129, // 46: cyclopus.v1.ReconcileFinding.observed_at:type_name -> google.protobuf.Timestamp
+	47,  // 47: cyclopus.v1.ReconciliationPlanOperation.object:type_name -> cyclopus.v1.ReconciliationObject
+	131, // 48: cyclopus.v1.ReconciliationPlanOperation.details:type_name -> google.protobuf.Value
+	48,  // 49: cyclopus.v1.ReconciliationPlan.create:type_name -> cyclopus.v1.ReconciliationPlanOperation
+	48,  // 50: cyclopus.v1.ReconciliationPlan.patch:type_name -> cyclopus.v1.ReconciliationPlanOperation
+	48,  // 51: cyclopus.v1.ReconciliationPlan.delete:type_name -> cyclopus.v1.ReconciliationPlanOperation
+	47,  // 52: cyclopus.v1.ReconciliationReport.orphans:type_name -> cyclopus.v1.ReconciliationObject
+	47,  // 53: cyclopus.v1.ReconciliationReport.pruned:type_name -> cyclopus.v1.ReconciliationObject
+	47,  // 54: cyclopus.v1.ReconciliationEvidence.object:type_name -> cyclopus.v1.ReconciliationObject
+	131, // 55: cyclopus.v1.ReconciliationEvidence.details:type_name -> google.protobuf.Value
+	129, // 56: cyclopus.v1.ReconciliationEvidence.observed_at:type_name -> google.protobuf.Timestamp
+	43,  // 57: cyclopus.v1.ReconciliationRun.scope:type_name -> cyclopus.v1.ReconcileScope
 	9,   // 58: cyclopus.v1.ReconciliationRun.categories:type_name -> cyclopus.v1.ReconcileCategory
 	6,   // 59: cyclopus.v1.ReconciliationRun.status:type_name -> cyclopus.v1.OperationStatus
-	115, // 60: cyclopus.v1.ReconciliationRun.created_at:type_name -> google.protobuf.Timestamp
-	115, // 61: cyclopus.v1.ReconciliationRun.completed_at:type_name -> google.protobuf.Timestamp
-	47,  // 62: cyclopus.v1.ReconciliationRun.plan:type_name -> cyclopus.v1.ReconciliationPlan
-	48,  // 63: cyclopus.v1.ReconciliationRun.report:type_name -> cyclopus.v1.ReconciliationReport
-	42,  // 64: cyclopus.v1.ReconciliationRun.findings:type_name -> cyclopus.v1.ReconcileFinding
-	115, // 65: cyclopus.v1.ReconciliationRun.started_at:type_name -> google.protobuf.Timestamp
-	13,  // 66: cyclopus.v1.BootstrapResponse.session:type_name -> cyclopus.v1.Session
-	13,  // 67: cyclopus.v1.LoginResponse.session:type_name -> cyclopus.v1.Session
-	12,  // 68: cyclopus.v1.GetCurrentUserResponse.user:type_name -> cyclopus.v1.User
-	115, // 69: cyclopus.v1.CreateApiTokenRequest.expires_at:type_name -> google.protobuf.Timestamp
-	14,  // 70: cyclopus.v1.CreateApiTokenResponse.api_token:type_name -> cyclopus.v1.ApiToken
+	129, // 60: cyclopus.v1.ReconciliationRun.created_at:type_name -> google.protobuf.Timestamp
+	129, // 61: cyclopus.v1.ReconciliationRun.completed_at:type_name -> google.protobuf.Timestamp
+	49,  // 62: cyclopus.v1.ReconciliationRun.plan:type_name -> cyclopus.v1.ReconciliationPlan
+	50,  // 63: cyclopus.v1.ReconciliationRun.report:type_name -> cyclopus.v1.ReconciliationReport
+	44,  // 64: cyclopus.v1.ReconciliationRun.findings:type_name -> cyclopus.v1.ReconcileFinding
+	129, // 65: cyclopus.v1.ReconciliationRun.started_at:type_name -> google.protobuf.Timestamp
+	15,  // 66: cyclopus.v1.BootstrapResponse.session:type_name -> cyclopus.v1.Session
+	15,  // 67: cyclopus.v1.LoginResponse.session:type_name -> cyclopus.v1.Session
+	14,  // 68: cyclopus.v1.GetCurrentUserResponse.user:type_name -> cyclopus.v1.User
+	129, // 69: cyclopus.v1.CreateApiTokenRequest.expires_at:type_name -> google.protobuf.Timestamp
+	16,  // 70: cyclopus.v1.CreateApiTokenResponse.api_token:type_name -> cyclopus.v1.ApiToken
 	7,   // 71: cyclopus.v1.CreateApiTokenResponse.result:type_name -> cyclopus.v1.CreateApiTokenResult
-	14,  // 72: cyclopus.v1.ListApiTokensResponse.api_tokens:type_name -> cyclopus.v1.ApiToken
-	15,  // 73: cyclopus.v1.GetOrganizationResponse.organization:type_name -> cyclopus.v1.Organization
-	40,  // 74: cyclopus.v1.DeleteOrganizationResponse.operation:type_name -> cyclopus.v1.Operation
-	16,  // 75: cyclopus.v1.CreateProjectRequest.project:type_name -> cyclopus.v1.Project
-	16,  // 76: cyclopus.v1.CreateProjectResponse.project:type_name -> cyclopus.v1.Project
-	16,  // 77: cyclopus.v1.GetProjectResponse.project:type_name -> cyclopus.v1.Project
-	16,  // 78: cyclopus.v1.ListProjectsResponse.projects:type_name -> cyclopus.v1.Project
-	16,  // 79: cyclopus.v1.UpdateProjectRequest.project:type_name -> cyclopus.v1.Project
-	116, // 80: cyclopus.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
-	16,  // 81: cyclopus.v1.UpdateProjectResponse.project:type_name -> cyclopus.v1.Project
-	40,  // 82: cyclopus.v1.DeleteProjectResponse.operation:type_name -> cyclopus.v1.Operation
-	18,  // 83: cyclopus.v1.CreateApplicationRequest.application:type_name -> cyclopus.v1.Application
-	18,  // 84: cyclopus.v1.CreateApplicationResponse.application:type_name -> cyclopus.v1.Application
-	18,  // 85: cyclopus.v1.GetApplicationResponse.application:type_name -> cyclopus.v1.Application
-	18,  // 86: cyclopus.v1.ListApplicationsResponse.applications:type_name -> cyclopus.v1.Application
-	18,  // 87: cyclopus.v1.UpdateApplicationRequest.application:type_name -> cyclopus.v1.Application
-	116, // 88: cyclopus.v1.UpdateApplicationRequest.update_mask:type_name -> google.protobuf.FieldMask
-	18,  // 89: cyclopus.v1.UpdateApplicationResponse.application:type_name -> cyclopus.v1.Application
-	40,  // 90: cyclopus.v1.DeleteApplicationResponse.operation:type_name -> cyclopus.v1.Operation
-	19,  // 91: cyclopus.v1.GetEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
-	19,  // 92: cyclopus.v1.ListEnvironmentsResponse.environments:type_name -> cyclopus.v1.Environment
-	40,  // 93: cyclopus.v1.DeployResponse.operation:type_name -> cyclopus.v1.Operation
-	40,  // 94: cyclopus.v1.RollbackResponse.operation:type_name -> cyclopus.v1.Operation
-	26,  // 95: cyclopus.v1.GetReleaseResponse.release:type_name -> cyclopus.v1.Release
+	16,  // 72: cyclopus.v1.ListApiTokensResponse.api_tokens:type_name -> cyclopus.v1.ApiToken
+	17,  // 73: cyclopus.v1.GetOrganizationResponse.organization:type_name -> cyclopus.v1.Organization
+	42,  // 74: cyclopus.v1.DeleteOrganizationResponse.operation:type_name -> cyclopus.v1.Operation
+	18,  // 75: cyclopus.v1.CreateProjectRequest.project:type_name -> cyclopus.v1.Project
+	18,  // 76: cyclopus.v1.CreateProjectResponse.project:type_name -> cyclopus.v1.Project
+	18,  // 77: cyclopus.v1.GetProjectResponse.project:type_name -> cyclopus.v1.Project
+	18,  // 78: cyclopus.v1.ListProjectsResponse.projects:type_name -> cyclopus.v1.Project
+	18,  // 79: cyclopus.v1.UpdateProjectRequest.project:type_name -> cyclopus.v1.Project
+	130, // 80: cyclopus.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
+	18,  // 81: cyclopus.v1.UpdateProjectResponse.project:type_name -> cyclopus.v1.Project
+	42,  // 82: cyclopus.v1.DeleteProjectResponse.operation:type_name -> cyclopus.v1.Operation
+	20,  // 83: cyclopus.v1.CreateApplicationRequest.application:type_name -> cyclopus.v1.Application
+	20,  // 84: cyclopus.v1.CreateApplicationResponse.application:type_name -> cyclopus.v1.Application
+	20,  // 85: cyclopus.v1.GetApplicationResponse.application:type_name -> cyclopus.v1.Application
+	20,  // 86: cyclopus.v1.ListApplicationsResponse.applications:type_name -> cyclopus.v1.Application
+	20,  // 87: cyclopus.v1.UpdateApplicationRequest.application:type_name -> cyclopus.v1.Application
+	130, // 88: cyclopus.v1.UpdateApplicationRequest.update_mask:type_name -> google.protobuf.FieldMask
+	20,  // 89: cyclopus.v1.UpdateApplicationResponse.application:type_name -> cyclopus.v1.Application
+	42,  // 90: cyclopus.v1.DeleteApplicationResponse.operation:type_name -> cyclopus.v1.Operation
+	21,  // 91: cyclopus.v1.GetEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
+	21,  // 92: cyclopus.v1.ListEnvironmentsResponse.environments:type_name -> cyclopus.v1.Environment
+	42,  // 93: cyclopus.v1.DeployResponse.operation:type_name -> cyclopus.v1.Operation
+	42,  // 94: cyclopus.v1.RollbackResponse.operation:type_name -> cyclopus.v1.Operation
+	28,  // 95: cyclopus.v1.GetReleaseResponse.release:type_name -> cyclopus.v1.Release
 	5,   // 96: cyclopus.v1.ListReleasesRequest.statuses:type_name -> cyclopus.v1.ReleaseStatus
-	26,  // 97: cyclopus.v1.ListReleasesResponse.releases:type_name -> cyclopus.v1.Release
-	28,  // 98: cyclopus.v1.GetEnvironmentVariablesResponse.revision:type_name -> cyclopus.v1.EnvironmentVariableRevision
-	27,  // 99: cyclopus.v1.SetEnvironmentVariablesRequest.variables:type_name -> cyclopus.v1.EnvironmentVariable
-	40,  // 100: cyclopus.v1.SetEnvironmentVariablesResponse.operation:type_name -> cyclopus.v1.Operation
-	41,  // 101: cyclopus.v1.StartReconciliationRequest.scope:type_name -> cyclopus.v1.ReconcileScope
+	28,  // 97: cyclopus.v1.ListReleasesResponse.releases:type_name -> cyclopus.v1.Release
+	30,  // 98: cyclopus.v1.GetEnvironmentVariablesResponse.revision:type_name -> cyclopus.v1.EnvironmentVariableRevision
+	29,  // 99: cyclopus.v1.SetEnvironmentVariablesRequest.variables:type_name -> cyclopus.v1.EnvironmentVariable
+	42,  // 100: cyclopus.v1.SetEnvironmentVariablesResponse.operation:type_name -> cyclopus.v1.Operation
+	43,  // 101: cyclopus.v1.StartReconciliationRequest.scope:type_name -> cyclopus.v1.ReconcileScope
 	9,   // 102: cyclopus.v1.StartReconciliationRequest.categories:type_name -> cyclopus.v1.ReconcileCategory
-	40,  // 103: cyclopus.v1.StartReconciliationResponse.operation:type_name -> cyclopus.v1.Operation
-	50,  // 104: cyclopus.v1.GetReconciliationResponse.reconciliation:type_name -> cyclopus.v1.ReconciliationRun
-	50,  // 105: cyclopus.v1.ListReconciliationsResponse.reconciliations:type_name -> cyclopus.v1.ReconciliationRun
-	49,  // 106: cyclopus.v1.ListReconciliationEvidenceResponse.evidence:type_name -> cyclopus.v1.ReconciliationEvidence
-	51,  // 107: cyclopus.v1.AuthenticationService.Bootstrap:input_type -> cyclopus.v1.BootstrapRequest
-	53,  // 108: cyclopus.v1.AuthenticationService.Login:input_type -> cyclopus.v1.LoginRequest
-	55,  // 109: cyclopus.v1.AuthenticationService.Logout:input_type -> cyclopus.v1.LogoutRequest
-	57,  // 110: cyclopus.v1.AuthenticationService.GetCurrentUser:input_type -> cyclopus.v1.GetCurrentUserRequest
-	59,  // 111: cyclopus.v1.AuthenticationService.CreateApiToken:input_type -> cyclopus.v1.CreateApiTokenRequest
-	61,  // 112: cyclopus.v1.AuthenticationService.ListApiTokens:input_type -> cyclopus.v1.ListApiTokensRequest
-	63,  // 113: cyclopus.v1.AuthenticationService.RevokeApiToken:input_type -> cyclopus.v1.RevokeApiTokenRequest
-	65,  // 114: cyclopus.v1.OrganizationService.GetOrganization:input_type -> cyclopus.v1.GetOrganizationRequest
-	67,  // 115: cyclopus.v1.OrganizationService.DeleteOrganization:input_type -> cyclopus.v1.DeleteOrganizationRequest
-	69,  // 116: cyclopus.v1.ProjectService.CreateProject:input_type -> cyclopus.v1.CreateProjectRequest
-	71,  // 117: cyclopus.v1.ProjectService.GetProject:input_type -> cyclopus.v1.GetProjectRequest
-	73,  // 118: cyclopus.v1.ProjectService.ListProjects:input_type -> cyclopus.v1.ListProjectsRequest
-	75,  // 119: cyclopus.v1.ProjectService.UpdateProject:input_type -> cyclopus.v1.UpdateProjectRequest
-	77,  // 120: cyclopus.v1.ProjectService.DeleteProject:input_type -> cyclopus.v1.DeleteProjectRequest
-	79,  // 121: cyclopus.v1.ApplicationService.CreateApplication:input_type -> cyclopus.v1.CreateApplicationRequest
-	81,  // 122: cyclopus.v1.ApplicationService.GetApplication:input_type -> cyclopus.v1.GetApplicationRequest
-	83,  // 123: cyclopus.v1.ApplicationService.ListApplications:input_type -> cyclopus.v1.ListApplicationsRequest
-	85,  // 124: cyclopus.v1.ApplicationService.UpdateApplication:input_type -> cyclopus.v1.UpdateApplicationRequest
-	87,  // 125: cyclopus.v1.ApplicationService.DeleteApplication:input_type -> cyclopus.v1.DeleteApplicationRequest
-	89,  // 126: cyclopus.v1.EnvironmentService.GetEnvironment:input_type -> cyclopus.v1.GetEnvironmentRequest
-	91,  // 127: cyclopus.v1.EnvironmentService.ListEnvironments:input_type -> cyclopus.v1.ListEnvironmentsRequest
-	20,  // 128: cyclopus.v1.EnvironmentService.AcceptPreviewPush:input_type -> cyclopus.v1.PreviewPushRequest
-	22,  // 129: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:input_type -> cyclopus.v1.PreviewBranchDeleteRequest
-	24,  // 130: cyclopus.v1.EnvironmentService.TeardownEnvironment:input_type -> cyclopus.v1.TeardownEnvironmentRequest
-	93,  // 131: cyclopus.v1.ReleaseService.Deploy:input_type -> cyclopus.v1.DeployRequest
-	95,  // 132: cyclopus.v1.ReleaseService.Rollback:input_type -> cyclopus.v1.RollbackRequest
-	97,  // 133: cyclopus.v1.ReleaseService.GetRelease:input_type -> cyclopus.v1.GetReleaseRequest
-	99,  // 134: cyclopus.v1.ReleaseService.ListReleases:input_type -> cyclopus.v1.ListReleasesRequest
-	101, // 135: cyclopus.v1.ReleaseService.GetEnvironmentVariables:input_type -> cyclopus.v1.GetEnvironmentVariablesRequest
-	103, // 136: cyclopus.v1.ReleaseService.SetEnvironmentVariables:input_type -> cyclopus.v1.SetEnvironmentVariablesRequest
-	105, // 137: cyclopus.v1.ReconciliationService.StartReconciliation:input_type -> cyclopus.v1.StartReconciliationRequest
-	107, // 138: cyclopus.v1.ReconciliationService.GetReconciliation:input_type -> cyclopus.v1.GetReconciliationRequest
-	109, // 139: cyclopus.v1.ReconciliationService.ListReconciliations:input_type -> cyclopus.v1.ListReconciliationsRequest
-	111, // 140: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:input_type -> cyclopus.v1.ListReconciliationEvidenceRequest
-	30,  // 141: cyclopus.v1.WebhookService.CreateWebhook:input_type -> cyclopus.v1.CreateWebhookRequest
-	32,  // 142: cyclopus.v1.WebhookService.GetWebhook:input_type -> cyclopus.v1.GetWebhookRequest
-	34,  // 143: cyclopus.v1.WebhookService.ListWebhooks:input_type -> cyclopus.v1.ListWebhooksRequest
-	36,  // 144: cyclopus.v1.WebhookService.UpdateWebhook:input_type -> cyclopus.v1.UpdateWebhookRequest
-	38,  // 145: cyclopus.v1.WebhookService.DeleteWebhook:input_type -> cyclopus.v1.DeleteWebhookRequest
-	52,  // 146: cyclopus.v1.AuthenticationService.Bootstrap:output_type -> cyclopus.v1.BootstrapResponse
-	54,  // 147: cyclopus.v1.AuthenticationService.Login:output_type -> cyclopus.v1.LoginResponse
-	56,  // 148: cyclopus.v1.AuthenticationService.Logout:output_type -> cyclopus.v1.LogoutResponse
-	58,  // 149: cyclopus.v1.AuthenticationService.GetCurrentUser:output_type -> cyclopus.v1.GetCurrentUserResponse
-	60,  // 150: cyclopus.v1.AuthenticationService.CreateApiToken:output_type -> cyclopus.v1.CreateApiTokenResponse
-	62,  // 151: cyclopus.v1.AuthenticationService.ListApiTokens:output_type -> cyclopus.v1.ListApiTokensResponse
-	64,  // 152: cyclopus.v1.AuthenticationService.RevokeApiToken:output_type -> cyclopus.v1.RevokeApiTokenResponse
-	66,  // 153: cyclopus.v1.OrganizationService.GetOrganization:output_type -> cyclopus.v1.GetOrganizationResponse
-	68,  // 154: cyclopus.v1.OrganizationService.DeleteOrganization:output_type -> cyclopus.v1.DeleteOrganizationResponse
-	70,  // 155: cyclopus.v1.ProjectService.CreateProject:output_type -> cyclopus.v1.CreateProjectResponse
-	72,  // 156: cyclopus.v1.ProjectService.GetProject:output_type -> cyclopus.v1.GetProjectResponse
-	74,  // 157: cyclopus.v1.ProjectService.ListProjects:output_type -> cyclopus.v1.ListProjectsResponse
-	76,  // 158: cyclopus.v1.ProjectService.UpdateProject:output_type -> cyclopus.v1.UpdateProjectResponse
-	78,  // 159: cyclopus.v1.ProjectService.DeleteProject:output_type -> cyclopus.v1.DeleteProjectResponse
-	80,  // 160: cyclopus.v1.ApplicationService.CreateApplication:output_type -> cyclopus.v1.CreateApplicationResponse
-	82,  // 161: cyclopus.v1.ApplicationService.GetApplication:output_type -> cyclopus.v1.GetApplicationResponse
-	84,  // 162: cyclopus.v1.ApplicationService.ListApplications:output_type -> cyclopus.v1.ListApplicationsResponse
-	86,  // 163: cyclopus.v1.ApplicationService.UpdateApplication:output_type -> cyclopus.v1.UpdateApplicationResponse
-	88,  // 164: cyclopus.v1.ApplicationService.DeleteApplication:output_type -> cyclopus.v1.DeleteApplicationResponse
-	90,  // 165: cyclopus.v1.EnvironmentService.GetEnvironment:output_type -> cyclopus.v1.GetEnvironmentResponse
-	92,  // 166: cyclopus.v1.EnvironmentService.ListEnvironments:output_type -> cyclopus.v1.ListEnvironmentsResponse
-	21,  // 167: cyclopus.v1.EnvironmentService.AcceptPreviewPush:output_type -> cyclopus.v1.PreviewPushResponse
-	23,  // 168: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:output_type -> cyclopus.v1.PreviewBranchDeleteResponse
-	25,  // 169: cyclopus.v1.EnvironmentService.TeardownEnvironment:output_type -> cyclopus.v1.TeardownEnvironmentResponse
-	94,  // 170: cyclopus.v1.ReleaseService.Deploy:output_type -> cyclopus.v1.DeployResponse
-	96,  // 171: cyclopus.v1.ReleaseService.Rollback:output_type -> cyclopus.v1.RollbackResponse
-	98,  // 172: cyclopus.v1.ReleaseService.GetRelease:output_type -> cyclopus.v1.GetReleaseResponse
-	100, // 173: cyclopus.v1.ReleaseService.ListReleases:output_type -> cyclopus.v1.ListReleasesResponse
-	102, // 174: cyclopus.v1.ReleaseService.GetEnvironmentVariables:output_type -> cyclopus.v1.GetEnvironmentVariablesResponse
-	104, // 175: cyclopus.v1.ReleaseService.SetEnvironmentVariables:output_type -> cyclopus.v1.SetEnvironmentVariablesResponse
-	106, // 176: cyclopus.v1.ReconciliationService.StartReconciliation:output_type -> cyclopus.v1.StartReconciliationResponse
-	108, // 177: cyclopus.v1.ReconciliationService.GetReconciliation:output_type -> cyclopus.v1.GetReconciliationResponse
-	110, // 178: cyclopus.v1.ReconciliationService.ListReconciliations:output_type -> cyclopus.v1.ListReconciliationsResponse
-	112, // 179: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:output_type -> cyclopus.v1.ListReconciliationEvidenceResponse
-	31,  // 180: cyclopus.v1.WebhookService.CreateWebhook:output_type -> cyclopus.v1.CreateWebhookResponse
-	33,  // 181: cyclopus.v1.WebhookService.GetWebhook:output_type -> cyclopus.v1.GetWebhookResponse
-	35,  // 182: cyclopus.v1.WebhookService.ListWebhooks:output_type -> cyclopus.v1.ListWebhooksResponse
-	37,  // 183: cyclopus.v1.WebhookService.UpdateWebhook:output_type -> cyclopus.v1.UpdateWebhookResponse
-	39,  // 184: cyclopus.v1.WebhookService.DeleteWebhook:output_type -> cyclopus.v1.DeleteWebhookResponse
-	146, // [146:185] is the sub-list for method output_type
-	107, // [107:146] is the sub-list for method input_type
-	107, // [107:107] is the sub-list for extension type_name
-	107, // [107:107] is the sub-list for extension extendee
-	0,   // [0:107] is the sub-list for field type_name
+	42,  // 103: cyclopus.v1.StartReconciliationResponse.operation:type_name -> cyclopus.v1.Operation
+	52,  // 104: cyclopus.v1.GetReconciliationResponse.reconciliation:type_name -> cyclopus.v1.ReconciliationRun
+	52,  // 105: cyclopus.v1.ListReconciliationsResponse.reconciliations:type_name -> cyclopus.v1.ReconciliationRun
+	51,  // 106: cyclopus.v1.ListReconciliationEvidenceResponse.evidence:type_name -> cyclopus.v1.ReconciliationEvidence
+	129, // 107: cyclopus.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
+	11,  // 108: cyclopus.v1.LogEntry.severity:type_name -> cyclopus.v1.LogSeverity
+	126, // 109: cyclopus.v1.LogEntry.attributes:type_name -> cyclopus.v1.LogEntry.AttributesEntry
+	129, // 110: cyclopus.v1.QueryApplicationLogsRequest.start_time:type_name -> google.protobuf.Timestamp
+	129, // 111: cyclopus.v1.QueryApplicationLogsRequest.end_time:type_name -> google.protobuf.Timestamp
+	11,  // 112: cyclopus.v1.QueryApplicationLogsRequest.min_severity:type_name -> cyclopus.v1.LogSeverity
+	115, // 113: cyclopus.v1.QueryApplicationLogsResponse.entries:type_name -> cyclopus.v1.LogEntry
+	129, // 114: cyclopus.v1.TraceSummary.start_time:type_name -> google.protobuf.Timestamp
+	12,  // 115: cyclopus.v1.TraceSummary.status:type_name -> cyclopus.v1.TraceStatus
+	129, // 116: cyclopus.v1.ListApplicationTracesRequest.start_time:type_name -> google.protobuf.Timestamp
+	129, // 117: cyclopus.v1.ListApplicationTracesRequest.end_time:type_name -> google.protobuf.Timestamp
+	118, // 118: cyclopus.v1.ListApplicationTracesResponse.traces:type_name -> cyclopus.v1.TraceSummary
+	129, // 119: cyclopus.v1.GetApplicationTraceRequest.start_time:type_name -> google.protobuf.Timestamp
+	129, // 120: cyclopus.v1.GetApplicationTraceRequest.end_time:type_name -> google.protobuf.Timestamp
+	118, // 121: cyclopus.v1.GetApplicationTraceResponse.trace:type_name -> cyclopus.v1.TraceSummary
+	129, // 122: cyclopus.v1.OperatorMetric.observed_at:type_name -> google.protobuf.Timestamp
+	123, // 123: cyclopus.v1.GetOperatorMetricsResponse.metrics:type_name -> cyclopus.v1.OperatorMetric
+	53,  // 124: cyclopus.v1.AuthenticationService.Bootstrap:input_type -> cyclopus.v1.BootstrapRequest
+	55,  // 125: cyclopus.v1.AuthenticationService.Login:input_type -> cyclopus.v1.LoginRequest
+	57,  // 126: cyclopus.v1.AuthenticationService.Logout:input_type -> cyclopus.v1.LogoutRequest
+	59,  // 127: cyclopus.v1.AuthenticationService.GetCurrentUser:input_type -> cyclopus.v1.GetCurrentUserRequest
+	61,  // 128: cyclopus.v1.AuthenticationService.CreateApiToken:input_type -> cyclopus.v1.CreateApiTokenRequest
+	63,  // 129: cyclopus.v1.AuthenticationService.ListApiTokens:input_type -> cyclopus.v1.ListApiTokensRequest
+	65,  // 130: cyclopus.v1.AuthenticationService.RevokeApiToken:input_type -> cyclopus.v1.RevokeApiTokenRequest
+	67,  // 131: cyclopus.v1.OrganizationService.GetOrganization:input_type -> cyclopus.v1.GetOrganizationRequest
+	69,  // 132: cyclopus.v1.OrganizationService.DeleteOrganization:input_type -> cyclopus.v1.DeleteOrganizationRequest
+	71,  // 133: cyclopus.v1.ProjectService.CreateProject:input_type -> cyclopus.v1.CreateProjectRequest
+	73,  // 134: cyclopus.v1.ProjectService.GetProject:input_type -> cyclopus.v1.GetProjectRequest
+	75,  // 135: cyclopus.v1.ProjectService.ListProjects:input_type -> cyclopus.v1.ListProjectsRequest
+	77,  // 136: cyclopus.v1.ProjectService.UpdateProject:input_type -> cyclopus.v1.UpdateProjectRequest
+	79,  // 137: cyclopus.v1.ProjectService.DeleteProject:input_type -> cyclopus.v1.DeleteProjectRequest
+	81,  // 138: cyclopus.v1.ApplicationService.CreateApplication:input_type -> cyclopus.v1.CreateApplicationRequest
+	83,  // 139: cyclopus.v1.ApplicationService.GetApplication:input_type -> cyclopus.v1.GetApplicationRequest
+	85,  // 140: cyclopus.v1.ApplicationService.ListApplications:input_type -> cyclopus.v1.ListApplicationsRequest
+	87,  // 141: cyclopus.v1.ApplicationService.UpdateApplication:input_type -> cyclopus.v1.UpdateApplicationRequest
+	89,  // 142: cyclopus.v1.ApplicationService.DeleteApplication:input_type -> cyclopus.v1.DeleteApplicationRequest
+	91,  // 143: cyclopus.v1.EnvironmentService.GetEnvironment:input_type -> cyclopus.v1.GetEnvironmentRequest
+	93,  // 144: cyclopus.v1.EnvironmentService.ListEnvironments:input_type -> cyclopus.v1.ListEnvironmentsRequest
+	22,  // 145: cyclopus.v1.EnvironmentService.AcceptPreviewPush:input_type -> cyclopus.v1.PreviewPushRequest
+	24,  // 146: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:input_type -> cyclopus.v1.PreviewBranchDeleteRequest
+	26,  // 147: cyclopus.v1.EnvironmentService.TeardownEnvironment:input_type -> cyclopus.v1.TeardownEnvironmentRequest
+	95,  // 148: cyclopus.v1.ReleaseService.Deploy:input_type -> cyclopus.v1.DeployRequest
+	97,  // 149: cyclopus.v1.ReleaseService.Rollback:input_type -> cyclopus.v1.RollbackRequest
+	99,  // 150: cyclopus.v1.ReleaseService.GetRelease:input_type -> cyclopus.v1.GetReleaseRequest
+	101, // 151: cyclopus.v1.ReleaseService.ListReleases:input_type -> cyclopus.v1.ListReleasesRequest
+	103, // 152: cyclopus.v1.ReleaseService.GetEnvironmentVariables:input_type -> cyclopus.v1.GetEnvironmentVariablesRequest
+	105, // 153: cyclopus.v1.ReleaseService.SetEnvironmentVariables:input_type -> cyclopus.v1.SetEnvironmentVariablesRequest
+	107, // 154: cyclopus.v1.ReconciliationService.StartReconciliation:input_type -> cyclopus.v1.StartReconciliationRequest
+	109, // 155: cyclopus.v1.ReconciliationService.GetReconciliation:input_type -> cyclopus.v1.GetReconciliationRequest
+	111, // 156: cyclopus.v1.ReconciliationService.ListReconciliations:input_type -> cyclopus.v1.ListReconciliationsRequest
+	113, // 157: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:input_type -> cyclopus.v1.ListReconciliationEvidenceRequest
+	32,  // 158: cyclopus.v1.WebhookService.CreateWebhook:input_type -> cyclopus.v1.CreateWebhookRequest
+	34,  // 159: cyclopus.v1.WebhookService.GetWebhook:input_type -> cyclopus.v1.GetWebhookRequest
+	36,  // 160: cyclopus.v1.WebhookService.ListWebhooks:input_type -> cyclopus.v1.ListWebhooksRequest
+	38,  // 161: cyclopus.v1.WebhookService.UpdateWebhook:input_type -> cyclopus.v1.UpdateWebhookRequest
+	40,  // 162: cyclopus.v1.WebhookService.DeleteWebhook:input_type -> cyclopus.v1.DeleteWebhookRequest
+	116, // 163: cyclopus.v1.ObservabilityService.QueryApplicationLogs:input_type -> cyclopus.v1.QueryApplicationLogsRequest
+	119, // 164: cyclopus.v1.ObservabilityService.ListApplicationTraces:input_type -> cyclopus.v1.ListApplicationTracesRequest
+	121, // 165: cyclopus.v1.ObservabilityService.GetApplicationTrace:input_type -> cyclopus.v1.GetApplicationTraceRequest
+	124, // 166: cyclopus.v1.ObservabilityService.GetOperatorMetrics:input_type -> cyclopus.v1.GetOperatorMetricsRequest
+	54,  // 167: cyclopus.v1.AuthenticationService.Bootstrap:output_type -> cyclopus.v1.BootstrapResponse
+	56,  // 168: cyclopus.v1.AuthenticationService.Login:output_type -> cyclopus.v1.LoginResponse
+	58,  // 169: cyclopus.v1.AuthenticationService.Logout:output_type -> cyclopus.v1.LogoutResponse
+	60,  // 170: cyclopus.v1.AuthenticationService.GetCurrentUser:output_type -> cyclopus.v1.GetCurrentUserResponse
+	62,  // 171: cyclopus.v1.AuthenticationService.CreateApiToken:output_type -> cyclopus.v1.CreateApiTokenResponse
+	64,  // 172: cyclopus.v1.AuthenticationService.ListApiTokens:output_type -> cyclopus.v1.ListApiTokensResponse
+	66,  // 173: cyclopus.v1.AuthenticationService.RevokeApiToken:output_type -> cyclopus.v1.RevokeApiTokenResponse
+	68,  // 174: cyclopus.v1.OrganizationService.GetOrganization:output_type -> cyclopus.v1.GetOrganizationResponse
+	70,  // 175: cyclopus.v1.OrganizationService.DeleteOrganization:output_type -> cyclopus.v1.DeleteOrganizationResponse
+	72,  // 176: cyclopus.v1.ProjectService.CreateProject:output_type -> cyclopus.v1.CreateProjectResponse
+	74,  // 177: cyclopus.v1.ProjectService.GetProject:output_type -> cyclopus.v1.GetProjectResponse
+	76,  // 178: cyclopus.v1.ProjectService.ListProjects:output_type -> cyclopus.v1.ListProjectsResponse
+	78,  // 179: cyclopus.v1.ProjectService.UpdateProject:output_type -> cyclopus.v1.UpdateProjectResponse
+	80,  // 180: cyclopus.v1.ProjectService.DeleteProject:output_type -> cyclopus.v1.DeleteProjectResponse
+	82,  // 181: cyclopus.v1.ApplicationService.CreateApplication:output_type -> cyclopus.v1.CreateApplicationResponse
+	84,  // 182: cyclopus.v1.ApplicationService.GetApplication:output_type -> cyclopus.v1.GetApplicationResponse
+	86,  // 183: cyclopus.v1.ApplicationService.ListApplications:output_type -> cyclopus.v1.ListApplicationsResponse
+	88,  // 184: cyclopus.v1.ApplicationService.UpdateApplication:output_type -> cyclopus.v1.UpdateApplicationResponse
+	90,  // 185: cyclopus.v1.ApplicationService.DeleteApplication:output_type -> cyclopus.v1.DeleteApplicationResponse
+	92,  // 186: cyclopus.v1.EnvironmentService.GetEnvironment:output_type -> cyclopus.v1.GetEnvironmentResponse
+	94,  // 187: cyclopus.v1.EnvironmentService.ListEnvironments:output_type -> cyclopus.v1.ListEnvironmentsResponse
+	23,  // 188: cyclopus.v1.EnvironmentService.AcceptPreviewPush:output_type -> cyclopus.v1.PreviewPushResponse
+	25,  // 189: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:output_type -> cyclopus.v1.PreviewBranchDeleteResponse
+	27,  // 190: cyclopus.v1.EnvironmentService.TeardownEnvironment:output_type -> cyclopus.v1.TeardownEnvironmentResponse
+	96,  // 191: cyclopus.v1.ReleaseService.Deploy:output_type -> cyclopus.v1.DeployResponse
+	98,  // 192: cyclopus.v1.ReleaseService.Rollback:output_type -> cyclopus.v1.RollbackResponse
+	100, // 193: cyclopus.v1.ReleaseService.GetRelease:output_type -> cyclopus.v1.GetReleaseResponse
+	102, // 194: cyclopus.v1.ReleaseService.ListReleases:output_type -> cyclopus.v1.ListReleasesResponse
+	104, // 195: cyclopus.v1.ReleaseService.GetEnvironmentVariables:output_type -> cyclopus.v1.GetEnvironmentVariablesResponse
+	106, // 196: cyclopus.v1.ReleaseService.SetEnvironmentVariables:output_type -> cyclopus.v1.SetEnvironmentVariablesResponse
+	108, // 197: cyclopus.v1.ReconciliationService.StartReconciliation:output_type -> cyclopus.v1.StartReconciliationResponse
+	110, // 198: cyclopus.v1.ReconciliationService.GetReconciliation:output_type -> cyclopus.v1.GetReconciliationResponse
+	112, // 199: cyclopus.v1.ReconciliationService.ListReconciliations:output_type -> cyclopus.v1.ListReconciliationsResponse
+	114, // 200: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:output_type -> cyclopus.v1.ListReconciliationEvidenceResponse
+	33,  // 201: cyclopus.v1.WebhookService.CreateWebhook:output_type -> cyclopus.v1.CreateWebhookResponse
+	35,  // 202: cyclopus.v1.WebhookService.GetWebhook:output_type -> cyclopus.v1.GetWebhookResponse
+	37,  // 203: cyclopus.v1.WebhookService.ListWebhooks:output_type -> cyclopus.v1.ListWebhooksResponse
+	39,  // 204: cyclopus.v1.WebhookService.UpdateWebhook:output_type -> cyclopus.v1.UpdateWebhookResponse
+	41,  // 205: cyclopus.v1.WebhookService.DeleteWebhook:output_type -> cyclopus.v1.DeleteWebhookResponse
+	117, // 206: cyclopus.v1.ObservabilityService.QueryApplicationLogs:output_type -> cyclopus.v1.QueryApplicationLogsResponse
+	120, // 207: cyclopus.v1.ObservabilityService.ListApplicationTraces:output_type -> cyclopus.v1.ListApplicationTracesResponse
+	122, // 208: cyclopus.v1.ObservabilityService.GetApplicationTrace:output_type -> cyclopus.v1.GetApplicationTraceResponse
+	125, // 209: cyclopus.v1.ObservabilityService.GetOperatorMetrics:output_type -> cyclopus.v1.GetOperatorMetricsResponse
+	167, // [167:210] is the sub-list for method output_type
+	124, // [124:167] is the sub-list for method input_type
+	124, // [124:124] is the sub-list for extension type_name
+	124, // [124:124] is the sub-list for extension extendee
+	0,   // [0:124] is the sub-list for field type_name
 }
 
 func init() { file_cyclopus_v1_cyclopus_proto_init() }
@@ -7807,10 +8763,10 @@ func file_cyclopus_v1_cyclopus_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cyclopus_v1_cyclopus_proto_rawDesc), len(file_cyclopus_v1_cyclopus_proto_rawDesc)),
-			NumEnums:      11,
-			NumMessages:   102,
+			NumEnums:      13,
+			NumMessages:   114,
 			NumExtensions: 0,
-			NumServices:   8,
+			NumServices:   9,
 		},
 		GoTypes:           file_cyclopus_v1_cyclopus_proto_goTypes,
 		DependencyIndexes: file_cyclopus_v1_cyclopus_proto_depIdxs,

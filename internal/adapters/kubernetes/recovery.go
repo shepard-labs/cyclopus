@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"time"
 
@@ -73,6 +74,7 @@ type RecoveryAdapter struct {
 	store     RecoveryStore
 	now       func() time.Time
 	lifecycle *LifecycleAdapter
+	logger    *slog.Logger
 }
 
 // AdapterOption extends adapter construction without breaking the existing
@@ -85,6 +87,25 @@ func WithDynamicClient(client dynamic.Interface) AdapterOption {
 	return func(a *RecoveryAdapter) { a.dynamic = client }
 }
 
+// WithLogger wires the redacting structured logger the adapter uses to emit the
+// stable §8.2 control-plane log events. The default is slog.Default().
+func WithLogger(logger *slog.Logger) AdapterOption {
+	return func(a *RecoveryAdapter) {
+		if logger != nil {
+			a.logger = logger
+		}
+	}
+}
+
+// log returns the adapter's logger, defaulting to slog.Default() when one was
+// never wired via WithLogger.
+func (a *RecoveryAdapter) log() *slog.Logger {
+	if a.logger != nil {
+		return a.logger
+	}
+	return slog.Default()
+}
+
 func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStore RecoveryStore, opts ...AdapterOption) (*RecoveryAdapter, error) {
 	if client == nil || recoveryStore == nil || config.PollInterval <= 0 || config.ConflictRetries <= 0 {
 		return nil, errors.New("invalid Kubernetes recovery adapter configuration")
@@ -92,7 +113,7 @@ func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStor
 	if config.APITimeout <= 0 {
 		config.APITimeout = 5 * time.Second
 	}
-	adapter := &RecoveryAdapter{config: config, client: client, store: recoveryStore, now: time.Now}
+	adapter := &RecoveryAdapter{config: config, client: client, store: recoveryStore, now: time.Now, logger: slog.Default()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(adapter)

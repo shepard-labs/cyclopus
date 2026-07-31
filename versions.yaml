@@ -205,3 +205,33 @@ components:
       reviewed_at: "2026-07-30"
       evidence: ["https://pkg.go.dev/github.com/robfig/cron/v3"]
       rationale: Used for server-side cron expression validation (H6) matching the KEDA v2.20.1 robfig/cron parser; prevents invalid schedules from being accepted that the KEDA operator would reject asynchronously.
+  opentelemetry_collector:
+    pin: "v0.157.0"
+    observed_latest: "v0.157.0"
+    probe: "curl -fsSL https://api.github.com/repos/open-telemetry/opentelemetry-collector-releases/releases/latest"
+    review:
+      status: approved
+      reviewer: phase-4-observability-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/open-telemetry/opentelemetry-collector-releases/releases/latest"]
+      rationale: DaemonSet ingest tier (§8.1). k8sattributes processor stamps tenant identity from pod metadata; memory_limiter and per-namespace rate limits bound backpressure. contrib distribution required for k8sattributes/filelog receivers.
+  openobserve:
+    pin: "v0.91.5"
+    observed_latest: "v0.91.5"
+    probe: "curl -fsSL https://api.github.com/repos/openobserve/openobserve/releases/latest"
+    review:
+      status: approved
+      reviewer: phase-4-observability-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/openobserve/openobserve/releases/latest"]
+      rationale: Logs/traces backend (§8), queried server-side via Cyclopus with mandatory tenant filter, never exposed. Multi-tenant streams keyed by app/environment/release stamped by the Collector.
+  beszel:
+    pin: "v0.18.7"
+    observed_latest: "v0.18.7"
+    probe: "curl -fsSL https://api.github.com/repos/henrygd/beszel/releases/latest"
+    review:
+      status: approved
+      reviewer: phase-4-observability-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/henrygd/beszel/releases/latest"]
+      rationale: Resource metrics (§8). PocketBase host metrics cannot be safely attributed to tenant app pods, so exposed as bounded operator-level metrics rather than a transparent per-tenant proxy (Phase 4 spec design note).

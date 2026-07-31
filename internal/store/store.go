@@ -15,9 +15,14 @@ var (
 	ErrConflict           = errors.New("store: conflict")
 	ErrAlreadyExists      = errors.New("store: already exists")
 	ErrFailedPrecondition = errors.New("store: failed precondition")
-	ErrLeaseNotOwned      = errors.New("store: lease not owned")
-	ErrIdempotencyActive  = errors.New("store: idempotency key is active")
-	ErrInvalidArgument    = errors.New("store: invalid argument")
+	// ErrPreviewCapReached is returned when a preview push is rejected because
+	// the app is already at its max_preview_environments cap (§4.3). It wraps
+	// ErrFailedPrecondition so existing precondition handling is unaffected,
+	// while letting callers detect the cap case specifically for §8.2 logging.
+	ErrPreviewCapReached = fmt.Errorf("%w: preview environment cap reached", ErrFailedPrecondition)
+	ErrLeaseNotOwned     = errors.New("store: lease not owned")
+	ErrIdempotencyActive = errors.New("store: idempotency key is active")
+	ErrInvalidArgument   = errors.New("store: invalid argument")
 )
 
 func requirePositiveDuration(name string, value time.Duration) error {

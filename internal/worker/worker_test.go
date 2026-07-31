@@ -355,6 +355,8 @@ type fakeRecoveryStore struct {
 	reconciliationOrgIDs  []string
 	reconciliationRuns    []*store.ReconciliationRun
 	reconciliationClaims  int
+	idlePreviewCandidates []store.IdlePreviewCandidate
+	idlePreviewReaped     bool
 }
 
 func (f *fakeRecoveryStore) DeleteExpiredIdempotencyRecords(context.Context, int) (int64, error) {
@@ -396,11 +398,11 @@ func (*fakeRecoveryStore) ClaimEnvironmentLifecycleJob(context.Context, string, 
 func (*fakeRecoveryStore) RescheduleEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, time.Duration, string, string) error {
 	return nil
 }
-func (*fakeRecoveryStore) ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error) {
-	return nil, nil
+func (f *fakeRecoveryStore) ListIdlePreviewCandidates(context.Context, int) ([]store.IdlePreviewCandidate, error) {
+	return f.idlePreviewCandidates, nil
 }
-func (*fakeRecoveryStore) RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error) {
-	return false, nil
+func (f *fakeRecoveryStore) RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error) {
+	return f.idlePreviewReaped, nil
 }
 
 func (f *fakeRecoveryStore) ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error) {

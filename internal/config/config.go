@@ -25,7 +25,24 @@ type Config struct {
 	Worker                  Worker
 	GitHub                  GitHub
 	Kubernetes              Kubernetes
+	Observability           Observability
 	InsecurePublicListeners bool
+}
+
+// Observability configures the server-side proxies to the OpenObserve
+// (tenant-scoped logs/traces) and Beszel (operator-level metrics) backends.
+// When OpenObserveBaseURL is empty, the logs/traces RPCs report the backend as
+// unavailable rather than reaching anything; likewise BeszelBaseURL gates the
+// operator metrics RPC. Credential secret references are resolved through
+// internal/secretref at startup; plaintext credentials never sit in config.
+type Observability struct {
+	OpenObserveBaseURL          string
+	OpenObserveOrganization     string
+	OpenObserveLogStream        string
+	OpenObserveTraceStream      string
+	OpenObserveCredentialSecret string
+	BeszelBaseURL               string
+	BeszelTokenSecret           string
 }
 
 type Auth struct {
@@ -133,6 +150,13 @@ func Load(args, environ []string) (Config, error) {
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
 	flags.Int("kubernetes-conflict-retries", 0, "Kubernetes optimistic update conflict retries")
 	flags.String("kubernetes-preview-hostname-suffix", "", "verified DNS suffix appended to generated preview slugs")
+	flags.String("observability-openobserve-base-url", "", "OpenObserve HTTPS base URL for proxied logs/traces queries")
+	flags.String("observability-openobserve-organization", "", "OpenObserve organization slug")
+	flags.String("observability-openobserve-log-stream", "", "OpenObserve stream holding application logs")
+	flags.String("observability-openobserve-trace-stream", "", "OpenObserve stream holding application traces")
+	flags.String("observability-openobserve-credential-secret", "", "secret reference for the OpenObserve basic-auth credential")
+	flags.String("observability-beszel-base-url", "", "Beszel HTTPS base URL for operator-level metrics")
+	flags.String("observability-beszel-token-secret", "", "secret reference for the Beszel PocketBase auth token")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, fmt.Errorf("parse flags: %w", err)
 	}
@@ -150,45 +174,52 @@ func Load(args, environ []string) (Config, error) {
 		v.Set(key, value)
 	}
 	flagKeys := map[string]string{
-		"http-address":                         "http.address",
-		"grpc-address":                         "grpc.address",
-		"auth-token-pepper":                    "auth.token_pepper",
-		"auth-bootstrap-secret":                "auth.bootstrap_secret",
-		"auth-session-ttl":                     "auth.session_ttl",
-		"auth-max-concurrent-hashes":           "auth.max_concurrent_hashes",
-		"auth-rate-limit-per-minute":           "auth.rate_limit_per_minute",
-		"auth-request-body-bytes":              "auth.request_body_bytes",
-		"insecure-public-listeners":            "insecure_public_listeners",
-		"http-tls-cert-file":                   "http.tls_cert_file",
-		"http-tls-key-file":                    "http.tls_key_file",
-		"http-max-body-bytes":                  "http.max_body_bytes",
-		"grpc-tls-cert-file":                   "grpc.tls_cert_file",
-		"grpc-tls-key-file":                    "grpc.tls_key_file",
-		"grpc-max-body-bytes":                  "grpc.max_body_bytes",
-		"http-read-timeout":                    "http.read_timeout",
-		"http-read-header-timeout":             "http.read_header_timeout",
-		"http-write-timeout":                   "http.write_timeout",
-		"http-idle-timeout":                    "http.idle_timeout",
-		"http-shutdown-timeout":                "http.shutdown_timeout",
-		"log-level":                            "log.level",
-		"database-url":                         "database.url",
-		"database-migration-lock-timeout":      "database.migration_lock_timeout",
-		"worker-scan-interval":                 "worker.scan_interval",
-		"worker-lease-duration":                "worker.lease_duration",
-		"worker-max-concurrent-deploys":        "worker.max_concurrent_deploys",
-		"github-app-id":                        "github.app_id",
-		"github-private-key-file":              "github.private_key_file",
-		"github-api-base-url":                  "github.api_base_url",
-		"github-upload-url":                    "github.upload_url",
-		"github-api-version":                   "github.api_version",
-		"github-dispatch-observation-interval": "github.dispatch_observation_interval",
-		"github-run-poll-interval":             "github.run_poll_interval",
-		"github-request-timeout":               "github.request_timeout",
-		"github-trusted-hosts":                 "github.trusted_hosts",
-		"kubeconfig":                           "kubernetes.kubeconfig",
-		"kubernetes-recovery-poll-interval":    "kubernetes.recovery_poll_interval",
-		"kubernetes-conflict-retries":          "kubernetes.conflict_retries",
-		"kubernetes-preview-hostname-suffix":   "kubernetes.preview_hostname_suffix",
+		"http-address":                                "http.address",
+		"grpc-address":                                "grpc.address",
+		"auth-token-pepper":                           "auth.token_pepper",
+		"auth-bootstrap-secret":                       "auth.bootstrap_secret",
+		"auth-session-ttl":                            "auth.session_ttl",
+		"auth-max-concurrent-hashes":                  "auth.max_concurrent_hashes",
+		"auth-rate-limit-per-minute":                  "auth.rate_limit_per_minute",
+		"auth-request-body-bytes":                     "auth.request_body_bytes",
+		"insecure-public-listeners":                   "insecure_public_listeners",
+		"http-tls-cert-file":                          "http.tls_cert_file",
+		"http-tls-key-file":                           "http.tls_key_file",
+		"http-max-body-bytes":                         "http.max_body_bytes",
+		"grpc-tls-cert-file":                          "grpc.tls_cert_file",
+		"grpc-tls-key-file":                           "grpc.tls_key_file",
+		"grpc-max-body-bytes":                         "grpc.max_body_bytes",
+		"http-read-timeout":                           "http.read_timeout",
+		"http-read-header-timeout":                    "http.read_header_timeout",
+		"http-write-timeout":                          "http.write_timeout",
+		"http-idle-timeout":                           "http.idle_timeout",
+		"http-shutdown-timeout":                       "http.shutdown_timeout",
+		"log-level":                                   "log.level",
+		"database-url":                                "database.url",
+		"database-migration-lock-timeout":             "database.migration_lock_timeout",
+		"worker-scan-interval":                        "worker.scan_interval",
+		"worker-lease-duration":                       "worker.lease_duration",
+		"worker-max-concurrent-deploys":               "worker.max_concurrent_deploys",
+		"github-app-id":                               "github.app_id",
+		"github-private-key-file":                     "github.private_key_file",
+		"github-api-base-url":                         "github.api_base_url",
+		"github-upload-url":                           "github.upload_url",
+		"github-api-version":                          "github.api_version",
+		"github-dispatch-observation-interval":        "github.dispatch_observation_interval",
+		"github-run-poll-interval":                    "github.run_poll_interval",
+		"github-request-timeout":                      "github.request_timeout",
+		"github-trusted-hosts":                        "github.trusted_hosts",
+		"kubeconfig":                                  "kubernetes.kubeconfig",
+		"kubernetes-recovery-poll-interval":           "kubernetes.recovery_poll_interval",
+		"kubernetes-conflict-retries":                 "kubernetes.conflict_retries",
+		"kubernetes-preview-hostname-suffix":          "kubernetes.preview_hostname_suffix",
+		"observability-openobserve-base-url":          "observability.openobserve_base_url",
+		"observability-openobserve-organization":      "observability.openobserve_organization",
+		"observability-openobserve-log-stream":        "observability.openobserve_log_stream",
+		"observability-openobserve-trace-stream":      "observability.openobserve_trace_stream",
+		"observability-openobserve-credential-secret": "observability.openobserve_credential_secret",
+		"observability-beszel-base-url":               "observability.beszel_base_url",
+		"observability-beszel-token-secret":           "observability.beszel_token_secret",
 	}
 	for flagName, key := range flagKeys {
 		if flags.Changed(flagName) {
@@ -242,6 +273,15 @@ func Load(args, environ []string) (Config, error) {
 			ConflictRetries:       v.GetInt("kubernetes.conflict_retries"),
 			PreviewHostnameSuffix: v.GetString("kubernetes.preview_hostname_suffix"),
 		},
+		Observability: Observability{
+			OpenObserveBaseURL:          v.GetString("observability.openobserve_base_url"),
+			OpenObserveOrganization:     v.GetString("observability.openobserve_organization"),
+			OpenObserveLogStream:        v.GetString("observability.openobserve_log_stream"),
+			OpenObserveTraceStream:      v.GetString("observability.openobserve_trace_stream"),
+			OpenObserveCredentialSecret: v.GetString("observability.openobserve_credential_secret"),
+			BeszelBaseURL:               v.GetString("observability.beszel_base_url"),
+			BeszelTokenSecret:           v.GetString("observability.beszel_token_secret"),
+		},
 		InsecurePublicListeners: v.GetBool("insecure_public_listeners"),
 	}
 	if err := cfg.Validate(); err != nil {
@@ -283,45 +323,52 @@ func setDefaults(v *viper.Viper) {
 
 func environment(environ []string) map[string]string {
 	keys := map[string]string{
-		"HTTP_ADDRESS":                         "http.address",
-		"GRPC_ADDRESS":                         "grpc.address",
-		"AUTH_TOKEN_PEPPER":                    "auth.token_pepper",
-		"AUTH_BOOTSTRAP_SECRET":                "auth.bootstrap_secret",
-		"AUTH_SESSION_TTL":                     "auth.session_ttl",
-		"AUTH_MAX_CONCURRENT_HASHES":           "auth.max_concurrent_hashes",
-		"AUTH_RATE_LIMIT_PER_MINUTE":           "auth.rate_limit_per_minute",
-		"AUTH_REQUEST_BODY_BYTES":              "auth.request_body_bytes",
-		"INSECURE_PUBLIC_LISTENERS":            "insecure_public_listeners",
-		"HTTP_TLS_CERT_FILE":                   "http.tls_cert_file",
-		"HTTP_TLS_KEY_FILE":                    "http.tls_key_file",
-		"HTTP_MAX_BODY_BYTES":                  "http.max_body_bytes",
-		"GRPC_TLS_CERT_FILE":                   "grpc.tls_cert_file",
-		"GRPC_TLS_KEY_FILE":                    "grpc.tls_key_file",
-		"GRPC_MAX_BODY_BYTES":                  "grpc.max_body_bytes",
-		"HTTP_READ_TIMEOUT":                    "http.read_timeout",
-		"HTTP_READ_HEADER_TIMEOUT":             "http.read_header_timeout",
-		"HTTP_WRITE_TIMEOUT":                   "http.write_timeout",
-		"HTTP_IDLE_TIMEOUT":                    "http.idle_timeout",
-		"HTTP_SHUTDOWN_TIMEOUT":                "http.shutdown_timeout",
-		"LOG_LEVEL":                            "log.level",
-		"DATABASE_URL":                         "database.url",
-		"DATABASE_MIGRATION_LOCK_TIMEOUT":      "database.migration_lock_timeout",
-		"WORKER_SCAN_INTERVAL":                 "worker.scan_interval",
-		"WORKER_LEASE_DURATION":                "worker.lease_duration",
-		"WORKER_MAX_CONCURRENT_DEPLOYS":        "worker.max_concurrent_deploys",
-		"GITHUB_APP_ID":                        "github.app_id",
-		"GITHUB_PRIVATE_KEY_FILE":              "github.private_key_file",
-		"GITHUB_API_BASE_URL":                  "github.api_base_url",
-		"GITHUB_UPLOAD_URL":                    "github.upload_url",
-		"GITHUB_API_VERSION":                   "github.api_version",
-		"GITHUB_DISPATCH_OBSERVATION_INTERVAL": "github.dispatch_observation_interval",
-		"GITHUB_RUN_POLL_INTERVAL":             "github.run_poll_interval",
-		"GITHUB_REQUEST_TIMEOUT":               "github.request_timeout",
-		"GITHUB_TRUSTED_HOSTS":                 "github.trusted_hosts",
-		"KUBECONFIG":                           "kubernetes.kubeconfig",
-		"KUBERNETES_RECOVERY_POLL_INTERVAL":    "kubernetes.recovery_poll_interval",
-		"KUBERNETES_CONFLICT_RETRIES":          "kubernetes.conflict_retries",
-		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":   "kubernetes.preview_hostname_suffix",
+		"HTTP_ADDRESS":                                "http.address",
+		"GRPC_ADDRESS":                                "grpc.address",
+		"AUTH_TOKEN_PEPPER":                           "auth.token_pepper",
+		"AUTH_BOOTSTRAP_SECRET":                       "auth.bootstrap_secret",
+		"AUTH_SESSION_TTL":                            "auth.session_ttl",
+		"AUTH_MAX_CONCURRENT_HASHES":                  "auth.max_concurrent_hashes",
+		"AUTH_RATE_LIMIT_PER_MINUTE":                  "auth.rate_limit_per_minute",
+		"AUTH_REQUEST_BODY_BYTES":                     "auth.request_body_bytes",
+		"INSECURE_PUBLIC_LISTENERS":                   "insecure_public_listeners",
+		"HTTP_TLS_CERT_FILE":                          "http.tls_cert_file",
+		"HTTP_TLS_KEY_FILE":                           "http.tls_key_file",
+		"HTTP_MAX_BODY_BYTES":                         "http.max_body_bytes",
+		"GRPC_TLS_CERT_FILE":                          "grpc.tls_cert_file",
+		"GRPC_TLS_KEY_FILE":                           "grpc.tls_key_file",
+		"GRPC_MAX_BODY_BYTES":                         "grpc.max_body_bytes",
+		"HTTP_READ_TIMEOUT":                           "http.read_timeout",
+		"HTTP_READ_HEADER_TIMEOUT":                    "http.read_header_timeout",
+		"HTTP_WRITE_TIMEOUT":                          "http.write_timeout",
+		"HTTP_IDLE_TIMEOUT":                           "http.idle_timeout",
+		"HTTP_SHUTDOWN_TIMEOUT":                       "http.shutdown_timeout",
+		"LOG_LEVEL":                                   "log.level",
+		"DATABASE_URL":                                "database.url",
+		"DATABASE_MIGRATION_LOCK_TIMEOUT":             "database.migration_lock_timeout",
+		"WORKER_SCAN_INTERVAL":                        "worker.scan_interval",
+		"WORKER_LEASE_DURATION":                       "worker.lease_duration",
+		"WORKER_MAX_CONCURRENT_DEPLOYS":               "worker.max_concurrent_deploys",
+		"GITHUB_APP_ID":                               "github.app_id",
+		"GITHUB_PRIVATE_KEY_FILE":                     "github.private_key_file",
+		"GITHUB_API_BASE_URL":                         "github.api_base_url",
+		"GITHUB_UPLOAD_URL":                           "github.upload_url",
+		"GITHUB_API_VERSION":                          "github.api_version",
+		"GITHUB_DISPATCH_OBSERVATION_INTERVAL":        "github.dispatch_observation_interval",
+		"GITHUB_RUN_POLL_INTERVAL":                    "github.run_poll_interval",
+		"GITHUB_REQUEST_TIMEOUT":                      "github.request_timeout",
+		"GITHUB_TRUSTED_HOSTS":                        "github.trusted_hosts",
+		"KUBECONFIG":                                  "kubernetes.kubeconfig",
+		"KUBERNETES_RECOVERY_POLL_INTERVAL":           "kubernetes.recovery_poll_interval",
+		"KUBERNETES_CONFLICT_RETRIES":                 "kubernetes.conflict_retries",
+		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":          "kubernetes.preview_hostname_suffix",
+		"OBSERVABILITY_OPENOBSERVE_BASE_URL":          "observability.openobserve_base_url",
+		"OBSERVABILITY_OPENOBSERVE_ORGANIZATION":      "observability.openobserve_organization",
+		"OBSERVABILITY_OPENOBSERVE_LOG_STREAM":        "observability.openobserve_log_stream",
+		"OBSERVABILITY_OPENOBSERVE_TRACE_STREAM":      "observability.openobserve_trace_stream",
+		"OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET": "observability.openobserve_credential_secret",
+		"OBSERVABILITY_BESZEL_BASE_URL":               "observability.beszel_base_url",
+		"OBSERVABILITY_BESZEL_TOKEN_SECRET":           "observability.beszel_token_secret",
 	}
 	values := make(map[string]string)
 	for _, item := range environ {
@@ -476,7 +523,37 @@ func (c Config) Validate() error {
 	if suffix := strings.TrimSpace(c.Kubernetes.PreviewHostnameSuffix); suffix == "" || len(suffix) > 253 || strings.ContainsAny(suffix, "/:@") {
 		errs = append(errs, fmt.Errorf("kubernetes.preview_hostname_suffix must be a DNS suffix"))
 	}
+	errs = append(errs, c.Observability.validate()...)
 	return errors.Join(errs...)
+}
+
+// LogsEnabled reports whether OpenObserve-backed logs/traces proxying is
+// configured.
+func (o Observability) LogsEnabled() bool {
+	return strings.TrimSpace(o.OpenObserveBaseURL) != ""
+}
+
+// MetricsEnabled reports whether Beszel-backed operator metrics are configured.
+func (o Observability) MetricsEnabled() bool {
+	return strings.TrimSpace(o.BeszelBaseURL) != ""
+}
+
+func (o Observability) validate() []error {
+	var errs []error
+	if o.LogsEnabled() {
+		if u, err := url.ParseRequestURI(o.OpenObserveBaseURL); err != nil || u.Scheme != "https" || u.Host == "" {
+			errs = append(errs, fmt.Errorf("observability.openobserve_base_url must be an absolute HTTPS URL"))
+		}
+		if strings.TrimSpace(o.OpenObserveOrganization) == "" {
+			errs = append(errs, fmt.Errorf("observability.openobserve_organization is required when OpenObserve is enabled"))
+		}
+	}
+	if o.MetricsEnabled() {
+		if u, err := url.ParseRequestURI(o.BeszelBaseURL); err != nil || u.Scheme != "https" || u.Host == "" {
+			errs = append(errs, fmt.Errorf("observability.beszel_base_url must be an absolute HTTPS URL"))
+		}
+	}
+	return errs
 }
 
 func validateTLSFiles(listener, certFile, keyFile string) error {

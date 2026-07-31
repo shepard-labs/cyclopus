@@ -85,6 +85,9 @@ type envPlan struct {
 }
 
 func (e *reconcileExec) execute(ctx context.Context) error {
+	e.adapter.log().Info("reconcile.invoked", "event", "reconcile.invoked",
+		"run_id", e.run.ID, "org_id", e.run.OrgID, "scope_kind", e.run.ScopeKind,
+		"dry_run", e.run.DryRun, "prune", e.run.Prune)
 	environments, err := e.environmentsInScope(ctx)
 	if err != nil {
 		return e.failRun(ctx, "scope_resolution_failed", err)
@@ -389,6 +392,8 @@ func (e *reconcileExec) runtimeClassDrift(ctx context.Context, namespace, expect
 		}
 		if observed != expected {
 			drift = append(drift, driftEntry{Kind: "runtime_class_mismatch", Namespace: namespace, Name: pod.Name, Expected: expected, Observed: observed})
+			e.adapter.log().Warn("runtime_class.drift_detected", "event", "runtime_class.drift_detected",
+				"namespace", namespace, "pod", pod.Name, "expected", expected, "observed", observed)
 		}
 	}
 	return drift

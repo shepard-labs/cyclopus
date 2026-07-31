@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -64,6 +65,10 @@ func (s *Service) AcceptPreviewPush(ctx context.Context, actor ActorContext, key
 	result, err := s.store.AcceptPreviewPush(ctx, store.PreviewPushParams{OrgID: actor.OrgID, AppID: input.AppID,
 		Branch: input.Branch, CommitSHA: input.CommitSHA, IdempotencyKey: key,
 		OrchestrationJobID: jobID.String(), Identities: identities, Audit: audit(actor)})
+	if errors.Is(err, store.ErrPreviewCapReached) {
+		s.log().Warn("preview.cap_reached", "event", "preview.cap_reached",
+			"org_id", actor.OrgID, "app_id", input.AppID)
+	}
 	return result, mapError(err)
 }
 

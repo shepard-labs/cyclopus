@@ -181,8 +181,13 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 		return fmt.Errorf("scan idle preview environments: %w", err)
 	}
 	for _, candidate := range idleCandidates {
-		if _, err := r.store.RequestIdlePreviewTeardown(ctx, candidate); err != nil {
+		reaped, err := r.store.RequestIdlePreviewTeardown(ctx, candidate)
+		if err != nil {
 			return fmt.Errorf("request idle preview teardown %s/%s: %w", candidate.OrgID, candidate.EnvironmentID, err)
+		}
+		if reaped {
+			r.logger.Info("preview.reaped", "event", "preview.reaped",
+				"org_id", candidate.OrgID, "environment_id", candidate.EnvironmentID)
 		}
 	}
 	lifecycleOrgIDs, err := r.store.ListLifecycleOrgIDs(ctx)
@@ -333,6 +338,9 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 		if err != nil {
 			return fmt.Errorf("claim expired deploy %s/%s: %w", deploy.OrgID, deploy.EnvironmentID, err)
 		}
+		r.logger.Warn("deploy.lease_swept", "event", "deploy.lease_swept",
+			"org_id", lease.OrgID, "environment_id", lease.EnvironmentID,
+			"release_id", lease.ReleaseID, "startup", startup)
 		result, err := r.adapters.Kubernetes.RecoverExpiredDeploy(ctx, lease)
 		if err != nil {
 			lease = result.Lease

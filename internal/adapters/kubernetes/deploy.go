@@ -268,6 +268,9 @@ func buildKEDAHTTPScaledObject(desired store.DesiredStateSnapshot, labels, annot
 
 func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.DeployExecution) (store.DeployRecoveryResult, error) {
 	result := store.DeployRecoveryResult{Lease: execution}
+	started := a.now()
+	a.log().Info("deploy.started", "event", "deploy.started",
+		"release_id", execution.ReleaseID, "environment_id", execution.EnvironmentID, "org_id", execution.OrgID)
 	bound := time.Now().Add(execution.Timeout)
 	if execution.ExpiresAt.Before(bound) {
 		bound = execution.ExpiresAt
@@ -276,23 +279,28 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 	defer cancel()
 	envelope, err := store.DecodeReleaseSnapshot(execution.FailedRelease.ConfigSnapshot)
 	if err != nil {
-		return a.failWithoutMutation(ctx, execution, fmt.Errorf("%w: %v", ErrDesiredStateInvalid, err))
+		cause := fmt.Errorf("%w: %v", ErrDesiredStateInvalid, err)
+		a.logDeployFailed(execution, started, cause)
+		return a.failWithoutMutation(ctx, execution, cause)
 	}
 	secretData, err := a.resolveSecretData(ctx, execution, envelope)
 	if err != nil {
 		if isForwardRetryable(err) {
 			return result, err
 		}
+		a.logDeployFailed(execution, started, err)
 		return a.failWithoutMutation(ctx, execution, err)
 	}
 	objects, err := BuildDesiredObjects(execution, envelope, secretData)
 	if err != nil {
+		a.logDeployFailed(execution, started, err)
 		return a.failWithoutMutation(ctx, execution, err)
 	}
 	if err := a.preflightDesired(ctx, execution, objects); err != nil {
 		if isForwardRetryable(err) {
 			return result, err
 		}
+		a.logDeployFailed(execution, started, err)
 		return a.failWithoutMutation(ctx, execution, err)
 	}
 	execution, err = a.renew(ctx, execution)
@@ -305,6 +313,7 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 		if isForwardRetryable(err) {
 			return result, err
 		}
+		a.logDeployFailed(execution, started, err)
 		return a.compensateOrQuarantine(ctx, execution, err)
 	}
 	result.Lease = execution
@@ -314,15 +323,32 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 		_, err = a.store.(ForwardStore).FinalizeReleaseLive(ctx, store.FinalizeReleaseParams{
 			Lease: execution, Hostname: execution.PlannedHostname, Audit: forwardAuditEvent(),
 		})
+		if err == nil {
+			a.log().Info("deploy.succeeded", "event", "deploy.succeeded",
+				"release_id", execution.ReleaseID, "environment_id", execution.EnvironmentID,
+				"org_id", execution.OrgID, "duration_ms", a.now().Sub(started).Milliseconds())
+		}
 		return result, err
 	}
 	if !errors.Is(err, ErrRolloutTerminal) {
 		if isForwardRetryable(err) {
 			return result, err
 		}
+		a.logDeployFailed(execution, started, err)
 		return a.compensateOrQuarantine(ctx, execution, err)
 	}
+	a.logDeployFailed(execution, started, err)
 	return a.compensateOrQuarantine(ctx, execution, err)
+}
+
+// logDeployFailed emits the stable deploy.failed event (§8.2) with the release
+// identity, duration, and the Kubernetes condition (or other cause) that ended
+// the deploy.
+func (a *RecoveryAdapter) logDeployFailed(execution store.DeployExecution, started time.Time, cause error) {
+	a.log().Warn("deploy.failed", "event", "deploy.failed",
+		"release_id", execution.ReleaseID, "environment_id", execution.EnvironmentID,
+		"org_id", execution.OrgID, "duration_ms", a.now().Sub(started).Milliseconds(),
+		"condition", cause.Error())
 }
 
 func (a *RecoveryAdapter) failWithoutMutation(ctx context.Context, execution store.DeployExecution, cause error) (store.DeployRecoveryResult, error) {

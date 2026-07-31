@@ -106,6 +106,25 @@ enum ReconcileFindingStatus {
   RECONCILE_FINDING_STATUS_ERROR = 5;
 }
 
+// LogSeverity is the coarse severity band a log query may filter on. Cyclopus
+// maps it to an OpenObserve severity predicate that is ANDed onto the mandatory
+// tenant filter; it can never widen scope.
+enum LogSeverity {
+  LOG_SEVERITY_UNSPECIFIED = 0;
+  LOG_SEVERITY_TRACE = 1;
+  LOG_SEVERITY_DEBUG = 2;
+  LOG_SEVERITY_INFO = 3;
+  LOG_SEVERITY_WARN = 4;
+  LOG_SEVERITY_ERROR = 5;
+  LOG_SEVERITY_FATAL = 6;
+}
+
+enum TraceStatus {
+  TRACE_STATUS_UNSPECIFIED = 0;
+  TRACE_STATUS_OK = 1;
+  TRACE_STATUS_ERROR = 2;
+}
+
 message User {
   string id = 1;
   string organization_id = 2;
@@ -626,6 +645,90 @@ message ListReconciliationEvidenceResponse {
   string next_page_token = 2;
 }
 
+// LogEntry is a single tenant-scoped log record returned from OpenObserve. The
+// tenant fields that determine ownership are stamped by the OpenTelemetry
+// Collector at ingest (spec 8.1), never claimed by the app.
+message LogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  LogSeverity severity = 2;
+  string body = 3;
+  map<string, string> attributes = 4;
+}
+
+message QueryApplicationLogsRequest {
+  // Required: the application whose logs are requested. Ownership is validated
+  // against the caller's organization before any upstream query is issued.
+  string application_id = 1;
+  // Optional additional scoping. When set they must belong to application_id.
+  string environment_id = 2;
+  string release_id = 3;
+  google.protobuf.Timestamp start_time = 4;
+  google.protobuf.Timestamp end_time = 5;
+  // Optional coarse severity floor. Records below it are excluded.
+  LogSeverity min_severity = 6;
+  // Optional free-text substring filter. Validated as a safe literal and ANDed
+  // onto the mandatory tenant filter; it cannot remove or widen tenant scope.
+  string query = 7;
+  int32 limit = 8;
+  string cursor = 9;
+}
+
+message QueryApplicationLogsResponse {
+  repeated LogEntry entries = 1;
+  string next_cursor = 2;
+}
+
+message TraceSummary {
+  string trace_id = 1;
+  string root_name = 2;
+  int64 duration_ms = 3;
+  google.protobuf.Timestamp start_time = 4;
+  TraceStatus status = 5;
+}
+
+message ListApplicationTracesRequest {
+  string application_id = 1;
+  string environment_id = 2;
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+
+message ListApplicationTracesResponse {
+  repeated TraceSummary traces = 1;
+  string next_cursor = 2;
+}
+
+message GetApplicationTraceRequest {
+  string application_id = 1;
+  string trace_id = 2;
+  string environment_id = 3;
+  google.protobuf.Timestamp start_time = 4;
+  google.protobuf.Timestamp end_time = 5;
+}
+
+message GetApplicationTraceResponse { TraceSummary trace = 1; }
+
+// OperatorMetric is one install-level host/system metric proxied from Beszel.
+// These are NOT tenant-scoped: they describe the operator's own hosts and carry
+// no per-application attribution (spec 8, design note: Beszel is operator/
+// install-level bounded metrics, not a transparent per-tenant proxy).
+message OperatorMetric {
+  string name = 1;
+  double value = 2;
+  string unit = 3;
+  google.protobuf.Timestamp observed_at = 4;
+}
+
+message GetOperatorMetricsRequest {}
+
+message GetOperatorMetricsResponse {
+  // Operator-level only. Any authenticated org member may read these; they are
+  // deliberately install-scoped and expose no tenant data.
+  repeated OperatorMetric metrics = 1;
+}
+
 service AuthenticationService {
   rpc Bootstrap(BootstrapRequest) returns (BootstrapResponse) {
     option (google.api.http) = { post: "/v1/auth/bootstrap" body: "*" };
@@ -764,5 +867,24 @@ service WebhookService {
   }
   rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse) {
     option (google.api.http) = { delete: "/v1/webhooks/{webhook_id}" };
+  }
+}
+
+// ObservabilityService proxies OpenObserve logs/traces and Beszel metrics.
+// The upstream backends are never exposed directly: every read is server-side
+// proxied and, for logs/traces, scoped by a mandatory tenant filter Cyclopus
+// builds from validated IDs. Operator metrics are install-level only.
+service ObservabilityService {
+  rpc QueryApplicationLogs(QueryApplicationLogsRequest) returns (QueryApplicationLogsResponse) {
+    option (google.api.http) = { get: "/v1/applications/{application_id}/logs" };
+  }
+  rpc ListApplicationTraces(ListApplicationTracesRequest) returns (ListApplicationTracesResponse) {
+    option (google.api.http) = { get: "/v1/applications/{application_id}/traces" };
+  }
+  rpc GetApplicationTrace(GetApplicationTraceRequest) returns (GetApplicationTraceResponse) {
+    option (google.api.http) = { get: "/v1/applications/{application_id}/traces/{trace_id}" };
+  }
+  rpc GetOperatorMetrics(GetOperatorMetricsRequest) returns (GetOperatorMetricsResponse) {
+    option (google.api.http) = { get: "/v1/operator/metrics" };
   }
 }

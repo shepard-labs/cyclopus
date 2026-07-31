@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"regexp"
@@ -32,6 +33,7 @@ var (
 	envKeyPattern      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,252}$`)
 	commitPattern      = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	cronShapePattern   = regexp.MustCompile(`^\S+( \S+){4}$`)
+	traceIDPattern     = regexp.MustCompile(`^[0-9a-fA-F]{8,64}$`)
 )
 
 const (
@@ -49,10 +51,48 @@ type Service struct {
 	store        *store.Store
 	now          func() time.Time
 	previewSlugs PreviewSlugGenerator
+	logger       *slog.Logger
+	telemetry    TelemetryProvider
 }
 
-func New(dataStore *store.Store) *Service {
-	return &Service{store: dataStore, now: time.Now, previewSlugs: randomPreviewSlugGenerator{source: rand.Reader}}
+type Option func(*Service)
+
+// WithTelemetry wires the observability provider used by the tenant-scoped
+// logs/traces reads and the operator-level metrics read. When nil, those RPCs
+// report telemetry as unavailable rather than panicking.
+func WithTelemetry(provider TelemetryProvider) Option {
+	return func(s *Service) {
+		if provider != nil {
+			s.telemetry = provider
+		}
+	}
+}
+
+// WithLogger wires the redacting structured logger the service uses to emit the
+// stable §8.2 control-plane log events. The default is slog.Default().
+func WithLogger(logger *slog.Logger) Option {
+	return func(s *Service) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
+func New(dataStore *store.Store, opts ...Option) *Service {
+	s := &Service{store: dataStore, now: time.Now, previewSlugs: randomPreviewSlugGenerator{source: rand.Reader}, logger: slog.Default()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
+}
+
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 func (s *Service) CurrentUser(ctx context.Context, actor ActorContext) (store.User, error) {

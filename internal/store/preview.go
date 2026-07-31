@@ -84,7 +84,7 @@ func (s *Store) AcceptPreviewPush(ctx context.Context, params PreviewPushParams)
 				return err
 			}
 			if active >= cap {
-				return ErrFailedPrecondition
+				return ErrPreviewCapReached
 			}
 			for _, identity := range params.Identities {
 				err = tx.QueryRow(ctx, `INSERT INTO environments

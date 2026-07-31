@@ -2011,3 +2011,229 @@ var WebhookService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "cyclopus/v1/cyclopus.proto",
 }
+
+const (
+	ObservabilityService_QueryApplicationLogs_FullMethodName  = "/cyclopus.v1.ObservabilityService/QueryApplicationLogs"
+	ObservabilityService_ListApplicationTraces_FullMethodName = "/cyclopus.v1.ObservabilityService/ListApplicationTraces"
+	ObservabilityService_GetApplicationTrace_FullMethodName   = "/cyclopus.v1.ObservabilityService/GetApplicationTrace"
+	ObservabilityService_GetOperatorMetrics_FullMethodName    = "/cyclopus.v1.ObservabilityService/GetOperatorMetrics"
+)
+
+// ObservabilityServiceClient is the client API for ObservabilityService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ObservabilityService proxies OpenObserve logs/traces and Beszel metrics.
+// The upstream backends are never exposed directly: every read is server-side
+// proxied and, for logs/traces, scoped by a mandatory tenant filter Cyclopus
+// builds from validated IDs. Operator metrics are install-level only.
+type ObservabilityServiceClient interface {
+	QueryApplicationLogs(ctx context.Context, in *QueryApplicationLogsRequest, opts ...grpc.CallOption) (*QueryApplicationLogsResponse, error)
+	ListApplicationTraces(ctx context.Context, in *ListApplicationTracesRequest, opts ...grpc.CallOption) (*ListApplicationTracesResponse, error)
+	GetApplicationTrace(ctx context.Context, in *GetApplicationTraceRequest, opts ...grpc.CallOption) (*GetApplicationTraceResponse, error)
+	GetOperatorMetrics(ctx context.Context, in *GetOperatorMetricsRequest, opts ...grpc.CallOption) (*GetOperatorMetricsResponse, error)
+}
+
+type observabilityServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewObservabilityServiceClient(cc grpc.ClientConnInterface) ObservabilityServiceClient {
+	return &observabilityServiceClient{cc}
+}
+
+func (c *observabilityServiceClient) QueryApplicationLogs(ctx context.Context, in *QueryApplicationLogsRequest, opts ...grpc.CallOption) (*QueryApplicationLogsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryApplicationLogsResponse)
+	err := c.cc.Invoke(ctx, ObservabilityService_QueryApplicationLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *observabilityServiceClient) ListApplicationTraces(ctx context.Context, in *ListApplicationTracesRequest, opts ...grpc.CallOption) (*ListApplicationTracesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListApplicationTracesResponse)
+	err := c.cc.Invoke(ctx, ObservabilityService_ListApplicationTraces_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *observabilityServiceClient) GetApplicationTrace(ctx context.Context, in *GetApplicationTraceRequest, opts ...grpc.CallOption) (*GetApplicationTraceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetApplicationTraceResponse)
+	err := c.cc.Invoke(ctx, ObservabilityService_GetApplicationTrace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *observabilityServiceClient) GetOperatorMetrics(ctx context.Context, in *GetOperatorMetricsRequest, opts ...grpc.CallOption) (*GetOperatorMetricsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOperatorMetricsResponse)
+	err := c.cc.Invoke(ctx, ObservabilityService_GetOperatorMetrics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ObservabilityServiceServer is the server API for ObservabilityService service.
+// All implementations must embed UnimplementedObservabilityServiceServer
+// for forward compatibility.
+//
+// ObservabilityService proxies OpenObserve logs/traces and Beszel metrics.
+// The upstream backends are never exposed directly: every read is server-side
+// proxied and, for logs/traces, scoped by a mandatory tenant filter Cyclopus
+// builds from validated IDs. Operator metrics are install-level only.
+type ObservabilityServiceServer interface {
+	QueryApplicationLogs(context.Context, *QueryApplicationLogsRequest) (*QueryApplicationLogsResponse, error)
+	ListApplicationTraces(context.Context, *ListApplicationTracesRequest) (*ListApplicationTracesResponse, error)
+	GetApplicationTrace(context.Context, *GetApplicationTraceRequest) (*GetApplicationTraceResponse, error)
+	GetOperatorMetrics(context.Context, *GetOperatorMetricsRequest) (*GetOperatorMetricsResponse, error)
+	mustEmbedUnimplementedObservabilityServiceServer()
+}
+
+// UnimplementedObservabilityServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedObservabilityServiceServer struct{}
+
+func (UnimplementedObservabilityServiceServer) QueryApplicationLogs(context.Context, *QueryApplicationLogsRequest) (*QueryApplicationLogsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method QueryApplicationLogs not implemented")
+}
+func (UnimplementedObservabilityServiceServer) ListApplicationTraces(context.Context, *ListApplicationTracesRequest) (*ListApplicationTracesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListApplicationTraces not implemented")
+}
+func (UnimplementedObservabilityServiceServer) GetApplicationTrace(context.Context, *GetApplicationTraceRequest) (*GetApplicationTraceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetApplicationTrace not implemented")
+}
+func (UnimplementedObservabilityServiceServer) GetOperatorMetrics(context.Context, *GetOperatorMetricsRequest) (*GetOperatorMetricsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOperatorMetrics not implemented")
+}
+func (UnimplementedObservabilityServiceServer) mustEmbedUnimplementedObservabilityServiceServer() {}
+func (UnimplementedObservabilityServiceServer) testEmbeddedByValue()                              {}
+
+// UnsafeObservabilityServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ObservabilityServiceServer will
+// result in compilation errors.
+type UnsafeObservabilityServiceServer interface {
+	mustEmbedUnimplementedObservabilityServiceServer()
+}
+
+func RegisterObservabilityServiceServer(s grpc.ServiceRegistrar, srv ObservabilityServiceServer) {
+	// If the following call panics, it indicates UnimplementedObservabilityServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ObservabilityService_ServiceDesc, srv)
+}
+
+func _ObservabilityService_QueryApplicationLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryApplicationLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ObservabilityServiceServer).QueryApplicationLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ObservabilityService_QueryApplicationLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ObservabilityServiceServer).QueryApplicationLogs(ctx, req.(*QueryApplicationLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ObservabilityService_ListApplicationTraces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListApplicationTracesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ObservabilityServiceServer).ListApplicationTraces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ObservabilityService_ListApplicationTraces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ObservabilityServiceServer).ListApplicationTraces(ctx, req.(*ListApplicationTracesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ObservabilityService_GetApplicationTrace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetApplicationTraceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ObservabilityServiceServer).GetApplicationTrace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ObservabilityService_GetApplicationTrace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ObservabilityServiceServer).GetApplicationTrace(ctx, req.(*GetApplicationTraceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ObservabilityService_GetOperatorMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOperatorMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ObservabilityServiceServer).GetOperatorMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ObservabilityService_GetOperatorMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ObservabilityServiceServer).GetOperatorMetrics(ctx, req.(*GetOperatorMetricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ObservabilityService_ServiceDesc is the grpc.ServiceDesc for ObservabilityService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ObservabilityService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.ObservabilityService",
+	HandlerType: (*ObservabilityServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "QueryApplicationLogs",
+			Handler:    _ObservabilityService_QueryApplicationLogs_Handler,
+		},
+		{
+			MethodName: "ListApplicationTraces",
+			Handler:    _ObservabilityService_ListApplicationTraces_Handler,
+		},
+		{
+			MethodName: "GetApplicationTrace",
+			Handler:    _ObservabilityService_GetApplicationTrace_Handler,
+		},
+		{
+			MethodName: "GetOperatorMetrics",
+			Handler:    _ObservabilityService_GetOperatorMetrics_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cyclopus/v1/cyclopus.proto",
+}

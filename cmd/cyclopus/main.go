@@ -13,6 +13,7 @@ import (
 
 	githubadapter "github.com/cyclopus-dev/cyclopus/internal/adapters/github"
 	kubernetesadapter "github.com/cyclopus-dev/cyclopus/internal/adapters/kubernetes"
+	"github.com/cyclopus-dev/cyclopus/internal/adapters/observability"
 	"github.com/cyclopus-dev/cyclopus/internal/auth"
 	"github.com/cyclopus-dev/cyclopus/internal/config"
 	"github.com/cyclopus-dev/cyclopus/internal/logging"
@@ -76,13 +77,13 @@ func run(args, environ []string) error {
 	if err != nil {
 		return fmt.Errorf("construct authentication service: %w", err)
 	}
-	domainService := service.New(dataStore)
+	domainService := service.New(dataStore, service.WithLogger(logger))
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)
 	services.Authenticator = authenticator
 	services.RateLimiter = server.NewAuthRateLimiter(cfg.Auth.RateLimitPerMinute)
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
-	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner))
+	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger))
 	if err != nil {
 		return err
 	}
@@ -93,6 +94,11 @@ func run(args, environ []string) error {
 		Owner:                owner,
 		RequestTimeout:       cfg.GitHub.RequestTimeout,
 	}, logger, dataStore, adapters)
+	if provider, err := buildTelemetryProvider(ctx, cfg.Observability, adapters); err != nil {
+		return err
+	} else if provider != nil {
+		domainService.SetTelemetry(provider)
+	}
 	var ready atomic.Bool
 	readiness := func(ctx context.Context) error {
 		if !ready.Load() {
@@ -109,6 +115,63 @@ func run(args, environ []string) error {
 	err = runLifecycle(ctx, apiServer, recovery, &ready)
 	logger.Info("server stopped")
 	return err
+}
+
+// buildTelemetryProvider assembles the OpenObserve and Beszel proxy clients from
+// configuration, resolving any credential secret references through the same
+// Kubernetes resolver used for webhook secrets. It returns nil (no error) when
+// neither backend is configured, leaving telemetry RPCs to report the backend
+// as unavailable.
+func buildTelemetryProvider(ctx context.Context, cfg config.Observability, adapters worker.RecoveryAdapters) (service.TelemetryProvider, error) {
+	if !cfg.LogsEnabled() && !cfg.MetricsEnabled() {
+		return nil, nil
+	}
+	clientHolder, ok := adapters.Kubernetes.(interface {
+		KubernetesClient() kubernetes.Interface
+	})
+	if !ok {
+		return nil, errors.New("telemetry credential resolution requires a Kubernetes client")
+	}
+	resolver := secretref.NewKubernetesResolver(clientHolder.KubernetesClient())
+	resolve := func(reference string) (string, error) {
+		if reference == "" {
+			return "", nil
+		}
+		value, err := resolver.Resolve(ctx, reference)
+		if err != nil {
+			return "", fmt.Errorf("resolve telemetry secret: %w", err)
+		}
+		return string(value), nil
+	}
+	var logs *observability.OpenObserveClient
+	if cfg.LogsEnabled() {
+		credential, err := resolve(cfg.OpenObserveCredentialSecret)
+		if err != nil {
+			return nil, err
+		}
+		logs, err = observability.NewOpenObserveClient(observability.OpenObserveConfig{
+			BaseURL:      cfg.OpenObserveBaseURL,
+			Organization: cfg.OpenObserveOrganization,
+			LogStream:    cfg.OpenObserveLogStream,
+			TraceStream:  cfg.OpenObserveTraceStream,
+			Credential:   credential,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	var metrics *observability.BeszelClient
+	if cfg.MetricsEnabled() {
+		token, err := resolve(cfg.BeszelTokenSecret)
+		if err != nil {
+			return nil, err
+		}
+		metrics, err = observability.NewBeszelClient(observability.BeszelConfig{BaseURL: cfg.BeszelBaseURL, Token: token})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return observability.NewProvider(logs, metrics), nil
 }
 
 type adapterConstructors struct {
@@ -164,7 +227,7 @@ func buildRecoveryAdapters(cfg config.Config, dataStore *store.Store, constructo
 	return adapters, nil
 }
 
-func productionAdapterConstructors(dataStore *store.Store, owner string) adapterConstructors {
+func productionAdapterConstructors(dataStore *store.Store, owner string, logger *slog.Logger) adapterConstructors {
 	return adapterConstructors{
 		github: func(cfg config.GitHub) (worker.GitHubRecoveryAdapter, error) {
 			clients, err := githubadapter.NewInstallationClientFactory(cfg.AppID, cfg.PrivateKeyFile,
@@ -193,7 +256,7 @@ func productionAdapterConstructors(dataStore *store.Store, owner string) adapter
 			return kubernetesadapter.NewAdapter(kubernetesadapter.Config{
 				PollInterval: cfg.RecoveryPollInterval, ConflictRetries: cfg.ConflictRetries,
 				PreviewHostnameSuffix: cfg.PreviewHostnameSuffix,
-			}, client, dataStore, kubernetesadapter.WithDynamicClient(dynamicClient))
+			}, client, dataStore, kubernetesadapter.WithDynamicClient(dynamicClient), kubernetesadapter.WithLogger(logger))
 		},
 	}
 }

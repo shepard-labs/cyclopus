@@ -42,6 +42,7 @@ var serviceNames = []string{
 	cyclopusv1.ReleaseService_ServiceDesc.ServiceName,
 	cyclopusv1.ReconciliationService_ServiceDesc.ServiceName,
 	cyclopusv1.WebhookService_ServiceDesc.ServiceName,
+	cyclopusv1.ObservabilityService_ServiceDesc.ServiceName,
 }
 
 const (
@@ -157,6 +158,9 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 			return cyclopusv1.RegisterReconciliationServiceHandlerServer(ctx, gateway, services.Reconciliation)
 		},
 		func() error { return cyclopusv1.RegisterWebhookServiceHandlerServer(ctx, gateway, services.Webhook) },
+		func() error {
+			return cyclopusv1.RegisterObservabilityServiceHandlerServer(ctx, gateway, services.Observability)
+		},
 	}
 	for _, register := range registrations {
 		if err := register(); err != nil {
@@ -219,6 +223,7 @@ func buildGRPCServer(services Services, readiness ReadinessCheck, grpcConfig con
 	cyclopusv1.RegisterReleaseServiceServer(server, services.Release)
 	cyclopusv1.RegisterReconciliationServiceServer(server, services.Reconciliation)
 	cyclopusv1.RegisterWebhookServiceServer(server, services.Webhook)
+	cyclopusv1.RegisterObservabilityServiceServer(server, services.Observability)
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", healthv1.HealthCheckResponse_NOT_SERVING)
 	for _, serviceName := range serviceNames {
