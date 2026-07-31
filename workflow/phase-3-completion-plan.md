@@ -31,6 +31,7 @@ are fixed.
 | F | Read-only APIs: Aliases / Certs / Audit (§6) | general | api-security review | committed | cf38fc5 |
 | G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | committed | a8b5aa8 |
 | H | Full gate run + regenerate evidence | general | — | committed | (final) |
+| D2 | Verified-domain Ingress + TLS + cert-manager issuance, teardown, reconcile parity (§7.5) | general | api-security / tenant-escape review | committed | b556049 |
 
 Status values: `pending` -> `in-progress` -> `review` -> `committed`.
 
