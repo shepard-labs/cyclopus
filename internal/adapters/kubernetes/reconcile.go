@@ -514,6 +514,7 @@ func (e *reconcileExec) detectOrphans(ctx context.Context, ep envPlan) ([]object
 	desiredDeployments := desiredNames(ep.objects.Deployment != nil, deployName(ep.objects))
 	desiredServices := serviceDesiredNames(ep.objects)
 	desiredHPAs := desiredNames(ep.objects.HPA != nil, hpaName(ep.objects))
+	desiredIngresses := ingressDesiredNames(ep)
 
 	deployments, err := e.adapter.client.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
@@ -536,6 +537,18 @@ func (e *reconcileExec) detectOrphans(ctx context.Context, ep envPlan) ([]object
 				continue
 			}
 			orphans = append(orphans, orphanAction(ep.env.ID, ns, "Service", s.Name))
+		}
+	}
+
+	ingresses, err := e.adapter.client.NetworkingV1().Ingresses(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("env %s: list ingresses: %s", ep.env.ID, err.Error()))
+	} else {
+		for _, ing := range ingresses.Items {
+			if ing.Labels[EnvironmentIDLabel] != ep.env.ID || desiredIngresses[ing.Name] {
+				continue
+			}
+			orphans = append(orphans, orphanAction(ep.env.ID, ns, "Ingress", ing.Name))
 		}
 	}
 
@@ -592,6 +605,8 @@ func (e *reconcileExec) deleteOrphan(ctx context.Context, ep *envPlan, orphan ob
 		return e.adapter.deleteOwnedDeployment(applyCtx, &execution, orphan.ObjectName)
 	case "Service":
 		return e.adapter.deleteOwnedService(applyCtx, &execution, orphan.ObjectName)
+	case "Ingress":
+		return e.adapter.deleteOwnedIngress(applyCtx, &execution, orphan.ObjectName)
 	case "HorizontalPodAutoscaler":
 		return e.adapter.deleteOwnedHPA(applyCtx, &execution, orphan.ObjectName)
 	case "ScaledObject":
@@ -636,6 +651,22 @@ func serviceDesiredNames(objects DesiredObjects) map[string]bool {
 	}
 	if objects.BridgeService != nil {
 		set[objects.BridgeService.Name] = true
+	}
+	return set
+}
+
+// ingressDesiredNames is the set of Ingress names Cyclopus expects in the
+// environment namespace: the environment's own Ingress plus one per verified
+// custom domain (production only). Any other managed Ingress is an orphan — e.g.
+// a custom-domain Ingress left behind when a domain was deleted while the
+// provisioner was unavailable, or after a hostname/ID change.
+func ingressDesiredNames(ep envPlan) map[string]bool {
+	set := map[string]bool{}
+	if ep.objects.Ingress != nil {
+		set[ep.objects.Ingress.Name] = true
+	}
+	for name := range ep.customDomains {
+		set[name] = true
 	}
 	return set
 }

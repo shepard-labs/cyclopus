@@ -464,6 +464,102 @@ func TestReconcilePruneDeletesOrphanWhenEnabled(t *testing.T) {
 	}
 }
 
+// managedIngress builds a Cyclopus-managed Ingress owned by the "environment"
+// env, mirroring what the custom-domain provisioner creates (managed labels, no
+// deploy-fence annotation).
+func managedIngress(name string) *networkingv1.Ingress {
+	return &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{
+		Name: name, Namespace: "tenant",
+		Labels: map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: "environment"},
+	}}
+}
+
+// A managed custom-domain Ingress with no matching verified domain is a stale
+// orphan (e.g. the domain was deleted while the provisioner was unavailable). It
+// must be reported on a no-prune run and NOT deleted.
+func TestReconcilePruneReportsOrphanCustomDomainIngress(t *testing.T) {
+	release := reconcileTestRelease(t)
+	stale := managedIngress("custom-domain-deleted-1")
+	client := fake.NewSimpleClientset(stale)
+	rs := &fakeReconcileStore{
+		env:     productionReconcileEnv(),
+		release: release,
+		app:     store.App{RuntimeClass: "gvisor", Slug: "app"},
+		// no verified domains -> the stale custom-domain Ingress has no desired match
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: true, Prune: false}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	plan := planFrom(t, rs)
+	found := false
+	for _, o := range plan.Orphans {
+		if o.ObjectKind == "Ingress" && o.ObjectName == "custom-domain-deleted-1" && o.Action == "orphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected stale custom-domain Ingress orphan report, got %+v", plan.Orphans)
+	}
+	if hasActionOn(client.Actions(), "delete", "ingresses", "custom-domain-deleted-1") {
+		t.Fatal("orphan Ingress deleted despite prune=false")
+	}
+}
+
+func TestReconcilePruneDeletesOrphanCustomDomainIngress(t *testing.T) {
+	release := reconcileTestRelease(t)
+	stale := managedIngress("custom-domain-deleted-1")
+	client := fake.NewSimpleClientset(stale)
+	rs := &fakeReconcileStore{
+		env:     productionReconcileEnv(),
+		release: release,
+		app:     store.App{RuntimeClass: "gvisor", Slug: "app"},
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: false, Prune: true}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	if !hasActionOn(client.Actions(), "delete", "ingresses", "custom-domain-deleted-1") {
+		t.Fatalf("expected orphan Ingress delete, actions = %+v", client.Actions())
+	}
+	found := false
+	for _, e := range rs.evidence {
+		if e.ObjectName != nil && *e.ObjectName == "custom-domain-deleted-1" && e.Action != nil && *e.Action == "delete" && e.Audit != nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected delete evidence with audit for orphan Ingress, got %+v", rs.evidence)
+	}
+}
+
+// A verified domain's own custom-domain Ingress is in the desired set and must
+// NEVER be reported as an orphan, even under prune.
+func TestReconcileDoesNotOrphanVerifiedCustomDomainIngress(t *testing.T) {
+	release := reconcileTestRelease(t)
+	wanted := managedIngress("custom-domain-domain-1")
+	client := fake.NewSimpleClientset(wanted)
+	rs := &fakeReconcileStore{
+		env:          productionReconcileEnv(),
+		release:      release,
+		app:          store.App{RuntimeClass: "gvisor", Slug: "app"},
+		verifiedDoms: []store.Domain{{ID: "domain-1", OrgID: "org", AppID: "app", Hostname: "app.customer.test"}},
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: false, Prune: true}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	plan := planFrom(t, rs)
+	for _, o := range plan.Orphans {
+		if o.ObjectName == "custom-domain-domain-1" {
+			t.Fatalf("verified custom-domain Ingress wrongly reported as orphan: %+v", o)
+		}
+	}
+	if hasActionOn(client.Actions(), "delete", "ingresses", "custom-domain-domain-1") {
+		t.Fatal("verified custom-domain Ingress wrongly deleted")
+	}
+}
+
 func TestReconcileAbortsOnLeaseLoss(t *testing.T) {
 	release := reconcileTestRelease(t)
 	client := fake.NewSimpleClientset() // deployment absent → create planned

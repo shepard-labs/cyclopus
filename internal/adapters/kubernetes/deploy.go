@@ -803,6 +803,22 @@ func (a *RecoveryAdapter) deleteOwnedService(ctx context.Context, execution *sto
 	})
 }
 
+func (a *RecoveryAdapter) deleteOwnedIngress(ctx context.Context, execution *store.DeployExecution, name string) error {
+	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
+		current, err := a.client.NetworkingV1().Ingresses(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+			return err
+		}
+		return a.client.NetworkingV1().Ingresses(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
+	})
+}
+
 func (a *RecoveryAdapter) deleteOwnedDeployment(ctx context.Context, execution *store.DeployExecution, name string) error {
 	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
 		current, err := a.client.AppsV1().Deployments(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
