@@ -106,9 +106,9 @@ phases:
     owner_agent: kubernetes-security-implementer
     reviewer_agent: tenant-escape-adversary
     deliverables:
-      - Fail-closed gVisor and Kyverno enforcement
-      - Default-deny ingress and egress NetworkPolicies including metadata and node protections
-      - Hostname provider implementation, domain verification, and certificate lifecycle
+      - Fail-closed gVisor enforcement via Kyverno mutating and validating ClusterPolicies (runtimeClassName injection + sandbox-class and policies-pending admission guards)
+      - Default-deny ingress and egress NetworkPolicies including metadata and configurable node public-IP egress exclusions
+      - Hostname provider implementation, custom-domain DNS verification (TXT/CNAME), and certificate status reads
       - sslip.io remains disabled until PSL compatibility gate passes
     checkpoints: [version-probe, isolation, networking, hostname-provider, tls, unit, evidence, adversarial-review]
     gates:

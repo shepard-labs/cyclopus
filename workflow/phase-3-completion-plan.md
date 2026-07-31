@@ -28,8 +28,8 @@ are fixed.
 | B | Kyverno fail-closed ClusterPolicies (chart) | general | tenant-escape review | committed | 0c13e27 |
 | D | Domain verification API (§7.5) | general | api-security review | committed | cd51a6c |
 | E | Registries + Git connections API (§6) | general | api-security review | committed | 604916e |
-| F | Read-only APIs: Aliases / Certs / Audit (§6) | general | api-security review | in-progress | — |
-| G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | pending | — |
+| F | Read-only APIs: Aliases / Certs / Audit (§6) | general | api-security review | committed | cf38fc5 |
+| G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | in-progress | — |
 | H | Full gate run + regenerate evidence | general | — | pending | — |
 
 Status values: `pending` -> `in-progress` -> `review` -> `committed`.
