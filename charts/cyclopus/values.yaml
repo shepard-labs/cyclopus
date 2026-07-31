@@ -130,4 +130,26 @@ readinessProbe:
   initialDelaySeconds: 5
   periodSeconds: 5
 
+# §7.1 / §4.3: Kyverno fail-closed compute-isolation admission policies. These
+# render as two ClusterPolicies (see templates/kyverno-policies.yaml) that
+# enforce Cyclopus's gVisor sandboxing guarantee. Kyverno itself is installed
+# ahead of Cyclopus (external install, pinned in Chart.yaml annotations); these
+# are the policy manifests it enforces. The label/value strings below MUST match
+# the constants the Go provisioning code uses — do not diverge (see
+# internal/adapters/kubernetes/{recovery,lifecycle,deploy}.go).
+kyverno:
+  policies:
+    enabled: true
+    # namespaceSelector label identifying Cyclopus-managed app namespaces
+    # (recovery.go: ManagedByLabel/ManagedByValue).
+    managedByLabel: app.kubernetes.io/managed-by
+    managedByValue: cyclopus
+    # §4.3 step-2 guard label (lifecycle.go: PoliciesPendingLabel). Pods are
+    # denied in any namespace carrying pendingLabel=true.
+    pendingLabel: cyclopus.app/policies-pending
+    # RuntimeClass injected by default (mutate) and required by the validating
+    # policy. runc is the operator break-glass exception (§7.1).
+    defaultRuntimeClass: gvisor
+    allowedRuntimeClasses: [gvisor, runc]
+
 # Constrained-profile overlay lives in values-constrained.yaml.

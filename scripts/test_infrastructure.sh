@@ -114,6 +114,13 @@ check_helm() {
   # The rendered chart must actually carry the load-bearing invariants.
   grep -q 'cyclopus.app/role' "$tmp_root/helm_template.log" || { mark_failed "rendered chart missing control-plane toleration"; return 0; }
   grep -q 'kind: ClusterRole' "$tmp_root/helm_template.log" || { mark_failed "rendered chart missing cluster-wide RBAC (§9.2)"; return 0; }
+  # §7.1/§4.3: the Kyverno fail-closed compute-isolation policies must render
+  # with all their load-bearing invariants (both ClusterPolicies, failurePolicy:
+  # Fail, Enforce, pending guard, managed-by selector, gvisor). Reuse the same
+  # helm binary this gate provisioned.
+  log "kyverno fail-closed policy render assertions"
+  HELM="$HELM" sh "$ROOT/tests/chart/kyverno_policies_test.sh" >"$tmp_root/kyverno_policies.log" 2>&1 \
+    || { mark_failed "kyverno policy render assertions failed (§7.1/§4.3)"; return 0; }
   note "helm lint+template passed"
 }
 

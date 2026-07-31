@@ -1,0 +1,158 @@
+{{- if .Values.kyverno.policies.enabled }}
+{{- /*
+Cyclopus compute-isolation admission policies (spec §7.1, §4.3).
+
+These two Kyverno ClusterPolicies are the enforcement half of Cyclopus's gVisor
+sandboxing guarantee. BOTH are fail-closed (spec.failurePolicy: Fail): if the
+Kyverno admission webhook is unreachable, pod creation in Cyclopus app
+namespaces is REJECTED rather than admitted onto the host runtime unsandboxed.
+
+Identifiers below are read from .Values.kyverno.policies and MUST match the
+constants the Go provisioning code uses (do not diverge):
+  - managed-by selector  -> internal/adapters/kubernetes/recovery.go:31-33
+                            (ManagedByLabel / ManagedByValue)
+  - pending guard label  -> internal/adapters/kubernetes/lifecycle.go:28
+                            (PoliciesPendingLabel = "cyclopus.app/policies-pending")
+  - default RuntimeClass -> apps.runtime_class default "gvisor";
+                            deploy.go:119 sets spec.runtimeClassName from the app record.
+
+runc break-glass handling (§7.1):
+  A cluster-wide Kyverno policy cannot read Postgres to know which specific app
+  is currently break-glassed to runc. So the VALIDATING policy enforces the real
+  §7.1 threat model — that a sandbox RuntimeClass is SET and is one of the
+  known-good sandbox classes (allowedRuntimeClasses = {gvisor, runc}) — and
+  rejects pods with an empty/absent or unknown runtimeClassName (a pod admitted
+  class-less would run on the host runtime). It intentionally does NOT try to
+  assert "this specific app must be gvisor, not runc":
+    * the MUTATING policy guarantees gvisor-by-default (it injects gvisor when
+      runtimeClassName is unset), and
+    * per-app gvisor-vs-runc correctness is the audited break-glass path,
+      caught after-the-fact by the reconcile drift report
+      (runtime_class.drift_detected, reconcile.go:394).
+  The mutating policy only injects when runtimeClassName is absent/empty, so an
+  explicitly-set runc (operator break-glass) is never clobbered.
+
+Kyverno API: v1.14 (chart pins kyverno v1.14.2). Uses the per-rule
+validate.failureAction: Enforce field (the current, non-deprecated form; the
+spec-level validationFailureAction is deprecated and, if dropped by a future
+Kyverno release, would silently degrade to Audit mode — admitting unsandboxed
+pods with only a warning). spec.failurePolicy: Fail gives fail-closed admission.
+
+Setting .Values.kyverno.policies.enabled=false REMOVES both policies and thereby
+DISABLES the §7.1 compute-isolation guarantee (pods may be admitted class-less on
+the host runtime, and the §4.3 policies-pending admission guard is absent). This
+is not a supported production setting; it exists only for rendering/testing.
+*/ -}}
+{{- $mgmtKey := .Values.kyverno.policies.managedByLabel -}}
+{{- $mgmtVal := .Values.kyverno.policies.managedByValue -}}
+{{- $pendingKey := .Values.kyverno.policies.pendingLabel -}}
+{{- $defaultClass := .Values.kyverno.policies.defaultRuntimeClass -}}
+{{- $allowed := .Values.kyverno.policies.allowedRuntimeClasses -}}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cyclopus-inject-runtimeclass
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Inject sandbox RuntimeClass into Cyclopus app pods
+    policies.kyverno.io/category: Cyclopus compute isolation (§7.1)
+    policies.kyverno.io/description: >-
+      Injects spec.runtimeClassName={{ $defaultClass }} into pods created in
+      Cyclopus-managed app namespaces when it is not already set. An
+      explicitly-set runtimeClassName (e.g. the runc operator break-glass) is
+      left untouched. Fail-closed: pod admission is rejected if the webhook is
+      unreachable.
+spec:
+  # Fail-closed (§7.1): reject pods rather than admit them unsandboxed if the
+  # admission webhook cannot be reached.
+  failurePolicy: Fail
+  background: false
+  rules:
+    - name: default-runtimeclass-gvisor
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchLabels:
+                  {{ $mgmtKey }}: {{ $mgmtVal }}
+      # Only inject when runtimeClassName is absent or empty — never clobber an
+      # explicitly-set class (runc break-glass path stays intact).
+      preconditions:
+        any:
+          - key: "{{`{{ request.object.spec.runtimeClassName || '' }}`}}"
+            operator: Equals
+            value: ""
+      mutate:
+        patchStrategicMerge:
+          spec:
+            runtimeClassName: {{ $defaultClass }}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cyclopus-enforce-sandbox
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Enforce sandbox RuntimeClass + isolation-pending guard
+    policies.kyverno.io/category: Cyclopus compute isolation (§7.1, §4.3)
+    policies.kyverno.io/description: >-
+      Rejects pods in Cyclopus-managed app namespaces that do not run under an
+      allowed sandbox RuntimeClass ({{ join ", " $allowed }}), and rejects all
+      pod creation in any namespace still carrying
+      {{ $pendingKey }}=true while isolation (NetworkPolicy) provisioning is in
+      flight (§4.3 step-2 guard). Fail-closed.
+spec:
+  # Fail-closed (§7.1): unreachable webhook => pods rejected, not admitted.
+  failurePolicy: Fail
+  background: true
+  rules:
+    - name: require-sandbox-runtimeclass
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchLabels:
+                  {{ $mgmtKey }}: {{ $mgmtVal }}
+      validate:
+        # Enforce = reject on violation (vs Audit). Per-rule failureAction is the
+        # current, non-deprecated field (spec-level validationFailureAction is
+        # deprecated and would silently degrade to Audit if a future Kyverno
+        # release drops it — see the header comment).
+        failureAction: Enforce
+        message: >-
+          Pods in Cyclopus app namespaces must run under a sandbox RuntimeClass
+          (one of: {{ join ", " $allowed }}). A pod with no runtimeClassName would
+          run on the host runtime, defeating gVisor isolation (§7.1).
+        deny:
+          conditions:
+            all:
+              - key: "{{`{{ request.object.spec.runtimeClassName || '' }}`}}"
+                operator: AnyNotIn
+                value:
+                  {{- range $allowed }}
+                  - {{ . }}
+                  {{- end }}
+    - name: block-while-policies-pending
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchLabels:
+                  {{ $pendingKey }}: "true"
+      validate:
+        failureAction: Enforce
+        message: >-
+          Namespace isolation policies are still being provisioned
+          ({{ $pendingKey }}=true); pod admission is blocked until Cyclopus
+          finishes applying NetworkPolicies and clears the label (§4.3).
+        deny: {}
+{{- end }}
