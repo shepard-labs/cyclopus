@@ -1268,6 +1268,55 @@ func TestOrchestrationConclusionlessRunTimeoutAndTerminalConclusionsIntegration(
 	})
 }
 
+func TestReconciliationListOrgIDsIntegration(t *testing.T) {
+	store, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+
+	// No runs → empty.
+	orgIDs, err := store.ListReconciliationOrgIDs(ctx)
+	if err != nil || len(orgIDs) != 0 {
+		t.Fatalf("initial ListReconciliationOrgIDs = %v, %v", orgIDs, err)
+	}
+
+	// Queued run → returned.
+	runID := "00000000-0000-0000-0000-0000000000e1"
+	if _, err := store.CreateReconciliationRun(ctx, CreateReconciliationRunParams{
+		ID: runID, OrgID: orgOneID, ScopeKind: "org", ScopeID: orgOneID, DryRun: boolPointer(true),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	orgIDs, err = store.ListReconciliationOrgIDs(ctx)
+	if err != nil || len(orgIDs) != 1 || orgIDs[0] != orgOneID {
+		t.Fatalf("queued ListReconciliationOrgIDs = %v, %v", orgIDs, err)
+	}
+
+	// Claim it (leased), then expire the lease → still returned.
+	if _, err := store.ClaimReconciliationRun(ctx, orgOneID, "reconciler", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	orgIDs, err = store.ListReconciliationOrgIDs(ctx)
+	if err != nil || len(orgIDs) != 0 {
+		t.Fatalf("leased-unexpired ListReconciliationOrgIDs = %v, %v", orgIDs, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE reconciliation_runs SET lease_expires_at = now() - interval '1 minute' WHERE id = $1`, runID); err != nil {
+		t.Fatal(err)
+	}
+	orgIDs, err = store.ListReconciliationOrgIDs(ctx)
+	if err != nil || len(orgIDs) != 1 {
+		t.Fatalf("leased-expired ListReconciliationOrgIDs = %v, %v", orgIDs, err)
+	}
+
+	// Complete it → absent.
+	if _, err := pool.Exec(ctx, `UPDATE reconciliation_runs SET status = 'completed', completed_at = now(), lease_owner = NULL, lease_expires_at = NULL WHERE id = $1`, runID); err != nil {
+		t.Fatal(err)
+	}
+	orgIDs, err = store.ListReconciliationOrgIDs(ctx)
+	if err != nil || len(orgIDs) != 0 {
+		t.Fatalf("completed ListReconciliationOrgIDs = %v, %v", orgIDs, err)
+	}
+}
+
 func TestReconciliationRunLifecycleOverlapPlanEvidenceAndAuditIntegration(t *testing.T) {
 	store, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())

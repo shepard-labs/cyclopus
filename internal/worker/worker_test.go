@@ -240,6 +240,39 @@ func assertBlockedRecovery(t *testing.T, err error, capability RecoveryCapabilit
 	}
 }
 
+type fakeReconciliationAdapter struct {
+	runs   []string
+	owners []string
+	err    error
+}
+
+func (f *fakeReconciliationAdapter) ExecuteReconciliation(_ context.Context, run *store.ReconciliationRun, owner string) error {
+	f.runs = append(f.runs, run.ID)
+	f.owners = append(f.owners, owner)
+	return f.err
+}
+
+func TestReconcileScanClaimsAndDispatchesRun(t *testing.T) {
+	fake := &fakeRecoveryStore{
+		reconciliationOrgIDs: []string{"org-one"},
+		reconciliationRuns:   []*store.ReconciliationRun{{ID: "run-one", OrgID: "org-one"}},
+	}
+	reconciler := &fakeReconciliationAdapter{}
+	runner := newTestRunner(fake, RecoveryAdapters{Reconciliation: reconciler})
+	if err := runner.Startup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(reconciler.runs) != 1 || reconciler.runs[0] != "run-one" {
+		t.Fatalf("dispatched runs = %v, want [run-one]", reconciler.runs)
+	}
+	if reconciler.owners[0] != "worker-one" {
+		t.Fatalf("owner = %q, want worker-one", reconciler.owners[0])
+	}
+	if fake.reconciliationClaims != 2 {
+		t.Fatalf("reconciliation claims = %d, want run plus not-found", fake.reconciliationClaims)
+	}
+}
+
 type fakeGitHubRecoveryAdapter struct {
 	calls          int
 	dispatchCalls  int
@@ -319,6 +352,9 @@ type fakeRecoveryStore struct {
 	webhookOrgIDs         []string
 	webhookDeliveries     []store.WebhookDelivery
 	webhookClaims         int
+	reconciliationOrgIDs  []string
+	reconciliationRuns    []*store.ReconciliationRun
+	reconciliationClaims  int
 }
 
 func (f *fakeRecoveryStore) DeleteExpiredIdempotencyRecords(context.Context, int) (int64, error) {
@@ -385,6 +421,21 @@ func (f *fakeRecoveryStore) ClaimWebhookDelivery(_ context.Context, _ string, ow
 	delivery := f.webhookDeliveries[0]
 	f.webhookDeliveries = f.webhookDeliveries[1:]
 	return delivery, nil
+}
+
+func (f *fakeRecoveryStore) ListReconciliationOrgIDs(context.Context) ([]string, error) {
+	return f.reconciliationOrgIDs, nil
+}
+
+func (f *fakeRecoveryStore) ClaimReconciliationRun(_ context.Context, _, owner string, _ time.Duration) (*store.ReconciliationRun, error) {
+	f.reconciliationClaims++
+	f.lastOwner = owner
+	if len(f.reconciliationRuns) == 0 {
+		return nil, store.ErrNotFound
+	}
+	run := f.reconciliationRuns[0]
+	f.reconciliationRuns = f.reconciliationRuns[1:]
+	return run, nil
 }
 
 func (f *fakeRecoveryStore) ListOrchestrationOrgIDs(context.Context) ([]string, error) {
@@ -663,6 +714,12 @@ func (*concurrentForwardStore) ListWebhookOrgIDs(context.Context) ([]string, err
 }
 func (*concurrentForwardStore) ClaimWebhookDelivery(context.Context, string, string, time.Duration) (store.WebhookDelivery, error) {
 	return store.WebhookDelivery{}, store.ErrNotFound
+}
+func (*concurrentForwardStore) ListReconciliationOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (*concurrentForwardStore) ClaimReconciliationRun(context.Context, string, string, time.Duration) (*store.ReconciliationRun, error) {
+	return nil, store.ErrNotFound
 }
 func (*concurrentForwardStore) ClaimOrchestration(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
 	return nil, store.ErrNotFound

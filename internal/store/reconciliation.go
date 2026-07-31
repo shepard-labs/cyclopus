@@ -387,3 +387,25 @@ func (s *Store) CompleteReconciliationRun(ctx context.Context, params CompleteRe
 		return nil
 	})
 }
+
+// ListReconciliationOrgIDs returns org IDs that have reconciliation runs
+// in a claimable state (queued, or leased/running with an expired lease).
+func (s *Store) ListReconciliationOrgIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT org_id::text FROM reconciliation_runs
+		WHERE status = 'queued'
+		   OR (status IN ('leased', 'running') AND lease_expires_at <= now())
+		ORDER BY org_id::text`)
+	if err != nil {
+		return nil, fmt.Errorf("list reconciliation org IDs: %w", err)
+	}
+	defer rows.Close()
+	var values []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}

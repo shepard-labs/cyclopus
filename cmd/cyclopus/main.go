@@ -141,6 +141,9 @@ func buildRecoveryAdapters(cfg config.Config, dataStore *store.Store, constructo
 		return worker.RecoveryAdapters{}, errors.New("Kubernetes adapter does not expose a client for webhook delivery")
 	}
 	adapters.Webhook = webhookdelivery.NewSender(dataStore, secretref.NewKubernetesResolver(webhookClient.KubernetesClient()))
+	if reconciler, ok := kubernetesRecovery.(worker.ReconciliationAdapter); ok {
+		adapters.Reconciliation = reconciler
+	}
 
 	if !cfg.GitHub.Enabled() {
 		return adapters, nil

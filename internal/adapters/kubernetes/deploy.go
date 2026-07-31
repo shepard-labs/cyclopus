@@ -770,6 +770,22 @@ func (a *RecoveryAdapter) deleteOwnedService(ctx context.Context, execution *sto
 	})
 }
 
+func (a *RecoveryAdapter) deleteOwnedDeployment(ctx context.Context, execution *store.DeployExecution, name string) error {
+	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
+		current, err := a.client.AppsV1().Deployments(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+			return err
+		}
+		return a.client.AppsV1().Deployments(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
+	})
+}
+
 func (a *RecoveryAdapter) deleteOwnedHPA(ctx context.Context, execution *store.DeployExecution, name string) error {
 	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
 		current, err := a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
@@ -901,7 +917,27 @@ func (a *RecoveryAdapter) retryMutation(ctx context.Context, execution *store.De
 	return retry.OnError(backoff, isConflict, func() error { return a.withMutationLease(ctx, execution, mutation) })
 }
 
+// reconcileApplyContextKey marks a context whose mutations run outside the
+// deploy-lease machinery (the reconciliation executor holds a reconciliation
+// lease, not a deploy lease). Under this marker withMutationLease skips
+// RenewDeployLease and mutates directly with the supplied execution identity.
+type reconcileApplyContextKey struct{}
+
+func withReconcileApply(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reconcileApplyContextKey{}, true)
+}
+
+func isReconcileApply(ctx context.Context) bool {
+	v, _ := ctx.Value(reconcileApplyContextKey{}).(bool)
+	return v
+}
+
 func (a *RecoveryAdapter) withMutationLease(ctx context.Context, execution *store.DeployExecution, mutation func(context.Context, store.DeployLease) error) error {
+	if isReconcileApply(ctx) {
+		opCtx, cancel := a.operationContext(ctx, *execution)
+		defer cancel()
+		return mutation(opCtx, *execution)
+	}
 	renewed, err := a.renew(ctx, *execution)
 	if err != nil {
 		return err

@@ -276,6 +276,12 @@ func (*startupRecoveryStore) ListWebhookOrgIDs(context.Context) ([]string, error
 func (*startupRecoveryStore) ClaimWebhookDelivery(context.Context, string, string, time.Duration) (store.WebhookDelivery, error) {
 	return store.WebhookDelivery{}, store.ErrNotFound
 }
+func (*startupRecoveryStore) ListReconciliationOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (*startupRecoveryStore) ClaimReconciliationRun(context.Context, string, string, time.Duration) (*store.ReconciliationRun, error) {
+	return nil, store.ErrNotFound
+}
 
 func (s *startupRecoveryStore) ClaimDispatchReconciliation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
 	if len(s.jobs) == 0 {

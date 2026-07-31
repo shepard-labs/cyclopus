@@ -37,6 +37,8 @@ type RecoveryStore interface {
 	RequestIdlePreviewTeardown(context.Context, store.IdlePreviewCandidate) (bool, error)
 	ListWebhookOrgIDs(context.Context) ([]string, error)
 	ClaimWebhookDelivery(context.Context, string, string, time.Duration) (store.WebhookDelivery, error)
+	ListReconciliationOrgIDs(context.Context) ([]string, error)
+	ClaimReconciliationRun(context.Context, string, string, time.Duration) (*store.ReconciliationRun, error)
 }
 
 type GitHubRecoveryAdapter interface {
@@ -57,6 +59,10 @@ type WebhookDeliveryAdapter interface {
 	Deliver(context.Context, store.WebhookDelivery) (store.WebhookDeliveryOutcome, error)
 }
 
+type ReconciliationAdapter interface {
+	ExecuteReconciliation(context.Context, *store.ReconciliationRun, string) error
+}
+
 type RecoveryAdapters struct {
 	Capabilities               RecoveryCapabilities
 	GitHub                     GitHubRecoveryAdapter
@@ -64,6 +70,7 @@ type RecoveryAdapters struct {
 	Kubernetes                 KubernetesRecoveryAdapter
 	Lifecycle                  KubernetesLifecycleAdapter
 	Webhook                    WebhookDeliveryAdapter
+	Reconciliation             ReconciliationAdapter
 	KubernetesErrorDisposition func(error) (bool, time.Duration, string)
 }
 
@@ -186,6 +193,10 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 	if err != nil {
 		return fmt.Errorf("scan webhook deliveries: %w", err)
 	}
+	reconciliationOrgIDs, err := r.store.ListReconciliationOrgIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("scan reconciliation runs: %w", err)
+	}
 
 	queuedOrgIDs, err := r.store.ListOrchestrationOrgIDs(ctx)
 	if err != nil {
@@ -273,6 +284,25 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 			}
 			if outcome.EndpointDisabled {
 				r.logger.Warn("webhook.disabled", "org_id", delivery.OrgID, "webhook_id", delivery.WebhookID)
+			}
+		}
+	}
+
+	for _, orgID := range reconciliationOrgIDs {
+		if r.adapters.Reconciliation == nil {
+			r.logger.Warn("reconciliation adapter unavailable; skipping queued reconciliation runs", "org_id", orgID)
+			continue
+		}
+		for {
+			run, err := r.store.ClaimReconciliationRun(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("claim reconciliation run for organization %s: %w", orgID, err)
+			}
+			if err := r.adapters.Reconciliation.ExecuteReconciliation(ctx, run, r.config.Owner); err != nil {
+				r.logger.Warn("reconciliation run error", "org_id", orgID, "run_id", run.ID, "error", err)
 			}
 		}
 	}

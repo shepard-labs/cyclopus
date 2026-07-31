@@ -280,6 +280,23 @@ func appArgs(a App) []any {
 	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, encodeKEDACronSchedules(a.KEDACronSchedules), a.KEDAHTTPTargetPendingRequests, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, a.CIWorkflowID}
 }
 
+func (s *Store) ListEnvironmentsByOrg(ctx context.Context, orgID string) ([]Environment, error) {
+	rows, err := s.db.Query(ctx, environmentSelect+` WHERE environment.org_id=$1 AND environment.torn_down_at IS NULL ORDER BY environment.created_at,environment.id`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list org environments: %w", err)
+	}
+	defer rows.Close()
+	var out []Environment
+	for rows.Next() {
+		var v Environment
+		if err := scanEnvironment(rows, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListEnvironments(ctx context.Context, orgID, appID string, includeTornDown bool) ([]Environment, error) {
 	rows, err := s.db.Query(ctx, environmentSelect+` WHERE environment.org_id=$1 AND environment.app_id=$2 AND ($3 OR environment.torn_down_at IS NULL) ORDER BY environment.created_at,environment.id`, orgID, appID, includeTornDown)
 	if err != nil {
