@@ -23,12 +23,12 @@ are fixed.
 
 | # | Workstream | Impl subagent | Reviewer subagent | Status | Commit |
 |---|---|---|---|---|---|
-| A | Remove OpenTofu/OVH; genericize to any-VPS (spec + infra + workflow defs) | general | production-readiness review | pending | — |
-| C | Node public-IP egress exclusion (config + provisioner + reconcile parity) | general | tenant-escape review | pending | — |
-| B | Kyverno fail-closed ClusterPolicies (chart) | general | tenant-escape review | pending | — |
-| D | Domain verification API (§7.5) | general | api-security review | pending | — |
-| E | Registries + Git connections API (§6) | general | api-security review | pending | — |
-| F | Read-only APIs: Aliases / Certs / Audit (§6) | general | api-security review | pending | — |
+| A | Remove OpenTofu/OVH; genericize to any-VPS (spec + infra + workflow defs) | general | production-readiness review | committed | 3acee33 |
+| C | Node public-IP egress exclusion (config + provisioner + reconcile parity) | general | tenant-escape review | committed | 38e7862 |
+| B | Kyverno fail-closed ClusterPolicies (chart) | general | tenant-escape review | committed | 0c13e27 |
+| D | Domain verification API (§7.5) | general | api-security review | committed | cd51a6c |
+| E | Registries + Git connections API (§6) | general | api-security review | committed | 604916e |
+| F | Read-only APIs: Aliases / Certs / Audit (§6) | general | api-security review | in-progress | — |
 | G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | pending | — |
 | H | Full gate run + regenerate evidence | general | — | pending | — |
 
