@@ -175,36 +175,6 @@ components:
       reviewed_at: "2026-07-30"
       evidence: ["https://api.github.com/repos/kedacore/http-add-on/releases/latest"]
       rationale: Beta accepted per spec 3.4 with hpa-mode fallback. HTTPScaledObject http.keda.sh/v1alpha1; uses scalingMetric concurrency/requestRate rather than deprecated targetPendingRequests.
-  opentofu:
-    pin: "1.10.1"
-    observed_latest: "1.12.5"
-    probe: "curl -fsSL https://api.github.com/repos/opentofu/opentofu/releases/latest"
-    review:
-      status: intentional_pin
-      reviewer: phase-0-workflow-fixer
-      reviewed_at: "2026-07-29"
-      evidence: ["https://api.github.com/repos/opentofu/opentofu/releases/latest"]
-      rationale: Retain until provider locks, state compatibility, and OVH plans pass Phase 5 infrastructure tests.
-  ovh_provider:
-    pin: "2.0.0"
-    observed_latest: "2.9.0"
-    probe: "curl -fsSL https://api.github.com/repos/ovh/terraform-provider-ovh/releases/latest"
-    review:
-      status: intentional_pin
-      reviewer: phase-5-infrastructure-implementer
-      reviewed_at: "2026-07-30"
-      evidence: ["https://api.github.com/repos/ovh/terraform-provider-ovh/releases/latest", "infra/opentofu/versions.tf", "infra/opentofu/.terraform.lock.hcl"]
-      rationale: OVH provider drives the vRack private network, floating IP, and S3-compatible object-storage resources (§7.2, §9.1). Pinned to the 2.0.0 major that matches the reviewed OpenStack provider 3.0.0 resource schemas; retain until Phase 5 OVH plans/state are exercised against a live project.
-  openstack_provider:
-    pin: "3.0.0"
-    observed_latest: "3.0.0"
-    probe: "curl -fsSL https://api.github.com/repos/terraform-provider-openstack/terraform-provider-openstack/releases/latest"
-    review:
-      status: approved
-      reviewer: phase-5-infrastructure-implementer
-      reviewed_at: "2026-07-30"
-      evidence: ["https://api.github.com/repos/terraform-provider-openstack/terraform-provider-openstack/releases/latest", "infra/opentofu/versions.tf"]
-      rationale: OVH Public Cloud is an OpenStack region; instances, network, security groups, flavor lookups, and floating-IP association are driven through the OpenStack provider 3.0.0 major line.
   helm:
     pin: "v3.18.3"
     observed_latest: "v4.2.3"

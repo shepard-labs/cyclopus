@@ -166,12 +166,11 @@ errors << "gate evidence validator must be reproducibly version-pinned" unless e
 errors << "gate evidence must require the current source revision" unless evidence_validation["require_current_source_revision"] == true
 
 profiles = run["integration_profiles"] || {}
-%w[orbstack_ubuntu orbstack_debian ovh_public_cloud ovh_vps_constrained].each do |profile|
+%w[orbstack_ubuntu orbstack_debian byo_vps].each do |profile|
   errors << "missing integration profile: #{profile}" unless profiles.key?(profile)
 end
-errors << "OVH Public Cloud must be primary" unless profiles.dig("ovh_public_cloud", "role") == "primary"
-errors << "OVH VPS must be constrained" unless profiles.dig("ovh_vps_constrained", "role") == "constrained"
-%w[ovh_public_cloud ovh_vps_constrained].each do |profile|
+errors << "BYO VPS must be constrained" unless profiles.dig("byo_vps", "role") == "constrained"
+%w[byo_vps].each do |profile|
   selection = profiles.dig(profile, "selection") || {}
   errors << "#{profile} must be an explicit user override" unless selection["kind"] == "user_override"
   %w[decided_by decided_at rationale capability_gate].each do |field|
@@ -235,16 +234,16 @@ errors << "phase-3 PSL gate must execute the PSL probe" unless psl_gate&.dig("co
 phase5 = Array(phases).find { |phase| phase["id"] == "phase-5" }
 phase5_gates = Array(phase5&.dig("gates", "evidence"))
 phase5_profiles = phase5_gates.map { |gate| gate["profile"] }.compact
-%w[orbstack_ubuntu orbstack_debian ovh_public_cloud ovh_vps_constrained].each do |profile|
+%w[orbstack_ubuntu orbstack_debian byo_vps].each do |profile|
   errors << "phase-5 lacks #{profile} evidence gate" unless phase5_profiles.include?(profile)
 end
-errors << "phase-5 lacks OVH capability decision gate" unless phase5_gates.map { |gate| gate["id"] }.include?("ovh-capability-decision")
+errors << "phase-5 lacks BYO-VPS capability decision gate" unless phase5_gates.map { |gate| gate["id"] }.include?("byo-vps-capability-decision")
 
 decision_terms = [
   "same Go binary", "Postgres is the authoritative saga", "No transaction spans Kubernetes and Postgres",
   "atomic take-and-clear", "one user in one organization", "idempotent", "immutable release snapshots",
   "maxUnavailable=0", "mixed traffic", "absent from the Public Suffix List", "configurable provider seam",
-  "RETURNING WITH (OLD AS old_row)", "durable orchestration job", "user override and capability decision",
+  "RETURNING WITH (OLD AS old_row)", "durable orchestration job", "any VPS with nested virtualization",
   "Correlation does not make a GitHub run live forever", "terminal failures", "atomically promotes the latest pending SHA",
   "never automatically redispatches an ambiguous request", "Phase 0 deletion erratum", "audited tombstone lifecycle"
 ]

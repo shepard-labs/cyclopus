@@ -118,28 +118,17 @@ integration_profiles:
     provider: orbstack
     image: debian:12
     purpose: integration
-  ovh_public_cloud:
-    provider: ovh
-    product: public-cloud
-    role: primary
-    os: ubuntu-24.04
-    selection:
-      kind: user_override
-      decided_by: project-owner
-      decided_at: "2026-07-29"
-      rationale: Primary production target selected by the user for Phase 0 planning.
-      capability_gate: ovh-capability-decision
-  ovh_vps_constrained:
-    provider: ovh
+  byo_vps:
+    provider: byo_vps
     product: vps
     role: constrained
-    os: debian-12
+    os: any-64bit-linux
     selection:
       kind: user_override
       decided_by: project-owner
-      decided_at: "2026-07-29"
-      rationale: Constrained OVH VPS behavior was explicitly requested by the user.
-      capability_gate: ovh-capability-decision
+      decided_at: "2026-07-30"
+      rationale: Any SSH-accessible 64-bit Linux VPS with nested virtualization (for gVisor runsc) was chosen by the user as the bring-your-own-node install model; no cloud-API provisioning.
+      capability_gate: byo-vps-capability-decision
     limits:
       vcpu: 2
       memory_mib: 2048

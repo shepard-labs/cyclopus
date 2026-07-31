@@ -40,13 +40,13 @@ old→new mapping.
 ## Credentials (environment only — never hardcoded)
 
 WAL-G reads storage_destinations from the environment, sourced from
-`/etc/cyclopus/walg.env` (created by the operator/DR runbook from the OpenTofu
-`bucket_*` outputs):
+`/etc/cyclopus/walg.env` (created by the operator/DR runbook from the object
+storage bucket details):
 
 ```sh
-export WALG_S3_ENDPOINT=https://s3.gra11.io.cloud.ovh.net
+export WALG_S3_ENDPOINT=https://s3.<region>.<provider>.example
 export WALG_S3_BUCKET=cyclopus-backups
-export WALG_S3_REGION=gra11
+export WALG_S3_REGION=<region>
 export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 ```

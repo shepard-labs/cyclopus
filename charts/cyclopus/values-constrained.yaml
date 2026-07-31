@@ -1,4 +1,4 @@
-# Constrained-profile overlay for the ovh_vps_constrained integration profile.
+# Constrained-profile overlay for the byo_vps constrained integration profile.
 #
 # Apply on top of values.yaml:
 #   helm template cyclopus charts/cyclopus -f charts/cyclopus/values-constrained.yaml

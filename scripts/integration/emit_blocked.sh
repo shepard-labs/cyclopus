@@ -2,7 +2,7 @@
 # Emit schema-conformant BLOCKED gate evidence and exit 0 (the caller decides the
 # process exit code — normally 2). Used by the OrbStack install/DR gates when the
 # 'orb' CLI is unavailable so the audit trail distinguishes a genuinely blocked
-# attempt from a gate that was never run (M4). Mirrors ovh_blocked.sh's schema.
+# attempt from a gate that was never run (M4). Mirrors byo_vps_blocked.sh's schema.
 #
 # Usage: emit_blocked.sh <gate> <gate_type> <profile> <evidence_name> <reason> <command>
 #   profile may be empty for gate_type=evidence; otherwise it must be a value the

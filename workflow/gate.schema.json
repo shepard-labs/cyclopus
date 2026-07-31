@@ -41,7 +41,7 @@
     "exit_code": { "type": "integer" },
     "profile": {
       "type": "string",
-      "enum": ["local", "orbstack_ubuntu", "orbstack_debian", "ovh_public_cloud", "ovh_vps_constrained"]
+      "enum": ["local", "orbstack_ubuntu", "orbstack_debian", "byo_vps"]
     },
     "reviewer_agent": { "type": "string", "minLength": 1 },
     "findings": {

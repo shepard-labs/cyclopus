@@ -45,7 +45,7 @@ arch_go() {
 }
 
 # Export WAL-G's S3 configuration from storage_destinations env. Callers set:
-#   WALG_S3_ENDPOINT           e.g. https://s3.gra11.io.cloud.ovh.net
+#   WALG_S3_ENDPOINT           e.g. https://s3.<region>.<provider>.example
 #   WALG_S3_BUCKET             storage_destinations bucket
 #   WALG_S3_REGION             storage region
 #   AWS_ACCESS_KEY_ID          S3 access key

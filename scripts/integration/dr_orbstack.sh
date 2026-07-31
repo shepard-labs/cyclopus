@@ -26,7 +26,7 @@ case "$DISTRO" in
 esac
 
 if ! command -v orb >/dev/null 2>&1; then
-  # orb unavailable: emit schema-valid BLOCKED evidence (like ovh_blocked.sh) so
+  # orb unavailable: emit schema-valid BLOCKED evidence (like byo_vps_blocked.sh) so
   # the audit trail distinguishes "blocked" from "never attempted" (M4).
   sh "$(dirname -- "$0")/emit_blocked.sh" \
     "dr-orbstack-$DISTRO" integration "orbstack_$DISTRO" \

@@ -1,14 +1,16 @@
 #!/bin/sh
-# Attach/detach the ingress floating IP to this node (§9.1).
+# Attach/detach the movable ingress IP to this node (§9.1).
 #
-# The floating IP is the sslip.io-embedded ingress address; DR reattaches it to
-# the replacement control-plane node so default hostnames and their certificates
-# survive a rebuild without user action.
+# The movable ingress IP is the sslip.io-embedded ingress address; if the
+# operator holds one (a cloud floating IP, keepalived VIP, or BGP-advertised
+# address), DR reattaches it to the replacement control-plane node so default
+# hostnames and their certificates survive a rebuild without user action.
+# Without a movable IP, default hostnames may change on DR (best-effort; §9.1).
 #
-# On OVH Public Cloud the authoritative move is done by the OpenStack API (see
-# infra/opentofu floating_ip module / infra/backup/dr_runbook.sh). This script
-# handles the node-local side: binding the address to the primary interface so
-# Traefik answers on it immediately, and detaching on teardown. Idempotent.
+# The authoritative move (where applicable) is done provider-side by the operator
+# (see infra/backup/dr_runbook.sh). This script handles the node-local side:
+# binding the address to the primary interface so Traefik answers on it
+# immediately, and detaching on teardown. Idempotent.
 #
 # Usage: floating_ip.sh attach <ip> [iface]
 #        floating_ip.sh detach <ip> [iface]

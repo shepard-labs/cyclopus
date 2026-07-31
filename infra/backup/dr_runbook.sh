@@ -2,8 +2,9 @@
 # Full disaster-recovery runbook for Cyclopus (§9.1).
 #
 # Total VPS loss recovery, in order:
-#   1. Provision new VPS via OpenTofu (documented — the operator runs this).
-#   2. Reattach the ingress floating IP to the new control-plane node (§9.1).
+#   1. Provision/attach a replacement VPS, operator's choice of provider
+#      (documented — the operator runs this).
+#   2. Reattach the movable ingress IP to the new control-plane node, if held (§9.1).
 #   3. helm-install Cyclopus onto the fresh cluster.
 #   4. Restore Postgres from WAL-G.
 #   5. Trigger POST /admin/reconcile as an org-scoped loop (§9.2) — there is no
@@ -31,17 +32,22 @@ ADMIN_TOKEN="${CYCLOPUS_ADMIN_TOKEN:-}"
 
 log "STEP 1 (documented): provision replacement VPS"
 cat <<'DOC'
-  Run OpenTofu against the OVH project to recreate nodes:
-    cd infra/opentofu && tofu init && tofu apply
+  Provision or attach a replacement VPS (operator's choice of provider) meeting
+  the node requirements (64-bit Linux; nested virtualization on app-workload
+  nodes for gVisor runsc).
   Then bootstrap the control plane and agents:
     infra/bootstrap/base_packages.sh; infra/bootstrap/k3s_server.sh
     infra/bootstrap/k3s_agent.sh (each worker); infra/bootstrap/install_gvisor.sh
+  If the operator holds a movable ingress IP (cloud floating IP, keepalived VIP,
+  or BGP-advertised address), reattach it so default hostnames survive DR;
+  otherwise default hostnames may change (best-effort DR) and reconcile emits the
+  old->new mapping. Custom domains are the durable path.
 DOC
 
-log "STEP 2: reattach the ingress floating IP to this control-plane node"
+log "STEP 2: reattach the movable ingress IP to this control-plane node (if held)"
 if [ -n "$FLOATING_IP" ]; then
   sh "$BOOTSTRAP/floating_ip.sh" attach "$FLOATING_IP" \
-    || warn "node-local floating IP bind failed; ensure the OpenStack association was reapplied"
+    || warn "node-local movable IP bind failed; ensure the provider-side association was reapplied"
 else
   warn "FLOATING_IP not set; skipping reattach (set it to recover default hostnames unchanged)"
 fi

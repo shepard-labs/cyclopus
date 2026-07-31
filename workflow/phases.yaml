@@ -165,13 +165,13 @@ phases:
         fix_loop: true
 
   - id: phase-5
-    name: Installation, OVH profiles, backup, disaster recovery, and upgrades
+    name: Installation, bring-your-own-VPS profiles, backup, disaster recovery, and upgrades
     spec_sections: ["2.2", "9", "10", "11"]
     owner_agent: infrastructure-dr-implementer
     reviewer_agent: production-readiness-adversary
     deliverables:
-      - Terraform/OpenTofu and Helm installation path for OVH Public Cloud
-      - Constrained OVH VPS profile with explicit capacity gates
+      - Bring-your-own-VPS bootstrap/Helm install path
+      - Constrained BYO-VPS profile with explicit capacity gates
       - Ubuntu and Debian node bootstrap, gVisor registration, k3s hardening, and floating IP handling
       - WAL-G backup and restore, full DR reconcile, and reviewed upgrade procedure
     checkpoints: [version-probe, provisioning, packaging, backup-restore, upgrade, unit, evidence, adversarial-review]
@@ -188,17 +188,13 @@ phases:
           profile: orbstack_debian
           command: ./scripts/integration.sh install
           evidence: orbstack-debian.json
-        - id: ovh-public-cloud-primary
-          profile: ovh_public_cloud
-          command: ./scripts/integration.sh ovh-public-cloud
-          evidence: ovh-public-cloud.json
-        - id: ovh-vps-constrained
-          profile: ovh_vps_constrained
-          command: ./scripts/integration.sh ovh-vps-constrained
-          evidence: ovh-vps-constrained.json
-        - id: ovh-capability-decision
-          command: ./scripts/integration.sh ovh-capabilities
-          evidence: ovh-capability-decision.json
+        - id: byo-vps-constrained
+          profile: byo_vps
+          command: ./scripts/integration.sh byo-vps
+          evidence: byo-vps.json
+        - id: byo-vps-capability-decision
+          command: ./scripts/integration.sh byo-vps-capabilities
+          evidence: byo-vps-capability-decision.json
         - id: disaster-recovery
           command: ./scripts/integration.sh disaster-recovery
           evidence: disaster-recovery.json

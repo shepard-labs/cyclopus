@@ -47,6 +47,7 @@ sh infra/bootstrap/install_gvisor.sh      # required, or app pods fail closed
 
 ## DR reattachment
 
-The floating IP move on OVH is authoritative via the OpenStack API (see
-`infra/opentofu` and `infra/backup/dr_runbook.sh`); `floating_ip.sh attach`
-handles the node-local address bind so Traefik answers immediately.
+The movable ingress IP move (if the operator holds one) is authoritative
+provider-side, done by the operator (see `infra/backup/dr_runbook.sh`);
+`floating_ip.sh attach` handles the node-local address bind so Traefik answers
+immediately.
