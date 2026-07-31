@@ -1,0 +1,53 @@
+{{- if .Values.rbac.create -}}
+# Cluster-wide reconcile reach (§9.2): POST /admin/reconcile regenerates
+# Kubernetes objects from Postgres across every app namespace, so the API needs
+# a ClusterRole, not a namespaced Role. Verbs cover the object kinds Cyclopus
+# owns via server-side apply as field manager plus the isolation objects it
+# inspects for drift (RuntimeClass, NetworkPolicy — §7.1, §7.2).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-reconcile
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, services, configmaps, secrets, serviceaccounts, pods]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies, ingresses]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["autoscaling"]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["node.k8s.io"]
+    resources: [runtimeclasses]
+    verbs: [get, list, watch]
+  - apiGroups: ["keda.sh"]
+    resources: [scaledobjects]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["http.keda.sh"]
+    resources: [httpscaledobjects]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["cert-manager.io"]
+    resources: [certificates]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-reconcile
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cyclopus.fullname" . }}-reconcile
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cyclopus.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

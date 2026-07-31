@@ -1,0 +1,29 @@
+# Non-secret configuration for the Cyclopus binary, surfaced as CYCLOPUS_* env
+# vars by the Deployment. Secrets are wired separately from the Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  HTTP_ADDRESS: {{ .Values.config.httpAddress | quote }}
+  GRPC_ADDRESS: {{ .Values.config.grpcAddress | quote }}
+  DATABASE_MIGRATION_LOCK_TIMEOUT: {{ .Values.config.database.migrationLockTimeout | quote }}
+  WORKER_SCAN_INTERVAL: {{ .Values.config.worker.scanInterval | quote }}
+  WORKER_LEASE_DURATION: {{ .Values.config.worker.leaseDuration | quote }}
+  WORKER_MAX_CONCURRENT_DEPLOYS: {{ .Values.config.worker.maxConcurrentDeploys | quote }}
+  KUBERNETES_PREVIEW_HOSTNAME_SUFFIX: {{ .Values.config.kubernetes.previewHostnameSuffix | quote }}
+  OBSERVABILITY_OPENOBSERVE_BASE_URL: {{ .Values.config.observability.openobserveBaseUrl | quote }}
+  OBSERVABILITY_OPENOBSERVE_ORGANIZATION: {{ .Values.config.observability.openobserveOrganization | quote }}
+  OBSERVABILITY_OPENOBSERVE_LOG_STREAM: {{ .Values.config.observability.openobserveLogStream | quote }}
+  OBSERVABILITY_OPENOBSERVE_TRACE_STREAM: {{ .Values.config.observability.openobserveTraceStream | quote }}
+  OBSERVABILITY_BESZEL_BASE_URL: {{ .Values.config.observability.beszelBaseUrl | quote }}
+  # storage_destinations S3 target for postgres_backup + observability_backing (§9.1).
+  STORAGE_S3_ENDPOINT: {{ .Values.storageDestinations.s3.endpoint | quote }}
+  STORAGE_S3_REGION: {{ .Values.storageDestinations.s3.region | quote }}
+  STORAGE_S3_BUCKET: {{ .Values.storageDestinations.s3.bucket | quote }}
+  STORAGE_S3_POSTGRES_BACKUP_PREFIX: {{ .Values.storageDestinations.s3.postgresBackupPrefix | quote }}
+  STORAGE_S3_OBSERVABILITY_PREFIX: {{ .Values.storageDestinations.s3.observabilityPrefix | quote }}

@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cyclopus.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  # Single replica (§9.3): the one API pod owns the schema-migration advisory
+  # lock and serves the UI + deploy API. Upgrade replaces it — brief downtime.
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "cyclopus.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when config/secret change so env is re-read at boot.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "cyclopus.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cyclopus.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # §2.2: land only on the tainted control-plane node (VPS1).
+      nodeSelector:
+        {{- toYaml .Values.controlPlane.nodeSelector | nindent 8 }}
+      tolerations:
+        - key: {{ .Values.controlPlane.taintKey | quote }}
+          operator: Equal
+          value: {{ .Values.controlPlane.taintValue | quote }}
+          effect: NoSchedule
+      containers:
+        - name: cyclopus
+          image: {{ include "cyclopus.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Migrations run at boot inside this same process, under a Postgres
+          # advisory lock, before serving begins (§9.3). No separate migration
+          # Job — the binary and its schema ship as one artifact.
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "cyclopus.fullname" . }}-config
+          env:
+            - name: CYCLOPUS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cyclopus.secretName" . }}
+                  key: DATABASE_URL
+            - name: CYCLOPUS_AUTH_TOKEN_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cyclopus.secretName" . }}
+                  key: AUTH_TOKEN_PEPPER
+            - name: CYCLOPUS_AUTH_BOOTSTRAP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cyclopus.secretName" . }}
+                  key: AUTH_BOOTSTRAP_SECRET
+            - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cyclopus.secretName" . }}
+                  key: OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
+            - name: CYCLOPUS_OBSERVABILITY_BESZEL_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cyclopus.secretName" . }}
+                  key: OBSERVABILITY_BESZEL_TOKEN_SECRET
+            # Re-map the non-secret ConfigMap keys to the CYCLOPUS_* namespace
+            # the binary reads.
+            - name: CYCLOPUS_LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: LOG_LEVEL } }
+            - name: CYCLOPUS_HTTP_ADDRESS
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: HTTP_ADDRESS } }
+            - name: CYCLOPUS_GRPC_ADDRESS
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: GRPC_ADDRESS } }
+            - name: CYCLOPUS_DATABASE_MIGRATION_LOCK_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: DATABASE_MIGRATION_LOCK_TIMEOUT } }
+            - name: CYCLOPUS_WORKER_SCAN_INTERVAL
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: WORKER_SCAN_INTERVAL } }
+            - name: CYCLOPUS_WORKER_LEASE_DURATION
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: WORKER_LEASE_DURATION } }
+            - name: CYCLOPUS_WORKER_MAX_CONCURRENT_DEPLOYS
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: WORKER_MAX_CONCURRENT_DEPLOYS } }
+            - name: CYCLOPUS_KUBERNETES_PREVIEW_HOSTNAME_SUFFIX
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: KUBERNETES_PREVIEW_HOSTNAME_SUFFIX } }
+            - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_BASE_URL
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_OPENOBSERVE_BASE_URL } }
+            - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_ORGANIZATION
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_OPENOBSERVE_ORGANIZATION } }
+            - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_LOG_STREAM
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_OPENOBSERVE_LOG_STREAM } }
+            - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_TRACE_STREAM
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_OPENOBSERVE_TRACE_STREAM } }
+            - name: CYCLOPUS_OBSERVABILITY_BESZEL_BASE_URL
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_BESZEL_BASE_URL } }
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

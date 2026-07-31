@@ -1,0 +1,15 @@
+Cyclopus control plane installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+The single API pod ({{ include "cyclopus.fullname" . }}) runs migrations at boot
+under a Postgres advisory lock (§9.3) before serving. It is pinned to the
+control-plane node via the {{ .Values.controlPlane.taintKey }}={{ .Values.controlPlane.taintValue }} toleration (§2.2).
+
+Check readiness:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "cyclopus.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "cyclopus.fullname" . }}
+
+First run: the only reachable route is account creation; whoever claims it first
+owns the install (§9). Keep the control plane on a private network / VPN.
+
+Upgrades (§9.3): `helm upgrade` replaces the single pod (brief downtime). See
+infra/backup/upgrade.sh for the sequenced expand/contract procedure.

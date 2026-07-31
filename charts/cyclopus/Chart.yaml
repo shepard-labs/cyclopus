@@ -1,0 +1,40 @@
+apiVersion: v2
+name: cyclopus
+description: >-
+  Cyclopus control-plane: the API binary (migrations embedded, run at boot under
+  an advisory lock — §9.3) plus RBAC and configuration wiring for Postgres,
+  observability, and storage_destinations. Platform dependencies (Traefik,
+  cert-manager, Kyverno, KEDA, the Collector, OpenObserve, Beszel) are pinned in
+  values.yaml and documented as external installs (see values.yaml comments and
+  README.md); they are not vendored as subcharts because several are installed
+  ahead of Cyclopus in a fixed order (§7.1 Kyverno fail-closed sequencing).
+type: application
+
+# Chart version is independent of the app; appVersion pins the Cyclopus binary
+# image tag deployed by this chart.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.33.0-0 <1.34.0-0"
+
+home: https://cyclopus.local
+sources:
+  - https://cyclopus.local/charts/cyclopus
+
+maintainers:
+  - name: infrastructure-dr-implementer
+
+annotations:
+  # Platform dependencies and their pinned versions from versions.yaml. Declared
+  # as annotations (documented external installs) rather than dependencies[] so
+  # install ordering — Kyverno fail-closed webhooks first, Cyclopus last — stays
+  # explicit and under the operator's control (§9.3).
+  cyclopus.app/dependency-traefik: "v3.4.1"
+  cyclopus.app/dependency-cert-manager: "v1.17.2"
+  cyclopus.app/dependency-kyverno: "v1.14.2"
+  cyclopus.app/dependency-keda: "v2.20.1"
+  cyclopus.app/dependency-keda-http-add-on: "v0.15.0"
+  cyclopus.app/dependency-opentelemetry-collector: "v0.157.0"
+  cyclopus.app/dependency-openobserve: "v0.91.5"
+  cyclopus.app/dependency-beszel: "v0.18.7"
+  cyclopus.app/dependency-k3s: "v1.33.13+k3s1"

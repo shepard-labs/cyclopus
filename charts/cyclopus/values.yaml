@@ -1,0 +1,133 @@
+# Default values for the Cyclopus control-plane chart.
+#
+# The chart deploys the pre-built Cyclopus API binary. Migrations are embedded
+# in the binary and run at boot under a Postgres advisory lock (§9.3) — there is
+# deliberately no separate migration Job.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/cyclopus/cyclopus
+  # Defaults to .Chart.AppVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Single replica: §9.3 brief-downtime upgrade. The one API pod is replaced on
+# upgrade, taking the UI/deploy API offline for a pod restart + migration; the
+# advisory lock makes >1 replica a future deployment change, not a redesign.
+replicaCount: 1
+
+# §2.2: Cyclopus API is pinned to the control-plane node. It tolerates VPS1's
+# taint and selects VPS1's label so it is the only place it lands.
+controlPlane:
+  taintKey: cyclopus.app/role
+  taintValue: control-plane
+  nodeSelector:
+    cyclopus.app/role: control-plane
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# §9.2: reconcile has cluster-wide write reach. RBAC is a ClusterRole so a single
+# org-scoped reconcile loop can regenerate objects across every app namespace.
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+  httpPort: 8080
+  grpcPort: 9090
+
+# The Cyclopus binary reads config from CYCLOPUS_*-prefixed env vars.
+# Non-secret settings go in the ConfigMap; secrets are referenced from a Secret.
+config:
+  logLevel: info
+  httpAddress: "0.0.0.0:8080"
+  grpcAddress: "0.0.0.0:9090"
+  database:
+    # Non-secret DB connection settings. The full URL (with password) is a
+    # secret; see secrets.databaseUrl below.
+    migrationLockTimeout: "30s"
+  worker:
+    scanInterval: "30s"
+    leaseDuration: "60s"
+    maxConcurrentDeploys: 4
+  kubernetes:
+    # Verified DNS suffix appended to generated preview slugs; the floating-IP
+    # dashed address (§7.5, §9.1), e.g. "203-0-113-7.sslip.io".
+    previewHostnameSuffix: ""
+  observability:
+    openobserveBaseUrl: "http://openobserve.cyclopus-observability.svc:5080"
+    openobserveOrganization: "cyclopus"
+    openobserveLogStream: "app_logs"
+    openobserveTraceStream: "app_traces"
+    beszelBaseUrl: "http://beszel.cyclopus-observability.svc:8090"
+
+# Secret wiring. In real installs these reference an existing Secret created out
+# of band (never committed). Inline values are for local `helm template` only.
+secrets:
+  # Name of an existing Secret. When set, its keys are used and inline values
+  # below are ignored.
+  existingSecret: ""
+  # Inline values (base64-encoded by the Secret template). Leave empty in Git.
+  databaseUrl: ""
+  authTokenPepper: ""
+  authBootstrapSecret: ""
+  openobserveCredential: ""
+  beszelToken: ""
+
+# storage_destinations S3 target (§9.1): postgres_backup + observability_backing.
+# The API doesn't talk to S3 directly, but the endpoint/bucket are surfaced so
+# WAL-G sidecar/host config and OpenObserve backing share one source of truth.
+storageDestinations:
+  s3:
+    endpoint: ""
+    region: ""
+    bucket: "cyclopus-backups"
+    # Credentials live in the Secret referenced above / an existing Secret.
+    postgresBackupPrefix: "postgres_backup"
+    observabilityPrefix: "observability_backing"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# §9.3: brief-downtime, single pod. Recreate avoids two pods contending the
+# migration advisory lock / DB during upgrade.
+updateStrategy:
+  type: Recreate
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+# Constrained-profile overlay lives in values-constrained.yaml.

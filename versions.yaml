@@ -185,6 +185,26 @@ components:
       reviewed_at: "2026-07-29"
       evidence: ["https://api.github.com/repos/opentofu/opentofu/releases/latest"]
       rationale: Retain until provider locks, state compatibility, and OVH plans pass Phase 5 infrastructure tests.
+  ovh_provider:
+    pin: "2.0.0"
+    observed_latest: "2.9.0"
+    probe: "curl -fsSL https://api.github.com/repos/ovh/terraform-provider-ovh/releases/latest"
+    review:
+      status: intentional_pin
+      reviewer: phase-5-infrastructure-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/ovh/terraform-provider-ovh/releases/latest", "infra/opentofu/versions.tf", "infra/opentofu/.terraform.lock.hcl"]
+      rationale: OVH provider drives the vRack private network, floating IP, and S3-compatible object-storage resources (§7.2, §9.1). Pinned to the 2.0.0 major that matches the reviewed OpenStack provider 3.0.0 resource schemas; retain until Phase 5 OVH plans/state are exercised against a live project.
+  openstack_provider:
+    pin: "3.0.0"
+    observed_latest: "3.0.0"
+    probe: "curl -fsSL https://api.github.com/repos/terraform-provider-openstack/terraform-provider-openstack/releases/latest"
+    review:
+      status: approved
+      reviewer: phase-5-infrastructure-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/terraform-provider-openstack/terraform-provider-openstack/releases/latest", "infra/opentofu/versions.tf"]
+      rationale: OVH Public Cloud is an OpenStack region; instances, network, security groups, flavor lookups, and floating-IP association are driven through the OpenStack provider 3.0.0 major line.
   helm:
     pin: "v3.18.3"
     observed_latest: "v4.2.3"
@@ -235,3 +255,46 @@ components:
       reviewed_at: "2026-07-30"
       evidence: ["https://api.github.com/repos/henrygd/beszel/releases/latest"]
       rationale: Resource metrics (§8). PocketBase host metrics cannot be safely attributed to tenant app pods, so exposed as bounded operator-level metrics rather than a transparent per-tenant proxy (Phase 4 spec design note).
+  wal_g:
+    pin: "v3.0.8"
+    observed_latest: "v3.0.8"
+    probe: "curl -fsSL https://api.github.com/repos/wal-g/wal-g/releases/latest"
+    review:
+      status: approved
+      reviewer: phase-5-infrastructure-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/wal-g/wal-g/releases/latest"]
+      rationale: Primary Postgres WAL streaming backup to a storage_destinations S3 target (§9.1). Checksum-verified binary install; restore drives the full DR reconcile path.
+    # Pinned upstream sha256 of the wal-g-pg-20.04 tarballs for v3.0.8, fetched
+    # from the GitHub release .tar.gz.sha256 sidecars on 2026-07-30 and embedded
+    # as constants so install_walg.sh verifies against a reviewed value rather
+    # than a same-origin sidecar downloaded at install time. The 20.04 build is
+    # statically linked and runs on Ubuntu 24.04 and Debian 12 (v1 profiles).
+    checksums:
+      tarball_name: "wal-g-pg-20.04-{arch}.tar.gz"
+      sha256:
+        amd64: "8a0ca72ff3aa10d5a288cdb3e5b2a2e7bc6f8b4ffcf7b3046d718cfeee99a7e7"
+        aarch64: "dd07f0c171b8ccdf72d2dbdd0f153efe729e24f398546fd55db22273f289c1f3"
+  gvisor:
+    pin: "release-20260727.0"
+    observed_latest: "release-20260727.0"
+    probe: "curl -fsSL https://api.github.com/repos/google/gvisor/tags?per_page=1"
+    review:
+      status: approved
+      reviewer: phase-5-infrastructure-implementer
+      reviewed_at: "2026-07-30"
+      evidence: ["https://api.github.com/repos/google/gvisor/tags"]
+      rationale: runsc runtime for the gvisor RuntimeClass (§7.1). Installed via checksum-verified release and registered as a containerd runtime handler during node bootstrap.
+    # Pinned upstream sha512 of runsc + containerd-shim-runsc-v1 for release
+    # 20260727.0, fetched from the storage.googleapis.com per-file .sha512
+    # sidecars on 2026-07-30 and embedded as constants so install_gvisor.sh
+    # verifies against a reviewed value rather than a same-origin sidecar
+    # downloaded at install time.
+    checksums:
+      sha512:
+        x86_64:
+          runsc: "ab99ea1b0e2d169ec95473ea6c44abdac9b6b63d9c483f898487fd2b3c32d63bfa9ea104a3d5eed217b90cfc880ceb7a1130a9f7daef6e50656b6e028a8f52e3"
+          containerd-shim-runsc-v1: "3d6834562006a9b47f5ae9124eb45a14616886ec481ada528cf8cba570a1fc32d2f74082eae510f9bf790c6eb94b54f811919ea0f12fb19e051181219ada48fc"
+        aarch64:
+          runsc: "c1a654739a11dadcb6e314ac29f458e7bc8befb5f86259bc55fe090c91cd64ee2254f1b70e3962c3b71a127de612839b0e0915b248d46fcf2a315e995650179b"
+          containerd-shim-runsc-v1: "f788b2445cffa925cef17d11f0ba9a4d57b409f9b54b236b296ed0f1068c151e2bee60a145cb6ad519ae984ab549fd748f1c524ba42e5d8808146ea5c43bc731"

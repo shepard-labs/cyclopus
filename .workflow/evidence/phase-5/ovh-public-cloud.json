@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "workflow": "cyclopus-api-platform-v1",
+  "phase": "phase-5",
+  "gate": "ovh-public-cloud-primary",
+  "gate_type": "integration",
+  "status": "blocked",
+  "attempt": 1,
+  "started_at": "2026-07-31T06:06:30Z",
+  "finished_at": "2026-07-31T06:06:30Z",
+  "source_revision": "1afb08a4d9e3d9ce24298a214ce4c80079f4361f",
+  "input_digest": "ca0db8b28dc689561ec1b223fae223a0f647c53ed29122c9ed6edaa8af8362a1",
+  "implementer_agent": "infrastructure-dr-implementer",
+  "command": "./scripts/integration.sh ovh-public-cloud",
+  "exit_code": 2,
+  "artifacts": [
+    "infra/opentofu"
+  ],
+  "notes": "blocking_reason: live OVH Public Cloud credentials unavailable in this environment. Offline tofu validate/fmt for this module is covered by scripts/test_infrastructure.sh (unit gate).",
+  "profile": "ovh_public_cloud"
+}
