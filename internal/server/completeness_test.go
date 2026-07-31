@@ -19,6 +19,8 @@ func TestAPIHandlersImplementEveryDeclaredRPC(t *testing.T) {
 		reflect.TypeOf((*cyclopusv1.ReconciliationServiceServer)(nil)).Elem(),
 		reflect.TypeOf((*cyclopusv1.WebhookServiceServer)(nil)).Elem(),
 		reflect.TypeOf((*cyclopusv1.DomainServiceServer)(nil)).Elem(),
+		reflect.TypeOf((*cyclopusv1.RegistryServiceServer)(nil)).Elem(),
+		reflect.TypeOf((*cyclopusv1.GitConnectionServiceServer)(nil)).Elem(),
 	}
 	for _, serviceType := range services {
 		for index := 0; index < serviceType.NumMethod(); index++ {

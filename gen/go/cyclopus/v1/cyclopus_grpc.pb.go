@@ -2271,6 +2271,456 @@ var DomainService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	RegistryService_CreateRegistry_FullMethodName = "/cyclopus.v1.RegistryService/CreateRegistry"
+	RegistryService_GetRegistry_FullMethodName    = "/cyclopus.v1.RegistryService/GetRegistry"
+	RegistryService_ListRegistries_FullMethodName = "/cyclopus.v1.RegistryService/ListRegistries"
+	RegistryService_DeleteRegistry_FullMethodName = "/cyclopus.v1.RegistryService/DeleteRegistry"
+)
+
+// RegistryServiceClient is the client API for RegistryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// RegistryService manages OCI image registries an app pulls images from (§6).
+// The pull credential is passed as a k8s-secret:// reference, never as a raw
+// secret. Deleting a registry still referenced by an app fails (FK RESTRICT).
+type RegistryServiceClient interface {
+	CreateRegistry(ctx context.Context, in *CreateRegistryRequest, opts ...grpc.CallOption) (*CreateRegistryResponse, error)
+	GetRegistry(ctx context.Context, in *GetRegistryRequest, opts ...grpc.CallOption) (*GetRegistryResponse, error)
+	ListRegistries(ctx context.Context, in *ListRegistriesRequest, opts ...grpc.CallOption) (*ListRegistriesResponse, error)
+	DeleteRegistry(ctx context.Context, in *DeleteRegistryRequest, opts ...grpc.CallOption) (*DeleteRegistryResponse, error)
+}
+
+type registryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewRegistryServiceClient(cc grpc.ClientConnInterface) RegistryServiceClient {
+	return &registryServiceClient{cc}
+}
+
+func (c *registryServiceClient) CreateRegistry(ctx context.Context, in *CreateRegistryRequest, opts ...grpc.CallOption) (*CreateRegistryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRegistryResponse)
+	err := c.cc.Invoke(ctx, RegistryService_CreateRegistry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *registryServiceClient) GetRegistry(ctx context.Context, in *GetRegistryRequest, opts ...grpc.CallOption) (*GetRegistryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRegistryResponse)
+	err := c.cc.Invoke(ctx, RegistryService_GetRegistry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *registryServiceClient) ListRegistries(ctx context.Context, in *ListRegistriesRequest, opts ...grpc.CallOption) (*ListRegistriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRegistriesResponse)
+	err := c.cc.Invoke(ctx, RegistryService_ListRegistries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *registryServiceClient) DeleteRegistry(ctx context.Context, in *DeleteRegistryRequest, opts ...grpc.CallOption) (*DeleteRegistryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteRegistryResponse)
+	err := c.cc.Invoke(ctx, RegistryService_DeleteRegistry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RegistryServiceServer is the server API for RegistryService service.
+// All implementations must embed UnimplementedRegistryServiceServer
+// for forward compatibility.
+//
+// RegistryService manages OCI image registries an app pulls images from (§6).
+// The pull credential is passed as a k8s-secret:// reference, never as a raw
+// secret. Deleting a registry still referenced by an app fails (FK RESTRICT).
+type RegistryServiceServer interface {
+	CreateRegistry(context.Context, *CreateRegistryRequest) (*CreateRegistryResponse, error)
+	GetRegistry(context.Context, *GetRegistryRequest) (*GetRegistryResponse, error)
+	ListRegistries(context.Context, *ListRegistriesRequest) (*ListRegistriesResponse, error)
+	DeleteRegistry(context.Context, *DeleteRegistryRequest) (*DeleteRegistryResponse, error)
+	mustEmbedUnimplementedRegistryServiceServer()
+}
+
+// UnimplementedRegistryServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedRegistryServiceServer struct{}
+
+func (UnimplementedRegistryServiceServer) CreateRegistry(context.Context, *CreateRegistryRequest) (*CreateRegistryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRegistry not implemented")
+}
+func (UnimplementedRegistryServiceServer) GetRegistry(context.Context, *GetRegistryRequest) (*GetRegistryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRegistry not implemented")
+}
+func (UnimplementedRegistryServiceServer) ListRegistries(context.Context, *ListRegistriesRequest) (*ListRegistriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRegistries not implemented")
+}
+func (UnimplementedRegistryServiceServer) DeleteRegistry(context.Context, *DeleteRegistryRequest) (*DeleteRegistryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteRegistry not implemented")
+}
+func (UnimplementedRegistryServiceServer) mustEmbedUnimplementedRegistryServiceServer() {}
+func (UnimplementedRegistryServiceServer) testEmbeddedByValue()                         {}
+
+// UnsafeRegistryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to RegistryServiceServer will
+// result in compilation errors.
+type UnsafeRegistryServiceServer interface {
+	mustEmbedUnimplementedRegistryServiceServer()
+}
+
+func RegisterRegistryServiceServer(s grpc.ServiceRegistrar, srv RegistryServiceServer) {
+	// If the following call panics, it indicates UnimplementedRegistryServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&RegistryService_ServiceDesc, srv)
+}
+
+func _RegistryService_CreateRegistry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRegistryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RegistryServiceServer).CreateRegistry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RegistryService_CreateRegistry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RegistryServiceServer).CreateRegistry(ctx, req.(*CreateRegistryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RegistryService_GetRegistry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRegistryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RegistryServiceServer).GetRegistry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RegistryService_GetRegistry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RegistryServiceServer).GetRegistry(ctx, req.(*GetRegistryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RegistryService_ListRegistries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRegistriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RegistryServiceServer).ListRegistries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RegistryService_ListRegistries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RegistryServiceServer).ListRegistries(ctx, req.(*ListRegistriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RegistryService_DeleteRegistry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRegistryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RegistryServiceServer).DeleteRegistry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RegistryService_DeleteRegistry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RegistryServiceServer).DeleteRegistry(ctx, req.(*DeleteRegistryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// RegistryService_ServiceDesc is the grpc.ServiceDesc for RegistryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var RegistryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.RegistryService",
+	HandlerType: (*RegistryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateRegistry",
+			Handler:    _RegistryService_CreateRegistry_Handler,
+		},
+		{
+			MethodName: "GetRegistry",
+			Handler:    _RegistryService_GetRegistry_Handler,
+		},
+		{
+			MethodName: "ListRegistries",
+			Handler:    _RegistryService_ListRegistries_Handler,
+		},
+		{
+			MethodName: "DeleteRegistry",
+			Handler:    _RegistryService_DeleteRegistry_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cyclopus/v1/cyclopus.proto",
+}
+
+const (
+	GitConnectionService_CreateGitConnection_FullMethodName = "/cyclopus.v1.GitConnectionService/CreateGitConnection"
+	GitConnectionService_GetGitConnection_FullMethodName    = "/cyclopus.v1.GitConnectionService/GetGitConnection"
+	GitConnectionService_ListGitConnections_FullMethodName  = "/cyclopus.v1.GitConnectionService/ListGitConnections"
+	GitConnectionService_DeleteGitConnection_FullMethodName = "/cyclopus.v1.GitConnectionService/DeleteGitConnection"
+)
+
+// GitConnectionServiceClient is the client API for GitConnectionService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// GitConnectionService manages GitHub App installations bound to a repository
+// (§6). The webhook signing secret is passed as a k8s-secret:// reference,
+// never as a raw secret. Deleting a git connection nulls referencing projects
+// (FK SET NULL).
+type GitConnectionServiceClient interface {
+	CreateGitConnection(ctx context.Context, in *CreateGitConnectionRequest, opts ...grpc.CallOption) (*CreateGitConnectionResponse, error)
+	GetGitConnection(ctx context.Context, in *GetGitConnectionRequest, opts ...grpc.CallOption) (*GetGitConnectionResponse, error)
+	ListGitConnections(ctx context.Context, in *ListGitConnectionsRequest, opts ...grpc.CallOption) (*ListGitConnectionsResponse, error)
+	DeleteGitConnection(ctx context.Context, in *DeleteGitConnectionRequest, opts ...grpc.CallOption) (*DeleteGitConnectionResponse, error)
+}
+
+type gitConnectionServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewGitConnectionServiceClient(cc grpc.ClientConnInterface) GitConnectionServiceClient {
+	return &gitConnectionServiceClient{cc}
+}
+
+func (c *gitConnectionServiceClient) CreateGitConnection(ctx context.Context, in *CreateGitConnectionRequest, opts ...grpc.CallOption) (*CreateGitConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateGitConnectionResponse)
+	err := c.cc.Invoke(ctx, GitConnectionService_CreateGitConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitConnectionServiceClient) GetGitConnection(ctx context.Context, in *GetGitConnectionRequest, opts ...grpc.CallOption) (*GetGitConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetGitConnectionResponse)
+	err := c.cc.Invoke(ctx, GitConnectionService_GetGitConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitConnectionServiceClient) ListGitConnections(ctx context.Context, in *ListGitConnectionsRequest, opts ...grpc.CallOption) (*ListGitConnectionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListGitConnectionsResponse)
+	err := c.cc.Invoke(ctx, GitConnectionService_ListGitConnections_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitConnectionServiceClient) DeleteGitConnection(ctx context.Context, in *DeleteGitConnectionRequest, opts ...grpc.CallOption) (*DeleteGitConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteGitConnectionResponse)
+	err := c.cc.Invoke(ctx, GitConnectionService_DeleteGitConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GitConnectionServiceServer is the server API for GitConnectionService service.
+// All implementations must embed UnimplementedGitConnectionServiceServer
+// for forward compatibility.
+//
+// GitConnectionService manages GitHub App installations bound to a repository
+// (§6). The webhook signing secret is passed as a k8s-secret:// reference,
+// never as a raw secret. Deleting a git connection nulls referencing projects
+// (FK SET NULL).
+type GitConnectionServiceServer interface {
+	CreateGitConnection(context.Context, *CreateGitConnectionRequest) (*CreateGitConnectionResponse, error)
+	GetGitConnection(context.Context, *GetGitConnectionRequest) (*GetGitConnectionResponse, error)
+	ListGitConnections(context.Context, *ListGitConnectionsRequest) (*ListGitConnectionsResponse, error)
+	DeleteGitConnection(context.Context, *DeleteGitConnectionRequest) (*DeleteGitConnectionResponse, error)
+	mustEmbedUnimplementedGitConnectionServiceServer()
+}
+
+// UnimplementedGitConnectionServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedGitConnectionServiceServer struct{}
+
+func (UnimplementedGitConnectionServiceServer) CreateGitConnection(context.Context, *CreateGitConnectionRequest) (*CreateGitConnectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateGitConnection not implemented")
+}
+func (UnimplementedGitConnectionServiceServer) GetGitConnection(context.Context, *GetGitConnectionRequest) (*GetGitConnectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGitConnection not implemented")
+}
+func (UnimplementedGitConnectionServiceServer) ListGitConnections(context.Context, *ListGitConnectionsRequest) (*ListGitConnectionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListGitConnections not implemented")
+}
+func (UnimplementedGitConnectionServiceServer) DeleteGitConnection(context.Context, *DeleteGitConnectionRequest) (*DeleteGitConnectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteGitConnection not implemented")
+}
+func (UnimplementedGitConnectionServiceServer) mustEmbedUnimplementedGitConnectionServiceServer() {}
+func (UnimplementedGitConnectionServiceServer) testEmbeddedByValue()                              {}
+
+// UnsafeGitConnectionServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to GitConnectionServiceServer will
+// result in compilation errors.
+type UnsafeGitConnectionServiceServer interface {
+	mustEmbedUnimplementedGitConnectionServiceServer()
+}
+
+func RegisterGitConnectionServiceServer(s grpc.ServiceRegistrar, srv GitConnectionServiceServer) {
+	// If the following call panics, it indicates UnimplementedGitConnectionServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&GitConnectionService_ServiceDesc, srv)
+}
+
+func _GitConnectionService_CreateGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateGitConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitConnectionServiceServer).CreateGitConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitConnectionService_CreateGitConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitConnectionServiceServer).CreateGitConnection(ctx, req.(*CreateGitConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitConnectionService_GetGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGitConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitConnectionServiceServer).GetGitConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitConnectionService_GetGitConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitConnectionServiceServer).GetGitConnection(ctx, req.(*GetGitConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitConnectionService_ListGitConnections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListGitConnectionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitConnectionServiceServer).ListGitConnections(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitConnectionService_ListGitConnections_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitConnectionServiceServer).ListGitConnections(ctx, req.(*ListGitConnectionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitConnectionService_DeleteGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteGitConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitConnectionServiceServer).DeleteGitConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitConnectionService_DeleteGitConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitConnectionServiceServer).DeleteGitConnection(ctx, req.(*DeleteGitConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// GitConnectionService_ServiceDesc is the grpc.ServiceDesc for GitConnectionService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var GitConnectionService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.GitConnectionService",
+	HandlerType: (*GitConnectionServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateGitConnection",
+			Handler:    _GitConnectionService_CreateGitConnection_Handler,
+		},
+		{
+			MethodName: "GetGitConnection",
+			Handler:    _GitConnectionService_GetGitConnection_Handler,
+		},
+		{
+			MethodName: "ListGitConnections",
+			Handler:    _GitConnectionService_ListGitConnections_Handler,
+		},
+		{
+			MethodName: "DeleteGitConnection",
+			Handler:    _GitConnectionService_DeleteGitConnection_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cyclopus/v1/cyclopus.proto",
+}
+
+const (
 	ObservabilityService_QueryApplicationLogs_FullMethodName  = "/cyclopus.v1.ObservabilityService/QueryApplicationLogs"
 	ObservabilityService_ListApplicationTraces_FullMethodName = "/cyclopus.v1.ObservabilityService/ListApplicationTraces"
 	ObservabilityService_GetApplicationTrace_FullMethodName   = "/cyclopus.v1.ObservabilityService/GetApplicationTrace"

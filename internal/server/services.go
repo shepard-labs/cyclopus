@@ -12,6 +12,8 @@ type Services struct {
 	Reconciliation   cyclopusv1.ReconciliationServiceServer
 	Webhook          cyclopusv1.WebhookServiceServer
 	Domain           cyclopusv1.DomainServiceServer
+	Registry         cyclopusv1.RegistryServiceServer
+	GitConnection    cyclopusv1.GitConnectionServiceServer
 	Observability    cyclopusv1.ObservabilityServiceServer
 	Authenticator    *Authenticator
 	RateLimiter      *authRateLimiter
@@ -29,6 +31,8 @@ func DefaultServices() Services {
 		Reconciliation: unimplementedReconciliationService{},
 		Webhook:        unimplementedWebhookService{},
 		Domain:         unimplementedDomainService{},
+		Registry:       unimplementedRegistryService{},
+		GitConnection:  unimplementedGitConnectionService{},
 		Observability:  unimplementedObservabilityService{},
 	}
 }
@@ -59,6 +63,12 @@ type unimplementedWebhookService struct {
 }
 type unimplementedDomainService struct {
 	cyclopusv1.UnimplementedDomainServiceServer
+}
+type unimplementedRegistryService struct {
+	cyclopusv1.UnimplementedRegistryServiceServer
+}
+type unimplementedGitConnectionService struct {
+	cyclopusv1.UnimplementedGitConnectionServiceServer
 }
 type unimplementedObservabilityService struct {
 	cyclopusv1.UnimplementedObservabilityServiceServer
@@ -92,6 +102,12 @@ func withDefaults(services Services) Services {
 	}
 	if services.Domain == nil {
 		services.Domain = defaults.Domain
+	}
+	if services.Registry == nil {
+		services.Registry = defaults.Registry
+	}
+	if services.GitConnection == nil {
+		services.GitConnection = defaults.GitConnection
 	}
 	if services.Observability == nil {
 		services.Observability = defaults.Observability

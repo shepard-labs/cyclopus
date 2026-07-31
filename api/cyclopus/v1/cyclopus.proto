@@ -403,6 +403,87 @@ message DeleteDomainRequest {
 }
 message DeleteDomainResponse {}
 
+// Registry is one row of the registries table: an OCI image registry an app
+// pulls container images from. credential_secret_ref is a
+// k8s-secret://<namespace>/<name>#<key> REFERENCE to the pull credential; the
+// raw credential is never accepted or stored in Postgres — only the reference.
+message Registry {
+  string id = 1;
+  string organization_id = 2;
+  // provider identifies the registry flavour: one of "ghcr", "gcr", "ecr",
+  // "other".
+  string provider = 3;
+  string registry_url = 4;
+  // credential_secret_ref is a k8s-secret://<namespace>/<name>#<key> reference
+  // to the pull credential, NOT a plaintext credential.
+  string credential_secret_ref = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message CreateRegistryRequest {
+  string organization_id = 1;
+  Registry registry = 2;
+  string idempotency_key = 3;
+}
+message CreateRegistryResponse { Registry registry = 1; }
+message GetRegistryRequest { string registry_id = 1; }
+message GetRegistryResponse { Registry registry = 1; }
+message ListRegistriesRequest {
+  string organization_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListRegistriesResponse {
+  repeated Registry registries = 1;
+  string next_page_token = 2;
+}
+message DeleteRegistryRequest {
+  string registry_id = 1;
+  string idempotency_key = 2;
+}
+message DeleteRegistryResponse {}
+
+// GitConnection is one row of the git_connections table: a GitHub App
+// installation bound to a single repository. webhook_secret_ref is a
+// k8s-secret://<namespace>/<name>#<key> REFERENCE to the webhook signing
+// secret; the raw secret is never accepted or stored in Postgres.
+message GitConnection {
+  string id = 1;
+  string organization_id = 2;
+  // provider is "github" (the only supported value in v1).
+  string provider = 3;
+  int64 installation_id = 4;
+  string repo_full_name = 5;
+  string default_branch = 6;
+  // webhook_secret_ref is a k8s-secret://<namespace>/<name>#<key> reference to
+  // the webhook signing secret, NOT a plaintext secret.
+  string webhook_secret_ref = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message CreateGitConnectionRequest {
+  string organization_id = 1;
+  GitConnection git_connection = 2;
+  string idempotency_key = 3;
+}
+message CreateGitConnectionResponse { GitConnection git_connection = 1; }
+message GetGitConnectionRequest { string git_connection_id = 1; }
+message GetGitConnectionResponse { GitConnection git_connection = 1; }
+message ListGitConnectionsRequest {
+  string organization_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListGitConnectionsResponse {
+  repeated GitConnection git_connections = 1;
+  string next_page_token = 2;
+}
+message DeleteGitConnectionRequest {
+  string git_connection_id = 1;
+  string idempotency_key = 2;
+}
+message DeleteGitConnectionResponse {}
+
 message Operation {
   string id = 1;
   OperationStatus status = 2;
@@ -958,6 +1039,43 @@ service DomainService {
   }
   rpc DeleteDomain(DeleteDomainRequest) returns (DeleteDomainResponse) {
     option (google.api.http) = { delete: "/v1/domains/{domain_id}" };
+  }
+}
+
+// RegistryService manages OCI image registries an app pulls images from (§6).
+// The pull credential is passed as a k8s-secret:// reference, never as a raw
+// secret. Deleting a registry still referenced by an app fails (FK RESTRICT).
+service RegistryService {
+  rpc CreateRegistry(CreateRegistryRequest) returns (CreateRegistryResponse) {
+    option (google.api.http) = { post: "/v1/organizations/{organization_id}/registries" body: "registry" };
+  }
+  rpc GetRegistry(GetRegistryRequest) returns (GetRegistryResponse) {
+    option (google.api.http) = { get: "/v1/registries/{registry_id}" };
+  }
+  rpc ListRegistries(ListRegistriesRequest) returns (ListRegistriesResponse) {
+    option (google.api.http) = { get: "/v1/organizations/{organization_id}/registries" };
+  }
+  rpc DeleteRegistry(DeleteRegistryRequest) returns (DeleteRegistryResponse) {
+    option (google.api.http) = { delete: "/v1/registries/{registry_id}" };
+  }
+}
+
+// GitConnectionService manages GitHub App installations bound to a repository
+// (§6). The webhook signing secret is passed as a k8s-secret:// reference,
+// never as a raw secret. Deleting a git connection nulls referencing projects
+// (FK SET NULL).
+service GitConnectionService {
+  rpc CreateGitConnection(CreateGitConnectionRequest) returns (CreateGitConnectionResponse) {
+    option (google.api.http) = { post: "/v1/organizations/{organization_id}/git-connections" body: "git_connection" };
+  }
+  rpc GetGitConnection(GetGitConnectionRequest) returns (GetGitConnectionResponse) {
+    option (google.api.http) = { get: "/v1/git-connections/{git_connection_id}" };
+  }
+  rpc ListGitConnections(ListGitConnectionsRequest) returns (ListGitConnectionsResponse) {
+    option (google.api.http) = { get: "/v1/organizations/{organization_id}/git-connections" };
+  }
+  rpc DeleteGitConnection(DeleteGitConnectionRequest) returns (DeleteGitConnectionResponse) {
+    option (google.api.http) = { delete: "/v1/git-connections/{git_connection_id}" };
   }
 }
 

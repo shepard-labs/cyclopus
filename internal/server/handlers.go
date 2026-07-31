@@ -41,6 +41,8 @@ type apiHandlers struct {
 	cyclopusv1.UnimplementedReconciliationServiceServer
 	cyclopusv1.UnimplementedWebhookServiceServer
 	cyclopusv1.UnimplementedDomainServiceServer
+	cyclopusv1.UnimplementedRegistryServiceServer
+	cyclopusv1.UnimplementedGitConnectionServiceServer
 	cyclopusv1.UnimplementedObservabilityServiceServer
 	auth       *internalauth.Service
 	service    *service.Service
@@ -53,7 +55,8 @@ func NewServices(authService *internalauth.Service, domainService *service.Servi
 	}
 	handler := &apiHandlers{auth: authService, service: domainService, sessionTTL: sessionTTL}
 	return Services{Authentication: handler, Organization: handler, Project: handler, Application: handler,
-		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler, Domain: handler, Observability: handler}
+		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler, Domain: handler,
+		Registry: handler, GitConnection: handler, Observability: handler}
 }
 
 func (h *apiHandlers) Bootstrap(ctx context.Context, req *cyclopusv1.BootstrapRequest) (*cyclopusv1.BootstrapResponse, error) {
@@ -1063,6 +1066,176 @@ func (h *apiHandlers) DeleteDomain(ctx context.Context, req *cyclopusv1.DeleteDo
 	return &cyclopusv1.DeleteDomainResponse{}, nil
 }
 
+func (h *apiHandlers) CreateRegistry(ctx context.Context, req *cyclopusv1.CreateRegistryRequest) (*cyclopusv1.CreateRegistryResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Registry == nil {
+		return nil, fieldError("registry", "is required")
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, status.Error(codes.PermissionDenied, "permission denied")
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(),
+		"registry.registry_url": req.Registry.GetRegistryUrl(), "registry.credential_secret_ref": req.Registry.GetCredentialSecretRef()}); err != nil {
+		return nil, err
+	}
+	value, err := h.service.CreateRegistry(ctx, actor, req.GetIdempotencyKey(), registryInput(req.Registry))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateRegistryResponse{Registry: registryProto(value)}, nil
+}
+
+func (h *apiHandlers) GetRegistry(ctx context.Context, req *cyclopusv1.GetRegistryRequest) (*cyclopusv1.GetRegistryResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("registry_id", req.GetRegistryId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetRegistry(ctx, actor, req.GetRegistryId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetRegistryResponse{Registry: registryProto(value)}, nil
+}
+
+func (h *apiHandlers) ListRegistries(ctx context.Context, req *cyclopusv1.ListRegistriesRequest) (*cyclopusv1.ListRegistriesResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, status.Error(codes.PermissionDenied, "permission denied")
+	}
+	values, err := h.service.ListRegistries(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	scope := pageScope("registries", actor.OrgID)
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Registry) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, scope, func(v store.Registry) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListRegistriesResponse{NextPageToken: next, Registries: make([]*cyclopusv1.Registry, 0, len(page))}
+	for _, value := range page {
+		response.Registries = append(response.Registries, registryProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) DeleteRegistry(ctx context.Context, req *cyclopusv1.DeleteRegistryRequest) (*cyclopusv1.DeleteRegistryResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("registry_id", req.GetRegistryId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	if err := h.service.DeleteRegistry(ctx, actor, req.GetIdempotencyKey(), req.GetRegistryId()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteRegistryResponse{}, nil
+}
+
+func (h *apiHandlers) CreateGitConnection(ctx context.Context, req *cyclopusv1.CreateGitConnectionRequest) (*cyclopusv1.CreateGitConnectionResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.GitConnection == nil {
+		return nil, fieldError("git_connection", "is required")
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, status.Error(codes.PermissionDenied, "permission denied")
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(),
+		"git_connection.repo_full_name": req.GitConnection.GetRepoFullName(), "git_connection.webhook_secret_ref": req.GitConnection.GetWebhookSecretRef()}); err != nil {
+		return nil, err
+	}
+	value, err := h.service.CreateGitConnection(ctx, actor, req.GetIdempotencyKey(), gitConnectionInput(req.GitConnection))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateGitConnectionResponse{GitConnection: gitConnectionProto(value)}, nil
+}
+
+func (h *apiHandlers) GetGitConnection(ctx context.Context, req *cyclopusv1.GetGitConnectionRequest) (*cyclopusv1.GetGitConnectionResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("git_connection_id", req.GetGitConnectionId()); err != nil {
+		return nil, err
+	}
+	value, err := h.service.GetGitConnection(ctx, actor, req.GetGitConnectionId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetGitConnectionResponse{GitConnection: gitConnectionProto(value)}, nil
+}
+
+func (h *apiHandlers) ListGitConnections(ctx context.Context, req *cyclopusv1.ListGitConnectionsRequest) (*cyclopusv1.ListGitConnectionsResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
+		return nil, err
+	}
+	if req.GetOrganizationId() != actor.OrgID {
+		return nil, status.Error(codes.PermissionDenied, "permission denied")
+	}
+	values, err := h.service.ListGitConnections(ctx, actor)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	scope := pageScope("git_connections", actor.OrgID)
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.GitConnection) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, scope, func(v store.GitConnection) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListGitConnectionsResponse{NextPageToken: next, GitConnections: make([]*cyclopusv1.GitConnection, 0, len(page))}
+	for _, value := range page {
+		response.GitConnections = append(response.GitConnections, gitConnectionProto(value))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) DeleteGitConnection(ctx context.Context, req *cyclopusv1.DeleteGitConnectionRequest) (*cyclopusv1.DeleteGitConnectionResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("git_connection_id", req.GetGitConnectionId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	if err := h.service.DeleteGitConnection(ctx, actor, req.GetIdempotencyKey(), req.GetGitConnectionId()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteGitConnectionResponse{}, nil
+}
+
 func sessionActor(ctx context.Context) (service.ActorContext, error) {
 	principal, err := principalFromContext(ctx)
 	if err != nil {
@@ -1175,6 +1348,14 @@ func webhookInput(value *cyclopusv1.WebhookEndpoint) service.WebhookInput {
 
 func domainInput(applicationID string, value *cyclopusv1.Domain) service.DomainInput {
 	return service.DomainInput{AppID: applicationID, Hostname: value.GetHostname(), VerificationMethod: domainVerificationMethodString(value.GetVerificationMethod())}
+}
+
+func registryInput(value *cyclopusv1.Registry) service.RegistryInput {
+	return service.RegistryInput{Provider: value.GetProvider(), RegistryURL: value.GetRegistryUrl(), CredentialSecretRef: value.GetCredentialSecretRef()}
+}
+
+func gitConnectionInput(value *cyclopusv1.GitConnection) service.GitConnectionInput {
+	return service.GitConnectionInput{Provider: value.GetProvider(), InstallationID: value.GetInstallationId(), RepoFullName: value.GetRepoFullName(), DefaultBranch: value.GetDefaultBranch(), WebhookSecretRef: value.GetWebhookSecretRef()}
 }
 
 func domainVerificationMethodString(v cyclopusv1.DomainVerificationMethod) string {
@@ -1318,6 +1499,19 @@ func domainProto(v store.Domain, instructions service.DomainInstructions) *cyclo
 		}
 	}
 	return proto
+}
+func registryProto(v store.Registry) *cyclopusv1.Registry {
+	return &cyclopusv1.Registry{
+		Id: v.ID, OrganizationId: v.OrgID, Provider: v.Provider, RegistryUrl: v.RegistryURL,
+		CredentialSecretRef: v.CredentialSecretRef, CreatedAt: timestamppb.New(v.CreatedAt),
+	}
+}
+func gitConnectionProto(v store.GitConnection) *cyclopusv1.GitConnection {
+	return &cyclopusv1.GitConnection{
+		Id: v.ID, OrganizationId: v.OrgID, Provider: v.Provider, InstallationId: v.InstallationID,
+		RepoFullName: v.RepoFullName, DefaultBranch: v.DefaultBranch, WebhookSecretRef: v.WebhookSecretRef,
+		CreatedAt: timestamppb.New(v.CreatedAt),
+	}
 }
 func operationProto(v service.AcceptedOperation, prefix string) *cyclopusv1.Operation {
 	return &cyclopusv1.Operation{Id: v.OperationID, ResourceName: prefix + v.ResourceID, Status: operationStatus(v.Status)}

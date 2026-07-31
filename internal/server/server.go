@@ -43,6 +43,8 @@ var serviceNames = []string{
 	cyclopusv1.ReconciliationService_ServiceDesc.ServiceName,
 	cyclopusv1.WebhookService_ServiceDesc.ServiceName,
 	cyclopusv1.DomainService_ServiceDesc.ServiceName,
+	cyclopusv1.RegistryService_ServiceDesc.ServiceName,
+	cyclopusv1.GitConnectionService_ServiceDesc.ServiceName,
 	cyclopusv1.ObservabilityService_ServiceDesc.ServiceName,
 }
 
@@ -160,6 +162,10 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 		},
 		func() error { return cyclopusv1.RegisterWebhookServiceHandlerServer(ctx, gateway, services.Webhook) },
 		func() error { return cyclopusv1.RegisterDomainServiceHandlerServer(ctx, gateway, services.Domain) },
+		func() error { return cyclopusv1.RegisterRegistryServiceHandlerServer(ctx, gateway, services.Registry) },
+		func() error {
+			return cyclopusv1.RegisterGitConnectionServiceHandlerServer(ctx, gateway, services.GitConnection)
+		},
 		func() error {
 			return cyclopusv1.RegisterObservabilityServiceHandlerServer(ctx, gateway, services.Observability)
 		},
@@ -226,6 +232,8 @@ func buildGRPCServer(services Services, readiness ReadinessCheck, grpcConfig con
 	cyclopusv1.RegisterReconciliationServiceServer(server, services.Reconciliation)
 	cyclopusv1.RegisterWebhookServiceServer(server, services.Webhook)
 	cyclopusv1.RegisterDomainServiceServer(server, services.Domain)
+	cyclopusv1.RegisterRegistryServiceServer(server, services.Registry)
+	cyclopusv1.RegisterGitConnectionServiceServer(server, services.GitConnection)
 	cyclopusv1.RegisterObservabilityServiceServer(server, services.Observability)
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", healthv1.HealthCheckResponse_NOT_SERVING)
