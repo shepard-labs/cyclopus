@@ -217,6 +217,7 @@ func validateIdempotencyResource(ctx context.Context, tx pgx.Tx, orgID string, r
 		"project": "projects", "reconciliation_run": "reconciliation_runs",
 		"orchestration_job": "orchestration_jobs", "env_var": "env_vars",
 		"api_token": "api_tokens", "webhook": "webhooks", "org": "orgs",
+		"domain": "domains",
 	}
 	table, ok := tables[*resourceType]
 	if !ok {

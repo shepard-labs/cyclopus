@@ -48,11 +48,13 @@ type ActorContext struct {
 }
 
 type Service struct {
-	store        *store.Store
-	now          func() time.Time
-	previewSlugs PreviewSlugGenerator
-	logger       *slog.Logger
-	telemetry    TelemetryProvider
+	store         *store.Store
+	now           func() time.Time
+	previewSlugs  PreviewSlugGenerator
+	logger        *slog.Logger
+	telemetry     TelemetryProvider
+	dnsResolver   DNSResolver
+	ingressTarget string
 }
 
 type Option func(*Service)
@@ -78,8 +80,28 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithDNSResolver overrides the DNS resolver used for custom-domain verification
+// (§7.5). The default wraps net.DefaultResolver; tests inject a fake.
+func WithDNSResolver(resolver DNSResolver) Option {
+	return func(s *Service) {
+		if resolver != nil {
+			s.dnsResolver = resolver
+		}
+	}
+}
+
+// WithIngressTarget sets the expected CNAME target that subdomain custom domains
+// must resolve to, and the apex A-record guidance value returned to callers
+// (§7.5). This is the platform ingress hostname that custom subdomains CNAME to,
+// a role distinct from the preview hostname suffix (though it defaults to it).
+func WithIngressTarget(target string) Option {
+	return func(s *Service) {
+		s.ingressTarget = strings.ToLower(strings.TrimSpace(target))
+	}
+}
+
 func New(dataStore *store.Store, opts ...Option) *Service {
-	s := &Service{store: dataStore, now: time.Now, previewSlugs: randomPreviewSlugGenerator{source: rand.Reader}, logger: slog.Default()}
+	s := &Service{store: dataStore, now: time.Now, previewSlugs: randomPreviewSlugGenerator{source: rand.Reader}, logger: slog.Default(), dnsResolver: stdlibDNSResolver{}}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(s)

@@ -750,6 +750,58 @@ func (TraceStatus) EnumDescriptor() ([]byte, []int) {
 	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{12}
 }
 
+// DomainVerificationMethod selects how a custom domain proves control (§7.5).
+// CNAME is used for subdomains (the CNAME both proves control and routes
+// traffic); DNS_TXT is used for apex/root domains via a challenge TXT record.
+type DomainVerificationMethod int32
+
+const (
+	DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_UNSPECIFIED DomainVerificationMethod = 0
+	DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_DNS_TXT     DomainVerificationMethod = 1
+	DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_CNAME       DomainVerificationMethod = 2
+)
+
+// Enum value maps for DomainVerificationMethod.
+var (
+	DomainVerificationMethod_name = map[int32]string{
+		0: "DOMAIN_VERIFICATION_METHOD_UNSPECIFIED",
+		1: "DOMAIN_VERIFICATION_METHOD_DNS_TXT",
+		2: "DOMAIN_VERIFICATION_METHOD_CNAME",
+	}
+	DomainVerificationMethod_value = map[string]int32{
+		"DOMAIN_VERIFICATION_METHOD_UNSPECIFIED": 0,
+		"DOMAIN_VERIFICATION_METHOD_DNS_TXT":     1,
+		"DOMAIN_VERIFICATION_METHOD_CNAME":       2,
+	}
+)
+
+func (x DomainVerificationMethod) Enum() *DomainVerificationMethod {
+	p := new(DomainVerificationMethod)
+	*p = x
+	return p
+}
+
+func (x DomainVerificationMethod) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DomainVerificationMethod) Descriptor() protoreflect.EnumDescriptor {
+	return file_cyclopus_v1_cyclopus_proto_enumTypes[13].Descriptor()
+}
+
+func (DomainVerificationMethod) Type() protoreflect.EnumType {
+	return &file_cyclopus_v1_cyclopus_proto_enumTypes[13]
+}
+
+func (x DomainVerificationMethod) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DomainVerificationMethod.Descriptor instead.
+func (DomainVerificationMethod) EnumDescriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{13}
+}
+
 // The imported error detail messages are the required typed error vocabulary.
 type ErrorDetailTypes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2938,6 +2990,686 @@ func (*DeleteWebhookResponse) Descriptor() ([]byte, []int) {
 	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{28}
 }
 
+type Domain struct {
+	state              protoimpl.MessageState   `protogen:"open.v1"`
+	Id                 string                   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	OrganizationId     string                   `protobuf:"bytes,2,opt,name=organization_id,json=organizationId,proto3" json:"organization_id,omitempty"`
+	ApplicationId      string                   `protobuf:"bytes,3,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	Hostname           string                   `protobuf:"bytes,4,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	VerificationMethod DomainVerificationMethod `protobuf:"varint,5,opt,name=verification_method,json=verificationMethod,proto3,enum=cyclopus.v1.DomainVerificationMethod" json:"verification_method,omitempty"`
+	// verification_token is only populated for dns_txt domains; it is the value
+	// the customer must publish in the challenge TXT record. It is null/empty for
+	// cname domains.
+	VerificationToken string                 `protobuf:"bytes,6,opt,name=verification_token,json=verificationToken,proto3" json:"verification_token,omitempty"`
+	VerifiedAt        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=verified_at,json=verifiedAt,proto3" json:"verified_at,omitempty"`
+	CreatedAt         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// instructions describes the exact DNS record the customer must create to
+	// complete verification and, for dns_txt, the follow-up A record.
+	Instructions  *DomainDnsInstructions `protobuf:"bytes,9,opt,name=instructions,proto3" json:"instructions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Domain) Reset() {
+	*x = Domain{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Domain) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Domain) ProtoMessage() {}
+
+func (x *Domain) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Domain.ProtoReflect.Descriptor instead.
+func (*Domain) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *Domain) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Domain) GetOrganizationId() string {
+	if x != nil {
+		return x.OrganizationId
+	}
+	return ""
+}
+
+func (x *Domain) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
+func (x *Domain) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *Domain) GetVerificationMethod() DomainVerificationMethod {
+	if x != nil {
+		return x.VerificationMethod
+	}
+	return DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_UNSPECIFIED
+}
+
+func (x *Domain) GetVerificationToken() string {
+	if x != nil {
+		return x.VerificationToken
+	}
+	return ""
+}
+
+func (x *Domain) GetVerifiedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.VerifiedAt
+	}
+	return nil
+}
+
+func (x *Domain) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Domain) GetInstructions() *DomainDnsInstructions {
+	if x != nil {
+		return x.Instructions
+	}
+	return nil
+}
+
+// DomainDnsInstructions is the operator-facing guidance the UI/CLI renders so
+// the customer can create the records Cyclopus checks (§7.5).
+type DomainDnsInstructions struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// record_type is "CNAME" or "TXT".
+	RecordType string `protobuf:"bytes,1,opt,name=record_type,json=recordType,proto3" json:"record_type,omitempty"`
+	// record_name is the fully-qualified name the customer creates the record on
+	// (e.g. "app.customer.com" for CNAME, "_cyclopus-challenge.customer.com" for
+	// TXT).
+	RecordName string `protobuf:"bytes,2,opt,name=record_name,json=recordName,proto3" json:"record_name,omitempty"`
+	// record_value is the expected value: the ingress target for CNAME, or the
+	// challenge token for TXT.
+	RecordValue string `protobuf:"bytes,3,opt,name=record_value,json=recordValue,proto3" json:"record_value,omitempty"`
+	// apex_a_record_target is set for dns_txt domains only: after verification the
+	// customer points an A record at this ingress IP/target. Cyclopus does not
+	// verify this record in this phase; it is operational guidance.
+	ApexARecordTarget string `protobuf:"bytes,4,opt,name=apex_a_record_target,json=apexARecordTarget,proto3" json:"apex_a_record_target,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *DomainDnsInstructions) Reset() {
+	*x = DomainDnsInstructions{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DomainDnsInstructions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DomainDnsInstructions) ProtoMessage() {}
+
+func (x *DomainDnsInstructions) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DomainDnsInstructions.ProtoReflect.Descriptor instead.
+func (*DomainDnsInstructions) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *DomainDnsInstructions) GetRecordType() string {
+	if x != nil {
+		return x.RecordType
+	}
+	return ""
+}
+
+func (x *DomainDnsInstructions) GetRecordName() string {
+	if x != nil {
+		return x.RecordName
+	}
+	return ""
+}
+
+func (x *DomainDnsInstructions) GetRecordValue() string {
+	if x != nil {
+		return x.RecordValue
+	}
+	return ""
+}
+
+func (x *DomainDnsInstructions) GetApexARecordTarget() string {
+	if x != nil {
+		return x.ApexARecordTarget
+	}
+	return ""
+}
+
+type CreateDomainRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ApplicationId  string                 `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	Domain         *Domain                `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
+	IdempotencyKey string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CreateDomainRequest) Reset() {
+	*x = CreateDomainRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateDomainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateDomainRequest) ProtoMessage() {}
+
+func (x *CreateDomainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateDomainRequest.ProtoReflect.Descriptor instead.
+func (*CreateDomainRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *CreateDomainRequest) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
+func (x *CreateDomainRequest) GetDomain() *Domain {
+	if x != nil {
+		return x.Domain
+	}
+	return nil
+}
+
+func (x *CreateDomainRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type CreateDomainResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Domain        *Domain                `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateDomainResponse) Reset() {
+	*x = CreateDomainResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateDomainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateDomainResponse) ProtoMessage() {}
+
+func (x *CreateDomainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateDomainResponse.ProtoReflect.Descriptor instead.
+func (*CreateDomainResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *CreateDomainResponse) GetDomain() *Domain {
+	if x != nil {
+		return x.Domain
+	}
+	return nil
+}
+
+type GetDomainRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DomainId      string                 `protobuf:"bytes,1,opt,name=domain_id,json=domainId,proto3" json:"domain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDomainRequest) Reset() {
+	*x = GetDomainRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDomainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDomainRequest) ProtoMessage() {}
+
+func (x *GetDomainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDomainRequest.ProtoReflect.Descriptor instead.
+func (*GetDomainRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *GetDomainRequest) GetDomainId() string {
+	if x != nil {
+		return x.DomainId
+	}
+	return ""
+}
+
+type GetDomainResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Domain        *Domain                `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDomainResponse) Reset() {
+	*x = GetDomainResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDomainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDomainResponse) ProtoMessage() {}
+
+func (x *GetDomainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDomainResponse.ProtoReflect.Descriptor instead.
+func (*GetDomainResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *GetDomainResponse) GetDomain() *Domain {
+	if x != nil {
+		return x.Domain
+	}
+	return nil
+}
+
+type ListDomainsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApplicationId string                 `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
+	PageSize      int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageToken     string                 `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDomainsRequest) Reset() {
+	*x = ListDomainsRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDomainsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDomainsRequest) ProtoMessage() {}
+
+func (x *ListDomainsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDomainsRequest.ProtoReflect.Descriptor instead.
+func (*ListDomainsRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ListDomainsRequest) GetApplicationId() string {
+	if x != nil {
+		return x.ApplicationId
+	}
+	return ""
+}
+
+func (x *ListDomainsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListDomainsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+type ListDomainsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Domains       []*Domain              `protobuf:"bytes,1,rep,name=domains,proto3" json:"domains,omitempty"`
+	NextPageToken string                 `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDomainsResponse) Reset() {
+	*x = ListDomainsResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDomainsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDomainsResponse) ProtoMessage() {}
+
+func (x *ListDomainsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDomainsResponse.ProtoReflect.Descriptor instead.
+func (*ListDomainsResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *ListDomainsResponse) GetDomains() []*Domain {
+	if x != nil {
+		return x.Domains
+	}
+	return nil
+}
+
+func (x *ListDomainsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+type VerifyDomainRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DomainId       string                 `protobuf:"bytes,1,opt,name=domain_id,json=domainId,proto3" json:"domain_id,omitempty"`
+	IdempotencyKey string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *VerifyDomainRequest) Reset() {
+	*x = VerifyDomainRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyDomainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyDomainRequest) ProtoMessage() {}
+
+func (x *VerifyDomainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyDomainRequest.ProtoReflect.Descriptor instead.
+func (*VerifyDomainRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *VerifyDomainRequest) GetDomainId() string {
+	if x != nil {
+		return x.DomainId
+	}
+	return ""
+}
+
+func (x *VerifyDomainRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type VerifyDomainResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Domain        *Domain                `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyDomainResponse) Reset() {
+	*x = VerifyDomainResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyDomainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyDomainResponse) ProtoMessage() {}
+
+func (x *VerifyDomainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyDomainResponse.ProtoReflect.Descriptor instead.
+func (*VerifyDomainResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *VerifyDomainResponse) GetDomain() *Domain {
+	if x != nil {
+		return x.Domain
+	}
+	return nil
+}
+
+type DeleteDomainRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DomainId       string                 `protobuf:"bytes,1,opt,name=domain_id,json=domainId,proto3" json:"domain_id,omitempty"`
+	IdempotencyKey string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DeleteDomainRequest) Reset() {
+	*x = DeleteDomainRequest{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteDomainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteDomainRequest) ProtoMessage() {}
+
+func (x *DeleteDomainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteDomainRequest.ProtoReflect.Descriptor instead.
+func (*DeleteDomainRequest) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *DeleteDomainRequest) GetDomainId() string {
+	if x != nil {
+		return x.DomainId
+	}
+	return ""
+}
+
+func (x *DeleteDomainRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type DeleteDomainResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteDomainResponse) Reset() {
+	*x = DeleteDomainResponse{}
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteDomainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteDomainResponse) ProtoMessage() {}
+
+func (x *DeleteDomainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteDomainResponse.ProtoReflect.Descriptor instead.
+func (*DeleteDomainResponse) Descriptor() ([]byte, []int) {
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{40}
+}
+
 type Operation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -2949,7 +3681,7 @@ type Operation struct {
 
 func (x *Operation) Reset() {
 	*x = Operation{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[29]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2961,7 +3693,7 @@ func (x *Operation) String() string {
 func (*Operation) ProtoMessage() {}
 
 func (x *Operation) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[29]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2974,7 +3706,7 @@ func (x *Operation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Operation.ProtoReflect.Descriptor instead.
 func (*Operation) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{29}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *Operation) GetId() string {
@@ -3010,7 +3742,7 @@ type ReconcileScope struct {
 
 func (x *ReconcileScope) Reset() {
 	*x = ReconcileScope{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[30]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3022,7 +3754,7 @@ func (x *ReconcileScope) String() string {
 func (*ReconcileScope) ProtoMessage() {}
 
 func (x *ReconcileScope) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[30]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3035,7 +3767,7 @@ func (x *ReconcileScope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconcileScope.ProtoReflect.Descriptor instead.
 func (*ReconcileScope) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{30}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ReconcileScope) GetKind() ReconcileScopeKind {
@@ -3084,7 +3816,7 @@ type ReconcileFinding struct {
 
 func (x *ReconcileFinding) Reset() {
 	*x = ReconcileFinding{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[31]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3096,7 +3828,7 @@ func (x *ReconcileFinding) String() string {
 func (*ReconcileFinding) ProtoMessage() {}
 
 func (x *ReconcileFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[31]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3109,7 +3841,7 @@ func (x *ReconcileFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconcileFinding.ProtoReflect.Descriptor instead.
 func (*ReconcileFinding) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{31}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ReconcileFinding) GetCategory() ReconcileCategory {
@@ -3198,7 +3930,7 @@ type RuntimeClassDriftFinding struct {
 
 func (x *RuntimeClassDriftFinding) Reset() {
 	*x = RuntimeClassDriftFinding{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[32]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3210,7 +3942,7 @@ func (x *RuntimeClassDriftFinding) String() string {
 func (*RuntimeClassDriftFinding) ProtoMessage() {}
 
 func (x *RuntimeClassDriftFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[32]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3223,7 +3955,7 @@ func (x *RuntimeClassDriftFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeClassDriftFinding.ProtoReflect.Descriptor instead.
 func (*RuntimeClassDriftFinding) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{32}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *RuntimeClassDriftFinding) GetExpectedRuntimeClass() string {
@@ -3249,7 +3981,7 @@ type NetworkPolicyDriftFinding struct {
 
 func (x *NetworkPolicyDriftFinding) Reset() {
 	*x = NetworkPolicyDriftFinding{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[33]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3261,7 +3993,7 @@ func (x *NetworkPolicyDriftFinding) String() string {
 func (*NetworkPolicyDriftFinding) ProtoMessage() {}
 
 func (x *NetworkPolicyDriftFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[33]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3274,7 +4006,7 @@ func (x *NetworkPolicyDriftFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkPolicyDriftFinding.ProtoReflect.Descriptor instead.
 func (*NetworkPolicyDriftFinding) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{33}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *NetworkPolicyDriftFinding) GetMissingPolicies() []string {
@@ -3295,7 +4027,7 @@ type ReconciliationObject struct {
 
 func (x *ReconciliationObject) Reset() {
 	*x = ReconciliationObject{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[34]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3307,7 +4039,7 @@ func (x *ReconciliationObject) String() string {
 func (*ReconciliationObject) ProtoMessage() {}
 
 func (x *ReconciliationObject) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[34]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3320,7 +4052,7 @@ func (x *ReconciliationObject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconciliationObject.ProtoReflect.Descriptor instead.
 func (*ReconciliationObject) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{34}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ReconciliationObject) GetKind() string {
@@ -3356,7 +4088,7 @@ type ReconciliationPlanOperation struct {
 
 func (x *ReconciliationPlanOperation) Reset() {
 	*x = ReconciliationPlanOperation{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[35]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3368,7 +4100,7 @@ func (x *ReconciliationPlanOperation) String() string {
 func (*ReconciliationPlanOperation) ProtoMessage() {}
 
 func (x *ReconciliationPlanOperation) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[35]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3381,7 +4113,7 @@ func (x *ReconciliationPlanOperation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconciliationPlanOperation.ProtoReflect.Descriptor instead.
 func (*ReconciliationPlanOperation) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{35}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ReconciliationPlanOperation) GetObject() *ReconciliationObject {
@@ -3423,7 +4155,7 @@ type ReconciliationPlan struct {
 
 func (x *ReconciliationPlan) Reset() {
 	*x = ReconciliationPlan{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[36]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3435,7 +4167,7 @@ func (x *ReconciliationPlan) String() string {
 func (*ReconciliationPlan) ProtoMessage() {}
 
 func (x *ReconciliationPlan) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[36]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3448,7 +4180,7 @@ func (x *ReconciliationPlan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconciliationPlan.ProtoReflect.Descriptor instead.
 func (*ReconciliationPlan) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{36}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ReconciliationPlan) GetCreate() []*ReconciliationPlanOperation {
@@ -3485,7 +4217,7 @@ type ReconciliationReport struct {
 
 func (x *ReconciliationReport) Reset() {
 	*x = ReconciliationReport{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[37]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3497,7 +4229,7 @@ func (x *ReconciliationReport) String() string {
 func (*ReconciliationReport) ProtoMessage() {}
 
 func (x *ReconciliationReport) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[37]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3510,7 +4242,7 @@ func (x *ReconciliationReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconciliationReport.ProtoReflect.Descriptor instead.
 func (*ReconciliationReport) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{37}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ReconciliationReport) GetOrphans() []*ReconciliationObject {
@@ -3564,7 +4296,7 @@ type ReconciliationEvidence struct {
 
 func (x *ReconciliationEvidence) Reset() {
 	*x = ReconciliationEvidence{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[38]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3576,7 +4308,7 @@ func (x *ReconciliationEvidence) String() string {
 func (*ReconciliationEvidence) ProtoMessage() {}
 
 func (x *ReconciliationEvidence) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[38]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3589,7 +4321,7 @@ func (x *ReconciliationEvidence) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconciliationEvidence.ProtoReflect.Descriptor instead.
 func (*ReconciliationEvidence) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{38}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ReconciliationEvidence) GetSequence() int64 {
@@ -3670,7 +4402,7 @@ type ReconciliationRun struct {
 
 func (x *ReconciliationRun) Reset() {
 	*x = ReconciliationRun{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[39]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3682,7 +4414,7 @@ func (x *ReconciliationRun) String() string {
 func (*ReconciliationRun) ProtoMessage() {}
 
 func (x *ReconciliationRun) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[39]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3695,7 +4427,7 @@ func (x *ReconciliationRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReconciliationRun.ProtoReflect.Descriptor instead.
 func (*ReconciliationRun) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{39}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ReconciliationRun) GetId() string {
@@ -3807,7 +4539,7 @@ type BootstrapRequest struct {
 
 func (x *BootstrapRequest) Reset() {
 	*x = BootstrapRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[40]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3819,7 +4551,7 @@ func (x *BootstrapRequest) String() string {
 func (*BootstrapRequest) ProtoMessage() {}
 
 func (x *BootstrapRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[40]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3832,7 +4564,7 @@ func (x *BootstrapRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BootstrapRequest.ProtoReflect.Descriptor instead.
 func (*BootstrapRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{40}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *BootstrapRequest) GetEmail() string {
@@ -3865,7 +4597,7 @@ type BootstrapResponse struct {
 
 func (x *BootstrapResponse) Reset() {
 	*x = BootstrapResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[41]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3877,7 +4609,7 @@ func (x *BootstrapResponse) String() string {
 func (*BootstrapResponse) ProtoMessage() {}
 
 func (x *BootstrapResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[41]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3890,7 +4622,7 @@ func (x *BootstrapResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BootstrapResponse.ProtoReflect.Descriptor instead.
 func (*BootstrapResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{41}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *BootstrapResponse) GetSession() *Session {
@@ -3910,7 +4642,7 @@ type LoginRequest struct {
 
 func (x *LoginRequest) Reset() {
 	*x = LoginRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[42]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3922,7 +4654,7 @@ func (x *LoginRequest) String() string {
 func (*LoginRequest) ProtoMessage() {}
 
 func (x *LoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[42]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3935,7 +4667,7 @@ func (x *LoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoginRequest.ProtoReflect.Descriptor instead.
 func (*LoginRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{42}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *LoginRequest) GetEmail() string {
@@ -3961,7 +4693,7 @@ type LoginResponse struct {
 
 func (x *LoginResponse) Reset() {
 	*x = LoginResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[43]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3973,7 +4705,7 @@ func (x *LoginResponse) String() string {
 func (*LoginResponse) ProtoMessage() {}
 
 func (x *LoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[43]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3986,7 +4718,7 @@ func (x *LoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoginResponse.ProtoReflect.Descriptor instead.
 func (*LoginResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{43}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *LoginResponse) GetSession() *Session {
@@ -4004,7 +4736,7 @@ type LogoutRequest struct {
 
 func (x *LogoutRequest) Reset() {
 	*x = LogoutRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[44]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4016,7 +4748,7 @@ func (x *LogoutRequest) String() string {
 func (*LogoutRequest) ProtoMessage() {}
 
 func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[44]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4029,7 +4761,7 @@ func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogoutRequest.ProtoReflect.Descriptor instead.
 func (*LogoutRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{44}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{56}
 }
 
 type LogoutResponse struct {
@@ -4040,7 +4772,7 @@ type LogoutResponse struct {
 
 func (x *LogoutResponse) Reset() {
 	*x = LogoutResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[45]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4052,7 +4784,7 @@ func (x *LogoutResponse) String() string {
 func (*LogoutResponse) ProtoMessage() {}
 
 func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[45]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4065,7 +4797,7 @@ func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogoutResponse.ProtoReflect.Descriptor instead.
 func (*LogoutResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{45}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{57}
 }
 
 type GetCurrentUserRequest struct {
@@ -4076,7 +4808,7 @@ type GetCurrentUserRequest struct {
 
 func (x *GetCurrentUserRequest) Reset() {
 	*x = GetCurrentUserRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[46]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4088,7 +4820,7 @@ func (x *GetCurrentUserRequest) String() string {
 func (*GetCurrentUserRequest) ProtoMessage() {}
 
 func (x *GetCurrentUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[46]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4101,7 +4833,7 @@ func (x *GetCurrentUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCurrentUserRequest.ProtoReflect.Descriptor instead.
 func (*GetCurrentUserRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{46}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{58}
 }
 
 type GetCurrentUserResponse struct {
@@ -4113,7 +4845,7 @@ type GetCurrentUserResponse struct {
 
 func (x *GetCurrentUserResponse) Reset() {
 	*x = GetCurrentUserResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[47]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4125,7 +4857,7 @@ func (x *GetCurrentUserResponse) String() string {
 func (*GetCurrentUserResponse) ProtoMessage() {}
 
 func (x *GetCurrentUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[47]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4138,7 +4870,7 @@ func (x *GetCurrentUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCurrentUserResponse.ProtoReflect.Descriptor instead.
 func (*GetCurrentUserResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{47}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *GetCurrentUserResponse) GetUser() *User {
@@ -4160,7 +4892,7 @@ type CreateApiTokenRequest struct {
 
 func (x *CreateApiTokenRequest) Reset() {
 	*x = CreateApiTokenRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[48]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4172,7 +4904,7 @@ func (x *CreateApiTokenRequest) String() string {
 func (*CreateApiTokenRequest) ProtoMessage() {}
 
 func (x *CreateApiTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[48]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4185,7 +4917,7 @@ func (x *CreateApiTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateApiTokenRequest.ProtoReflect.Descriptor instead.
 func (*CreateApiTokenRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{48}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *CreateApiTokenRequest) GetName() string {
@@ -4227,7 +4959,7 @@ type CreateApiTokenResponse struct {
 
 func (x *CreateApiTokenResponse) Reset() {
 	*x = CreateApiTokenResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[49]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4239,7 +4971,7 @@ func (x *CreateApiTokenResponse) String() string {
 func (*CreateApiTokenResponse) ProtoMessage() {}
 
 func (x *CreateApiTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[49]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4252,7 +4984,7 @@ func (x *CreateApiTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateApiTokenResponse.ProtoReflect.Descriptor instead.
 func (*CreateApiTokenResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{49}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *CreateApiTokenResponse) GetApiToken() *ApiToken {
@@ -4286,7 +5018,7 @@ type ListApiTokensRequest struct {
 
 func (x *ListApiTokensRequest) Reset() {
 	*x = ListApiTokensRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[50]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4298,7 +5030,7 @@ func (x *ListApiTokensRequest) String() string {
 func (*ListApiTokensRequest) ProtoMessage() {}
 
 func (x *ListApiTokensRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[50]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4311,7 +5043,7 @@ func (x *ListApiTokensRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApiTokensRequest.ProtoReflect.Descriptor instead.
 func (*ListApiTokensRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{50}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ListApiTokensRequest) GetPageSize() int32 {
@@ -4338,7 +5070,7 @@ type ListApiTokensResponse struct {
 
 func (x *ListApiTokensResponse) Reset() {
 	*x = ListApiTokensResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[51]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4350,7 +5082,7 @@ func (x *ListApiTokensResponse) String() string {
 func (*ListApiTokensResponse) ProtoMessage() {}
 
 func (x *ListApiTokensResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[51]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4363,7 +5095,7 @@ func (x *ListApiTokensResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApiTokensResponse.ProtoReflect.Descriptor instead.
 func (*ListApiTokensResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{51}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ListApiTokensResponse) GetApiTokens() []*ApiToken {
@@ -4390,7 +5122,7 @@ type RevokeApiTokenRequest struct {
 
 func (x *RevokeApiTokenRequest) Reset() {
 	*x = RevokeApiTokenRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[52]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4402,7 +5134,7 @@ func (x *RevokeApiTokenRequest) String() string {
 func (*RevokeApiTokenRequest) ProtoMessage() {}
 
 func (x *RevokeApiTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[52]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4415,7 +5147,7 @@ func (x *RevokeApiTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeApiTokenRequest.ProtoReflect.Descriptor instead.
 func (*RevokeApiTokenRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{52}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *RevokeApiTokenRequest) GetApiTokenId() string {
@@ -4440,7 +5172,7 @@ type RevokeApiTokenResponse struct {
 
 func (x *RevokeApiTokenResponse) Reset() {
 	*x = RevokeApiTokenResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[53]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4452,7 +5184,7 @@ func (x *RevokeApiTokenResponse) String() string {
 func (*RevokeApiTokenResponse) ProtoMessage() {}
 
 func (x *RevokeApiTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[53]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4465,7 +5197,7 @@ func (x *RevokeApiTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeApiTokenResponse.ProtoReflect.Descriptor instead.
 func (*RevokeApiTokenResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{53}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{65}
 }
 
 type GetOrganizationRequest struct {
@@ -4477,7 +5209,7 @@ type GetOrganizationRequest struct {
 
 func (x *GetOrganizationRequest) Reset() {
 	*x = GetOrganizationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[54]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4489,7 +5221,7 @@ func (x *GetOrganizationRequest) String() string {
 func (*GetOrganizationRequest) ProtoMessage() {}
 
 func (x *GetOrganizationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[54]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4502,7 +5234,7 @@ func (x *GetOrganizationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOrganizationRequest.ProtoReflect.Descriptor instead.
 func (*GetOrganizationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{54}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *GetOrganizationRequest) GetOrganizationId() string {
@@ -4521,7 +5253,7 @@ type GetOrganizationResponse struct {
 
 func (x *GetOrganizationResponse) Reset() {
 	*x = GetOrganizationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[55]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4533,7 +5265,7 @@ func (x *GetOrganizationResponse) String() string {
 func (*GetOrganizationResponse) ProtoMessage() {}
 
 func (x *GetOrganizationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[55]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4546,7 +5278,7 @@ func (x *GetOrganizationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOrganizationResponse.ProtoReflect.Descriptor instead.
 func (*GetOrganizationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{55}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *GetOrganizationResponse) GetOrganization() *Organization {
@@ -4567,7 +5299,7 @@ type DeleteOrganizationRequest struct {
 
 func (x *DeleteOrganizationRequest) Reset() {
 	*x = DeleteOrganizationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[56]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4579,7 +5311,7 @@ func (x *DeleteOrganizationRequest) String() string {
 func (*DeleteOrganizationRequest) ProtoMessage() {}
 
 func (x *DeleteOrganizationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[56]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4592,7 +5324,7 @@ func (x *DeleteOrganizationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteOrganizationRequest.ProtoReflect.Descriptor instead.
 func (*DeleteOrganizationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{56}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *DeleteOrganizationRequest) GetOrganizationId() string {
@@ -4625,7 +5357,7 @@ type DeleteOrganizationResponse struct {
 
 func (x *DeleteOrganizationResponse) Reset() {
 	*x = DeleteOrganizationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[57]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4637,7 +5369,7 @@ func (x *DeleteOrganizationResponse) String() string {
 func (*DeleteOrganizationResponse) ProtoMessage() {}
 
 func (x *DeleteOrganizationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[57]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4650,7 +5382,7 @@ func (x *DeleteOrganizationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteOrganizationResponse.ProtoReflect.Descriptor instead.
 func (*DeleteOrganizationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{57}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *DeleteOrganizationResponse) GetOperation() *Operation {
@@ -4671,7 +5403,7 @@ type CreateProjectRequest struct {
 
 func (x *CreateProjectRequest) Reset() {
 	*x = CreateProjectRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[58]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4683,7 +5415,7 @@ func (x *CreateProjectRequest) String() string {
 func (*CreateProjectRequest) ProtoMessage() {}
 
 func (x *CreateProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[58]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4696,7 +5428,7 @@ func (x *CreateProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProjectRequest.ProtoReflect.Descriptor instead.
 func (*CreateProjectRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{58}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *CreateProjectRequest) GetOrganizationId() string {
@@ -4729,7 +5461,7 @@ type CreateProjectResponse struct {
 
 func (x *CreateProjectResponse) Reset() {
 	*x = CreateProjectResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[59]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4741,7 +5473,7 @@ func (x *CreateProjectResponse) String() string {
 func (*CreateProjectResponse) ProtoMessage() {}
 
 func (x *CreateProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[59]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4754,7 +5486,7 @@ func (x *CreateProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateProjectResponse.ProtoReflect.Descriptor instead.
 func (*CreateProjectResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{59}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *CreateProjectResponse) GetProject() *Project {
@@ -4773,7 +5505,7 @@ type GetProjectRequest struct {
 
 func (x *GetProjectRequest) Reset() {
 	*x = GetProjectRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[60]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4785,7 +5517,7 @@ func (x *GetProjectRequest) String() string {
 func (*GetProjectRequest) ProtoMessage() {}
 
 func (x *GetProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[60]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4798,7 +5530,7 @@ func (x *GetProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectRequest.ProtoReflect.Descriptor instead.
 func (*GetProjectRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{60}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *GetProjectRequest) GetProjectId() string {
@@ -4817,7 +5549,7 @@ type GetProjectResponse struct {
 
 func (x *GetProjectResponse) Reset() {
 	*x = GetProjectResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[61]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4829,7 +5561,7 @@ func (x *GetProjectResponse) String() string {
 func (*GetProjectResponse) ProtoMessage() {}
 
 func (x *GetProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[61]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4842,7 +5574,7 @@ func (x *GetProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectResponse.ProtoReflect.Descriptor instead.
 func (*GetProjectResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{61}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *GetProjectResponse) GetProject() *Project {
@@ -4864,7 +5596,7 @@ type ListProjectsRequest struct {
 
 func (x *ListProjectsRequest) Reset() {
 	*x = ListProjectsRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[62]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4876,7 +5608,7 @@ func (x *ListProjectsRequest) String() string {
 func (*ListProjectsRequest) ProtoMessage() {}
 
 func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[62]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4889,7 +5621,7 @@ func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectsRequest.ProtoReflect.Descriptor instead.
 func (*ListProjectsRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{62}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ListProjectsRequest) GetOrganizationId() string {
@@ -4930,7 +5662,7 @@ type ListProjectsResponse struct {
 
 func (x *ListProjectsResponse) Reset() {
 	*x = ListProjectsResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[63]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4942,7 +5674,7 @@ func (x *ListProjectsResponse) String() string {
 func (*ListProjectsResponse) ProtoMessage() {}
 
 func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[63]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4955,7 +5687,7 @@ func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectsResponse.ProtoReflect.Descriptor instead.
 func (*ListProjectsResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{63}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ListProjectsResponse) GetProjects() []*Project {
@@ -4983,7 +5715,7 @@ type UpdateProjectRequest struct {
 
 func (x *UpdateProjectRequest) Reset() {
 	*x = UpdateProjectRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[64]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4995,7 +5727,7 @@ func (x *UpdateProjectRequest) String() string {
 func (*UpdateProjectRequest) ProtoMessage() {}
 
 func (x *UpdateProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[64]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5008,7 +5740,7 @@ func (x *UpdateProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProjectRequest.ProtoReflect.Descriptor instead.
 func (*UpdateProjectRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{64}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *UpdateProjectRequest) GetProject() *Project {
@@ -5041,7 +5773,7 @@ type UpdateProjectResponse struct {
 
 func (x *UpdateProjectResponse) Reset() {
 	*x = UpdateProjectResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[65]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5053,7 +5785,7 @@ func (x *UpdateProjectResponse) String() string {
 func (*UpdateProjectResponse) ProtoMessage() {}
 
 func (x *UpdateProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[65]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5066,7 +5798,7 @@ func (x *UpdateProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProjectResponse.ProtoReflect.Descriptor instead.
 func (*UpdateProjectResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{65}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *UpdateProjectResponse) GetProject() *Project {
@@ -5087,7 +5819,7 @@ type DeleteProjectRequest struct {
 
 func (x *DeleteProjectRequest) Reset() {
 	*x = DeleteProjectRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[66]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5099,7 +5831,7 @@ func (x *DeleteProjectRequest) String() string {
 func (*DeleteProjectRequest) ProtoMessage() {}
 
 func (x *DeleteProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[66]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5112,7 +5844,7 @@ func (x *DeleteProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProjectRequest.ProtoReflect.Descriptor instead.
 func (*DeleteProjectRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{66}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *DeleteProjectRequest) GetProjectId() string {
@@ -5145,7 +5877,7 @@ type DeleteProjectResponse struct {
 
 func (x *DeleteProjectResponse) Reset() {
 	*x = DeleteProjectResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[67]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5157,7 +5889,7 @@ func (x *DeleteProjectResponse) String() string {
 func (*DeleteProjectResponse) ProtoMessage() {}
 
 func (x *DeleteProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[67]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5170,7 +5902,7 @@ func (x *DeleteProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProjectResponse.ProtoReflect.Descriptor instead.
 func (*DeleteProjectResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{67}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *DeleteProjectResponse) GetOperation() *Operation {
@@ -5191,7 +5923,7 @@ type CreateApplicationRequest struct {
 
 func (x *CreateApplicationRequest) Reset() {
 	*x = CreateApplicationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[68]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5203,7 +5935,7 @@ func (x *CreateApplicationRequest) String() string {
 func (*CreateApplicationRequest) ProtoMessage() {}
 
 func (x *CreateApplicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[68]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5216,7 +5948,7 @@ func (x *CreateApplicationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateApplicationRequest.ProtoReflect.Descriptor instead.
 func (*CreateApplicationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{68}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *CreateApplicationRequest) GetProjectId() string {
@@ -5249,7 +5981,7 @@ type CreateApplicationResponse struct {
 
 func (x *CreateApplicationResponse) Reset() {
 	*x = CreateApplicationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[69]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5261,7 +5993,7 @@ func (x *CreateApplicationResponse) String() string {
 func (*CreateApplicationResponse) ProtoMessage() {}
 
 func (x *CreateApplicationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[69]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5274,7 +6006,7 @@ func (x *CreateApplicationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateApplicationResponse.ProtoReflect.Descriptor instead.
 func (*CreateApplicationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{69}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *CreateApplicationResponse) GetApplication() *Application {
@@ -5293,7 +6025,7 @@ type GetApplicationRequest struct {
 
 func (x *GetApplicationRequest) Reset() {
 	*x = GetApplicationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[70]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5305,7 +6037,7 @@ func (x *GetApplicationRequest) String() string {
 func (*GetApplicationRequest) ProtoMessage() {}
 
 func (x *GetApplicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[70]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5318,7 +6050,7 @@ func (x *GetApplicationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetApplicationRequest.ProtoReflect.Descriptor instead.
 func (*GetApplicationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{70}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *GetApplicationRequest) GetApplicationId() string {
@@ -5337,7 +6069,7 @@ type GetApplicationResponse struct {
 
 func (x *GetApplicationResponse) Reset() {
 	*x = GetApplicationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[71]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5349,7 +6081,7 @@ func (x *GetApplicationResponse) String() string {
 func (*GetApplicationResponse) ProtoMessage() {}
 
 func (x *GetApplicationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[71]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5362,7 +6094,7 @@ func (x *GetApplicationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetApplicationResponse.ProtoReflect.Descriptor instead.
 func (*GetApplicationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{71}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *GetApplicationResponse) GetApplication() *Application {
@@ -5384,7 +6116,7 @@ type ListApplicationsRequest struct {
 
 func (x *ListApplicationsRequest) Reset() {
 	*x = ListApplicationsRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[72]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5396,7 +6128,7 @@ func (x *ListApplicationsRequest) String() string {
 func (*ListApplicationsRequest) ProtoMessage() {}
 
 func (x *ListApplicationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[72]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5409,7 +6141,7 @@ func (x *ListApplicationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApplicationsRequest.ProtoReflect.Descriptor instead.
 func (*ListApplicationsRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{72}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *ListApplicationsRequest) GetProjectId() string {
@@ -5450,7 +6182,7 @@ type ListApplicationsResponse struct {
 
 func (x *ListApplicationsResponse) Reset() {
 	*x = ListApplicationsResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[73]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5462,7 +6194,7 @@ func (x *ListApplicationsResponse) String() string {
 func (*ListApplicationsResponse) ProtoMessage() {}
 
 func (x *ListApplicationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[73]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5475,7 +6207,7 @@ func (x *ListApplicationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApplicationsResponse.ProtoReflect.Descriptor instead.
 func (*ListApplicationsResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{73}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ListApplicationsResponse) GetApplications() []*Application {
@@ -5503,7 +6235,7 @@ type UpdateApplicationRequest struct {
 
 func (x *UpdateApplicationRequest) Reset() {
 	*x = UpdateApplicationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[74]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5515,7 +6247,7 @@ func (x *UpdateApplicationRequest) String() string {
 func (*UpdateApplicationRequest) ProtoMessage() {}
 
 func (x *UpdateApplicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[74]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5528,7 +6260,7 @@ func (x *UpdateApplicationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateApplicationRequest.ProtoReflect.Descriptor instead.
 func (*UpdateApplicationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{74}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *UpdateApplicationRequest) GetApplication() *Application {
@@ -5561,7 +6293,7 @@ type UpdateApplicationResponse struct {
 
 func (x *UpdateApplicationResponse) Reset() {
 	*x = UpdateApplicationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[75]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5573,7 +6305,7 @@ func (x *UpdateApplicationResponse) String() string {
 func (*UpdateApplicationResponse) ProtoMessage() {}
 
 func (x *UpdateApplicationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[75]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5586,7 +6318,7 @@ func (x *UpdateApplicationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateApplicationResponse.ProtoReflect.Descriptor instead.
 func (*UpdateApplicationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{75}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *UpdateApplicationResponse) GetApplication() *Application {
@@ -5607,7 +6339,7 @@ type DeleteApplicationRequest struct {
 
 func (x *DeleteApplicationRequest) Reset() {
 	*x = DeleteApplicationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[76]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5619,7 +6351,7 @@ func (x *DeleteApplicationRequest) String() string {
 func (*DeleteApplicationRequest) ProtoMessage() {}
 
 func (x *DeleteApplicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[76]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5632,7 +6364,7 @@ func (x *DeleteApplicationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteApplicationRequest.ProtoReflect.Descriptor instead.
 func (*DeleteApplicationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{76}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *DeleteApplicationRequest) GetApplicationId() string {
@@ -5665,7 +6397,7 @@ type DeleteApplicationResponse struct {
 
 func (x *DeleteApplicationResponse) Reset() {
 	*x = DeleteApplicationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[77]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5677,7 +6409,7 @@ func (x *DeleteApplicationResponse) String() string {
 func (*DeleteApplicationResponse) ProtoMessage() {}
 
 func (x *DeleteApplicationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[77]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5690,7 +6422,7 @@ func (x *DeleteApplicationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteApplicationResponse.ProtoReflect.Descriptor instead.
 func (*DeleteApplicationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{77}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *DeleteApplicationResponse) GetOperation() *Operation {
@@ -5709,7 +6441,7 @@ type GetEnvironmentRequest struct {
 
 func (x *GetEnvironmentRequest) Reset() {
 	*x = GetEnvironmentRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[78]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5721,7 +6453,7 @@ func (x *GetEnvironmentRequest) String() string {
 func (*GetEnvironmentRequest) ProtoMessage() {}
 
 func (x *GetEnvironmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[78]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5734,7 +6466,7 @@ func (x *GetEnvironmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEnvironmentRequest.ProtoReflect.Descriptor instead.
 func (*GetEnvironmentRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{78}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *GetEnvironmentRequest) GetEnvironmentId() string {
@@ -5753,7 +6485,7 @@ type GetEnvironmentResponse struct {
 
 func (x *GetEnvironmentResponse) Reset() {
 	*x = GetEnvironmentResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[79]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5765,7 +6497,7 @@ func (x *GetEnvironmentResponse) String() string {
 func (*GetEnvironmentResponse) ProtoMessage() {}
 
 func (x *GetEnvironmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[79]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5778,7 +6510,7 @@ func (x *GetEnvironmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEnvironmentResponse.ProtoReflect.Descriptor instead.
 func (*GetEnvironmentResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{79}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *GetEnvironmentResponse) GetEnvironment() *Environment {
@@ -5800,7 +6532,7 @@ type ListEnvironmentsRequest struct {
 
 func (x *ListEnvironmentsRequest) Reset() {
 	*x = ListEnvironmentsRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[80]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5812,7 +6544,7 @@ func (x *ListEnvironmentsRequest) String() string {
 func (*ListEnvironmentsRequest) ProtoMessage() {}
 
 func (x *ListEnvironmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[80]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5825,7 +6557,7 @@ func (x *ListEnvironmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEnvironmentsRequest.ProtoReflect.Descriptor instead.
 func (*ListEnvironmentsRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{80}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *ListEnvironmentsRequest) GetApplicationId() string {
@@ -5866,7 +6598,7 @@ type ListEnvironmentsResponse struct {
 
 func (x *ListEnvironmentsResponse) Reset() {
 	*x = ListEnvironmentsResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[81]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5878,7 +6610,7 @@ func (x *ListEnvironmentsResponse) String() string {
 func (*ListEnvironmentsResponse) ProtoMessage() {}
 
 func (x *ListEnvironmentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[81]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5891,7 +6623,7 @@ func (x *ListEnvironmentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEnvironmentsResponse.ProtoReflect.Descriptor instead.
 func (*ListEnvironmentsResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{81}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ListEnvironmentsResponse) GetEnvironments() []*Environment {
@@ -5920,7 +6652,7 @@ type DeployRequest struct {
 
 func (x *DeployRequest) Reset() {
 	*x = DeployRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[82]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5932,7 +6664,7 @@ func (x *DeployRequest) String() string {
 func (*DeployRequest) ProtoMessage() {}
 
 func (x *DeployRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[82]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5945,7 +6677,7 @@ func (x *DeployRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployRequest.ProtoReflect.Descriptor instead.
 func (*DeployRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{82}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *DeployRequest) GetEnvironmentId() string {
@@ -5985,7 +6717,7 @@ type DeployResponse struct {
 
 func (x *DeployResponse) Reset() {
 	*x = DeployResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[83]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5997,7 +6729,7 @@ func (x *DeployResponse) String() string {
 func (*DeployResponse) ProtoMessage() {}
 
 func (x *DeployResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[83]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6010,7 +6742,7 @@ func (x *DeployResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployResponse.ProtoReflect.Descriptor instead.
 func (*DeployResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{83}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *DeployResponse) GetOperation() *Operation {
@@ -6031,7 +6763,7 @@ type RollbackRequest struct {
 
 func (x *RollbackRequest) Reset() {
 	*x = RollbackRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[84]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6043,7 +6775,7 @@ func (x *RollbackRequest) String() string {
 func (*RollbackRequest) ProtoMessage() {}
 
 func (x *RollbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[84]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6056,7 +6788,7 @@ func (x *RollbackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackRequest.ProtoReflect.Descriptor instead.
 func (*RollbackRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{84}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *RollbackRequest) GetEnvironmentId() string {
@@ -6089,7 +6821,7 @@ type RollbackResponse struct {
 
 func (x *RollbackResponse) Reset() {
 	*x = RollbackResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[85]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6101,7 +6833,7 @@ func (x *RollbackResponse) String() string {
 func (*RollbackResponse) ProtoMessage() {}
 
 func (x *RollbackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[85]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6114,7 +6846,7 @@ func (x *RollbackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackResponse.ProtoReflect.Descriptor instead.
 func (*RollbackResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{85}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *RollbackResponse) GetOperation() *Operation {
@@ -6133,7 +6865,7 @@ type GetReleaseRequest struct {
 
 func (x *GetReleaseRequest) Reset() {
 	*x = GetReleaseRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[86]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6145,7 +6877,7 @@ func (x *GetReleaseRequest) String() string {
 func (*GetReleaseRequest) ProtoMessage() {}
 
 func (x *GetReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[86]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6158,7 +6890,7 @@ func (x *GetReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReleaseRequest.ProtoReflect.Descriptor instead.
 func (*GetReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{86}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *GetReleaseRequest) GetReleaseId() string {
@@ -6177,7 +6909,7 @@ type GetReleaseResponse struct {
 
 func (x *GetReleaseResponse) Reset() {
 	*x = GetReleaseResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[87]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6189,7 +6921,7 @@ func (x *GetReleaseResponse) String() string {
 func (*GetReleaseResponse) ProtoMessage() {}
 
 func (x *GetReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[87]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6202,7 +6934,7 @@ func (x *GetReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReleaseResponse.ProtoReflect.Descriptor instead.
 func (*GetReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{87}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *GetReleaseResponse) GetRelease() *Release {
@@ -6224,7 +6956,7 @@ type ListReleasesRequest struct {
 
 func (x *ListReleasesRequest) Reset() {
 	*x = ListReleasesRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[88]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6236,7 +6968,7 @@ func (x *ListReleasesRequest) String() string {
 func (*ListReleasesRequest) ProtoMessage() {}
 
 func (x *ListReleasesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[88]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6249,7 +6981,7 @@ func (x *ListReleasesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReleasesRequest.ProtoReflect.Descriptor instead.
 func (*ListReleasesRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{88}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *ListReleasesRequest) GetEnvironmentId() string {
@@ -6290,7 +7022,7 @@ type ListReleasesResponse struct {
 
 func (x *ListReleasesResponse) Reset() {
 	*x = ListReleasesResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[89]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6302,7 +7034,7 @@ func (x *ListReleasesResponse) String() string {
 func (*ListReleasesResponse) ProtoMessage() {}
 
 func (x *ListReleasesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[89]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6315,7 +7047,7 @@ func (x *ListReleasesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReleasesResponse.ProtoReflect.Descriptor instead.
 func (*ListReleasesResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{89}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *ListReleasesResponse) GetReleases() []*Release {
@@ -6341,7 +7073,7 @@ type GetEnvironmentVariablesRequest struct {
 
 func (x *GetEnvironmentVariablesRequest) Reset() {
 	*x = GetEnvironmentVariablesRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[90]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6353,7 +7085,7 @@ func (x *GetEnvironmentVariablesRequest) String() string {
 func (*GetEnvironmentVariablesRequest) ProtoMessage() {}
 
 func (x *GetEnvironmentVariablesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[90]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6366,7 +7098,7 @@ func (x *GetEnvironmentVariablesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEnvironmentVariablesRequest.ProtoReflect.Descriptor instead.
 func (*GetEnvironmentVariablesRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{90}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *GetEnvironmentVariablesRequest) GetEnvironmentId() string {
@@ -6385,7 +7117,7 @@ type GetEnvironmentVariablesResponse struct {
 
 func (x *GetEnvironmentVariablesResponse) Reset() {
 	*x = GetEnvironmentVariablesResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[91]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6397,7 +7129,7 @@ func (x *GetEnvironmentVariablesResponse) String() string {
 func (*GetEnvironmentVariablesResponse) ProtoMessage() {}
 
 func (x *GetEnvironmentVariablesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[91]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6410,7 +7142,7 @@ func (x *GetEnvironmentVariablesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEnvironmentVariablesResponse.ProtoReflect.Descriptor instead.
 func (*GetEnvironmentVariablesResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{91}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *GetEnvironmentVariablesResponse) GetRevision() *EnvironmentVariableRevision {
@@ -6431,7 +7163,7 @@ type SetEnvironmentVariablesRequest struct {
 
 func (x *SetEnvironmentVariablesRequest) Reset() {
 	*x = SetEnvironmentVariablesRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[92]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6443,7 +7175,7 @@ func (x *SetEnvironmentVariablesRequest) String() string {
 func (*SetEnvironmentVariablesRequest) ProtoMessage() {}
 
 func (x *SetEnvironmentVariablesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[92]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6456,7 +7188,7 @@ func (x *SetEnvironmentVariablesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetEnvironmentVariablesRequest.ProtoReflect.Descriptor instead.
 func (*SetEnvironmentVariablesRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{92}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *SetEnvironmentVariablesRequest) GetEnvironmentId() string {
@@ -6489,7 +7221,7 @@ type SetEnvironmentVariablesResponse struct {
 
 func (x *SetEnvironmentVariablesResponse) Reset() {
 	*x = SetEnvironmentVariablesResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[93]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6501,7 +7233,7 @@ func (x *SetEnvironmentVariablesResponse) String() string {
 func (*SetEnvironmentVariablesResponse) ProtoMessage() {}
 
 func (x *SetEnvironmentVariablesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[93]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6514,7 +7246,7 @@ func (x *SetEnvironmentVariablesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetEnvironmentVariablesResponse.ProtoReflect.Descriptor instead.
 func (*SetEnvironmentVariablesResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{93}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *SetEnvironmentVariablesResponse) GetOperation() *Operation {
@@ -6537,7 +7269,7 @@ type StartReconciliationRequest struct {
 
 func (x *StartReconciliationRequest) Reset() {
 	*x = StartReconciliationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[94]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6549,7 +7281,7 @@ func (x *StartReconciliationRequest) String() string {
 func (*StartReconciliationRequest) ProtoMessage() {}
 
 func (x *StartReconciliationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[94]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6562,7 +7294,7 @@ func (x *StartReconciliationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartReconciliationRequest.ProtoReflect.Descriptor instead.
 func (*StartReconciliationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{94}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *StartReconciliationRequest) GetScope() *ReconcileScope {
@@ -6609,7 +7341,7 @@ type StartReconciliationResponse struct {
 
 func (x *StartReconciliationResponse) Reset() {
 	*x = StartReconciliationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[95]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6621,7 +7353,7 @@ func (x *StartReconciliationResponse) String() string {
 func (*StartReconciliationResponse) ProtoMessage() {}
 
 func (x *StartReconciliationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[95]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6634,7 +7366,7 @@ func (x *StartReconciliationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartReconciliationResponse.ProtoReflect.Descriptor instead.
 func (*StartReconciliationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{95}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *StartReconciliationResponse) GetOperation() *Operation {
@@ -6653,7 +7385,7 @@ type GetReconciliationRequest struct {
 
 func (x *GetReconciliationRequest) Reset() {
 	*x = GetReconciliationRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[96]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6665,7 +7397,7 @@ func (x *GetReconciliationRequest) String() string {
 func (*GetReconciliationRequest) ProtoMessage() {}
 
 func (x *GetReconciliationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[96]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6678,7 +7410,7 @@ func (x *GetReconciliationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReconciliationRequest.ProtoReflect.Descriptor instead.
 func (*GetReconciliationRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{96}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *GetReconciliationRequest) GetReconciliationId() string {
@@ -6697,7 +7429,7 @@ type GetReconciliationResponse struct {
 
 func (x *GetReconciliationResponse) Reset() {
 	*x = GetReconciliationResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[97]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6709,7 +7441,7 @@ func (x *GetReconciliationResponse) String() string {
 func (*GetReconciliationResponse) ProtoMessage() {}
 
 func (x *GetReconciliationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[97]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6722,7 +7454,7 @@ func (x *GetReconciliationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReconciliationResponse.ProtoReflect.Descriptor instead.
 func (*GetReconciliationResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{97}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *GetReconciliationResponse) GetReconciliation() *ReconciliationRun {
@@ -6745,7 +7477,7 @@ type ListReconciliationsRequest struct {
 
 func (x *ListReconciliationsRequest) Reset() {
 	*x = ListReconciliationsRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[98]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6757,7 +7489,7 @@ func (x *ListReconciliationsRequest) String() string {
 func (*ListReconciliationsRequest) ProtoMessage() {}
 
 func (x *ListReconciliationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[98]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6770,7 +7502,7 @@ func (x *ListReconciliationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReconciliationsRequest.ProtoReflect.Descriptor instead.
 func (*ListReconciliationsRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{98}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *ListReconciliationsRequest) GetOrganizationId() string {
@@ -6818,7 +7550,7 @@ type ListReconciliationsResponse struct {
 
 func (x *ListReconciliationsResponse) Reset() {
 	*x = ListReconciliationsResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[99]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6830,7 +7562,7 @@ func (x *ListReconciliationsResponse) String() string {
 func (*ListReconciliationsResponse) ProtoMessage() {}
 
 func (x *ListReconciliationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[99]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6843,7 +7575,7 @@ func (x *ListReconciliationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReconciliationsResponse.ProtoReflect.Descriptor instead.
 func (*ListReconciliationsResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{99}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *ListReconciliationsResponse) GetReconciliations() []*ReconciliationRun {
@@ -6871,7 +7603,7 @@ type ListReconciliationEvidenceRequest struct {
 
 func (x *ListReconciliationEvidenceRequest) Reset() {
 	*x = ListReconciliationEvidenceRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[100]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6883,7 +7615,7 @@ func (x *ListReconciliationEvidenceRequest) String() string {
 func (*ListReconciliationEvidenceRequest) ProtoMessage() {}
 
 func (x *ListReconciliationEvidenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[100]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6896,7 +7628,7 @@ func (x *ListReconciliationEvidenceRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ListReconciliationEvidenceRequest.ProtoReflect.Descriptor instead.
 func (*ListReconciliationEvidenceRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{100}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *ListReconciliationEvidenceRequest) GetReconciliationId() string {
@@ -6930,7 +7662,7 @@ type ListReconciliationEvidenceResponse struct {
 
 func (x *ListReconciliationEvidenceResponse) Reset() {
 	*x = ListReconciliationEvidenceResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[101]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6942,7 +7674,7 @@ func (x *ListReconciliationEvidenceResponse) String() string {
 func (*ListReconciliationEvidenceResponse) ProtoMessage() {}
 
 func (x *ListReconciliationEvidenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[101]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6955,7 +7687,7 @@ func (x *ListReconciliationEvidenceResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ListReconciliationEvidenceResponse.ProtoReflect.Descriptor instead.
 func (*ListReconciliationEvidenceResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{101}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *ListReconciliationEvidenceResponse) GetEvidence() []*ReconciliationEvidence {
@@ -6987,7 +7719,7 @@ type LogEntry struct {
 
 func (x *LogEntry) Reset() {
 	*x = LogEntry{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[102]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6999,7 +7731,7 @@ func (x *LogEntry) String() string {
 func (*LogEntry) ProtoMessage() {}
 
 func (x *LogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[102]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7012,7 +7744,7 @@ func (x *LogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
 func (*LogEntry) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{102}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *LogEntry) GetTimestamp() *timestamppb.Timestamp {
@@ -7066,7 +7798,7 @@ type QueryApplicationLogsRequest struct {
 
 func (x *QueryApplicationLogsRequest) Reset() {
 	*x = QueryApplicationLogsRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[103]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7078,7 +7810,7 @@ func (x *QueryApplicationLogsRequest) String() string {
 func (*QueryApplicationLogsRequest) ProtoMessage() {}
 
 func (x *QueryApplicationLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[103]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7091,7 +7823,7 @@ func (x *QueryApplicationLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryApplicationLogsRequest.ProtoReflect.Descriptor instead.
 func (*QueryApplicationLogsRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{103}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *QueryApplicationLogsRequest) GetApplicationId() string {
@@ -7167,7 +7899,7 @@ type QueryApplicationLogsResponse struct {
 
 func (x *QueryApplicationLogsResponse) Reset() {
 	*x = QueryApplicationLogsResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[104]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7179,7 +7911,7 @@ func (x *QueryApplicationLogsResponse) String() string {
 func (*QueryApplicationLogsResponse) ProtoMessage() {}
 
 func (x *QueryApplicationLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[104]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7192,7 +7924,7 @@ func (x *QueryApplicationLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryApplicationLogsResponse.ProtoReflect.Descriptor instead.
 func (*QueryApplicationLogsResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{104}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *QueryApplicationLogsResponse) GetEntries() []*LogEntry {
@@ -7222,7 +7954,7 @@ type TraceSummary struct {
 
 func (x *TraceSummary) Reset() {
 	*x = TraceSummary{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[105]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7234,7 +7966,7 @@ func (x *TraceSummary) String() string {
 func (*TraceSummary) ProtoMessage() {}
 
 func (x *TraceSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[105]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7247,7 +7979,7 @@ func (x *TraceSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceSummary.ProtoReflect.Descriptor instead.
 func (*TraceSummary) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{105}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *TraceSummary) GetTraceId() string {
@@ -7299,7 +8031,7 @@ type ListApplicationTracesRequest struct {
 
 func (x *ListApplicationTracesRequest) Reset() {
 	*x = ListApplicationTracesRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[106]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7311,7 +8043,7 @@ func (x *ListApplicationTracesRequest) String() string {
 func (*ListApplicationTracesRequest) ProtoMessage() {}
 
 func (x *ListApplicationTracesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[106]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7324,7 +8056,7 @@ func (x *ListApplicationTracesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApplicationTracesRequest.ProtoReflect.Descriptor instead.
 func (*ListApplicationTracesRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{106}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *ListApplicationTracesRequest) GetApplicationId() string {
@@ -7379,7 +8111,7 @@ type ListApplicationTracesResponse struct {
 
 func (x *ListApplicationTracesResponse) Reset() {
 	*x = ListApplicationTracesResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[107]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7391,7 +8123,7 @@ func (x *ListApplicationTracesResponse) String() string {
 func (*ListApplicationTracesResponse) ProtoMessage() {}
 
 func (x *ListApplicationTracesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[107]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7404,7 +8136,7 @@ func (x *ListApplicationTracesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApplicationTracesResponse.ProtoReflect.Descriptor instead.
 func (*ListApplicationTracesResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{107}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{119}
 }
 
 func (x *ListApplicationTracesResponse) GetTraces() []*TraceSummary {
@@ -7434,7 +8166,7 @@ type GetApplicationTraceRequest struct {
 
 func (x *GetApplicationTraceRequest) Reset() {
 	*x = GetApplicationTraceRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[108]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7446,7 +8178,7 @@ func (x *GetApplicationTraceRequest) String() string {
 func (*GetApplicationTraceRequest) ProtoMessage() {}
 
 func (x *GetApplicationTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[108]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7459,7 +8191,7 @@ func (x *GetApplicationTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetApplicationTraceRequest.ProtoReflect.Descriptor instead.
 func (*GetApplicationTraceRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{108}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *GetApplicationTraceRequest) GetApplicationId() string {
@@ -7506,7 +8238,7 @@ type GetApplicationTraceResponse struct {
 
 func (x *GetApplicationTraceResponse) Reset() {
 	*x = GetApplicationTraceResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[109]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7518,7 +8250,7 @@ func (x *GetApplicationTraceResponse) String() string {
 func (*GetApplicationTraceResponse) ProtoMessage() {}
 
 func (x *GetApplicationTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[109]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7531,7 +8263,7 @@ func (x *GetApplicationTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetApplicationTraceResponse.ProtoReflect.Descriptor instead.
 func (*GetApplicationTraceResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{109}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *GetApplicationTraceResponse) GetTrace() *TraceSummary {
@@ -7557,7 +8289,7 @@ type OperatorMetric struct {
 
 func (x *OperatorMetric) Reset() {
 	*x = OperatorMetric{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[110]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7569,7 +8301,7 @@ func (x *OperatorMetric) String() string {
 func (*OperatorMetric) ProtoMessage() {}
 
 func (x *OperatorMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[110]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7582,7 +8314,7 @@ func (x *OperatorMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperatorMetric.ProtoReflect.Descriptor instead.
 func (*OperatorMetric) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{110}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *OperatorMetric) GetName() string {
@@ -7621,7 +8353,7 @@ type GetOperatorMetricsRequest struct {
 
 func (x *GetOperatorMetricsRequest) Reset() {
 	*x = GetOperatorMetricsRequest{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[111]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7633,7 +8365,7 @@ func (x *GetOperatorMetricsRequest) String() string {
 func (*GetOperatorMetricsRequest) ProtoMessage() {}
 
 func (x *GetOperatorMetricsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[111]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7646,7 +8378,7 @@ func (x *GetOperatorMetricsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOperatorMetricsRequest.ProtoReflect.Descriptor instead.
 func (*GetOperatorMetricsRequest) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{111}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{123}
 }
 
 type GetOperatorMetricsResponse struct {
@@ -7660,7 +8392,7 @@ type GetOperatorMetricsResponse struct {
 
 func (x *GetOperatorMetricsResponse) Reset() {
 	*x = GetOperatorMetricsResponse{}
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[112]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7672,7 +8404,7 @@ func (x *GetOperatorMetricsResponse) String() string {
 func (*GetOperatorMetricsResponse) ProtoMessage() {}
 
 func (x *GetOperatorMetricsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[112]
+	mi := &file_cyclopus_v1_cyclopus_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7685,7 +8417,7 @@ func (x *GetOperatorMetricsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOperatorMetricsResponse.ProtoReflect.Descriptor instead.
 func (*GetOperatorMetricsResponse) Descriptor() ([]byte, []int) {
-	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{112}
+	return file_cyclopus_v1_cyclopus_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *GetOperatorMetricsResponse) GetMetrics() []*OperatorMetric {
@@ -7904,7 +8636,53 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"\n" +
 	"webhook_id\x18\x01 \x01(\tR\twebhookId\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\"\x17\n" +
-	"\x15DeleteWebhookResponse\"v\n" +
+	"\x15DeleteWebhookResponse\"\xcb\x03\n" +
+	"\x06Domain\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12'\n" +
+	"\x0forganization_id\x18\x02 \x01(\tR\x0eorganizationId\x12%\n" +
+	"\x0eapplication_id\x18\x03 \x01(\tR\rapplicationId\x12\x1a\n" +
+	"\bhostname\x18\x04 \x01(\tR\bhostname\x12V\n" +
+	"\x13verification_method\x18\x05 \x01(\x0e2%.cyclopus.v1.DomainVerificationMethodR\x12verificationMethod\x12-\n" +
+	"\x12verification_token\x18\x06 \x01(\tR\x11verificationToken\x12;\n" +
+	"\vverified_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"verifiedAt\x129\n" +
+	"\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12F\n" +
+	"\finstructions\x18\t \x01(\v2\".cyclopus.v1.DomainDnsInstructionsR\finstructions\"\xad\x01\n" +
+	"\x15DomainDnsInstructions\x12\x1f\n" +
+	"\vrecord_type\x18\x01 \x01(\tR\n" +
+	"recordType\x12\x1f\n" +
+	"\vrecord_name\x18\x02 \x01(\tR\n" +
+	"recordName\x12!\n" +
+	"\frecord_value\x18\x03 \x01(\tR\vrecordValue\x12/\n" +
+	"\x14apex_a_record_target\x18\x04 \x01(\tR\x11apexARecordTarget\"\x92\x01\n" +
+	"\x13CreateDomainRequest\x12%\n" +
+	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12+\n" +
+	"\x06domain\x18\x02 \x01(\v2\x13.cyclopus.v1.DomainR\x06domain\x12'\n" +
+	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\"C\n" +
+	"\x14CreateDomainResponse\x12+\n" +
+	"\x06domain\x18\x01 \x01(\v2\x13.cyclopus.v1.DomainR\x06domain\"/\n" +
+	"\x10GetDomainRequest\x12\x1b\n" +
+	"\tdomain_id\x18\x01 \x01(\tR\bdomainId\"@\n" +
+	"\x11GetDomainResponse\x12+\n" +
+	"\x06domain\x18\x01 \x01(\v2\x13.cyclopus.v1.DomainR\x06domain\"w\n" +
+	"\x12ListDomainsRequest\x12%\n" +
+	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"l\n" +
+	"\x13ListDomainsResponse\x12-\n" +
+	"\adomains\x18\x01 \x03(\v2\x13.cyclopus.v1.DomainR\adomains\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"[\n" +
+	"\x13VerifyDomainRequest\x12\x1b\n" +
+	"\tdomain_id\x18\x01 \x01(\tR\bdomainId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\"C\n" +
+	"\x14VerifyDomainResponse\x12+\n" +
+	"\x06domain\x18\x01 \x01(\v2\x13.cyclopus.v1.DomainR\x06domain\"[\n" +
+	"\x13DeleteDomainRequest\x12\x1b\n" +
+	"\tdomain_id\x18\x01 \x01(\tR\bdomainId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\"\x16\n" +
+	"\x14DeleteDomainResponse\"v\n" +
 	"\tOperation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x1c.cyclopus.v1.OperationStatusR\x06status\x12#\n" +
@@ -8324,7 +9102,11 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"\vTraceStatus\x12\x1c\n" +
 	"\x18TRACE_STATUS_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fTRACE_STATUS_OK\x10\x01\x12\x16\n" +
-	"\x12TRACE_STATUS_ERROR\x10\x022\xa1\x06\n" +
+	"\x12TRACE_STATUS_ERROR\x10\x02*\x94\x01\n" +
+	"\x18DomainVerificationMethod\x12*\n" +
+	"&DOMAIN_VERIFICATION_METHOD_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"DOMAIN_VERIFICATION_METHOD_DNS_TXT\x10\x01\x12$\n" +
+	" DOMAIN_VERIFICATION_METHOD_CNAME\x10\x022\xa1\x06\n" +
 	"\x15AuthenticationService\x12i\n" +
 	"\tBootstrap\x12\x1d.cyclopus.v1.BootstrapRequest\x1a\x1e.cyclopus.v1.BootstrapResponse\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/auth/bootstrap\x12Y\n" +
 	"\x05Login\x12\x19.cyclopus.v1.LoginRequest\x1a\x1a.cyclopus.v1.LoginResponse\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/v1/auth/login\x12]\n" +
@@ -8375,7 +9157,13 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"GetWebhook\x12\x1e.cyclopus.v1.GetWebhookRequest\x1a\x1f.cyclopus.v1.GetWebhookResponse\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/webhooks/{webhook_id}\x12\x89\x01\n" +
 	"\fListWebhooks\x12 .cyclopus.v1.ListWebhooksRequest\x1a!.cyclopus.v1.ListWebhooksResponse\"4\x82\xd3\xe4\x93\x02.\x12,/v1/organizations/{organization_id}/webhooks\x12\x82\x01\n" +
 	"\rUpdateWebhook\x12!.cyclopus.v1.UpdateWebhookRequest\x1a\".cyclopus.v1.UpdateWebhookResponse\"*\x82\xd3\xe4\x93\x02$:\awebhook2\x19/v1/webhooks/{webhook.id}\x12y\n" +
-	"\rDeleteWebhook\x12!.cyclopus.v1.DeleteWebhookRequest\x1a\".cyclopus.v1.DeleteWebhookResponse\"!\x82\xd3\xe4\x93\x02\x1b*\x19/v1/webhooks/{webhook_id}2\x85\x05\n" +
+	"\rDeleteWebhook\x12!.cyclopus.v1.DeleteWebhookRequest\x1a\".cyclopus.v1.DeleteWebhookResponse\"!\x82\xd3\xe4\x93\x02\x1b*\x19/v1/webhooks/{webhook_id}2\x89\x05\n" +
+	"\rDomainService\x12\x8e\x01\n" +
+	"\fCreateDomain\x12 .cyclopus.v1.CreateDomainRequest\x1a!.cyclopus.v1.CreateDomainResponse\"9\x82\xd3\xe4\x93\x023:\x06domain\")/v1/applications/{application_id}/domains\x12k\n" +
+	"\tGetDomain\x12\x1d.cyclopus.v1.GetDomainRequest\x1a\x1e.cyclopus.v1.GetDomainResponse\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/domains/{domain_id}\x12\x83\x01\n" +
+	"\vListDomains\x12\x1f.cyclopus.v1.ListDomainsRequest\x1a .cyclopus.v1.ListDomainsResponse\"1\x82\xd3\xe4\x93\x02+\x12)/v1/applications/{application_id}/domains\x12~\n" +
+	"\fVerifyDomain\x12 .cyclopus.v1.VerifyDomainRequest\x1a!.cyclopus.v1.VerifyDomainResponse\")\x82\xd3\xe4\x93\x02#:\x01*\"\x1e/v1/domains/{domain_id}:verify\x12t\n" +
+	"\fDeleteDomain\x12 .cyclopus.v1.DeleteDomainRequest\x1a!.cyclopus.v1.DeleteDomainResponse\"\x1f\x82\xd3\xe4\x93\x02\x19*\x17/v1/domains/{domain_id}2\x85\x05\n" +
 	"\x14ObservabilityService\x12\x9b\x01\n" +
 	"\x14QueryApplicationLogs\x12(.cyclopus.v1.QueryApplicationLogsRequest\x1a).cyclopus.v1.QueryApplicationLogsResponse\".\x82\xd3\xe4\x93\x02(\x12&/v1/applications/{application_id}/logs\x12\xa0\x01\n" +
 	"\x15ListApplicationTraces\x12).cyclopus.v1.ListApplicationTracesRequest\x1a*.cyclopus.v1.ListApplicationTracesResponse\"0\x82\xd3\xe4\x93\x02*\x12(/v1/applications/{application_id}/traces\x12\xa5\x01\n" +
@@ -8394,8 +9182,8 @@ func file_cyclopus_v1_cyclopus_proto_rawDescGZIP() []byte {
 	return file_cyclopus_v1_cyclopus_proto_rawDescData
 }
 
-var file_cyclopus_v1_cyclopus_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
-var file_cyclopus_v1_cyclopus_proto_msgTypes = make([]protoimpl.MessageInfo, 114)
+var file_cyclopus_v1_cyclopus_proto_enumTypes = make([]protoimpl.EnumInfo, 14)
+var file_cyclopus_v1_cyclopus_proto_msgTypes = make([]protoimpl.MessageInfo, 126)
 var file_cyclopus_v1_cyclopus_proto_goTypes = []any{
 	(EnvironmentKind)(0),                       // 0: cyclopus.v1.EnvironmentKind
 	(EnvironmentLifecycleStatus)(0),            // 1: cyclopus.v1.EnvironmentLifecycleStatus
@@ -8410,342 +9198,374 @@ var file_cyclopus_v1_cyclopus_proto_goTypes = []any{
 	(ReconcileFindingStatus)(0),                // 10: cyclopus.v1.ReconcileFindingStatus
 	(LogSeverity)(0),                           // 11: cyclopus.v1.LogSeverity
 	(TraceStatus)(0),                           // 12: cyclopus.v1.TraceStatus
-	(*ErrorDetailTypes)(nil),                   // 13: cyclopus.v1.ErrorDetailTypes
-	(*User)(nil),                               // 14: cyclopus.v1.User
-	(*Session)(nil),                            // 15: cyclopus.v1.Session
-	(*ApiToken)(nil),                           // 16: cyclopus.v1.ApiToken
-	(*Organization)(nil),                       // 17: cyclopus.v1.Organization
-	(*Project)(nil),                            // 18: cyclopus.v1.Project
-	(*KedaCronSchedule)(nil),                   // 19: cyclopus.v1.KedaCronSchedule
-	(*Application)(nil),                        // 20: cyclopus.v1.Application
-	(*Environment)(nil),                        // 21: cyclopus.v1.Environment
-	(*PreviewPushRequest)(nil),                 // 22: cyclopus.v1.PreviewPushRequest
-	(*PreviewPushResponse)(nil),                // 23: cyclopus.v1.PreviewPushResponse
-	(*PreviewBranchDeleteRequest)(nil),         // 24: cyclopus.v1.PreviewBranchDeleteRequest
-	(*PreviewBranchDeleteResponse)(nil),        // 25: cyclopus.v1.PreviewBranchDeleteResponse
-	(*TeardownEnvironmentRequest)(nil),         // 26: cyclopus.v1.TeardownEnvironmentRequest
-	(*TeardownEnvironmentResponse)(nil),        // 27: cyclopus.v1.TeardownEnvironmentResponse
-	(*Release)(nil),                            // 28: cyclopus.v1.Release
-	(*EnvironmentVariable)(nil),                // 29: cyclopus.v1.EnvironmentVariable
-	(*EnvironmentVariableRevision)(nil),        // 30: cyclopus.v1.EnvironmentVariableRevision
-	(*WebhookEndpoint)(nil),                    // 31: cyclopus.v1.WebhookEndpoint
-	(*CreateWebhookRequest)(nil),               // 32: cyclopus.v1.CreateWebhookRequest
-	(*CreateWebhookResponse)(nil),              // 33: cyclopus.v1.CreateWebhookResponse
-	(*GetWebhookRequest)(nil),                  // 34: cyclopus.v1.GetWebhookRequest
-	(*GetWebhookResponse)(nil),                 // 35: cyclopus.v1.GetWebhookResponse
-	(*ListWebhooksRequest)(nil),                // 36: cyclopus.v1.ListWebhooksRequest
-	(*ListWebhooksResponse)(nil),               // 37: cyclopus.v1.ListWebhooksResponse
-	(*UpdateWebhookRequest)(nil),               // 38: cyclopus.v1.UpdateWebhookRequest
-	(*UpdateWebhookResponse)(nil),              // 39: cyclopus.v1.UpdateWebhookResponse
-	(*DeleteWebhookRequest)(nil),               // 40: cyclopus.v1.DeleteWebhookRequest
-	(*DeleteWebhookResponse)(nil),              // 41: cyclopus.v1.DeleteWebhookResponse
-	(*Operation)(nil),                          // 42: cyclopus.v1.Operation
-	(*ReconcileScope)(nil),                     // 43: cyclopus.v1.ReconcileScope
-	(*ReconcileFinding)(nil),                   // 44: cyclopus.v1.ReconcileFinding
-	(*RuntimeClassDriftFinding)(nil),           // 45: cyclopus.v1.RuntimeClassDriftFinding
-	(*NetworkPolicyDriftFinding)(nil),          // 46: cyclopus.v1.NetworkPolicyDriftFinding
-	(*ReconciliationObject)(nil),               // 47: cyclopus.v1.ReconciliationObject
-	(*ReconciliationPlanOperation)(nil),        // 48: cyclopus.v1.ReconciliationPlanOperation
-	(*ReconciliationPlan)(nil),                 // 49: cyclopus.v1.ReconciliationPlan
-	(*ReconciliationReport)(nil),               // 50: cyclopus.v1.ReconciliationReport
-	(*ReconciliationEvidence)(nil),             // 51: cyclopus.v1.ReconciliationEvidence
-	(*ReconciliationRun)(nil),                  // 52: cyclopus.v1.ReconciliationRun
-	(*BootstrapRequest)(nil),                   // 53: cyclopus.v1.BootstrapRequest
-	(*BootstrapResponse)(nil),                  // 54: cyclopus.v1.BootstrapResponse
-	(*LoginRequest)(nil),                       // 55: cyclopus.v1.LoginRequest
-	(*LoginResponse)(nil),                      // 56: cyclopus.v1.LoginResponse
-	(*LogoutRequest)(nil),                      // 57: cyclopus.v1.LogoutRequest
-	(*LogoutResponse)(nil),                     // 58: cyclopus.v1.LogoutResponse
-	(*GetCurrentUserRequest)(nil),              // 59: cyclopus.v1.GetCurrentUserRequest
-	(*GetCurrentUserResponse)(nil),             // 60: cyclopus.v1.GetCurrentUserResponse
-	(*CreateApiTokenRequest)(nil),              // 61: cyclopus.v1.CreateApiTokenRequest
-	(*CreateApiTokenResponse)(nil),             // 62: cyclopus.v1.CreateApiTokenResponse
-	(*ListApiTokensRequest)(nil),               // 63: cyclopus.v1.ListApiTokensRequest
-	(*ListApiTokensResponse)(nil),              // 64: cyclopus.v1.ListApiTokensResponse
-	(*RevokeApiTokenRequest)(nil),              // 65: cyclopus.v1.RevokeApiTokenRequest
-	(*RevokeApiTokenResponse)(nil),             // 66: cyclopus.v1.RevokeApiTokenResponse
-	(*GetOrganizationRequest)(nil),             // 67: cyclopus.v1.GetOrganizationRequest
-	(*GetOrganizationResponse)(nil),            // 68: cyclopus.v1.GetOrganizationResponse
-	(*DeleteOrganizationRequest)(nil),          // 69: cyclopus.v1.DeleteOrganizationRequest
-	(*DeleteOrganizationResponse)(nil),         // 70: cyclopus.v1.DeleteOrganizationResponse
-	(*CreateProjectRequest)(nil),               // 71: cyclopus.v1.CreateProjectRequest
-	(*CreateProjectResponse)(nil),              // 72: cyclopus.v1.CreateProjectResponse
-	(*GetProjectRequest)(nil),                  // 73: cyclopus.v1.GetProjectRequest
-	(*GetProjectResponse)(nil),                 // 74: cyclopus.v1.GetProjectResponse
-	(*ListProjectsRequest)(nil),                // 75: cyclopus.v1.ListProjectsRequest
-	(*ListProjectsResponse)(nil),               // 76: cyclopus.v1.ListProjectsResponse
-	(*UpdateProjectRequest)(nil),               // 77: cyclopus.v1.UpdateProjectRequest
-	(*UpdateProjectResponse)(nil),              // 78: cyclopus.v1.UpdateProjectResponse
-	(*DeleteProjectRequest)(nil),               // 79: cyclopus.v1.DeleteProjectRequest
-	(*DeleteProjectResponse)(nil),              // 80: cyclopus.v1.DeleteProjectResponse
-	(*CreateApplicationRequest)(nil),           // 81: cyclopus.v1.CreateApplicationRequest
-	(*CreateApplicationResponse)(nil),          // 82: cyclopus.v1.CreateApplicationResponse
-	(*GetApplicationRequest)(nil),              // 83: cyclopus.v1.GetApplicationRequest
-	(*GetApplicationResponse)(nil),             // 84: cyclopus.v1.GetApplicationResponse
-	(*ListApplicationsRequest)(nil),            // 85: cyclopus.v1.ListApplicationsRequest
-	(*ListApplicationsResponse)(nil),           // 86: cyclopus.v1.ListApplicationsResponse
-	(*UpdateApplicationRequest)(nil),           // 87: cyclopus.v1.UpdateApplicationRequest
-	(*UpdateApplicationResponse)(nil),          // 88: cyclopus.v1.UpdateApplicationResponse
-	(*DeleteApplicationRequest)(nil),           // 89: cyclopus.v1.DeleteApplicationRequest
-	(*DeleteApplicationResponse)(nil),          // 90: cyclopus.v1.DeleteApplicationResponse
-	(*GetEnvironmentRequest)(nil),              // 91: cyclopus.v1.GetEnvironmentRequest
-	(*GetEnvironmentResponse)(nil),             // 92: cyclopus.v1.GetEnvironmentResponse
-	(*ListEnvironmentsRequest)(nil),            // 93: cyclopus.v1.ListEnvironmentsRequest
-	(*ListEnvironmentsResponse)(nil),           // 94: cyclopus.v1.ListEnvironmentsResponse
-	(*DeployRequest)(nil),                      // 95: cyclopus.v1.DeployRequest
-	(*DeployResponse)(nil),                     // 96: cyclopus.v1.DeployResponse
-	(*RollbackRequest)(nil),                    // 97: cyclopus.v1.RollbackRequest
-	(*RollbackResponse)(nil),                   // 98: cyclopus.v1.RollbackResponse
-	(*GetReleaseRequest)(nil),                  // 99: cyclopus.v1.GetReleaseRequest
-	(*GetReleaseResponse)(nil),                 // 100: cyclopus.v1.GetReleaseResponse
-	(*ListReleasesRequest)(nil),                // 101: cyclopus.v1.ListReleasesRequest
-	(*ListReleasesResponse)(nil),               // 102: cyclopus.v1.ListReleasesResponse
-	(*GetEnvironmentVariablesRequest)(nil),     // 103: cyclopus.v1.GetEnvironmentVariablesRequest
-	(*GetEnvironmentVariablesResponse)(nil),    // 104: cyclopus.v1.GetEnvironmentVariablesResponse
-	(*SetEnvironmentVariablesRequest)(nil),     // 105: cyclopus.v1.SetEnvironmentVariablesRequest
-	(*SetEnvironmentVariablesResponse)(nil),    // 106: cyclopus.v1.SetEnvironmentVariablesResponse
-	(*StartReconciliationRequest)(nil),         // 107: cyclopus.v1.StartReconciliationRequest
-	(*StartReconciliationResponse)(nil),        // 108: cyclopus.v1.StartReconciliationResponse
-	(*GetReconciliationRequest)(nil),           // 109: cyclopus.v1.GetReconciliationRequest
-	(*GetReconciliationResponse)(nil),          // 110: cyclopus.v1.GetReconciliationResponse
-	(*ListReconciliationsRequest)(nil),         // 111: cyclopus.v1.ListReconciliationsRequest
-	(*ListReconciliationsResponse)(nil),        // 112: cyclopus.v1.ListReconciliationsResponse
-	(*ListReconciliationEvidenceRequest)(nil),  // 113: cyclopus.v1.ListReconciliationEvidenceRequest
-	(*ListReconciliationEvidenceResponse)(nil), // 114: cyclopus.v1.ListReconciliationEvidenceResponse
-	(*LogEntry)(nil),                           // 115: cyclopus.v1.LogEntry
-	(*QueryApplicationLogsRequest)(nil),        // 116: cyclopus.v1.QueryApplicationLogsRequest
-	(*QueryApplicationLogsResponse)(nil),       // 117: cyclopus.v1.QueryApplicationLogsResponse
-	(*TraceSummary)(nil),                       // 118: cyclopus.v1.TraceSummary
-	(*ListApplicationTracesRequest)(nil),       // 119: cyclopus.v1.ListApplicationTracesRequest
-	(*ListApplicationTracesResponse)(nil),      // 120: cyclopus.v1.ListApplicationTracesResponse
-	(*GetApplicationTraceRequest)(nil),         // 121: cyclopus.v1.GetApplicationTraceRequest
-	(*GetApplicationTraceResponse)(nil),        // 122: cyclopus.v1.GetApplicationTraceResponse
-	(*OperatorMetric)(nil),                     // 123: cyclopus.v1.OperatorMetric
-	(*GetOperatorMetricsRequest)(nil),          // 124: cyclopus.v1.GetOperatorMetricsRequest
-	(*GetOperatorMetricsResponse)(nil),         // 125: cyclopus.v1.GetOperatorMetricsResponse
-	nil,                                        // 126: cyclopus.v1.LogEntry.AttributesEntry
-	(*errdetails.ErrorInfo)(nil),               // 127: google.rpc.ErrorInfo
-	(*errdetails.BadRequest)(nil),              // 128: google.rpc.BadRequest
-	(*timestamppb.Timestamp)(nil),              // 129: google.protobuf.Timestamp
-	(*fieldmaskpb.FieldMask)(nil),              // 130: google.protobuf.FieldMask
-	(*structpb.Value)(nil),                     // 131: google.protobuf.Value
+	(DomainVerificationMethod)(0),              // 13: cyclopus.v1.DomainVerificationMethod
+	(*ErrorDetailTypes)(nil),                   // 14: cyclopus.v1.ErrorDetailTypes
+	(*User)(nil),                               // 15: cyclopus.v1.User
+	(*Session)(nil),                            // 16: cyclopus.v1.Session
+	(*ApiToken)(nil),                           // 17: cyclopus.v1.ApiToken
+	(*Organization)(nil),                       // 18: cyclopus.v1.Organization
+	(*Project)(nil),                            // 19: cyclopus.v1.Project
+	(*KedaCronSchedule)(nil),                   // 20: cyclopus.v1.KedaCronSchedule
+	(*Application)(nil),                        // 21: cyclopus.v1.Application
+	(*Environment)(nil),                        // 22: cyclopus.v1.Environment
+	(*PreviewPushRequest)(nil),                 // 23: cyclopus.v1.PreviewPushRequest
+	(*PreviewPushResponse)(nil),                // 24: cyclopus.v1.PreviewPushResponse
+	(*PreviewBranchDeleteRequest)(nil),         // 25: cyclopus.v1.PreviewBranchDeleteRequest
+	(*PreviewBranchDeleteResponse)(nil),        // 26: cyclopus.v1.PreviewBranchDeleteResponse
+	(*TeardownEnvironmentRequest)(nil),         // 27: cyclopus.v1.TeardownEnvironmentRequest
+	(*TeardownEnvironmentResponse)(nil),        // 28: cyclopus.v1.TeardownEnvironmentResponse
+	(*Release)(nil),                            // 29: cyclopus.v1.Release
+	(*EnvironmentVariable)(nil),                // 30: cyclopus.v1.EnvironmentVariable
+	(*EnvironmentVariableRevision)(nil),        // 31: cyclopus.v1.EnvironmentVariableRevision
+	(*WebhookEndpoint)(nil),                    // 32: cyclopus.v1.WebhookEndpoint
+	(*CreateWebhookRequest)(nil),               // 33: cyclopus.v1.CreateWebhookRequest
+	(*CreateWebhookResponse)(nil),              // 34: cyclopus.v1.CreateWebhookResponse
+	(*GetWebhookRequest)(nil),                  // 35: cyclopus.v1.GetWebhookRequest
+	(*GetWebhookResponse)(nil),                 // 36: cyclopus.v1.GetWebhookResponse
+	(*ListWebhooksRequest)(nil),                // 37: cyclopus.v1.ListWebhooksRequest
+	(*ListWebhooksResponse)(nil),               // 38: cyclopus.v1.ListWebhooksResponse
+	(*UpdateWebhookRequest)(nil),               // 39: cyclopus.v1.UpdateWebhookRequest
+	(*UpdateWebhookResponse)(nil),              // 40: cyclopus.v1.UpdateWebhookResponse
+	(*DeleteWebhookRequest)(nil),               // 41: cyclopus.v1.DeleteWebhookRequest
+	(*DeleteWebhookResponse)(nil),              // 42: cyclopus.v1.DeleteWebhookResponse
+	(*Domain)(nil),                             // 43: cyclopus.v1.Domain
+	(*DomainDnsInstructions)(nil),              // 44: cyclopus.v1.DomainDnsInstructions
+	(*CreateDomainRequest)(nil),                // 45: cyclopus.v1.CreateDomainRequest
+	(*CreateDomainResponse)(nil),               // 46: cyclopus.v1.CreateDomainResponse
+	(*GetDomainRequest)(nil),                   // 47: cyclopus.v1.GetDomainRequest
+	(*GetDomainResponse)(nil),                  // 48: cyclopus.v1.GetDomainResponse
+	(*ListDomainsRequest)(nil),                 // 49: cyclopus.v1.ListDomainsRequest
+	(*ListDomainsResponse)(nil),                // 50: cyclopus.v1.ListDomainsResponse
+	(*VerifyDomainRequest)(nil),                // 51: cyclopus.v1.VerifyDomainRequest
+	(*VerifyDomainResponse)(nil),               // 52: cyclopus.v1.VerifyDomainResponse
+	(*DeleteDomainRequest)(nil),                // 53: cyclopus.v1.DeleteDomainRequest
+	(*DeleteDomainResponse)(nil),               // 54: cyclopus.v1.DeleteDomainResponse
+	(*Operation)(nil),                          // 55: cyclopus.v1.Operation
+	(*ReconcileScope)(nil),                     // 56: cyclopus.v1.ReconcileScope
+	(*ReconcileFinding)(nil),                   // 57: cyclopus.v1.ReconcileFinding
+	(*RuntimeClassDriftFinding)(nil),           // 58: cyclopus.v1.RuntimeClassDriftFinding
+	(*NetworkPolicyDriftFinding)(nil),          // 59: cyclopus.v1.NetworkPolicyDriftFinding
+	(*ReconciliationObject)(nil),               // 60: cyclopus.v1.ReconciliationObject
+	(*ReconciliationPlanOperation)(nil),        // 61: cyclopus.v1.ReconciliationPlanOperation
+	(*ReconciliationPlan)(nil),                 // 62: cyclopus.v1.ReconciliationPlan
+	(*ReconciliationReport)(nil),               // 63: cyclopus.v1.ReconciliationReport
+	(*ReconciliationEvidence)(nil),             // 64: cyclopus.v1.ReconciliationEvidence
+	(*ReconciliationRun)(nil),                  // 65: cyclopus.v1.ReconciliationRun
+	(*BootstrapRequest)(nil),                   // 66: cyclopus.v1.BootstrapRequest
+	(*BootstrapResponse)(nil),                  // 67: cyclopus.v1.BootstrapResponse
+	(*LoginRequest)(nil),                       // 68: cyclopus.v1.LoginRequest
+	(*LoginResponse)(nil),                      // 69: cyclopus.v1.LoginResponse
+	(*LogoutRequest)(nil),                      // 70: cyclopus.v1.LogoutRequest
+	(*LogoutResponse)(nil),                     // 71: cyclopus.v1.LogoutResponse
+	(*GetCurrentUserRequest)(nil),              // 72: cyclopus.v1.GetCurrentUserRequest
+	(*GetCurrentUserResponse)(nil),             // 73: cyclopus.v1.GetCurrentUserResponse
+	(*CreateApiTokenRequest)(nil),              // 74: cyclopus.v1.CreateApiTokenRequest
+	(*CreateApiTokenResponse)(nil),             // 75: cyclopus.v1.CreateApiTokenResponse
+	(*ListApiTokensRequest)(nil),               // 76: cyclopus.v1.ListApiTokensRequest
+	(*ListApiTokensResponse)(nil),              // 77: cyclopus.v1.ListApiTokensResponse
+	(*RevokeApiTokenRequest)(nil),              // 78: cyclopus.v1.RevokeApiTokenRequest
+	(*RevokeApiTokenResponse)(nil),             // 79: cyclopus.v1.RevokeApiTokenResponse
+	(*GetOrganizationRequest)(nil),             // 80: cyclopus.v1.GetOrganizationRequest
+	(*GetOrganizationResponse)(nil),            // 81: cyclopus.v1.GetOrganizationResponse
+	(*DeleteOrganizationRequest)(nil),          // 82: cyclopus.v1.DeleteOrganizationRequest
+	(*DeleteOrganizationResponse)(nil),         // 83: cyclopus.v1.DeleteOrganizationResponse
+	(*CreateProjectRequest)(nil),               // 84: cyclopus.v1.CreateProjectRequest
+	(*CreateProjectResponse)(nil),              // 85: cyclopus.v1.CreateProjectResponse
+	(*GetProjectRequest)(nil),                  // 86: cyclopus.v1.GetProjectRequest
+	(*GetProjectResponse)(nil),                 // 87: cyclopus.v1.GetProjectResponse
+	(*ListProjectsRequest)(nil),                // 88: cyclopus.v1.ListProjectsRequest
+	(*ListProjectsResponse)(nil),               // 89: cyclopus.v1.ListProjectsResponse
+	(*UpdateProjectRequest)(nil),               // 90: cyclopus.v1.UpdateProjectRequest
+	(*UpdateProjectResponse)(nil),              // 91: cyclopus.v1.UpdateProjectResponse
+	(*DeleteProjectRequest)(nil),               // 92: cyclopus.v1.DeleteProjectRequest
+	(*DeleteProjectResponse)(nil),              // 93: cyclopus.v1.DeleteProjectResponse
+	(*CreateApplicationRequest)(nil),           // 94: cyclopus.v1.CreateApplicationRequest
+	(*CreateApplicationResponse)(nil),          // 95: cyclopus.v1.CreateApplicationResponse
+	(*GetApplicationRequest)(nil),              // 96: cyclopus.v1.GetApplicationRequest
+	(*GetApplicationResponse)(nil),             // 97: cyclopus.v1.GetApplicationResponse
+	(*ListApplicationsRequest)(nil),            // 98: cyclopus.v1.ListApplicationsRequest
+	(*ListApplicationsResponse)(nil),           // 99: cyclopus.v1.ListApplicationsResponse
+	(*UpdateApplicationRequest)(nil),           // 100: cyclopus.v1.UpdateApplicationRequest
+	(*UpdateApplicationResponse)(nil),          // 101: cyclopus.v1.UpdateApplicationResponse
+	(*DeleteApplicationRequest)(nil),           // 102: cyclopus.v1.DeleteApplicationRequest
+	(*DeleteApplicationResponse)(nil),          // 103: cyclopus.v1.DeleteApplicationResponse
+	(*GetEnvironmentRequest)(nil),              // 104: cyclopus.v1.GetEnvironmentRequest
+	(*GetEnvironmentResponse)(nil),             // 105: cyclopus.v1.GetEnvironmentResponse
+	(*ListEnvironmentsRequest)(nil),            // 106: cyclopus.v1.ListEnvironmentsRequest
+	(*ListEnvironmentsResponse)(nil),           // 107: cyclopus.v1.ListEnvironmentsResponse
+	(*DeployRequest)(nil),                      // 108: cyclopus.v1.DeployRequest
+	(*DeployResponse)(nil),                     // 109: cyclopus.v1.DeployResponse
+	(*RollbackRequest)(nil),                    // 110: cyclopus.v1.RollbackRequest
+	(*RollbackResponse)(nil),                   // 111: cyclopus.v1.RollbackResponse
+	(*GetReleaseRequest)(nil),                  // 112: cyclopus.v1.GetReleaseRequest
+	(*GetReleaseResponse)(nil),                 // 113: cyclopus.v1.GetReleaseResponse
+	(*ListReleasesRequest)(nil),                // 114: cyclopus.v1.ListReleasesRequest
+	(*ListReleasesResponse)(nil),               // 115: cyclopus.v1.ListReleasesResponse
+	(*GetEnvironmentVariablesRequest)(nil),     // 116: cyclopus.v1.GetEnvironmentVariablesRequest
+	(*GetEnvironmentVariablesResponse)(nil),    // 117: cyclopus.v1.GetEnvironmentVariablesResponse
+	(*SetEnvironmentVariablesRequest)(nil),     // 118: cyclopus.v1.SetEnvironmentVariablesRequest
+	(*SetEnvironmentVariablesResponse)(nil),    // 119: cyclopus.v1.SetEnvironmentVariablesResponse
+	(*StartReconciliationRequest)(nil),         // 120: cyclopus.v1.StartReconciliationRequest
+	(*StartReconciliationResponse)(nil),        // 121: cyclopus.v1.StartReconciliationResponse
+	(*GetReconciliationRequest)(nil),           // 122: cyclopus.v1.GetReconciliationRequest
+	(*GetReconciliationResponse)(nil),          // 123: cyclopus.v1.GetReconciliationResponse
+	(*ListReconciliationsRequest)(nil),         // 124: cyclopus.v1.ListReconciliationsRequest
+	(*ListReconciliationsResponse)(nil),        // 125: cyclopus.v1.ListReconciliationsResponse
+	(*ListReconciliationEvidenceRequest)(nil),  // 126: cyclopus.v1.ListReconciliationEvidenceRequest
+	(*ListReconciliationEvidenceResponse)(nil), // 127: cyclopus.v1.ListReconciliationEvidenceResponse
+	(*LogEntry)(nil),                           // 128: cyclopus.v1.LogEntry
+	(*QueryApplicationLogsRequest)(nil),        // 129: cyclopus.v1.QueryApplicationLogsRequest
+	(*QueryApplicationLogsResponse)(nil),       // 130: cyclopus.v1.QueryApplicationLogsResponse
+	(*TraceSummary)(nil),                       // 131: cyclopus.v1.TraceSummary
+	(*ListApplicationTracesRequest)(nil),       // 132: cyclopus.v1.ListApplicationTracesRequest
+	(*ListApplicationTracesResponse)(nil),      // 133: cyclopus.v1.ListApplicationTracesResponse
+	(*GetApplicationTraceRequest)(nil),         // 134: cyclopus.v1.GetApplicationTraceRequest
+	(*GetApplicationTraceResponse)(nil),        // 135: cyclopus.v1.GetApplicationTraceResponse
+	(*OperatorMetric)(nil),                     // 136: cyclopus.v1.OperatorMetric
+	(*GetOperatorMetricsRequest)(nil),          // 137: cyclopus.v1.GetOperatorMetricsRequest
+	(*GetOperatorMetricsResponse)(nil),         // 138: cyclopus.v1.GetOperatorMetricsResponse
+	nil,                                        // 139: cyclopus.v1.LogEntry.AttributesEntry
+	(*errdetails.ErrorInfo)(nil),               // 140: google.rpc.ErrorInfo
+	(*errdetails.BadRequest)(nil),              // 141: google.rpc.BadRequest
+	(*timestamppb.Timestamp)(nil),              // 142: google.protobuf.Timestamp
+	(*fieldmaskpb.FieldMask)(nil),              // 143: google.protobuf.FieldMask
+	(*structpb.Value)(nil),                     // 144: google.protobuf.Value
 }
 var file_cyclopus_v1_cyclopus_proto_depIdxs = []int32{
-	127, // 0: cyclopus.v1.ErrorDetailTypes.error_info:type_name -> google.rpc.ErrorInfo
-	128, // 1: cyclopus.v1.ErrorDetailTypes.bad_request:type_name -> google.rpc.BadRequest
-	129, // 2: cyclopus.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	129, // 3: cyclopus.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
-	14,  // 4: cyclopus.v1.Session.user:type_name -> cyclopus.v1.User
-	129, // 5: cyclopus.v1.ApiToken.expires_at:type_name -> google.protobuf.Timestamp
-	129, // 6: cyclopus.v1.ApiToken.created_at:type_name -> google.protobuf.Timestamp
-	129, // 7: cyclopus.v1.ApiToken.last_used_at:type_name -> google.protobuf.Timestamp
-	129, // 8: cyclopus.v1.Organization.created_at:type_name -> google.protobuf.Timestamp
-	129, // 9: cyclopus.v1.Organization.deleted_at:type_name -> google.protobuf.Timestamp
-	129, // 10: cyclopus.v1.Project.created_at:type_name -> google.protobuf.Timestamp
-	129, // 11: cyclopus.v1.Project.deleted_at:type_name -> google.protobuf.Timestamp
+	140, // 0: cyclopus.v1.ErrorDetailTypes.error_info:type_name -> google.rpc.ErrorInfo
+	141, // 1: cyclopus.v1.ErrorDetailTypes.bad_request:type_name -> google.rpc.BadRequest
+	142, // 2: cyclopus.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	142, // 3: cyclopus.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	15,  // 4: cyclopus.v1.Session.user:type_name -> cyclopus.v1.User
+	142, // 5: cyclopus.v1.ApiToken.expires_at:type_name -> google.protobuf.Timestamp
+	142, // 6: cyclopus.v1.ApiToken.created_at:type_name -> google.protobuf.Timestamp
+	142, // 7: cyclopus.v1.ApiToken.last_used_at:type_name -> google.protobuf.Timestamp
+	142, // 8: cyclopus.v1.Organization.created_at:type_name -> google.protobuf.Timestamp
+	142, // 9: cyclopus.v1.Organization.deleted_at:type_name -> google.protobuf.Timestamp
+	142, // 10: cyclopus.v1.Project.created_at:type_name -> google.protobuf.Timestamp
+	142, // 11: cyclopus.v1.Project.deleted_at:type_name -> google.protobuf.Timestamp
 	2,   // 12: cyclopus.v1.Application.scaling_mode:type_name -> cyclopus.v1.ScalingMode
 	3,   // 13: cyclopus.v1.Application.runtime_class:type_name -> cyclopus.v1.RuntimeClass
-	129, // 14: cyclopus.v1.Application.created_at:type_name -> google.protobuf.Timestamp
-	129, // 15: cyclopus.v1.Application.deleted_at:type_name -> google.protobuf.Timestamp
-	19,  // 16: cyclopus.v1.Application.keda_cron_schedules:type_name -> cyclopus.v1.KedaCronSchedule
+	142, // 14: cyclopus.v1.Application.created_at:type_name -> google.protobuf.Timestamp
+	142, // 15: cyclopus.v1.Application.deleted_at:type_name -> google.protobuf.Timestamp
+	20,  // 16: cyclopus.v1.Application.keda_cron_schedules:type_name -> cyclopus.v1.KedaCronSchedule
 	0,   // 17: cyclopus.v1.Environment.kind:type_name -> cyclopus.v1.EnvironmentKind
-	129, // 18: cyclopus.v1.Environment.created_at:type_name -> google.protobuf.Timestamp
-	129, // 19: cyclopus.v1.Environment.torn_down_at:type_name -> google.protobuf.Timestamp
+	142, // 18: cyclopus.v1.Environment.created_at:type_name -> google.protobuf.Timestamp
+	142, // 19: cyclopus.v1.Environment.torn_down_at:type_name -> google.protobuf.Timestamp
 	1,   // 20: cyclopus.v1.Environment.lifecycle_status:type_name -> cyclopus.v1.EnvironmentLifecycleStatus
-	129, // 21: cyclopus.v1.Environment.teardown_requested_at:type_name -> google.protobuf.Timestamp
-	21,  // 22: cyclopus.v1.PreviewPushResponse.environment:type_name -> cyclopus.v1.Environment
-	21,  // 23: cyclopus.v1.PreviewBranchDeleteResponse.environment:type_name -> cyclopus.v1.Environment
-	21,  // 24: cyclopus.v1.TeardownEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
+	142, // 21: cyclopus.v1.Environment.teardown_requested_at:type_name -> google.protobuf.Timestamp
+	22,  // 22: cyclopus.v1.PreviewPushResponse.environment:type_name -> cyclopus.v1.Environment
+	22,  // 23: cyclopus.v1.PreviewBranchDeleteResponse.environment:type_name -> cyclopus.v1.Environment
+	22,  // 24: cyclopus.v1.TeardownEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
 	4,   // 25: cyclopus.v1.Release.kind:type_name -> cyclopus.v1.ReleaseKind
 	5,   // 26: cyclopus.v1.Release.status:type_name -> cyclopus.v1.ReleaseStatus
-	129, // 27: cyclopus.v1.Release.created_at:type_name -> google.protobuf.Timestamp
-	29,  // 28: cyclopus.v1.EnvironmentVariableRevision.variables:type_name -> cyclopus.v1.EnvironmentVariable
-	129, // 29: cyclopus.v1.EnvironmentVariableRevision.created_at:type_name -> google.protobuf.Timestamp
-	129, // 30: cyclopus.v1.WebhookEndpoint.disabled_at:type_name -> google.protobuf.Timestamp
-	129, // 31: cyclopus.v1.WebhookEndpoint.created_at:type_name -> google.protobuf.Timestamp
-	129, // 32: cyclopus.v1.WebhookEndpoint.updated_at:type_name -> google.protobuf.Timestamp
-	31,  // 33: cyclopus.v1.CreateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	31,  // 34: cyclopus.v1.CreateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	31,  // 35: cyclopus.v1.GetWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	31,  // 36: cyclopus.v1.ListWebhooksResponse.webhooks:type_name -> cyclopus.v1.WebhookEndpoint
-	31,  // 37: cyclopus.v1.UpdateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	130, // 38: cyclopus.v1.UpdateWebhookRequest.update_mask:type_name -> google.protobuf.FieldMask
-	31,  // 39: cyclopus.v1.UpdateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
-	6,   // 40: cyclopus.v1.Operation.status:type_name -> cyclopus.v1.OperationStatus
-	8,   // 41: cyclopus.v1.ReconcileScope.kind:type_name -> cyclopus.v1.ReconcileScopeKind
-	9,   // 42: cyclopus.v1.ReconcileFinding.category:type_name -> cyclopus.v1.ReconcileCategory
-	10,  // 43: cyclopus.v1.ReconcileFinding.status:type_name -> cyclopus.v1.ReconcileFindingStatus
-	45,  // 44: cyclopus.v1.ReconcileFinding.runtime_class_drift:type_name -> cyclopus.v1.RuntimeClassDriftFinding
-	46,  // 45: cyclopus.v1.ReconcileFinding.network_policy_drift:type_name -> cyclopus.v1.NetworkPolicyDriftFinding
-	129, // 46: cyclopus.v1.ReconcileFinding.observed_at:type_name -> google.protobuf.Timestamp
-	47,  // 47: cyclopus.v1.ReconciliationPlanOperation.object:type_name -> cyclopus.v1.ReconciliationObject
-	131, // 48: cyclopus.v1.ReconciliationPlanOperation.details:type_name -> google.protobuf.Value
-	48,  // 49: cyclopus.v1.ReconciliationPlan.create:type_name -> cyclopus.v1.ReconciliationPlanOperation
-	48,  // 50: cyclopus.v1.ReconciliationPlan.patch:type_name -> cyclopus.v1.ReconciliationPlanOperation
-	48,  // 51: cyclopus.v1.ReconciliationPlan.delete:type_name -> cyclopus.v1.ReconciliationPlanOperation
-	47,  // 52: cyclopus.v1.ReconciliationReport.orphans:type_name -> cyclopus.v1.ReconciliationObject
-	47,  // 53: cyclopus.v1.ReconciliationReport.pruned:type_name -> cyclopus.v1.ReconciliationObject
-	47,  // 54: cyclopus.v1.ReconciliationEvidence.object:type_name -> cyclopus.v1.ReconciliationObject
-	131, // 55: cyclopus.v1.ReconciliationEvidence.details:type_name -> google.protobuf.Value
-	129, // 56: cyclopus.v1.ReconciliationEvidence.observed_at:type_name -> google.protobuf.Timestamp
-	43,  // 57: cyclopus.v1.ReconciliationRun.scope:type_name -> cyclopus.v1.ReconcileScope
-	9,   // 58: cyclopus.v1.ReconciliationRun.categories:type_name -> cyclopus.v1.ReconcileCategory
-	6,   // 59: cyclopus.v1.ReconciliationRun.status:type_name -> cyclopus.v1.OperationStatus
-	129, // 60: cyclopus.v1.ReconciliationRun.created_at:type_name -> google.protobuf.Timestamp
-	129, // 61: cyclopus.v1.ReconciliationRun.completed_at:type_name -> google.protobuf.Timestamp
-	49,  // 62: cyclopus.v1.ReconciliationRun.plan:type_name -> cyclopus.v1.ReconciliationPlan
-	50,  // 63: cyclopus.v1.ReconciliationRun.report:type_name -> cyclopus.v1.ReconciliationReport
-	44,  // 64: cyclopus.v1.ReconciliationRun.findings:type_name -> cyclopus.v1.ReconcileFinding
-	129, // 65: cyclopus.v1.ReconciliationRun.started_at:type_name -> google.protobuf.Timestamp
-	15,  // 66: cyclopus.v1.BootstrapResponse.session:type_name -> cyclopus.v1.Session
-	15,  // 67: cyclopus.v1.LoginResponse.session:type_name -> cyclopus.v1.Session
-	14,  // 68: cyclopus.v1.GetCurrentUserResponse.user:type_name -> cyclopus.v1.User
-	129, // 69: cyclopus.v1.CreateApiTokenRequest.expires_at:type_name -> google.protobuf.Timestamp
-	16,  // 70: cyclopus.v1.CreateApiTokenResponse.api_token:type_name -> cyclopus.v1.ApiToken
-	7,   // 71: cyclopus.v1.CreateApiTokenResponse.result:type_name -> cyclopus.v1.CreateApiTokenResult
-	16,  // 72: cyclopus.v1.ListApiTokensResponse.api_tokens:type_name -> cyclopus.v1.ApiToken
-	17,  // 73: cyclopus.v1.GetOrganizationResponse.organization:type_name -> cyclopus.v1.Organization
-	42,  // 74: cyclopus.v1.DeleteOrganizationResponse.operation:type_name -> cyclopus.v1.Operation
-	18,  // 75: cyclopus.v1.CreateProjectRequest.project:type_name -> cyclopus.v1.Project
-	18,  // 76: cyclopus.v1.CreateProjectResponse.project:type_name -> cyclopus.v1.Project
-	18,  // 77: cyclopus.v1.GetProjectResponse.project:type_name -> cyclopus.v1.Project
-	18,  // 78: cyclopus.v1.ListProjectsResponse.projects:type_name -> cyclopus.v1.Project
-	18,  // 79: cyclopus.v1.UpdateProjectRequest.project:type_name -> cyclopus.v1.Project
-	130, // 80: cyclopus.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
-	18,  // 81: cyclopus.v1.UpdateProjectResponse.project:type_name -> cyclopus.v1.Project
-	42,  // 82: cyclopus.v1.DeleteProjectResponse.operation:type_name -> cyclopus.v1.Operation
-	20,  // 83: cyclopus.v1.CreateApplicationRequest.application:type_name -> cyclopus.v1.Application
-	20,  // 84: cyclopus.v1.CreateApplicationResponse.application:type_name -> cyclopus.v1.Application
-	20,  // 85: cyclopus.v1.GetApplicationResponse.application:type_name -> cyclopus.v1.Application
-	20,  // 86: cyclopus.v1.ListApplicationsResponse.applications:type_name -> cyclopus.v1.Application
-	20,  // 87: cyclopus.v1.UpdateApplicationRequest.application:type_name -> cyclopus.v1.Application
-	130, // 88: cyclopus.v1.UpdateApplicationRequest.update_mask:type_name -> google.protobuf.FieldMask
-	20,  // 89: cyclopus.v1.UpdateApplicationResponse.application:type_name -> cyclopus.v1.Application
-	42,  // 90: cyclopus.v1.DeleteApplicationResponse.operation:type_name -> cyclopus.v1.Operation
-	21,  // 91: cyclopus.v1.GetEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
-	21,  // 92: cyclopus.v1.ListEnvironmentsResponse.environments:type_name -> cyclopus.v1.Environment
-	42,  // 93: cyclopus.v1.DeployResponse.operation:type_name -> cyclopus.v1.Operation
-	42,  // 94: cyclopus.v1.RollbackResponse.operation:type_name -> cyclopus.v1.Operation
-	28,  // 95: cyclopus.v1.GetReleaseResponse.release:type_name -> cyclopus.v1.Release
-	5,   // 96: cyclopus.v1.ListReleasesRequest.statuses:type_name -> cyclopus.v1.ReleaseStatus
-	28,  // 97: cyclopus.v1.ListReleasesResponse.releases:type_name -> cyclopus.v1.Release
-	30,  // 98: cyclopus.v1.GetEnvironmentVariablesResponse.revision:type_name -> cyclopus.v1.EnvironmentVariableRevision
-	29,  // 99: cyclopus.v1.SetEnvironmentVariablesRequest.variables:type_name -> cyclopus.v1.EnvironmentVariable
-	42,  // 100: cyclopus.v1.SetEnvironmentVariablesResponse.operation:type_name -> cyclopus.v1.Operation
-	43,  // 101: cyclopus.v1.StartReconciliationRequest.scope:type_name -> cyclopus.v1.ReconcileScope
-	9,   // 102: cyclopus.v1.StartReconciliationRequest.categories:type_name -> cyclopus.v1.ReconcileCategory
-	42,  // 103: cyclopus.v1.StartReconciliationResponse.operation:type_name -> cyclopus.v1.Operation
-	52,  // 104: cyclopus.v1.GetReconciliationResponse.reconciliation:type_name -> cyclopus.v1.ReconciliationRun
-	52,  // 105: cyclopus.v1.ListReconciliationsResponse.reconciliations:type_name -> cyclopus.v1.ReconciliationRun
-	51,  // 106: cyclopus.v1.ListReconciliationEvidenceResponse.evidence:type_name -> cyclopus.v1.ReconciliationEvidence
-	129, // 107: cyclopus.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
-	11,  // 108: cyclopus.v1.LogEntry.severity:type_name -> cyclopus.v1.LogSeverity
-	126, // 109: cyclopus.v1.LogEntry.attributes:type_name -> cyclopus.v1.LogEntry.AttributesEntry
-	129, // 110: cyclopus.v1.QueryApplicationLogsRequest.start_time:type_name -> google.protobuf.Timestamp
-	129, // 111: cyclopus.v1.QueryApplicationLogsRequest.end_time:type_name -> google.protobuf.Timestamp
-	11,  // 112: cyclopus.v1.QueryApplicationLogsRequest.min_severity:type_name -> cyclopus.v1.LogSeverity
-	115, // 113: cyclopus.v1.QueryApplicationLogsResponse.entries:type_name -> cyclopus.v1.LogEntry
-	129, // 114: cyclopus.v1.TraceSummary.start_time:type_name -> google.protobuf.Timestamp
-	12,  // 115: cyclopus.v1.TraceSummary.status:type_name -> cyclopus.v1.TraceStatus
-	129, // 116: cyclopus.v1.ListApplicationTracesRequest.start_time:type_name -> google.protobuf.Timestamp
-	129, // 117: cyclopus.v1.ListApplicationTracesRequest.end_time:type_name -> google.protobuf.Timestamp
-	118, // 118: cyclopus.v1.ListApplicationTracesResponse.traces:type_name -> cyclopus.v1.TraceSummary
-	129, // 119: cyclopus.v1.GetApplicationTraceRequest.start_time:type_name -> google.protobuf.Timestamp
-	129, // 120: cyclopus.v1.GetApplicationTraceRequest.end_time:type_name -> google.protobuf.Timestamp
-	118, // 121: cyclopus.v1.GetApplicationTraceResponse.trace:type_name -> cyclopus.v1.TraceSummary
-	129, // 122: cyclopus.v1.OperatorMetric.observed_at:type_name -> google.protobuf.Timestamp
-	123, // 123: cyclopus.v1.GetOperatorMetricsResponse.metrics:type_name -> cyclopus.v1.OperatorMetric
-	53,  // 124: cyclopus.v1.AuthenticationService.Bootstrap:input_type -> cyclopus.v1.BootstrapRequest
-	55,  // 125: cyclopus.v1.AuthenticationService.Login:input_type -> cyclopus.v1.LoginRequest
-	57,  // 126: cyclopus.v1.AuthenticationService.Logout:input_type -> cyclopus.v1.LogoutRequest
-	59,  // 127: cyclopus.v1.AuthenticationService.GetCurrentUser:input_type -> cyclopus.v1.GetCurrentUserRequest
-	61,  // 128: cyclopus.v1.AuthenticationService.CreateApiToken:input_type -> cyclopus.v1.CreateApiTokenRequest
-	63,  // 129: cyclopus.v1.AuthenticationService.ListApiTokens:input_type -> cyclopus.v1.ListApiTokensRequest
-	65,  // 130: cyclopus.v1.AuthenticationService.RevokeApiToken:input_type -> cyclopus.v1.RevokeApiTokenRequest
-	67,  // 131: cyclopus.v1.OrganizationService.GetOrganization:input_type -> cyclopus.v1.GetOrganizationRequest
-	69,  // 132: cyclopus.v1.OrganizationService.DeleteOrganization:input_type -> cyclopus.v1.DeleteOrganizationRequest
-	71,  // 133: cyclopus.v1.ProjectService.CreateProject:input_type -> cyclopus.v1.CreateProjectRequest
-	73,  // 134: cyclopus.v1.ProjectService.GetProject:input_type -> cyclopus.v1.GetProjectRequest
-	75,  // 135: cyclopus.v1.ProjectService.ListProjects:input_type -> cyclopus.v1.ListProjectsRequest
-	77,  // 136: cyclopus.v1.ProjectService.UpdateProject:input_type -> cyclopus.v1.UpdateProjectRequest
-	79,  // 137: cyclopus.v1.ProjectService.DeleteProject:input_type -> cyclopus.v1.DeleteProjectRequest
-	81,  // 138: cyclopus.v1.ApplicationService.CreateApplication:input_type -> cyclopus.v1.CreateApplicationRequest
-	83,  // 139: cyclopus.v1.ApplicationService.GetApplication:input_type -> cyclopus.v1.GetApplicationRequest
-	85,  // 140: cyclopus.v1.ApplicationService.ListApplications:input_type -> cyclopus.v1.ListApplicationsRequest
-	87,  // 141: cyclopus.v1.ApplicationService.UpdateApplication:input_type -> cyclopus.v1.UpdateApplicationRequest
-	89,  // 142: cyclopus.v1.ApplicationService.DeleteApplication:input_type -> cyclopus.v1.DeleteApplicationRequest
-	91,  // 143: cyclopus.v1.EnvironmentService.GetEnvironment:input_type -> cyclopus.v1.GetEnvironmentRequest
-	93,  // 144: cyclopus.v1.EnvironmentService.ListEnvironments:input_type -> cyclopus.v1.ListEnvironmentsRequest
-	22,  // 145: cyclopus.v1.EnvironmentService.AcceptPreviewPush:input_type -> cyclopus.v1.PreviewPushRequest
-	24,  // 146: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:input_type -> cyclopus.v1.PreviewBranchDeleteRequest
-	26,  // 147: cyclopus.v1.EnvironmentService.TeardownEnvironment:input_type -> cyclopus.v1.TeardownEnvironmentRequest
-	95,  // 148: cyclopus.v1.ReleaseService.Deploy:input_type -> cyclopus.v1.DeployRequest
-	97,  // 149: cyclopus.v1.ReleaseService.Rollback:input_type -> cyclopus.v1.RollbackRequest
-	99,  // 150: cyclopus.v1.ReleaseService.GetRelease:input_type -> cyclopus.v1.GetReleaseRequest
-	101, // 151: cyclopus.v1.ReleaseService.ListReleases:input_type -> cyclopus.v1.ListReleasesRequest
-	103, // 152: cyclopus.v1.ReleaseService.GetEnvironmentVariables:input_type -> cyclopus.v1.GetEnvironmentVariablesRequest
-	105, // 153: cyclopus.v1.ReleaseService.SetEnvironmentVariables:input_type -> cyclopus.v1.SetEnvironmentVariablesRequest
-	107, // 154: cyclopus.v1.ReconciliationService.StartReconciliation:input_type -> cyclopus.v1.StartReconciliationRequest
-	109, // 155: cyclopus.v1.ReconciliationService.GetReconciliation:input_type -> cyclopus.v1.GetReconciliationRequest
-	111, // 156: cyclopus.v1.ReconciliationService.ListReconciliations:input_type -> cyclopus.v1.ListReconciliationsRequest
-	113, // 157: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:input_type -> cyclopus.v1.ListReconciliationEvidenceRequest
-	32,  // 158: cyclopus.v1.WebhookService.CreateWebhook:input_type -> cyclopus.v1.CreateWebhookRequest
-	34,  // 159: cyclopus.v1.WebhookService.GetWebhook:input_type -> cyclopus.v1.GetWebhookRequest
-	36,  // 160: cyclopus.v1.WebhookService.ListWebhooks:input_type -> cyclopus.v1.ListWebhooksRequest
-	38,  // 161: cyclopus.v1.WebhookService.UpdateWebhook:input_type -> cyclopus.v1.UpdateWebhookRequest
-	40,  // 162: cyclopus.v1.WebhookService.DeleteWebhook:input_type -> cyclopus.v1.DeleteWebhookRequest
-	116, // 163: cyclopus.v1.ObservabilityService.QueryApplicationLogs:input_type -> cyclopus.v1.QueryApplicationLogsRequest
-	119, // 164: cyclopus.v1.ObservabilityService.ListApplicationTraces:input_type -> cyclopus.v1.ListApplicationTracesRequest
-	121, // 165: cyclopus.v1.ObservabilityService.GetApplicationTrace:input_type -> cyclopus.v1.GetApplicationTraceRequest
-	124, // 166: cyclopus.v1.ObservabilityService.GetOperatorMetrics:input_type -> cyclopus.v1.GetOperatorMetricsRequest
-	54,  // 167: cyclopus.v1.AuthenticationService.Bootstrap:output_type -> cyclopus.v1.BootstrapResponse
-	56,  // 168: cyclopus.v1.AuthenticationService.Login:output_type -> cyclopus.v1.LoginResponse
-	58,  // 169: cyclopus.v1.AuthenticationService.Logout:output_type -> cyclopus.v1.LogoutResponse
-	60,  // 170: cyclopus.v1.AuthenticationService.GetCurrentUser:output_type -> cyclopus.v1.GetCurrentUserResponse
-	62,  // 171: cyclopus.v1.AuthenticationService.CreateApiToken:output_type -> cyclopus.v1.CreateApiTokenResponse
-	64,  // 172: cyclopus.v1.AuthenticationService.ListApiTokens:output_type -> cyclopus.v1.ListApiTokensResponse
-	66,  // 173: cyclopus.v1.AuthenticationService.RevokeApiToken:output_type -> cyclopus.v1.RevokeApiTokenResponse
-	68,  // 174: cyclopus.v1.OrganizationService.GetOrganization:output_type -> cyclopus.v1.GetOrganizationResponse
-	70,  // 175: cyclopus.v1.OrganizationService.DeleteOrganization:output_type -> cyclopus.v1.DeleteOrganizationResponse
-	72,  // 176: cyclopus.v1.ProjectService.CreateProject:output_type -> cyclopus.v1.CreateProjectResponse
-	74,  // 177: cyclopus.v1.ProjectService.GetProject:output_type -> cyclopus.v1.GetProjectResponse
-	76,  // 178: cyclopus.v1.ProjectService.ListProjects:output_type -> cyclopus.v1.ListProjectsResponse
-	78,  // 179: cyclopus.v1.ProjectService.UpdateProject:output_type -> cyclopus.v1.UpdateProjectResponse
-	80,  // 180: cyclopus.v1.ProjectService.DeleteProject:output_type -> cyclopus.v1.DeleteProjectResponse
-	82,  // 181: cyclopus.v1.ApplicationService.CreateApplication:output_type -> cyclopus.v1.CreateApplicationResponse
-	84,  // 182: cyclopus.v1.ApplicationService.GetApplication:output_type -> cyclopus.v1.GetApplicationResponse
-	86,  // 183: cyclopus.v1.ApplicationService.ListApplications:output_type -> cyclopus.v1.ListApplicationsResponse
-	88,  // 184: cyclopus.v1.ApplicationService.UpdateApplication:output_type -> cyclopus.v1.UpdateApplicationResponse
-	90,  // 185: cyclopus.v1.ApplicationService.DeleteApplication:output_type -> cyclopus.v1.DeleteApplicationResponse
-	92,  // 186: cyclopus.v1.EnvironmentService.GetEnvironment:output_type -> cyclopus.v1.GetEnvironmentResponse
-	94,  // 187: cyclopus.v1.EnvironmentService.ListEnvironments:output_type -> cyclopus.v1.ListEnvironmentsResponse
-	23,  // 188: cyclopus.v1.EnvironmentService.AcceptPreviewPush:output_type -> cyclopus.v1.PreviewPushResponse
-	25,  // 189: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:output_type -> cyclopus.v1.PreviewBranchDeleteResponse
-	27,  // 190: cyclopus.v1.EnvironmentService.TeardownEnvironment:output_type -> cyclopus.v1.TeardownEnvironmentResponse
-	96,  // 191: cyclopus.v1.ReleaseService.Deploy:output_type -> cyclopus.v1.DeployResponse
-	98,  // 192: cyclopus.v1.ReleaseService.Rollback:output_type -> cyclopus.v1.RollbackResponse
-	100, // 193: cyclopus.v1.ReleaseService.GetRelease:output_type -> cyclopus.v1.GetReleaseResponse
-	102, // 194: cyclopus.v1.ReleaseService.ListReleases:output_type -> cyclopus.v1.ListReleasesResponse
-	104, // 195: cyclopus.v1.ReleaseService.GetEnvironmentVariables:output_type -> cyclopus.v1.GetEnvironmentVariablesResponse
-	106, // 196: cyclopus.v1.ReleaseService.SetEnvironmentVariables:output_type -> cyclopus.v1.SetEnvironmentVariablesResponse
-	108, // 197: cyclopus.v1.ReconciliationService.StartReconciliation:output_type -> cyclopus.v1.StartReconciliationResponse
-	110, // 198: cyclopus.v1.ReconciliationService.GetReconciliation:output_type -> cyclopus.v1.GetReconciliationResponse
-	112, // 199: cyclopus.v1.ReconciliationService.ListReconciliations:output_type -> cyclopus.v1.ListReconciliationsResponse
-	114, // 200: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:output_type -> cyclopus.v1.ListReconciliationEvidenceResponse
-	33,  // 201: cyclopus.v1.WebhookService.CreateWebhook:output_type -> cyclopus.v1.CreateWebhookResponse
-	35,  // 202: cyclopus.v1.WebhookService.GetWebhook:output_type -> cyclopus.v1.GetWebhookResponse
-	37,  // 203: cyclopus.v1.WebhookService.ListWebhooks:output_type -> cyclopus.v1.ListWebhooksResponse
-	39,  // 204: cyclopus.v1.WebhookService.UpdateWebhook:output_type -> cyclopus.v1.UpdateWebhookResponse
-	41,  // 205: cyclopus.v1.WebhookService.DeleteWebhook:output_type -> cyclopus.v1.DeleteWebhookResponse
-	117, // 206: cyclopus.v1.ObservabilityService.QueryApplicationLogs:output_type -> cyclopus.v1.QueryApplicationLogsResponse
-	120, // 207: cyclopus.v1.ObservabilityService.ListApplicationTraces:output_type -> cyclopus.v1.ListApplicationTracesResponse
-	122, // 208: cyclopus.v1.ObservabilityService.GetApplicationTrace:output_type -> cyclopus.v1.GetApplicationTraceResponse
-	125, // 209: cyclopus.v1.ObservabilityService.GetOperatorMetrics:output_type -> cyclopus.v1.GetOperatorMetricsResponse
-	167, // [167:210] is the sub-list for method output_type
-	124, // [124:167] is the sub-list for method input_type
-	124, // [124:124] is the sub-list for extension type_name
-	124, // [124:124] is the sub-list for extension extendee
-	0,   // [0:124] is the sub-list for field type_name
+	142, // 27: cyclopus.v1.Release.created_at:type_name -> google.protobuf.Timestamp
+	30,  // 28: cyclopus.v1.EnvironmentVariableRevision.variables:type_name -> cyclopus.v1.EnvironmentVariable
+	142, // 29: cyclopus.v1.EnvironmentVariableRevision.created_at:type_name -> google.protobuf.Timestamp
+	142, // 30: cyclopus.v1.WebhookEndpoint.disabled_at:type_name -> google.protobuf.Timestamp
+	142, // 31: cyclopus.v1.WebhookEndpoint.created_at:type_name -> google.protobuf.Timestamp
+	142, // 32: cyclopus.v1.WebhookEndpoint.updated_at:type_name -> google.protobuf.Timestamp
+	32,  // 33: cyclopus.v1.CreateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	32,  // 34: cyclopus.v1.CreateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	32,  // 35: cyclopus.v1.GetWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	32,  // 36: cyclopus.v1.ListWebhooksResponse.webhooks:type_name -> cyclopus.v1.WebhookEndpoint
+	32,  // 37: cyclopus.v1.UpdateWebhookRequest.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	143, // 38: cyclopus.v1.UpdateWebhookRequest.update_mask:type_name -> google.protobuf.FieldMask
+	32,  // 39: cyclopus.v1.UpdateWebhookResponse.webhook:type_name -> cyclopus.v1.WebhookEndpoint
+	13,  // 40: cyclopus.v1.Domain.verification_method:type_name -> cyclopus.v1.DomainVerificationMethod
+	142, // 41: cyclopus.v1.Domain.verified_at:type_name -> google.protobuf.Timestamp
+	142, // 42: cyclopus.v1.Domain.created_at:type_name -> google.protobuf.Timestamp
+	44,  // 43: cyclopus.v1.Domain.instructions:type_name -> cyclopus.v1.DomainDnsInstructions
+	43,  // 44: cyclopus.v1.CreateDomainRequest.domain:type_name -> cyclopus.v1.Domain
+	43,  // 45: cyclopus.v1.CreateDomainResponse.domain:type_name -> cyclopus.v1.Domain
+	43,  // 46: cyclopus.v1.GetDomainResponse.domain:type_name -> cyclopus.v1.Domain
+	43,  // 47: cyclopus.v1.ListDomainsResponse.domains:type_name -> cyclopus.v1.Domain
+	43,  // 48: cyclopus.v1.VerifyDomainResponse.domain:type_name -> cyclopus.v1.Domain
+	6,   // 49: cyclopus.v1.Operation.status:type_name -> cyclopus.v1.OperationStatus
+	8,   // 50: cyclopus.v1.ReconcileScope.kind:type_name -> cyclopus.v1.ReconcileScopeKind
+	9,   // 51: cyclopus.v1.ReconcileFinding.category:type_name -> cyclopus.v1.ReconcileCategory
+	10,  // 52: cyclopus.v1.ReconcileFinding.status:type_name -> cyclopus.v1.ReconcileFindingStatus
+	58,  // 53: cyclopus.v1.ReconcileFinding.runtime_class_drift:type_name -> cyclopus.v1.RuntimeClassDriftFinding
+	59,  // 54: cyclopus.v1.ReconcileFinding.network_policy_drift:type_name -> cyclopus.v1.NetworkPolicyDriftFinding
+	142, // 55: cyclopus.v1.ReconcileFinding.observed_at:type_name -> google.protobuf.Timestamp
+	60,  // 56: cyclopus.v1.ReconciliationPlanOperation.object:type_name -> cyclopus.v1.ReconciliationObject
+	144, // 57: cyclopus.v1.ReconciliationPlanOperation.details:type_name -> google.protobuf.Value
+	61,  // 58: cyclopus.v1.ReconciliationPlan.create:type_name -> cyclopus.v1.ReconciliationPlanOperation
+	61,  // 59: cyclopus.v1.ReconciliationPlan.patch:type_name -> cyclopus.v1.ReconciliationPlanOperation
+	61,  // 60: cyclopus.v1.ReconciliationPlan.delete:type_name -> cyclopus.v1.ReconciliationPlanOperation
+	60,  // 61: cyclopus.v1.ReconciliationReport.orphans:type_name -> cyclopus.v1.ReconciliationObject
+	60,  // 62: cyclopus.v1.ReconciliationReport.pruned:type_name -> cyclopus.v1.ReconciliationObject
+	60,  // 63: cyclopus.v1.ReconciliationEvidence.object:type_name -> cyclopus.v1.ReconciliationObject
+	144, // 64: cyclopus.v1.ReconciliationEvidence.details:type_name -> google.protobuf.Value
+	142, // 65: cyclopus.v1.ReconciliationEvidence.observed_at:type_name -> google.protobuf.Timestamp
+	56,  // 66: cyclopus.v1.ReconciliationRun.scope:type_name -> cyclopus.v1.ReconcileScope
+	9,   // 67: cyclopus.v1.ReconciliationRun.categories:type_name -> cyclopus.v1.ReconcileCategory
+	6,   // 68: cyclopus.v1.ReconciliationRun.status:type_name -> cyclopus.v1.OperationStatus
+	142, // 69: cyclopus.v1.ReconciliationRun.created_at:type_name -> google.protobuf.Timestamp
+	142, // 70: cyclopus.v1.ReconciliationRun.completed_at:type_name -> google.protobuf.Timestamp
+	62,  // 71: cyclopus.v1.ReconciliationRun.plan:type_name -> cyclopus.v1.ReconciliationPlan
+	63,  // 72: cyclopus.v1.ReconciliationRun.report:type_name -> cyclopus.v1.ReconciliationReport
+	57,  // 73: cyclopus.v1.ReconciliationRun.findings:type_name -> cyclopus.v1.ReconcileFinding
+	142, // 74: cyclopus.v1.ReconciliationRun.started_at:type_name -> google.protobuf.Timestamp
+	16,  // 75: cyclopus.v1.BootstrapResponse.session:type_name -> cyclopus.v1.Session
+	16,  // 76: cyclopus.v1.LoginResponse.session:type_name -> cyclopus.v1.Session
+	15,  // 77: cyclopus.v1.GetCurrentUserResponse.user:type_name -> cyclopus.v1.User
+	142, // 78: cyclopus.v1.CreateApiTokenRequest.expires_at:type_name -> google.protobuf.Timestamp
+	17,  // 79: cyclopus.v1.CreateApiTokenResponse.api_token:type_name -> cyclopus.v1.ApiToken
+	7,   // 80: cyclopus.v1.CreateApiTokenResponse.result:type_name -> cyclopus.v1.CreateApiTokenResult
+	17,  // 81: cyclopus.v1.ListApiTokensResponse.api_tokens:type_name -> cyclopus.v1.ApiToken
+	18,  // 82: cyclopus.v1.GetOrganizationResponse.organization:type_name -> cyclopus.v1.Organization
+	55,  // 83: cyclopus.v1.DeleteOrganizationResponse.operation:type_name -> cyclopus.v1.Operation
+	19,  // 84: cyclopus.v1.CreateProjectRequest.project:type_name -> cyclopus.v1.Project
+	19,  // 85: cyclopus.v1.CreateProjectResponse.project:type_name -> cyclopus.v1.Project
+	19,  // 86: cyclopus.v1.GetProjectResponse.project:type_name -> cyclopus.v1.Project
+	19,  // 87: cyclopus.v1.ListProjectsResponse.projects:type_name -> cyclopus.v1.Project
+	19,  // 88: cyclopus.v1.UpdateProjectRequest.project:type_name -> cyclopus.v1.Project
+	143, // 89: cyclopus.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
+	19,  // 90: cyclopus.v1.UpdateProjectResponse.project:type_name -> cyclopus.v1.Project
+	55,  // 91: cyclopus.v1.DeleteProjectResponse.operation:type_name -> cyclopus.v1.Operation
+	21,  // 92: cyclopus.v1.CreateApplicationRequest.application:type_name -> cyclopus.v1.Application
+	21,  // 93: cyclopus.v1.CreateApplicationResponse.application:type_name -> cyclopus.v1.Application
+	21,  // 94: cyclopus.v1.GetApplicationResponse.application:type_name -> cyclopus.v1.Application
+	21,  // 95: cyclopus.v1.ListApplicationsResponse.applications:type_name -> cyclopus.v1.Application
+	21,  // 96: cyclopus.v1.UpdateApplicationRequest.application:type_name -> cyclopus.v1.Application
+	143, // 97: cyclopus.v1.UpdateApplicationRequest.update_mask:type_name -> google.protobuf.FieldMask
+	21,  // 98: cyclopus.v1.UpdateApplicationResponse.application:type_name -> cyclopus.v1.Application
+	55,  // 99: cyclopus.v1.DeleteApplicationResponse.operation:type_name -> cyclopus.v1.Operation
+	22,  // 100: cyclopus.v1.GetEnvironmentResponse.environment:type_name -> cyclopus.v1.Environment
+	22,  // 101: cyclopus.v1.ListEnvironmentsResponse.environments:type_name -> cyclopus.v1.Environment
+	55,  // 102: cyclopus.v1.DeployResponse.operation:type_name -> cyclopus.v1.Operation
+	55,  // 103: cyclopus.v1.RollbackResponse.operation:type_name -> cyclopus.v1.Operation
+	29,  // 104: cyclopus.v1.GetReleaseResponse.release:type_name -> cyclopus.v1.Release
+	5,   // 105: cyclopus.v1.ListReleasesRequest.statuses:type_name -> cyclopus.v1.ReleaseStatus
+	29,  // 106: cyclopus.v1.ListReleasesResponse.releases:type_name -> cyclopus.v1.Release
+	31,  // 107: cyclopus.v1.GetEnvironmentVariablesResponse.revision:type_name -> cyclopus.v1.EnvironmentVariableRevision
+	30,  // 108: cyclopus.v1.SetEnvironmentVariablesRequest.variables:type_name -> cyclopus.v1.EnvironmentVariable
+	55,  // 109: cyclopus.v1.SetEnvironmentVariablesResponse.operation:type_name -> cyclopus.v1.Operation
+	56,  // 110: cyclopus.v1.StartReconciliationRequest.scope:type_name -> cyclopus.v1.ReconcileScope
+	9,   // 111: cyclopus.v1.StartReconciliationRequest.categories:type_name -> cyclopus.v1.ReconcileCategory
+	55,  // 112: cyclopus.v1.StartReconciliationResponse.operation:type_name -> cyclopus.v1.Operation
+	65,  // 113: cyclopus.v1.GetReconciliationResponse.reconciliation:type_name -> cyclopus.v1.ReconciliationRun
+	65,  // 114: cyclopus.v1.ListReconciliationsResponse.reconciliations:type_name -> cyclopus.v1.ReconciliationRun
+	64,  // 115: cyclopus.v1.ListReconciliationEvidenceResponse.evidence:type_name -> cyclopus.v1.ReconciliationEvidence
+	142, // 116: cyclopus.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
+	11,  // 117: cyclopus.v1.LogEntry.severity:type_name -> cyclopus.v1.LogSeverity
+	139, // 118: cyclopus.v1.LogEntry.attributes:type_name -> cyclopus.v1.LogEntry.AttributesEntry
+	142, // 119: cyclopus.v1.QueryApplicationLogsRequest.start_time:type_name -> google.protobuf.Timestamp
+	142, // 120: cyclopus.v1.QueryApplicationLogsRequest.end_time:type_name -> google.protobuf.Timestamp
+	11,  // 121: cyclopus.v1.QueryApplicationLogsRequest.min_severity:type_name -> cyclopus.v1.LogSeverity
+	128, // 122: cyclopus.v1.QueryApplicationLogsResponse.entries:type_name -> cyclopus.v1.LogEntry
+	142, // 123: cyclopus.v1.TraceSummary.start_time:type_name -> google.protobuf.Timestamp
+	12,  // 124: cyclopus.v1.TraceSummary.status:type_name -> cyclopus.v1.TraceStatus
+	142, // 125: cyclopus.v1.ListApplicationTracesRequest.start_time:type_name -> google.protobuf.Timestamp
+	142, // 126: cyclopus.v1.ListApplicationTracesRequest.end_time:type_name -> google.protobuf.Timestamp
+	131, // 127: cyclopus.v1.ListApplicationTracesResponse.traces:type_name -> cyclopus.v1.TraceSummary
+	142, // 128: cyclopus.v1.GetApplicationTraceRequest.start_time:type_name -> google.protobuf.Timestamp
+	142, // 129: cyclopus.v1.GetApplicationTraceRequest.end_time:type_name -> google.protobuf.Timestamp
+	131, // 130: cyclopus.v1.GetApplicationTraceResponse.trace:type_name -> cyclopus.v1.TraceSummary
+	142, // 131: cyclopus.v1.OperatorMetric.observed_at:type_name -> google.protobuf.Timestamp
+	136, // 132: cyclopus.v1.GetOperatorMetricsResponse.metrics:type_name -> cyclopus.v1.OperatorMetric
+	66,  // 133: cyclopus.v1.AuthenticationService.Bootstrap:input_type -> cyclopus.v1.BootstrapRequest
+	68,  // 134: cyclopus.v1.AuthenticationService.Login:input_type -> cyclopus.v1.LoginRequest
+	70,  // 135: cyclopus.v1.AuthenticationService.Logout:input_type -> cyclopus.v1.LogoutRequest
+	72,  // 136: cyclopus.v1.AuthenticationService.GetCurrentUser:input_type -> cyclopus.v1.GetCurrentUserRequest
+	74,  // 137: cyclopus.v1.AuthenticationService.CreateApiToken:input_type -> cyclopus.v1.CreateApiTokenRequest
+	76,  // 138: cyclopus.v1.AuthenticationService.ListApiTokens:input_type -> cyclopus.v1.ListApiTokensRequest
+	78,  // 139: cyclopus.v1.AuthenticationService.RevokeApiToken:input_type -> cyclopus.v1.RevokeApiTokenRequest
+	80,  // 140: cyclopus.v1.OrganizationService.GetOrganization:input_type -> cyclopus.v1.GetOrganizationRequest
+	82,  // 141: cyclopus.v1.OrganizationService.DeleteOrganization:input_type -> cyclopus.v1.DeleteOrganizationRequest
+	84,  // 142: cyclopus.v1.ProjectService.CreateProject:input_type -> cyclopus.v1.CreateProjectRequest
+	86,  // 143: cyclopus.v1.ProjectService.GetProject:input_type -> cyclopus.v1.GetProjectRequest
+	88,  // 144: cyclopus.v1.ProjectService.ListProjects:input_type -> cyclopus.v1.ListProjectsRequest
+	90,  // 145: cyclopus.v1.ProjectService.UpdateProject:input_type -> cyclopus.v1.UpdateProjectRequest
+	92,  // 146: cyclopus.v1.ProjectService.DeleteProject:input_type -> cyclopus.v1.DeleteProjectRequest
+	94,  // 147: cyclopus.v1.ApplicationService.CreateApplication:input_type -> cyclopus.v1.CreateApplicationRequest
+	96,  // 148: cyclopus.v1.ApplicationService.GetApplication:input_type -> cyclopus.v1.GetApplicationRequest
+	98,  // 149: cyclopus.v1.ApplicationService.ListApplications:input_type -> cyclopus.v1.ListApplicationsRequest
+	100, // 150: cyclopus.v1.ApplicationService.UpdateApplication:input_type -> cyclopus.v1.UpdateApplicationRequest
+	102, // 151: cyclopus.v1.ApplicationService.DeleteApplication:input_type -> cyclopus.v1.DeleteApplicationRequest
+	104, // 152: cyclopus.v1.EnvironmentService.GetEnvironment:input_type -> cyclopus.v1.GetEnvironmentRequest
+	106, // 153: cyclopus.v1.EnvironmentService.ListEnvironments:input_type -> cyclopus.v1.ListEnvironmentsRequest
+	23,  // 154: cyclopus.v1.EnvironmentService.AcceptPreviewPush:input_type -> cyclopus.v1.PreviewPushRequest
+	25,  // 155: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:input_type -> cyclopus.v1.PreviewBranchDeleteRequest
+	27,  // 156: cyclopus.v1.EnvironmentService.TeardownEnvironment:input_type -> cyclopus.v1.TeardownEnvironmentRequest
+	108, // 157: cyclopus.v1.ReleaseService.Deploy:input_type -> cyclopus.v1.DeployRequest
+	110, // 158: cyclopus.v1.ReleaseService.Rollback:input_type -> cyclopus.v1.RollbackRequest
+	112, // 159: cyclopus.v1.ReleaseService.GetRelease:input_type -> cyclopus.v1.GetReleaseRequest
+	114, // 160: cyclopus.v1.ReleaseService.ListReleases:input_type -> cyclopus.v1.ListReleasesRequest
+	116, // 161: cyclopus.v1.ReleaseService.GetEnvironmentVariables:input_type -> cyclopus.v1.GetEnvironmentVariablesRequest
+	118, // 162: cyclopus.v1.ReleaseService.SetEnvironmentVariables:input_type -> cyclopus.v1.SetEnvironmentVariablesRequest
+	120, // 163: cyclopus.v1.ReconciliationService.StartReconciliation:input_type -> cyclopus.v1.StartReconciliationRequest
+	122, // 164: cyclopus.v1.ReconciliationService.GetReconciliation:input_type -> cyclopus.v1.GetReconciliationRequest
+	124, // 165: cyclopus.v1.ReconciliationService.ListReconciliations:input_type -> cyclopus.v1.ListReconciliationsRequest
+	126, // 166: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:input_type -> cyclopus.v1.ListReconciliationEvidenceRequest
+	33,  // 167: cyclopus.v1.WebhookService.CreateWebhook:input_type -> cyclopus.v1.CreateWebhookRequest
+	35,  // 168: cyclopus.v1.WebhookService.GetWebhook:input_type -> cyclopus.v1.GetWebhookRequest
+	37,  // 169: cyclopus.v1.WebhookService.ListWebhooks:input_type -> cyclopus.v1.ListWebhooksRequest
+	39,  // 170: cyclopus.v1.WebhookService.UpdateWebhook:input_type -> cyclopus.v1.UpdateWebhookRequest
+	41,  // 171: cyclopus.v1.WebhookService.DeleteWebhook:input_type -> cyclopus.v1.DeleteWebhookRequest
+	45,  // 172: cyclopus.v1.DomainService.CreateDomain:input_type -> cyclopus.v1.CreateDomainRequest
+	47,  // 173: cyclopus.v1.DomainService.GetDomain:input_type -> cyclopus.v1.GetDomainRequest
+	49,  // 174: cyclopus.v1.DomainService.ListDomains:input_type -> cyclopus.v1.ListDomainsRequest
+	51,  // 175: cyclopus.v1.DomainService.VerifyDomain:input_type -> cyclopus.v1.VerifyDomainRequest
+	53,  // 176: cyclopus.v1.DomainService.DeleteDomain:input_type -> cyclopus.v1.DeleteDomainRequest
+	129, // 177: cyclopus.v1.ObservabilityService.QueryApplicationLogs:input_type -> cyclopus.v1.QueryApplicationLogsRequest
+	132, // 178: cyclopus.v1.ObservabilityService.ListApplicationTraces:input_type -> cyclopus.v1.ListApplicationTracesRequest
+	134, // 179: cyclopus.v1.ObservabilityService.GetApplicationTrace:input_type -> cyclopus.v1.GetApplicationTraceRequest
+	137, // 180: cyclopus.v1.ObservabilityService.GetOperatorMetrics:input_type -> cyclopus.v1.GetOperatorMetricsRequest
+	67,  // 181: cyclopus.v1.AuthenticationService.Bootstrap:output_type -> cyclopus.v1.BootstrapResponse
+	69,  // 182: cyclopus.v1.AuthenticationService.Login:output_type -> cyclopus.v1.LoginResponse
+	71,  // 183: cyclopus.v1.AuthenticationService.Logout:output_type -> cyclopus.v1.LogoutResponse
+	73,  // 184: cyclopus.v1.AuthenticationService.GetCurrentUser:output_type -> cyclopus.v1.GetCurrentUserResponse
+	75,  // 185: cyclopus.v1.AuthenticationService.CreateApiToken:output_type -> cyclopus.v1.CreateApiTokenResponse
+	77,  // 186: cyclopus.v1.AuthenticationService.ListApiTokens:output_type -> cyclopus.v1.ListApiTokensResponse
+	79,  // 187: cyclopus.v1.AuthenticationService.RevokeApiToken:output_type -> cyclopus.v1.RevokeApiTokenResponse
+	81,  // 188: cyclopus.v1.OrganizationService.GetOrganization:output_type -> cyclopus.v1.GetOrganizationResponse
+	83,  // 189: cyclopus.v1.OrganizationService.DeleteOrganization:output_type -> cyclopus.v1.DeleteOrganizationResponse
+	85,  // 190: cyclopus.v1.ProjectService.CreateProject:output_type -> cyclopus.v1.CreateProjectResponse
+	87,  // 191: cyclopus.v1.ProjectService.GetProject:output_type -> cyclopus.v1.GetProjectResponse
+	89,  // 192: cyclopus.v1.ProjectService.ListProjects:output_type -> cyclopus.v1.ListProjectsResponse
+	91,  // 193: cyclopus.v1.ProjectService.UpdateProject:output_type -> cyclopus.v1.UpdateProjectResponse
+	93,  // 194: cyclopus.v1.ProjectService.DeleteProject:output_type -> cyclopus.v1.DeleteProjectResponse
+	95,  // 195: cyclopus.v1.ApplicationService.CreateApplication:output_type -> cyclopus.v1.CreateApplicationResponse
+	97,  // 196: cyclopus.v1.ApplicationService.GetApplication:output_type -> cyclopus.v1.GetApplicationResponse
+	99,  // 197: cyclopus.v1.ApplicationService.ListApplications:output_type -> cyclopus.v1.ListApplicationsResponse
+	101, // 198: cyclopus.v1.ApplicationService.UpdateApplication:output_type -> cyclopus.v1.UpdateApplicationResponse
+	103, // 199: cyclopus.v1.ApplicationService.DeleteApplication:output_type -> cyclopus.v1.DeleteApplicationResponse
+	105, // 200: cyclopus.v1.EnvironmentService.GetEnvironment:output_type -> cyclopus.v1.GetEnvironmentResponse
+	107, // 201: cyclopus.v1.EnvironmentService.ListEnvironments:output_type -> cyclopus.v1.ListEnvironmentsResponse
+	24,  // 202: cyclopus.v1.EnvironmentService.AcceptPreviewPush:output_type -> cyclopus.v1.PreviewPushResponse
+	26,  // 203: cyclopus.v1.EnvironmentService.AcceptPreviewBranchDelete:output_type -> cyclopus.v1.PreviewBranchDeleteResponse
+	28,  // 204: cyclopus.v1.EnvironmentService.TeardownEnvironment:output_type -> cyclopus.v1.TeardownEnvironmentResponse
+	109, // 205: cyclopus.v1.ReleaseService.Deploy:output_type -> cyclopus.v1.DeployResponse
+	111, // 206: cyclopus.v1.ReleaseService.Rollback:output_type -> cyclopus.v1.RollbackResponse
+	113, // 207: cyclopus.v1.ReleaseService.GetRelease:output_type -> cyclopus.v1.GetReleaseResponse
+	115, // 208: cyclopus.v1.ReleaseService.ListReleases:output_type -> cyclopus.v1.ListReleasesResponse
+	117, // 209: cyclopus.v1.ReleaseService.GetEnvironmentVariables:output_type -> cyclopus.v1.GetEnvironmentVariablesResponse
+	119, // 210: cyclopus.v1.ReleaseService.SetEnvironmentVariables:output_type -> cyclopus.v1.SetEnvironmentVariablesResponse
+	121, // 211: cyclopus.v1.ReconciliationService.StartReconciliation:output_type -> cyclopus.v1.StartReconciliationResponse
+	123, // 212: cyclopus.v1.ReconciliationService.GetReconciliation:output_type -> cyclopus.v1.GetReconciliationResponse
+	125, // 213: cyclopus.v1.ReconciliationService.ListReconciliations:output_type -> cyclopus.v1.ListReconciliationsResponse
+	127, // 214: cyclopus.v1.ReconciliationService.ListReconciliationEvidence:output_type -> cyclopus.v1.ListReconciliationEvidenceResponse
+	34,  // 215: cyclopus.v1.WebhookService.CreateWebhook:output_type -> cyclopus.v1.CreateWebhookResponse
+	36,  // 216: cyclopus.v1.WebhookService.GetWebhook:output_type -> cyclopus.v1.GetWebhookResponse
+	38,  // 217: cyclopus.v1.WebhookService.ListWebhooks:output_type -> cyclopus.v1.ListWebhooksResponse
+	40,  // 218: cyclopus.v1.WebhookService.UpdateWebhook:output_type -> cyclopus.v1.UpdateWebhookResponse
+	42,  // 219: cyclopus.v1.WebhookService.DeleteWebhook:output_type -> cyclopus.v1.DeleteWebhookResponse
+	46,  // 220: cyclopus.v1.DomainService.CreateDomain:output_type -> cyclopus.v1.CreateDomainResponse
+	48,  // 221: cyclopus.v1.DomainService.GetDomain:output_type -> cyclopus.v1.GetDomainResponse
+	50,  // 222: cyclopus.v1.DomainService.ListDomains:output_type -> cyclopus.v1.ListDomainsResponse
+	52,  // 223: cyclopus.v1.DomainService.VerifyDomain:output_type -> cyclopus.v1.VerifyDomainResponse
+	54,  // 224: cyclopus.v1.DomainService.DeleteDomain:output_type -> cyclopus.v1.DeleteDomainResponse
+	130, // 225: cyclopus.v1.ObservabilityService.QueryApplicationLogs:output_type -> cyclopus.v1.QueryApplicationLogsResponse
+	133, // 226: cyclopus.v1.ObservabilityService.ListApplicationTraces:output_type -> cyclopus.v1.ListApplicationTracesResponse
+	135, // 227: cyclopus.v1.ObservabilityService.GetApplicationTrace:output_type -> cyclopus.v1.GetApplicationTraceResponse
+	138, // 228: cyclopus.v1.ObservabilityService.GetOperatorMetrics:output_type -> cyclopus.v1.GetOperatorMetricsResponse
+	181, // [181:229] is the sub-list for method output_type
+	133, // [133:181] is the sub-list for method input_type
+	133, // [133:133] is the sub-list for extension type_name
+	133, // [133:133] is the sub-list for extension extendee
+	0,   // [0:133] is the sub-list for field type_name
 }
 
 func init() { file_cyclopus_v1_cyclopus_proto_init() }
@@ -8753,20 +9573,20 @@ func file_cyclopus_v1_cyclopus_proto_init() {
 	if File_cyclopus_v1_cyclopus_proto != nil {
 		return
 	}
-	file_cyclopus_v1_cyclopus_proto_msgTypes[31].OneofWrappers = []any{
+	file_cyclopus_v1_cyclopus_proto_msgTypes[43].OneofWrappers = []any{
 		(*ReconcileFinding_RuntimeClassDrift)(nil),
 		(*ReconcileFinding_NetworkPolicyDrift)(nil),
 	}
-	file_cyclopus_v1_cyclopus_proto_msgTypes[94].OneofWrappers = []any{}
+	file_cyclopus_v1_cyclopus_proto_msgTypes[106].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cyclopus_v1_cyclopus_proto_rawDesc), len(file_cyclopus_v1_cyclopus_proto_rawDesc)),
-			NumEnums:      13,
-			NumMessages:   114,
+			NumEnums:      14,
+			NumMessages:   126,
 			NumExtensions: 0,
-			NumServices:   9,
+			NumServices:   10,
 		},
 		GoTypes:           file_cyclopus_v1_cyclopus_proto_goTypes,
 		DependencyIndexes: file_cyclopus_v1_cyclopus_proto_depIdxs,

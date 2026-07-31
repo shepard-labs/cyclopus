@@ -40,6 +40,7 @@ type apiHandlers struct {
 	cyclopusv1.UnimplementedReleaseServiceServer
 	cyclopusv1.UnimplementedReconciliationServiceServer
 	cyclopusv1.UnimplementedWebhookServiceServer
+	cyclopusv1.UnimplementedDomainServiceServer
 	cyclopusv1.UnimplementedObservabilityServiceServer
 	auth       *internalauth.Service
 	service    *service.Service
@@ -52,7 +53,7 @@ func NewServices(authService *internalauth.Service, domainService *service.Servi
 	}
 	handler := &apiHandlers{auth: authService, service: domainService, sessionTTL: sessionTTL}
 	return Services{Authentication: handler, Organization: handler, Project: handler, Application: handler,
-		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler, Observability: handler}
+		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler, Domain: handler, Observability: handler}
 }
 
 func (h *apiHandlers) Bootstrap(ctx context.Context, req *cyclopusv1.BootstrapRequest) (*cyclopusv1.BootstrapResponse, error) {
@@ -966,6 +967,102 @@ func (h *apiHandlers) DeleteWebhook(ctx context.Context, req *cyclopusv1.DeleteW
 	return &cyclopusv1.DeleteWebhookResponse{}, nil
 }
 
+func (h *apiHandlers) CreateDomain(ctx context.Context, req *cyclopusv1.CreateDomainRequest) (*cyclopusv1.CreateDomainResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Domain == nil {
+		return nil, fieldError("domain", "is required")
+	}
+	if err := validateUUID("application_id", req.GetApplicationId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(), "domain.hostname": req.Domain.GetHostname()}); err != nil {
+		return nil, err
+	}
+	value, instructions, err := h.service.CreateDomain(ctx, actor, req.GetIdempotencyKey(), domainInput(req.GetApplicationId(), req.Domain))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateDomainResponse{Domain: domainProto(value, instructions)}, nil
+}
+
+func (h *apiHandlers) GetDomain(ctx context.Context, req *cyclopusv1.GetDomainRequest) (*cyclopusv1.GetDomainResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("domain_id", req.GetDomainId()); err != nil {
+		return nil, err
+	}
+	value, instructions, err := h.service.GetDomain(ctx, actor, req.GetDomainId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.GetDomainResponse{Domain: domainProto(value, instructions)}, nil
+}
+
+func (h *apiHandlers) ListDomains(ctx context.Context, req *cyclopusv1.ListDomainsRequest) (*cyclopusv1.ListDomainsResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("application_id", req.GetApplicationId()); err != nil {
+		return nil, err
+	}
+	values, err := h.service.ListDomains(ctx, actor, req.GetApplicationId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	scope := pageScope("domains", actor.OrgID+"/"+req.GetApplicationId())
+	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Domain) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	if err != nil {
+		return nil, err
+	}
+	page, next := pageValues(values, start, size, scope, func(v store.Domain) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
+	response := &cyclopusv1.ListDomainsResponse{NextPageToken: next, Domains: make([]*cyclopusv1.Domain, 0, len(page))}
+	for _, value := range page {
+		response.Domains = append(response.Domains, domainProto(value, service.DomainInstructions{}))
+	}
+	return response, nil
+}
+
+func (h *apiHandlers) VerifyDomain(ctx context.Context, req *cyclopusv1.VerifyDomainRequest) (*cyclopusv1.VerifyDomainResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("domain_id", req.GetDomainId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	value, instructions, err := h.service.VerifyDomain(ctx, actor, req.GetIdempotencyKey(), req.GetDomainId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.VerifyDomainResponse{Domain: domainProto(value, instructions)}, nil
+}
+
+func (h *apiHandlers) DeleteDomain(ctx context.Context, req *cyclopusv1.DeleteDomainRequest) (*cyclopusv1.DeleteDomainResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("domain_id", req.GetDomainId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	if err := h.service.DeleteDomain(ctx, actor, req.GetIdempotencyKey(), req.GetDomainId()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DeleteDomainResponse{}, nil
+}
+
 func sessionActor(ctx context.Context) (service.ActorContext, error) {
 	principal, err := principalFromContext(ctx)
 	if err != nil {
@@ -1074,6 +1171,24 @@ func appInput(value *cyclopusv1.Application) service.AppInput {
 
 func webhookInput(value *cyclopusv1.WebhookEndpoint) service.WebhookInput {
 	return service.WebhookInput{TargetURL: value.GetTargetUrl(), Events: append([]string(nil), value.GetEvents()...), SecretRef: value.GetSecretRef(), Enabled: value.GetEnabled()}
+}
+
+func domainInput(applicationID string, value *cyclopusv1.Domain) service.DomainInput {
+	return service.DomainInput{AppID: applicationID, Hostname: value.GetHostname(), VerificationMethod: domainVerificationMethodString(value.GetVerificationMethod())}
+}
+
+func domainVerificationMethodString(v cyclopusv1.DomainVerificationMethod) string {
+	return map[cyclopusv1.DomainVerificationMethod]string{
+		cyclopusv1.DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_DNS_TXT: "dns_txt",
+		cyclopusv1.DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_CNAME:   "cname",
+	}[v]
+}
+
+func domainVerificationMethodProto(v string) cyclopusv1.DomainVerificationMethod {
+	return map[string]cyclopusv1.DomainVerificationMethod{
+		"dns_txt": cyclopusv1.DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_DNS_TXT,
+		"cname":   cyclopusv1.DomainVerificationMethod_DOMAIN_VERIFICATION_METHOD_CNAME,
+	}[v]
 }
 
 func reconciliationInput(req *cyclopusv1.StartReconciliationRequest) (service.ReconciliationInput, error) {
@@ -1185,6 +1300,24 @@ func apiTokenProto(v store.APIToken) *cyclopusv1.ApiToken {
 }
 func webhookProto(v store.Webhook) *cyclopusv1.WebhookEndpoint {
 	return &cyclopusv1.WebhookEndpoint{Id: v.ID, OrganizationId: v.OrgID, TargetUrl: v.TargetURL, Events: append([]string(nil), v.Events...), SecretRef: v.SecretRef, Enabled: v.DisabledAt == nil, ConsecutiveFailures: int32(v.ConsecutiveFailures), DisabledAt: timeProto(v.DisabledAt), CreatedAt: timestamppb.New(v.CreatedAt), UpdatedAt: timestamppb.New(v.UpdatedAt)}
+}
+func domainProto(v store.Domain, instructions service.DomainInstructions) *cyclopusv1.Domain {
+	token := ""
+	if v.VerificationToken != nil {
+		token = *v.VerificationToken
+	}
+	proto := &cyclopusv1.Domain{
+		Id: v.ID, OrganizationId: v.OrgID, ApplicationId: v.AppID, Hostname: v.Hostname,
+		VerificationMethod: domainVerificationMethodProto(v.VerificationMethod), VerificationToken: token,
+		VerifiedAt: timeProto(v.VerifiedAt), CreatedAt: timestamppb.New(v.CreatedAt),
+	}
+	if instructions.RecordType != "" {
+		proto.Instructions = &cyclopusv1.DomainDnsInstructions{
+			RecordType: instructions.RecordType, RecordName: instructions.RecordName,
+			RecordValue: instructions.RecordValue, ApexARecordTarget: instructions.ApexARecordTarget,
+		}
+	}
+	return proto
 }
 func operationProto(v service.AcceptedOperation, prefix string) *cyclopusv1.Operation {
 	return &cyclopusv1.Operation{Id: v.OperationID, ResourceName: prefix + v.ResourceID, Status: operationStatus(v.Status)}

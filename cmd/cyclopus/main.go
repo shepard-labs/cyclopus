@@ -77,7 +77,7 @@ func run(args, environ []string) error {
 	if err != nil {
 		return fmt.Errorf("construct authentication service: %w", err)
 	}
-	domainService := service.New(dataStore, service.WithLogger(logger))
+	domainService := service.New(dataStore, service.WithLogger(logger), service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget))
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)
 	services.Authenticator = authenticator

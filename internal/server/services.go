@@ -11,6 +11,7 @@ type Services struct {
 	Release          cyclopusv1.ReleaseServiceServer
 	Reconciliation   cyclopusv1.ReconciliationServiceServer
 	Webhook          cyclopusv1.WebhookServiceServer
+	Domain           cyclopusv1.DomainServiceServer
 	Observability    cyclopusv1.ObservabilityServiceServer
 	Authenticator    *Authenticator
 	RateLimiter      *authRateLimiter
@@ -27,6 +28,7 @@ func DefaultServices() Services {
 		Release:        unimplementedReleaseService{},
 		Reconciliation: unimplementedReconciliationService{},
 		Webhook:        unimplementedWebhookService{},
+		Domain:         unimplementedDomainService{},
 		Observability:  unimplementedObservabilityService{},
 	}
 }
@@ -54,6 +56,9 @@ type unimplementedReconciliationService struct {
 }
 type unimplementedWebhookService struct {
 	cyclopusv1.UnimplementedWebhookServiceServer
+}
+type unimplementedDomainService struct {
+	cyclopusv1.UnimplementedDomainServiceServer
 }
 type unimplementedObservabilityService struct {
 	cyclopusv1.UnimplementedObservabilityServiceServer
@@ -84,6 +89,9 @@ func withDefaults(services Services) Services {
 	}
 	if services.Webhook == nil {
 		services.Webhook = defaults.Webhook
+	}
+	if services.Domain == nil {
+		services.Domain = defaults.Domain
 	}
 	if services.Observability == nil {
 		services.Observability = defaults.Observability

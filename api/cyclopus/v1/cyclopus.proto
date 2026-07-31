@@ -331,6 +331,78 @@ message DeleteWebhookRequest {
 }
 message DeleteWebhookResponse {}
 
+// DomainVerificationMethod selects how a custom domain proves control (§7.5).
+// CNAME is used for subdomains (the CNAME both proves control and routes
+// traffic); DNS_TXT is used for apex/root domains via a challenge TXT record.
+enum DomainVerificationMethod {
+  DOMAIN_VERIFICATION_METHOD_UNSPECIFIED = 0;
+  DOMAIN_VERIFICATION_METHOD_DNS_TXT = 1;
+  DOMAIN_VERIFICATION_METHOD_CNAME = 2;
+}
+
+message Domain {
+  string id = 1;
+  string organization_id = 2;
+  string application_id = 3;
+  string hostname = 4;
+  DomainVerificationMethod verification_method = 5;
+  // verification_token is only populated for dns_txt domains; it is the value
+  // the customer must publish in the challenge TXT record. It is null/empty for
+  // cname domains.
+  string verification_token = 6;
+  google.protobuf.Timestamp verified_at = 7;
+  google.protobuf.Timestamp created_at = 8;
+  // instructions describes the exact DNS record the customer must create to
+  // complete verification and, for dns_txt, the follow-up A record.
+  DomainDnsInstructions instructions = 9;
+}
+
+// DomainDnsInstructions is the operator-facing guidance the UI/CLI renders so
+// the customer can create the records Cyclopus checks (§7.5).
+message DomainDnsInstructions {
+  // record_type is "CNAME" or "TXT".
+  string record_type = 1;
+  // record_name is the fully-qualified name the customer creates the record on
+  // (e.g. "app.customer.com" for CNAME, "_cyclopus-challenge.customer.com" for
+  // TXT).
+  string record_name = 2;
+  // record_value is the expected value: the ingress target for CNAME, or the
+  // challenge token for TXT.
+  string record_value = 3;
+  // apex_a_record_target is set for dns_txt domains only: after verification the
+  // customer points an A record at this ingress IP/target. Cyclopus does not
+  // verify this record in this phase; it is operational guidance.
+  string apex_a_record_target = 4;
+}
+
+message CreateDomainRequest {
+  string application_id = 1;
+  Domain domain = 2;
+  string idempotency_key = 3;
+}
+message CreateDomainResponse { Domain domain = 1; }
+message GetDomainRequest { string domain_id = 1; }
+message GetDomainResponse { Domain domain = 1; }
+message ListDomainsRequest {
+  string application_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListDomainsResponse {
+  repeated Domain domains = 1;
+  string next_page_token = 2;
+}
+message VerifyDomainRequest {
+  string domain_id = 1;
+  string idempotency_key = 2;
+}
+message VerifyDomainResponse { Domain domain = 1; }
+message DeleteDomainRequest {
+  string domain_id = 1;
+  string idempotency_key = 2;
+}
+message DeleteDomainResponse {}
+
 message Operation {
   string id = 1;
   OperationStatus status = 2;
@@ -867,6 +939,25 @@ service WebhookService {
   }
   rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse) {
     option (google.api.http) = { delete: "/v1/webhooks/{webhook_id}" };
+  }
+}
+
+// DomainService manages custom-domain registration and DNS verification (§7.5).
+service DomainService {
+  rpc CreateDomain(CreateDomainRequest) returns (CreateDomainResponse) {
+    option (google.api.http) = { post: "/v1/applications/{application_id}/domains" body: "domain" };
+  }
+  rpc GetDomain(GetDomainRequest) returns (GetDomainResponse) {
+    option (google.api.http) = { get: "/v1/domains/{domain_id}" };
+  }
+  rpc ListDomains(ListDomainsRequest) returns (ListDomainsResponse) {
+    option (google.api.http) = { get: "/v1/applications/{application_id}/domains" };
+  }
+  rpc VerifyDomain(VerifyDomainRequest) returns (VerifyDomainResponse) {
+    option (google.api.http) = { post: "/v1/domains/{domain_id}:verify" body: "*" };
+  }
+  rpc DeleteDomain(DeleteDomainRequest) returns (DeleteDomainResponse) {
+    option (google.api.http) = { delete: "/v1/domains/{domain_id}" };
   }
 }
 

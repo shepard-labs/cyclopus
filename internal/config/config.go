@@ -147,6 +147,7 @@ type Kubernetes struct {
 	RecoveryPollInterval       time.Duration
 	ConflictRetries            int
 	PreviewHostnameSuffix      string
+	CustomDomainCNAMETarget    string
 	NetworkEgressExcludedCIDRs []string
 }
 
@@ -193,6 +194,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
 	flags.Int("kubernetes-conflict-retries", 0, "Kubernetes optimistic update conflict retries")
 	flags.String("kubernetes-preview-hostname-suffix", "", "verified DNS suffix appended to generated preview slugs")
+	flags.String("kubernetes-custom-domain-cname-target", "", "platform ingress hostname that custom subdomains CNAME to (§7.5); defaults to the preview hostname suffix when empty")
 	flags.StringSlice("kubernetes-network-egress-excluded-cidrs", nil, "additional CIDRs (e.g. node public IPs) appended to the default-deny-egress policy Except list")
 	flags.String("observability-openobserve-base-url", "", "OpenObserve HTTPS base URL for proxied logs/traces queries")
 	flags.String("observability-openobserve-organization", "", "OpenObserve organization slug")
@@ -261,6 +263,7 @@ func Load(args, environ []string) (Config, error) {
 		"kubernetes-recovery-poll-interval":           "kubernetes.recovery_poll_interval",
 		"kubernetes-conflict-retries":                 "kubernetes.conflict_retries",
 		"kubernetes-preview-hostname-suffix":          "kubernetes.preview_hostname_suffix",
+		"kubernetes-custom-domain-cname-target":       "kubernetes.custom_domain_cname_target",
 		"kubernetes-network-egress-excluded-cidrs":    "kubernetes.network_egress_excluded_cidrs",
 		"observability-openobserve-base-url":          "observability.openobserve_base_url",
 		"observability-openobserve-organization":      "observability.openobserve_organization",
@@ -283,6 +286,14 @@ func Load(args, environ []string) (Config, error) {
 			continue
 		}
 		v.Set(key, flags.Lookup(flagName).Value.String())
+	}
+
+	// The custom-domain CNAME target (§7.5) defaults to the preview hostname
+	// suffix when unset so operators need only configure one value unless their
+	// custom-domain ingress endpoint differs from the preview parent suffix.
+	customDomainTarget := v.GetString("kubernetes.custom_domain_cname_target")
+	if strings.TrimSpace(customDomainTarget) == "" {
+		customDomainTarget = v.GetString("kubernetes.preview_hostname_suffix")
 	}
 
 	cfg := Config{
@@ -330,6 +341,7 @@ func Load(args, environ []string) (Config, error) {
 			RecoveryPollInterval:       v.GetDuration("kubernetes.recovery_poll_interval"),
 			ConflictRetries:            v.GetInt("kubernetes.conflict_retries"),
 			PreviewHostnameSuffix:      v.GetString("kubernetes.preview_hostname_suffix"),
+			CustomDomainCNAMETarget:    customDomainTarget,
 			NetworkEgressExcludedCIDRs: normalizeSliceValues(v.GetStringSlice("kubernetes.network_egress_excluded_cidrs")),
 		},
 		Observability: Observability{
@@ -421,6 +433,7 @@ func environment(environ []string) map[string]string {
 		"KUBERNETES_RECOVERY_POLL_INTERVAL":           "kubernetes.recovery_poll_interval",
 		"KUBERNETES_CONFLICT_RETRIES":                 "kubernetes.conflict_retries",
 		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":          "kubernetes.preview_hostname_suffix",
+		"KUBERNETES_CUSTOM_DOMAIN_CNAME_TARGET":       "kubernetes.custom_domain_cname_target",
 		"KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS":    "kubernetes.network_egress_excluded_cidrs",
 		"OBSERVABILITY_OPENOBSERVE_BASE_URL":          "observability.openobserve_base_url",
 		"OBSERVABILITY_OPENOBSERVE_ORGANIZATION":      "observability.openobserve_organization",
@@ -582,6 +595,9 @@ func (c Config) Validate() error {
 	}
 	if suffix := strings.TrimSpace(c.Kubernetes.PreviewHostnameSuffix); suffix == "" || len(suffix) > 253 || strings.ContainsAny(suffix, "/:@") {
 		errs = append(errs, fmt.Errorf("kubernetes.preview_hostname_suffix must be a DNS suffix"))
+	}
+	if target := strings.TrimSpace(c.Kubernetes.CustomDomainCNAMETarget); target == "" || len(target) > 253 || strings.ContainsAny(target, "/:@") {
+		errs = append(errs, fmt.Errorf("kubernetes.custom_domain_cname_target must be a DNS suffix"))
 	}
 	for _, cidr := range c.Kubernetes.NetworkEgressExcludedCIDRs {
 		if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {

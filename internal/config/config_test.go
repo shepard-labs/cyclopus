@@ -109,6 +109,48 @@ func TestLoadKubernetesRecoveryConfigPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadCustomDomainCNAMETargetDefaultsToPreviewSuffix(t *testing.T) {
+	cfg, err := Load(
+		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.sslip.io"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Kubernetes.CustomDomainCNAMETarget != "203-0-113-7.sslip.io" {
+		t.Fatalf("custom domain CNAME target = %q, want fallback to preview suffix", cfg.Kubernetes.CustomDomainCNAMETarget)
+	}
+	if cfg.Kubernetes.CustomDomainCNAMETarget != cfg.Kubernetes.PreviewHostnameSuffix {
+		t.Fatalf("custom domain CNAME target = %q, want equal to preview suffix %q", cfg.Kubernetes.CustomDomainCNAMETarget, cfg.Kubernetes.PreviewHostnameSuffix)
+	}
+}
+
+func TestLoadCustomDomainCNAMETargetOverride(t *testing.T) {
+	cfg, err := Load(
+		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.sslip.io", "--kubernetes-custom-domain-cname-target", "ingress.example.test"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Kubernetes.CustomDomainCNAMETarget != "ingress.example.test" {
+		t.Fatalf("custom domain CNAME target = %q, want explicit override", cfg.Kubernetes.CustomDomainCNAMETarget)
+	}
+	if cfg.Kubernetes.PreviewHostnameSuffix != "203-0-113-7.sslip.io" {
+		t.Fatalf("preview suffix = %q, want unaffected by override", cfg.Kubernetes.PreviewHostnameSuffix)
+	}
+}
+
+func TestLoadCustomDomainCNAMETargetRejectsInvalid(t *testing.T) {
+	_, err := Load(
+		[]string{"--kubernetes-custom-domain-cname-target", "bad/target"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "kubernetes.custom_domain_cname_target must be a DNS suffix") {
+		t.Fatalf("Load() error = %v, want custom domain CNAME target validation", err)
+	}
+}
+
 func TestLoadNetworkEgressExcludedCIDRsParses(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5/32,198.51.100.0/24"},
