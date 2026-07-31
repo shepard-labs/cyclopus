@@ -32,6 +32,7 @@ are fixed.
 | G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | committed | a8b5aa8 |
 | H | Full gate run + regenerate evidence | general | — | committed | (final) |
 | D2 | Verified-domain Ingress + TLS + cert-manager issuance, teardown, reconcile parity (§7.5) | general | api-security / tenant-escape review | committed | b556049 |
+| D3 | Reconcile orphan-detect + prune managed Ingresses (D2 review follow-up) | direct + self-review | tenant-escape (self) | committed | 8038feb |
 
 Status values: `pending` -> `in-progress` -> `review` -> `committed`.
 
