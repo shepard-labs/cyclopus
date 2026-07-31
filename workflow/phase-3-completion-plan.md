@@ -29,8 +29,8 @@ are fixed.
 | D | Domain verification API (§7.5) | general | api-security review | committed | cd51a6c |
 | E | Registries + Git connections API (§6) | general | api-security review | committed | 604916e |
 | F | Read-only APIs: Aliases / Certs / Audit (§6) | general | api-security review | committed | cf38fc5 |
-| G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | in-progress | — |
-| H | Full gate run + regenerate evidence | general | — | pending | — |
+| G | Phase-3 checkpoint + evidence; phases.yaml deliverables | general | — | committed | a8b5aa8 |
+| H | Full gate run + regenerate evidence | general | — | committed | (final) |
 
 Status values: `pending` -> `in-progress` -> `review` -> `committed`.
 
