@@ -400,6 +400,12 @@ func (e *reconcileExec) runtimeClassDrift(ctx context.Context, namespace, expect
 }
 
 func (e *reconcileExec) networkPolicyDrift(ctx context.Context, namespace string) []driftEntry {
+	// This check is existence-only: it reports missing ingress/egress policies
+	// by PolicyType and does NOT reconstruct or compare the egress spec. The
+	// Except CIDR list (defaults + operator-supplied node public IPs) is owned
+	// entirely by NetworkPolicyProvisioner (see mergeEgressExceptCIDRs in
+	// lifecycle.go); no CIDR source is threaded here, so there is no risk of
+	// false-reporting drift on the Except contents.
 	var drift []driftEntry
 	policies, err := e.adapter.client.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {

@@ -255,7 +255,8 @@ func productionAdapterConstructors(dataStore *store.Store, owner string, logger 
 			}
 			return kubernetesadapter.NewAdapter(kubernetesadapter.Config{
 				PollInterval: cfg.RecoveryPollInterval, ConflictRetries: cfg.ConflictRetries,
-				PreviewHostnameSuffix: cfg.PreviewHostnameSuffix,
+				PreviewHostnameSuffix:      cfg.PreviewHostnameSuffix,
+				NetworkEgressExcludedCIDRs: cfg.NetworkEgressExcludedCIDRs,
 			}, client, dataStore, kubernetesadapter.WithDynamicClient(dynamicClient), kubernetesadapter.WithLogger(logger))
 		},
 	}

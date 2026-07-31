@@ -109,6 +109,165 @@ func TestLoadKubernetesRecoveryConfigPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadNetworkEgressExcludedCIDRsParses(t *testing.T) {
+	cfg, err := Load(
+		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5/32,198.51.100.0/24"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"203.0.113.5/32", "198.51.100.0/24"}
+	got := cfg.Kubernetes.NetworkEgressExcludedCIDRs
+	if len(got) != len(want) {
+		t.Fatalf("NetworkEgressExcludedCIDRs = %v, want %v", got, want)
+	}
+	for i, cidr := range want {
+		if got[i] != cidr {
+			t.Fatalf("NetworkEgressExcludedCIDRs[%d] = %q, want %q", i, got[i], cidr)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidNetworkEgressExcludedCIDR(t *testing.T) {
+	_, err := Load(
+		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "kubernetes.network_egress_excluded_cidrs") {
+		t.Fatalf("Load() error = %v, want invalid CIDR error", err)
+	}
+}
+
+func TestLoadNetworkEgressExcludedCIDRsFromEnvSplits(t *testing.T) {
+	cfg, err := Load(nil, []string{
+		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS=203.0.113.0/24,198.51.100.0/24",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"203.0.113.0/24", "198.51.100.0/24"}
+	got := cfg.Kubernetes.NetworkEgressExcludedCIDRs
+	if len(got) != len(want) {
+		t.Fatalf("NetworkEgressExcludedCIDRs = %v, want %v", got, want)
+	}
+	for i, cidr := range want {
+		if got[i] != cidr {
+			t.Fatalf("NetworkEgressExcludedCIDRs[%d] = %q, want %q", i, got[i], cidr)
+		}
+	}
+}
+
+func TestLoadTrustedHostsFromEnvSplits(t *testing.T) {
+	cfg, err := Load(nil, []string{
+		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_GITHUB_TRUSTED_HOSTS=api.github.com,uploads.github.com",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"api.github.com", "uploads.github.com"}
+	got := cfg.GitHub.TrustedHosts
+	if len(got) != len(want) {
+		t.Fatalf("TrustedHosts = %v, want %v", got, want)
+	}
+	for i, host := range want {
+		if got[i] != host {
+			t.Fatalf("TrustedHosts[%d] = %q, want %q", i, got[i], host)
+		}
+	}
+}
+
+func TestLoadSingleValueEnvSliceYieldsSingleElement(t *testing.T) {
+	cfg, err := Load(nil, []string{
+		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS=203.0.113.0/24",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	got := cfg.Kubernetes.NetworkEgressExcludedCIDRs
+	if len(got) != 1 || got[0] != "203.0.113.0/24" {
+		t.Fatalf("NetworkEgressExcludedCIDRs = %v, want [203.0.113.0/24]", got)
+	}
+}
+
+func TestLoadUnsetEnvSliceDoesNotClobberFlag(t *testing.T) {
+	cfg, err := Load(
+		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5/32"},
+		[]string{
+			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	got := cfg.Kubernetes.NetworkEgressExcludedCIDRs
+	if len(got) != 1 || got[0] != "203.0.113.5/32" {
+		t.Fatalf("NetworkEgressExcludedCIDRs = %v, want flag value [203.0.113.5/32]", got)
+	}
+	// The default trusted hosts must survive when neither flag nor env sets them.
+	wantHosts := []string{"api.github.com", "uploads.github.com"}
+	if len(cfg.GitHub.TrustedHosts) != len(wantHosts) {
+		t.Fatalf("TrustedHosts = %v, want defaults %v", cfg.GitHub.TrustedHosts, wantHosts)
+	}
+}
+
+func TestLoadNetworkEgressExcludedCIDRsTrimsWhitespaceAndEmpties(t *testing.T) {
+	cfg, err := Load(nil, []string{
+		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS= 203.0.113.0/24 , 198.51.100.0/24 ,",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"203.0.113.0/24", "198.51.100.0/24"}
+	got := cfg.Kubernetes.NetworkEgressExcludedCIDRs
+	if len(got) != len(want) {
+		t.Fatalf("NetworkEgressExcludedCIDRs = %v, want %v", got, want)
+	}
+	for i, cidr := range want {
+		if got[i] != cidr {
+			t.Fatalf("NetworkEgressExcludedCIDRs[%d] = %q, want %q (no whitespace/empties)", i, got[i], cidr)
+		}
+	}
+}
+
+func TestLoadNetworkEgressExcludedCIDRsFlagTrimsWhitespace(t *testing.T) {
+	cfg, err := Load(
+		[]string{"--kubernetes-network-egress-excluded-cidrs", " 203.0.113.0/24 , 198.51.100.0/24 "},
+		[]string{
+			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"203.0.113.0/24", "198.51.100.0/24"}
+	got := cfg.Kubernetes.NetworkEgressExcludedCIDRs
+	if len(got) != len(want) {
+		t.Fatalf("NetworkEgressExcludedCIDRs = %v, want %v", got, want)
+	}
+	for i, cidr := range want {
+		if got[i] != cidr {
+			t.Fatalf("NetworkEgressExcludedCIDRs[%d] = %q, want %q (flag path trimmed)", i, got[i], cidr)
+		}
+	}
+}
+
 func TestGitHubEnabledOnlyWithCompleteConfig(t *testing.T) {
 	cfg, err := Load(nil, []string{
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",

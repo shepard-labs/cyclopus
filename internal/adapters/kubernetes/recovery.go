@@ -43,6 +43,9 @@ type Config struct {
 	ConflictRetries       int
 	APITimeout            time.Duration
 	PreviewHostnameSuffix string
+	// NetworkEgressExcludedCIDRs are operator-supplied CIDRs (e.g. node public
+	// IPs) appended to the default-deny-egress policy Except list (spec §7.2).
+	NetworkEgressExcludedCIDRs []string
 	// H2: KEDA HTTP add-on interceptor routing. The Ingress for keda_http apps
 	// must route traffic to the interceptor proxy so scale-from-zero works.
 	// Defaults match the standard KEDA HTTP add-on v0.15.0 Helm chart.
@@ -138,7 +141,7 @@ func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardSto
 	if err != nil {
 		return nil, err
 	}
-	adapter.lifecycle, err = NewLifecycleAdapter(client, lifecycleStore, NewNetworkPolicyProvisioner(client), hostnames, config.PollInterval)
+	adapter.lifecycle, err = NewLifecycleAdapter(client, lifecycleStore, NewNetworkPolicyProvisioner(client, config.NetworkEgressExcludedCIDRs), hostnames, config.PollInterval)
 	return adapter, err
 }
 

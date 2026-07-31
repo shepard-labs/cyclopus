@@ -60,7 +60,7 @@ func TestPreviewProvisionVerifiedPolicyRemovesPendingLabelAndMarksReady(t *testi
 func TestNetworkPolicyProvisionerCreatesAndVerifiesRequiredPolicies(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	job := previewLifecycleJob()
-	if err := NewNetworkPolicyProvisioner(client).ProvisionAndVerify(context.Background(), job); err != nil {
+	if err := NewNetworkPolicyProvisioner(client, nil).ProvisionAndVerify(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"default-deny-ingress", "default-deny-egress"} {
@@ -72,6 +72,65 @@ func TestNetworkPolicyProvisionerCreatesAndVerifiesRequiredPolicies(t *testing.T
 	egress, _ := client.NetworkingV1().NetworkPolicies(job.Namespace).Get(context.Background(), "default-deny-egress", metav1.GetOptions{})
 	if len(egress.Spec.Egress) != 4 || egress.Spec.Egress[3].To[0].IPBlock == nil {
 		t.Fatalf("egress policy = %+v", egress.Spec.Egress)
+	}
+}
+
+func TestNetworkPolicyProvisionerMergesConfiguredEgressExceptCIDRs(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	job := previewLifecycleJob()
+	// "10.0.0.0/8" is already a default and must be de-duplicated; the node
+	// public CIDR "203.0.113.0/24" must be appended after the 5 defaults.
+	provisioner := NewNetworkPolicyProvisioner(client, []string{"203.0.113.0/24", "10.0.0.0/8"})
+	if err := provisioner.ProvisionAndVerify(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	egress, err := client.NetworkingV1().NetworkPolicies(job.Namespace).Get(context.Background(), "default-deny-egress", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := egress.Spec.Egress[3].To[0].IPBlock
+	if block == nil {
+		t.Fatalf("egress IPBlock is nil: %+v", egress.Spec.Egress)
+	}
+	want := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8", "203.0.113.0/24"}
+	if len(block.Except) != len(want) {
+		t.Fatalf("Except = %v, want %v", block.Except, want)
+	}
+	for i, cidr := range want {
+		if block.Except[i] != cidr {
+			t.Fatalf("Except[%d] = %q, want %q (full: %v)", i, block.Except[i], cidr, block.Except)
+		}
+	}
+	dupes := 0
+	for _, cidr := range block.Except {
+		if cidr == "10.0.0.0/8" {
+			dupes++
+		}
+	}
+	if dupes != 1 {
+		t.Fatalf("expected 10.0.0.0/8 exactly once, got %d times: %v", dupes, block.Except)
+	}
+}
+
+func TestNetworkPolicyProvisionerDefaultExceptCIDRsWithoutExtras(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	job := previewLifecycleJob()
+	if err := NewNetworkPolicyProvisioner(client, nil).ProvisionAndVerify(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	egress, err := client.NetworkingV1().NetworkPolicies(job.Namespace).Get(context.Background(), "default-deny-egress", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := egress.Spec.Egress[3].To[0].IPBlock
+	want := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"}
+	if block == nil || len(block.Except) != len(want) {
+		t.Fatalf("Except = %+v, want exactly the 5 defaults %v", block, want)
+	}
+	for i, cidr := range want {
+		if block.Except[i] != cidr {
+			t.Fatalf("Except[%d] = %q, want %q (full: %v)", i, block.Except[i], cidr, block.Except)
+		}
 	}
 }
 

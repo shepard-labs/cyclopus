@@ -41,10 +41,38 @@ type HostnameProvider interface {
 	PreviewHostname(context.Context, store.EnvironmentLifecycleJob) (string, error)
 }
 
-type NetworkPolicyProvisioner struct{ client kubernetes.Interface }
+type NetworkPolicyProvisioner struct {
+	client              kubernetes.Interface
+	egressExcludedCIDRs []string
+}
 
-func NewNetworkPolicyProvisioner(client kubernetes.Interface) *NetworkPolicyProvisioner {
-	return &NetworkPolicyProvisioner{client: client}
+// defaultEgressExceptCIDRs are the baseline private/link-local/loopback ranges
+// carved out of the default-deny-egress 0.0.0.0/0 rule. Per spec §7.2 these are
+// load-bearing (169.254.0.0/16 covers cloud metadata; 127.0.0.0/8 loopback) and
+// must never be dropped. Operator-supplied node public IP CIDRs are appended to
+// this baseline via mergeEgressExceptCIDRs.
+var defaultEgressExceptCIDRs = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"}
+
+// mergeEgressExceptCIDRs returns the baseline default CIDRs followed by the
+// operator-supplied extras, de-duplicated and in deterministic order (defaults
+// first in their existing order, then extras in their given order, skipping any
+// already present). Determinism matters because the reconcile drift check and
+// the provisioner update path compare NetworkPolicy specs.
+func mergeEgressExceptCIDRs(extras []string) []string {
+	seen := make(map[string]struct{}, len(defaultEgressExceptCIDRs)+len(extras))
+	merged := make([]string, 0, len(defaultEgressExceptCIDRs)+len(extras))
+	for _, cidr := range append(append([]string{}, defaultEgressExceptCIDRs...), extras...) {
+		if _, ok := seen[cidr]; ok {
+			continue
+		}
+		seen[cidr] = struct{}{}
+		merged = append(merged, cidr)
+	}
+	return merged
+}
+
+func NewNetworkPolicyProvisioner(client kubernetes.Interface, egressExcludedCIDRs []string) *NetworkPolicyProvisioner {
+	return &NetworkPolicyProvisioner{client: client, egressExcludedCIDRs: egressExcludedCIDRs}
 }
 
 func (p *NetworkPolicyProvisioner) ProvisionAndVerify(ctx context.Context, job store.EnvironmentLifecycleJob) error {
@@ -67,7 +95,7 @@ func (p *NetworkPolicyProvisioner) ProvisionAndVerify(ctx context.Context, job s
 					{To: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}}}}, Ports: []networkingv1.NetworkPolicyPort{{Port: intstrPointer(53), Protocol: protocolPointer(corev1.ProtocolUDP)}, {Port: intstrPointer(53), Protocol: protocolPointer(corev1.ProtocolTCP)}}},
 					{To: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}}},
 					{To: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "cyclopus-observability"}}, PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "opentelemetry-collector"}}}}, Ports: []networkingv1.NetworkPolicyPort{{Port: intstrPointer(4317), Protocol: protocolPointer(corev1.ProtocolTCP)}, {Port: intstrPointer(4318), Protocol: protocolPointer(corev1.ProtocolTCP)}}},
-					{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0", Except: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"}}}}},
+					{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0", Except: mergeEgressExceptCIDRs(p.egressExcludedCIDRs)}}}},
 				},
 			},
 		},

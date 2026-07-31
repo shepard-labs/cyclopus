@@ -16,6 +16,48 @@ const envPrefix = "CYCLOPUS_"
 
 const MaxSessionTTL = 7 * 24 * time.Hour
 
+// sliceViperKeys is the single source of truth for which configuration keys are
+// string slices. It is keyed by the viper key (e.g. "github.trusted_hosts") so
+// that both the environment-variable path and the flag-binding path can share
+// it. Slice-typed values arrive from env vars as a single comma-separated
+// string and must be split; values from any source are normalized so the stored
+// config never contains empty or whitespace-padded elements.
+var sliceViperKeys = map[string]struct{}{
+	"github.trusted_hosts":                     {},
+	"kubernetes.network_egress_excluded_cidrs": {},
+}
+
+func isSliceKey(key string) bool {
+	_, ok := sliceViperKeys[key]
+	return ok
+}
+
+// splitSliceValue splits a comma-separated env value into individual elements,
+// trimming whitespace around each and dropping empty elements so that
+// "a, b," yields ["a","b"].
+func splitSliceValue(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// normalizeSliceValues trims whitespace around each element and drops empty
+// elements, canonicalizing a slice regardless of its source (env or flag).
+func normalizeSliceValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 type Config struct {
 	HTTP                    HTTP
 	GRPC                    GRPC
@@ -101,10 +143,11 @@ type GitHub struct {
 }
 
 type Kubernetes struct {
-	Kubeconfig            string
-	RecoveryPollInterval  time.Duration
-	ConflictRetries       int
-	PreviewHostnameSuffix string
+	Kubeconfig                 string
+	RecoveryPollInterval       time.Duration
+	ConflictRetries            int
+	PreviewHostnameSuffix      string
+	NetworkEgressExcludedCIDRs []string
 }
 
 func Load(args, environ []string) (Config, error) {
@@ -150,6 +193,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
 	flags.Int("kubernetes-conflict-retries", 0, "Kubernetes optimistic update conflict retries")
 	flags.String("kubernetes-preview-hostname-suffix", "", "verified DNS suffix appended to generated preview slugs")
+	flags.StringSlice("kubernetes-network-egress-excluded-cidrs", nil, "additional CIDRs (e.g. node public IPs) appended to the default-deny-egress policy Except list")
 	flags.String("observability-openobserve-base-url", "", "OpenObserve HTTPS base URL for proxied logs/traces queries")
 	flags.String("observability-openobserve-organization", "", "OpenObserve organization slug")
 	flags.String("observability-openobserve-log-stream", "", "OpenObserve stream holding application logs")
@@ -171,6 +215,10 @@ func Load(args, environ []string) (Config, error) {
 	}
 
 	for key, value := range environment(environ) {
+		if isSliceKey(key) {
+			v.Set(key, splitSliceValue(value))
+			continue
+		}
 		v.Set(key, value)
 	}
 	flagKeys := map[string]string{
@@ -213,6 +261,7 @@ func Load(args, environ []string) (Config, error) {
 		"kubernetes-recovery-poll-interval":           "kubernetes.recovery_poll_interval",
 		"kubernetes-conflict-retries":                 "kubernetes.conflict_retries",
 		"kubernetes-preview-hostname-suffix":          "kubernetes.preview_hostname_suffix",
+		"kubernetes-network-egress-excluded-cidrs":    "kubernetes.network_egress_excluded_cidrs",
 		"observability-openobserve-base-url":          "observability.openobserve_base_url",
 		"observability-openobserve-organization":      "observability.openobserve_organization",
 		"observability-openobserve-log-stream":        "observability.openobserve_log_stream",
@@ -222,9 +271,18 @@ func Load(args, environ []string) (Config, error) {
 		"observability-beszel-token-secret":           "observability.beszel_token_secret",
 	}
 	for flagName, key := range flagKeys {
-		if flags.Changed(flagName) {
-			v.Set(key, flags.Lookup(flagName).Value.String())
+		if !flags.Changed(flagName) {
+			continue
 		}
+		if isSliceKey(key) {
+			values, err := flags.GetStringSlice(flagName)
+			if err != nil {
+				return Config{}, fmt.Errorf("parse flag %s: %w", flagName, err)
+			}
+			v.Set(key, normalizeSliceValues(values))
+			continue
+		}
+		v.Set(key, flags.Lookup(flagName).Value.String())
 	}
 
 	cfg := Config{
@@ -265,13 +323,14 @@ func Load(args, environ []string) (Config, error) {
 			DispatchObservationInterval: v.GetDuration("github.dispatch_observation_interval"),
 			RunPollInterval:             v.GetDuration("github.run_poll_interval"),
 			RequestTimeout:              v.GetDuration("github.request_timeout"),
-			TrustedHosts:                v.GetStringSlice("github.trusted_hosts"),
+			TrustedHosts:                normalizeSliceValues(v.GetStringSlice("github.trusted_hosts")),
 		},
 		Kubernetes: Kubernetes{
-			Kubeconfig:            v.GetString("kubernetes.kubeconfig"),
-			RecoveryPollInterval:  v.GetDuration("kubernetes.recovery_poll_interval"),
-			ConflictRetries:       v.GetInt("kubernetes.conflict_retries"),
-			PreviewHostnameSuffix: v.GetString("kubernetes.preview_hostname_suffix"),
+			Kubeconfig:                 v.GetString("kubernetes.kubeconfig"),
+			RecoveryPollInterval:       v.GetDuration("kubernetes.recovery_poll_interval"),
+			ConflictRetries:            v.GetInt("kubernetes.conflict_retries"),
+			PreviewHostnameSuffix:      v.GetString("kubernetes.preview_hostname_suffix"),
+			NetworkEgressExcludedCIDRs: normalizeSliceValues(v.GetStringSlice("kubernetes.network_egress_excluded_cidrs")),
 		},
 		Observability: Observability{
 			OpenObserveBaseURL:          v.GetString("observability.openobserve_base_url"),
@@ -362,6 +421,7 @@ func environment(environ []string) map[string]string {
 		"KUBERNETES_RECOVERY_POLL_INTERVAL":           "kubernetes.recovery_poll_interval",
 		"KUBERNETES_CONFLICT_RETRIES":                 "kubernetes.conflict_retries",
 		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":          "kubernetes.preview_hostname_suffix",
+		"KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS":    "kubernetes.network_egress_excluded_cidrs",
 		"OBSERVABILITY_OPENOBSERVE_BASE_URL":          "observability.openobserve_base_url",
 		"OBSERVABILITY_OPENOBSERVE_ORGANIZATION":      "observability.openobserve_organization",
 		"OBSERVABILITY_OPENOBSERVE_LOG_STREAM":        "observability.openobserve_log_stream",
@@ -522,6 +582,11 @@ func (c Config) Validate() error {
 	}
 	if suffix := strings.TrimSpace(c.Kubernetes.PreviewHostnameSuffix); suffix == "" || len(suffix) > 253 || strings.ContainsAny(suffix, "/:@") {
 		errs = append(errs, fmt.Errorf("kubernetes.preview_hostname_suffix must be a DNS suffix"))
+	}
+	for _, cidr := range c.Kubernetes.NetworkEgressExcludedCIDRs {
+		if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
+			errs = append(errs, fmt.Errorf("kubernetes.network_egress_excluded_cidrs entry %q is not a valid CIDR", cidr))
+		}
 	}
 	errs = append(errs, c.Observability.validate()...)
 	return errors.Join(errs...)
