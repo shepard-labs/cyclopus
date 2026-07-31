@@ -44,6 +44,9 @@ type apiHandlers struct {
 	cyclopusv1.UnimplementedRegistryServiceServer
 	cyclopusv1.UnimplementedGitConnectionServiceServer
 	cyclopusv1.UnimplementedObservabilityServiceServer
+	cyclopusv1.UnimplementedAliasServiceServer
+	cyclopusv1.UnimplementedAuditEventServiceServer
+	cyclopusv1.UnimplementedCertificateServiceServer
 	auth       *internalauth.Service
 	service    *service.Service
 	sessionTTL time.Duration
@@ -56,7 +59,8 @@ func NewServices(authService *internalauth.Service, domainService *service.Servi
 	handler := &apiHandlers{auth: authService, service: domainService, sessionTTL: sessionTTL}
 	return Services{Authentication: handler, Organization: handler, Project: handler, Application: handler,
 		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler, Domain: handler,
-		Registry: handler, GitConnection: handler, Observability: handler}
+		Registry: handler, GitConnection: handler, Observability: handler, Alias: handler,
+		AuditEvent: handler, Certificate: handler}
 }
 
 func (h *apiHandlers) Bootstrap(ctx context.Context, req *cyclopusv1.BootstrapRequest) (*cyclopusv1.BootstrapResponse, error) {

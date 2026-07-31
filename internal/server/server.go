@@ -46,6 +46,9 @@ var serviceNames = []string{
 	cyclopusv1.RegistryService_ServiceDesc.ServiceName,
 	cyclopusv1.GitConnectionService_ServiceDesc.ServiceName,
 	cyclopusv1.ObservabilityService_ServiceDesc.ServiceName,
+	cyclopusv1.AliasService_ServiceDesc.ServiceName,
+	cyclopusv1.AuditEventService_ServiceDesc.ServiceName,
+	cyclopusv1.CertificateService_ServiceDesc.ServiceName,
 }
 
 const (
@@ -169,6 +172,13 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 		func() error {
 			return cyclopusv1.RegisterObservabilityServiceHandlerServer(ctx, gateway, services.Observability)
 		},
+		func() error { return cyclopusv1.RegisterAliasServiceHandlerServer(ctx, gateway, services.Alias) },
+		func() error {
+			return cyclopusv1.RegisterAuditEventServiceHandlerServer(ctx, gateway, services.AuditEvent)
+		},
+		func() error {
+			return cyclopusv1.RegisterCertificateServiceHandlerServer(ctx, gateway, services.Certificate)
+		},
 	}
 	for _, register := range registrations {
 		if err := register(); err != nil {
@@ -235,6 +245,9 @@ func buildGRPCServer(services Services, readiness ReadinessCheck, grpcConfig con
 	cyclopusv1.RegisterRegistryServiceServer(server, services.Registry)
 	cyclopusv1.RegisterGitConnectionServiceServer(server, services.GitConnection)
 	cyclopusv1.RegisterObservabilityServiceServer(server, services.Observability)
+	cyclopusv1.RegisterAliasServiceServer(server, services.Alias)
+	cyclopusv1.RegisterAuditEventServiceServer(server, services.AuditEvent)
+	cyclopusv1.RegisterCertificateServiceServer(server, services.Certificate)
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", healthv1.HealthCheckResponse_NOT_SERVING)
 	for _, serviceName := range serviceNames {

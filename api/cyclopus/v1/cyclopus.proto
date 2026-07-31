@@ -484,6 +484,84 @@ message DeleteGitConnectionRequest {
 }
 message DeleteGitConnectionResponse {}
 
+// Alias is one row of the aliases table: a bookkeeping record of which release
+// currently serves at a hostname for an environment (§3.7). There is at most
+// one alias per environment (UNIQUE(environment_id)).
+message Alias {
+  string id = 1;
+  string organization_id = 2;
+  string environment_id = 3;
+  string hostname = 4;
+  string release_id = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message GetAliasRequest { string alias_id = 1; }
+message GetAliasResponse { Alias alias = 1; }
+message ListAliasesRequest {
+  string environment_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListAliasesResponse {
+  repeated Alias aliases = 1;
+  string next_page_token = 2;
+}
+
+// AuditEvent is one row of the audit_events table: an immutable record of a
+// control-plane mutation (§9). before/after carry the prior and resulting
+// resource state as JSON objects. These are org-scoped; a caller can only read
+// their own org's audit trail. The stored `after` for secret-bearing resources
+// (e.g. registries) contains the secret REFERENCE, never a plaintext secret.
+message AuditEvent {
+  string id = 1;
+  string organization_id = 2;
+  // actor_user_id is the user who performed the action; empty for
+  // system-originated events.
+  string actor_user_id = 3;
+  string action = 4;
+  string target_type = 5;
+  string target_id = 6;
+  // before/after are the JSON object states of the target resource. They are
+  // exposed as google.protobuf.Struct because the stored jsonb is always a JSON
+  // object (or null), mapping cleanly to Struct; this preserves structure for
+  // clients rather than an opaque string.
+  google.protobuf.Struct before = 7;
+  google.protobuf.Struct after = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ListAuditEventsRequest {
+  string organization_id = 1;
+  // Optional filters. When set, only events whose target matches are returned.
+  string target_type = 2;
+  string target_id = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+message ListAuditEventsResponse {
+  repeated AuditEvent audit_events = 1;
+  string next_page_token = 2;
+}
+
+// CertificateStatus is the live status of a cert-manager Certificate serving an
+// environment's hostname, read directly from the cluster (read-only, §6). It is
+// not stored in Postgres; it is projected from the Certificate CRD's spec and
+// status. ready reflects the Ready condition; reason carries the condition's
+// message; not_after is the certificate expiry when known.
+message CertificateStatus {
+  string hostname = 1;
+  string secret_name = 2;
+  bool ready = 3;
+  string reason = 4;
+  google.protobuf.Timestamp not_after = 5;
+  string issuer = 6;
+  repeated string dns_names = 7;
+}
+
+message ListCertificatesRequest { string environment_id = 1; }
+message ListCertificatesResponse { repeated CertificateStatus certificates = 1; }
+
 message Operation {
   string id = 1;
   OperationStatus status = 2;
@@ -1095,5 +1173,34 @@ service ObservabilityService {
   }
   rpc GetOperatorMetrics(GetOperatorMetricsRequest) returns (GetOperatorMetricsResponse) {
     option (google.api.http) = { get: "/v1/operator/metrics" };
+  }
+}
+
+// AliasService reads the aliases bookkeeping table: which release currently
+// serves at an environment's hostname (§3.7). Read-only in v1; org-scoped.
+service AliasService {
+  rpc GetAlias(GetAliasRequest) returns (GetAliasResponse) {
+    option (google.api.http) = { get: "/v1/aliases/{alias_id}" };
+  }
+  rpc ListAliases(ListAliasesRequest) returns (ListAliasesResponse) {
+    option (google.api.http) = { get: "/v1/environments/{environment_id}/aliases" };
+  }
+}
+
+// AuditEventService reads the org-scoped audit trail (§9). Read-only; a caller
+// can only read their own organization's events, most-recent first.
+service AuditEventService {
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse) {
+    option (google.api.http) = { get: "/v1/organizations/{organization_id}/audit-events" };
+  }
+}
+
+// CertificateService reads live cert-manager Certificate status from the
+// cluster for an environment (read-only, §6). Org-scoping is enforced by
+// resolving the environment within the caller's org before reading only the
+// Certificates in that environment's Cyclopus-managed namespace.
+service CertificateService {
+  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse) {
+    option (google.api.http) = { get: "/v1/environments/{environment_id}/certificates" };
   }
 }

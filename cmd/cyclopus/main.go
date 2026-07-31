@@ -99,6 +99,9 @@ func run(args, environ []string) error {
 	} else if provider != nil {
 		domainService.SetTelemetry(provider)
 	}
+	if reader := buildCertReader(adapters); reader != nil {
+		domainService.SetCertReader(reader)
+	}
 	var ready atomic.Bool
 	readiness := func(ctx context.Context) error {
 		if !ready.Load() {
@@ -172,6 +175,25 @@ func buildTelemetryProvider(ctx context.Context, cfg config.Observability, adapt
 		}
 	}
 	return observability.NewProvider(logs, metrics), nil
+}
+
+// buildCertReader constructs the read-only cert-manager Certificate reader from
+// the Kubernetes adapter's dynamic client. It returns nil when the adapter does
+// not expose a dynamic client (leaving the Certificate RPCs to report the
+// capability as unavailable), and reads only through the dynamic client — no
+// cert-manager Go module is imported.
+func buildCertReader(adapters worker.RecoveryAdapters) service.CertReader {
+	holder, ok := adapters.Kubernetes.(interface {
+		DynamicClient() dynamic.Interface
+	})
+	if !ok {
+		return nil
+	}
+	client := holder.DynamicClient()
+	if client == nil {
+		return nil
+	}
+	return kubernetesadapter.NewCertificateReader(client)
 }
 
 type adapterConstructors struct {

@@ -53,6 +53,7 @@ type Service struct {
 	previewSlugs  PreviewSlugGenerator
 	logger        *slog.Logger
 	telemetry     TelemetryProvider
+	certReader    CertReader
 	dnsResolver   DNSResolver
 	ingressTarget string
 }

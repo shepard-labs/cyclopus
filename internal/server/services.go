@@ -15,6 +15,9 @@ type Services struct {
 	Registry         cyclopusv1.RegistryServiceServer
 	GitConnection    cyclopusv1.GitConnectionServiceServer
 	Observability    cyclopusv1.ObservabilityServiceServer
+	Alias            cyclopusv1.AliasServiceServer
+	AuditEvent       cyclopusv1.AuditEventServiceServer
+	Certificate      cyclopusv1.CertificateServiceServer
 	Authenticator    *Authenticator
 	RateLimiter      *authRateLimiter
 	RequestBodyBytes int64
@@ -34,6 +37,9 @@ func DefaultServices() Services {
 		Registry:       unimplementedRegistryService{},
 		GitConnection:  unimplementedGitConnectionService{},
 		Observability:  unimplementedObservabilityService{},
+		Alias:          unimplementedAliasService{},
+		AuditEvent:     unimplementedAuditEventService{},
+		Certificate:    unimplementedCertificateService{},
 	}
 }
 
@@ -73,6 +79,15 @@ type unimplementedGitConnectionService struct {
 type unimplementedObservabilityService struct {
 	cyclopusv1.UnimplementedObservabilityServiceServer
 }
+type unimplementedAliasService struct {
+	cyclopusv1.UnimplementedAliasServiceServer
+}
+type unimplementedAuditEventService struct {
+	cyclopusv1.UnimplementedAuditEventServiceServer
+}
+type unimplementedCertificateService struct {
+	cyclopusv1.UnimplementedCertificateServiceServer
+}
 
 func withDefaults(services Services) Services {
 	defaults := DefaultServices()
@@ -111,6 +126,15 @@ func withDefaults(services Services) Services {
 	}
 	if services.Observability == nil {
 		services.Observability = defaults.Observability
+	}
+	if services.Alias == nil {
+		services.Alias = defaults.Alias
+	}
+	if services.AuditEvent == nil {
+		services.AuditEvent = defaults.AuditEvent
+	}
+	if services.Certificate == nil {
+		services.Certificate = defaults.Certificate
 	}
 	return services
 }

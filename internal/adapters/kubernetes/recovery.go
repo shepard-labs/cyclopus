@@ -149,6 +149,13 @@ func (a *RecoveryAdapter) KubernetesClient() kubernetes.Interface {
 	return a.client
 }
 
+// DynamicClient exposes the dynamic client used for CRD reads (KEDA scalers,
+// cert-manager Certificates). Wiring uses it to construct the read-only
+// CertificateReader. It may be nil if no dynamic client was injected.
+func (a *RecoveryAdapter) DynamicClient() dynamic.Interface {
+	return a.dynamic
+}
+
 func (a *RecoveryAdapter) ExecuteEnvironmentLifecycle(ctx context.Context, job store.EnvironmentLifecycleJob) error {
 	return a.lifecycle.ExecuteEnvironmentLifecycle(ctx, job)
 }

@@ -2945,3 +2945,369 @@ var ObservabilityService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "cyclopus/v1/cyclopus.proto",
 }
+
+const (
+	AliasService_GetAlias_FullMethodName    = "/cyclopus.v1.AliasService/GetAlias"
+	AliasService_ListAliases_FullMethodName = "/cyclopus.v1.AliasService/ListAliases"
+)
+
+// AliasServiceClient is the client API for AliasService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// AliasService reads the aliases bookkeeping table: which release currently
+// serves at an environment's hostname (§3.7). Read-only in v1; org-scoped.
+type AliasServiceClient interface {
+	GetAlias(ctx context.Context, in *GetAliasRequest, opts ...grpc.CallOption) (*GetAliasResponse, error)
+	ListAliases(ctx context.Context, in *ListAliasesRequest, opts ...grpc.CallOption) (*ListAliasesResponse, error)
+}
+
+type aliasServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAliasServiceClient(cc grpc.ClientConnInterface) AliasServiceClient {
+	return &aliasServiceClient{cc}
+}
+
+func (c *aliasServiceClient) GetAlias(ctx context.Context, in *GetAliasRequest, opts ...grpc.CallOption) (*GetAliasResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAliasResponse)
+	err := c.cc.Invoke(ctx, AliasService_GetAlias_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aliasServiceClient) ListAliases(ctx context.Context, in *ListAliasesRequest, opts ...grpc.CallOption) (*ListAliasesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAliasesResponse)
+	err := c.cc.Invoke(ctx, AliasService_ListAliases_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AliasServiceServer is the server API for AliasService service.
+// All implementations must embed UnimplementedAliasServiceServer
+// for forward compatibility.
+//
+// AliasService reads the aliases bookkeeping table: which release currently
+// serves at an environment's hostname (§3.7). Read-only in v1; org-scoped.
+type AliasServiceServer interface {
+	GetAlias(context.Context, *GetAliasRequest) (*GetAliasResponse, error)
+	ListAliases(context.Context, *ListAliasesRequest) (*ListAliasesResponse, error)
+	mustEmbedUnimplementedAliasServiceServer()
+}
+
+// UnimplementedAliasServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAliasServiceServer struct{}
+
+func (UnimplementedAliasServiceServer) GetAlias(context.Context, *GetAliasRequest) (*GetAliasResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAlias not implemented")
+}
+func (UnimplementedAliasServiceServer) ListAliases(context.Context, *ListAliasesRequest) (*ListAliasesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAliases not implemented")
+}
+func (UnimplementedAliasServiceServer) mustEmbedUnimplementedAliasServiceServer() {}
+func (UnimplementedAliasServiceServer) testEmbeddedByValue()                      {}
+
+// UnsafeAliasServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AliasServiceServer will
+// result in compilation errors.
+type UnsafeAliasServiceServer interface {
+	mustEmbedUnimplementedAliasServiceServer()
+}
+
+func RegisterAliasServiceServer(s grpc.ServiceRegistrar, srv AliasServiceServer) {
+	// If the following call panics, it indicates UnimplementedAliasServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&AliasService_ServiceDesc, srv)
+}
+
+func _AliasService_GetAlias_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAliasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AliasServiceServer).GetAlias(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AliasService_GetAlias_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AliasServiceServer).GetAlias(ctx, req.(*GetAliasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AliasService_ListAliases_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAliasesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AliasServiceServer).ListAliases(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AliasService_ListAliases_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AliasServiceServer).ListAliases(ctx, req.(*ListAliasesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// AliasService_ServiceDesc is the grpc.ServiceDesc for AliasService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var AliasService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.AliasService",
+	HandlerType: (*AliasServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetAlias",
+			Handler:    _AliasService_GetAlias_Handler,
+		},
+		{
+			MethodName: "ListAliases",
+			Handler:    _AliasService_ListAliases_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cyclopus/v1/cyclopus.proto",
+}
+
+const (
+	AuditEventService_ListAuditEvents_FullMethodName = "/cyclopus.v1.AuditEventService/ListAuditEvents"
+)
+
+// AuditEventServiceClient is the client API for AuditEventService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// AuditEventService reads the org-scoped audit trail (§9). Read-only; a caller
+// can only read their own organization's events, most-recent first.
+type AuditEventServiceClient interface {
+	ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error)
+}
+
+type auditEventServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAuditEventServiceClient(cc grpc.ClientConnInterface) AuditEventServiceClient {
+	return &auditEventServiceClient{cc}
+}
+
+func (c *auditEventServiceClient) ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAuditEventsResponse)
+	err := c.cc.Invoke(ctx, AuditEventService_ListAuditEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AuditEventServiceServer is the server API for AuditEventService service.
+// All implementations must embed UnimplementedAuditEventServiceServer
+// for forward compatibility.
+//
+// AuditEventService reads the org-scoped audit trail (§9). Read-only; a caller
+// can only read their own organization's events, most-recent first.
+type AuditEventServiceServer interface {
+	ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error)
+	mustEmbedUnimplementedAuditEventServiceServer()
+}
+
+// UnimplementedAuditEventServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAuditEventServiceServer struct{}
+
+func (UnimplementedAuditEventServiceServer) ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAuditEvents not implemented")
+}
+func (UnimplementedAuditEventServiceServer) mustEmbedUnimplementedAuditEventServiceServer() {}
+func (UnimplementedAuditEventServiceServer) testEmbeddedByValue()                           {}
+
+// UnsafeAuditEventServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AuditEventServiceServer will
+// result in compilation errors.
+type UnsafeAuditEventServiceServer interface {
+	mustEmbedUnimplementedAuditEventServiceServer()
+}
+
+func RegisterAuditEventServiceServer(s grpc.ServiceRegistrar, srv AuditEventServiceServer) {
+	// If the following call panics, it indicates UnimplementedAuditEventServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&AuditEventService_ServiceDesc, srv)
+}
+
+func _AuditEventService_ListAuditEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAuditEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuditEventServiceServer).ListAuditEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuditEventService_ListAuditEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuditEventServiceServer).ListAuditEvents(ctx, req.(*ListAuditEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// AuditEventService_ServiceDesc is the grpc.ServiceDesc for AuditEventService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var AuditEventService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.AuditEventService",
+	HandlerType: (*AuditEventServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListAuditEvents",
+			Handler:    _AuditEventService_ListAuditEvents_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cyclopus/v1/cyclopus.proto",
+}
+
+const (
+	CertificateService_ListCertificates_FullMethodName = "/cyclopus.v1.CertificateService/ListCertificates"
+)
+
+// CertificateServiceClient is the client API for CertificateService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// CertificateService reads live cert-manager Certificate status from the
+// cluster for an environment (read-only, §6). Org-scoping is enforced by
+// resolving the environment within the caller's org before reading only the
+// Certificates in that environment's Cyclopus-managed namespace.
+type CertificateServiceClient interface {
+	ListCertificates(ctx context.Context, in *ListCertificatesRequest, opts ...grpc.CallOption) (*ListCertificatesResponse, error)
+}
+
+type certificateServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewCertificateServiceClient(cc grpc.ClientConnInterface) CertificateServiceClient {
+	return &certificateServiceClient{cc}
+}
+
+func (c *certificateServiceClient) ListCertificates(ctx context.Context, in *ListCertificatesRequest, opts ...grpc.CallOption) (*ListCertificatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCertificatesResponse)
+	err := c.cc.Invoke(ctx, CertificateService_ListCertificates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CertificateServiceServer is the server API for CertificateService service.
+// All implementations must embed UnimplementedCertificateServiceServer
+// for forward compatibility.
+//
+// CertificateService reads live cert-manager Certificate status from the
+// cluster for an environment (read-only, §6). Org-scoping is enforced by
+// resolving the environment within the caller's org before reading only the
+// Certificates in that environment's Cyclopus-managed namespace.
+type CertificateServiceServer interface {
+	ListCertificates(context.Context, *ListCertificatesRequest) (*ListCertificatesResponse, error)
+	mustEmbedUnimplementedCertificateServiceServer()
+}
+
+// UnimplementedCertificateServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedCertificateServiceServer struct{}
+
+func (UnimplementedCertificateServiceServer) ListCertificates(context.Context, *ListCertificatesRequest) (*ListCertificatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCertificates not implemented")
+}
+func (UnimplementedCertificateServiceServer) mustEmbedUnimplementedCertificateServiceServer() {}
+func (UnimplementedCertificateServiceServer) testEmbeddedByValue()                            {}
+
+// UnsafeCertificateServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to CertificateServiceServer will
+// result in compilation errors.
+type UnsafeCertificateServiceServer interface {
+	mustEmbedUnimplementedCertificateServiceServer()
+}
+
+func RegisterCertificateServiceServer(s grpc.ServiceRegistrar, srv CertificateServiceServer) {
+	// If the following call panics, it indicates UnimplementedCertificateServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&CertificateService_ServiceDesc, srv)
+}
+
+func _CertificateService_ListCertificates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCertificatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CertificateServiceServer).ListCertificates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CertificateService_ListCertificates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CertificateServiceServer).ListCertificates(ctx, req.(*ListCertificatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// CertificateService_ServiceDesc is the grpc.ServiceDesc for CertificateService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var CertificateService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.CertificateService",
+	HandlerType: (*CertificateServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListCertificates",
+			Handler:    _CertificateService_ListCertificates_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cyclopus/v1/cyclopus.proto",
+}
