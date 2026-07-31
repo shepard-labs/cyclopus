@@ -88,7 +88,7 @@ flowchart TB
 
     subgraph ext["External"]
         Reg["Registry — GHCR / GCR"]
-        SS["sslip.io (default hostnames — DNS only)"]
+        SS["sslip.io or operator domain (default hostnames — DNS only)"]
         CustDNS["Customer DNS (custom domains)"]
     end
 
@@ -125,7 +125,7 @@ flowchart TB
 |---|---|---|---|
 | Orchestrator | k3s | Runs everything | Once, via the bootstrap install script on operator-provided VPS nodes. App-workload nodes require nested virtualization (for gVisor `runsc`). Server node: ~2GB RAM / 2 CPU minimum; agent nodes as low as 512MB. Started with `--disable=traefik` and secrets encryption at rest enabled (§9). |
 | Ingress | Traefik | Routes hostnames to pods | Once, via Helm. k3s's bundled Traefik is disabled at install so the version is managed explicitly rather than moving with k3s upgrades. |
-| TLS | cert-manager | Per-hostname certs via HTTP-01, for both default `sslip.io` hostnames and customer custom domains. No wildcard certificates and therefore no DNS-01 solver or DNS-provider credential anywhere in v1 (§7.5) | Once, via Helm |
+| TLS | cert-manager | Per-hostname certs via HTTP-01, for both default platform hostnames and customer custom domains. No wildcard certificates and therefore no DNS-01 solver or DNS-provider credential anywhere in v1 (§7.5) | Once, via Helm |
 | Isolation — compute | Kyverno + gVisor (`runsc`) RuntimeClass | Kernel-level sandboxing per app pod, mutating *and* validating policies, both fail-closed (§7.1) | Once, via Helm |
 | Isolation — network | Kubernetes NetworkPolicy, enforced by k3s's bundled kube-router controller (default) or Calico (optional upgrade for `GlobalNetworkPolicy`) | Default-deny ingress AND egress per app namespace (§7.2) | Built into k3s; Calico optional, Helm |
 | Pod autoscaling | Kubernetes HPA | Default for production environments; floor >=1, no scale-to-zero. Not attached to preview environments (§4.3) | Built into k3s |
@@ -140,7 +140,7 @@ flowchart TB
 | Resource metrics | Beszel | PocketBase-based, proxied through Cyclopus | Once, via Helm |
 | Postgres backup | WAL-G (primary), pgBackRest (heavier alternative) | Streams WAL to `storage_destinations` (S3-compatible); RPO target in §9.1 | Once, via Helm |
 | Cluster resource backup | Velero | Kubernetes objects + PVs, secondary to Postgres backup, not a substitute for it | Once, via Helm, optional |
-| Default hostnames | sslip.io | External, DNS-only, no cert bundling. Provides both preview and default production hostnames (§7.5) | Not installed, just used |
+| Default hostnames | sslip.io (default) or operator-owned domain | External, DNS-only. Configured via `kubernetes.preview_hostname_suffix`; both preview and production hostnames use this suffix. sslip.io is not PSL-listed — cert quota is shared globally; configure your own domain for production isolation (§7.5). | Not installed, just used |
 | Custom domain DNS | Customer's own DNS provider | Customer-configured; Cyclopus never holds DNS credentials | Not installed by Cyclopus |
 
 ### 2.2 Multi-node topology: control plane and app workloads on separate VPS instances
@@ -784,10 +784,14 @@ Every mutating API call writes an `audit_events` row.
 
 **There is no Cyclopus-operated wildcard domain.** Every install is a separate cluster with a separate ingress IP, so a single vendor-held wildcard record has no coherent target, and a per-install sub-zone would require handing every customer a credential that can write the vendor's DNS zone. Both were considered and rejected; the cost is that there is no vanity default hostname, and the benefit is that Cyclopus operates no shared DNS infrastructure, holds no DNS credentials, and has no dependency that can take down every install at once.
 
-**Default hostnames come from sslip.io**, which resolves an IP embedded in the name back to that IP with no registration, no API, and no credential. Both environment kinds use it:
+**Default hostnames use the operator-configured `kubernetes.preview_hostname_suffix`**, applied to both environment kinds:
 
-- **Production:** `{app.hostname_label}.{ingress-ip-dashed}.sslip.io`
-- **Preview:** `{preview-slug}.{ingress-ip-dashed}.sslip.io`
+- **Production:** `{app.hostname_label}.{suffix}` — e.g. `api.203-0-113-7.sslip.io`
+- **Preview:** `{preview-slug}.{suffix}` — e.g. `crimson-otter-7f3k.203-0-113-7.sslip.io`
+
+The recommended default is `{ingress-ip-dashed}.sslip.io`, which resolves the embedded IP with no registration or credential. sslip.io is not on the Public Suffix List (PSL): cert quota is shared globally across all sslip.io users, and apps on one install are same-site in browsers. For a solo developer or small team on their own cluster, this is acceptable in practice (see §7.6). Operators running production workloads should configure their own wildcard domain (e.g. `apps.example.com` with `*.apps.example.com → ingress-ip`) for per-install cert quota isolation.
+
+Production environments are created via `CreateProductionEnvironment` (§4.1), which auto-generates the hostname from `hostname_label + suffix`. An explicit hostname can be provided at creation time to attach a custom domain immediately.
 
 Ideally the IP is a **movable ingress IP** (a cloud floating IP, keepalived VIP, or BGP-advertised address the operator holds) rather than a node's native address — see §9.1, which is what lets these hostnames survive a rebuild. On a generic VPS without a movable IP this is best-effort: default hostnames may change on DR (§9.1).
 
@@ -804,7 +808,7 @@ Slugs are never reused. A branch that is torn down and later pushed again gets a
 
 **Customer custom domains need real verification, and the method matches the domain shape:**
 
-- **Subdomain** (`app.customerdomain.com`) — recommended default: the customer adds `CNAME app.customerdomain.com → {ingress-ip-dashed}.sslip.io`. No separate ownership-proof step: creating a CNAME requires DNS zone edit access, which is itself sufficient proof of control, and the same record is what routes traffic — verification and go-live are one action, one DNS change instead of two.
+- **Subdomain** (`app.customerdomain.com`) — recommended default: the customer adds `CNAME app.customerdomain.com → {platform-ingress-hostname}`. No separate ownership-proof step: creating a CNAME requires DNS zone edit access, which is itself sufficient proof of control, and the same record is what routes traffic — verification and go-live are one action, one DNS change instead of two.
 - **Apex/root domain** (`customerdomain.com` itself) — CNAME isn't valid at a zone apex under standard DNS rules (some providers offer ALIAS/ANAME flattening, not universal). Use a `TXT` ownership challenge first (`_cyclopus-challenge.customerdomain.com` = the per-domain random `domains.verification_token`), then, once verified, give the customer the ingress A record to point at. Two steps here, not one, specifically because apex A-record pointing is a weaker standalone proof of intent than a full CNAME delegation.
 
 ### 7.6 Certificate issuance rate
@@ -813,9 +817,12 @@ Preview environments issue one certificate per branch, not per push (§4.3), whi
 
 Issuance volume still scales with development activity, so cert-manager's issuance and failure counters are a monitored signal from day one (§11), with alerting before Let's Encrypt's per-registered-domain weekly limits are approached rather than after certificates start failing.
 
-**One external dependency worth naming explicitly:** Let's Encrypt computes its per-registered-domain limits using the Public Suffix List. If `sslip.io` is PSL-listed, each `{ip}.sslip.io` is its own registered domain and an install's quota is its own. If it is not, the limit is shared globally with every sslip.io user in the world and preview issuance would fail for reasons no operator can see or control. Other self-hosted PaaS tooling relies on sslip.io for exactly this pattern, which is good evidence it holds — but it is a five-minute check and it is load-bearing twice over, so it is listed in §11.
+**sslip.io is not on the Public Suffix List (PSL).** This has two consequences:
 
-The same PSL fact governs browser origin separation. All of one install's hostnames sit under a shared `{ip}.sslip.io` parent, so if that parent is a registered domain rather than a public suffix, apps on a single install are same-site to each other: `Domain`-scoped cookies are shared, and `SameSite` provides no protection between them. Unlike the multi-tenant case this is one customer's own apps on their own cluster, which lowers the stakes considerably — but an app handling third-party sessions alongside other apps on the same install should not rely on `SameSite` alone.
+- **Cert quota:** Let's Encrypt computes limits per registered domain (as defined by the PSL). With sslip.io unlisted, `sslip.io` itself is the registered domain — all installs worldwide share one quota. For a solo developer with a handful of previews this is unlikely to matter. Operators expecting high branch churn should configure their own wildcard domain.
+- **Browser same-site:** All of one install's hostnames share `{ip}.sslip.io` as their effective registered domain, so apps on the same install are same-site to each other. On a single-team cluster you control all the apps — the risk is low and accepted.
+
+Operators who need per-install cert quota isolation should set `kubernetes.preview_hostname_suffix` to their own domain (e.g. `apps.example.com`) and add one wildcard DNS record (`*.apps.example.com → ingress-ip`). A startup warning is logged when sslip.io or nip.io is detected.
 
 ### 7.7 Trust boundary: repository write access
 
@@ -890,7 +897,7 @@ Three distinct concerns:
 
 #### Hostname survival across DR
 
-Every hostname is already durable in Postgres — `aliases.hostname` and `domains.hostname` — so a restore knows exactly what every environment was reachable at. **But persistence alone does not make a default hostname work again**, because a sslip.io name *is* an IP: `api.203-0-113-7.sslip.io` resolves to `203.0.113.7` by construction. Reusing a stored hostname on a cluster with a different address produces a name that resolves to the old, dead machine. The record survives; the routing doesn't.
+Every hostname is already durable in Postgres — `aliases.hostname` and `domains.hostname` — so a restore knows exactly what every environment was reachable at. **But persistence alone does not make a default hostname work again when using IP-embedding services like sslip.io.** The hostname `api.203-0-113-7.sslip.io` resolves to `203.0.113.7` by construction — reusing it on a cluster with a different address produces a name that resolves to the old, dead machine. The record survives; the routing doesn't.
 
 What actually makes them survive is holding the address, so the operator SHOULD provision the ingress address as a **movable IP** (a cloud floating IP, keepalived VIP, or BGP-advertised address — operator's choice) rather than using a node's native address. DR reattaches it to the new node. On a generic VPS without a movable IP, default hostnames may change on DR and reconcile emits the old→new mapping; custom domains remain the durable path. With the address recovered:
 
@@ -952,7 +959,7 @@ Helm chart upgrades that touch platform dependencies (Traefik, cert-manager, Kyv
 | Network isolation | NetworkPolicy via k3s's bundled kube-router (default) or Calico (optional upgrade) |
 | Release model | One mutable Deployment per environment (release-scoped Deployments deferred to v2) |
 | Autoscaling | HPA (default, production only), KEDA core + HTTP Add-on — beta (opt-in per production app); previews pinned at 1 replica |
-| Default hostnames | sslip.io (production and preview), against a movable ingress IP if the operator holds one |
+| Default hostnames | Operator-configured suffix via `kubernetes.preview_hostname_suffix`; recommended default `{ip}.sslip.io` (not PSL-listed — shared cert quota; configure own domain for production isolation) |
 | Control-plane observability | Structured JSON logs via the Collector (metrics + alerting deferred to v2) |
 | Outbound webhooks | HMAC-SHA256 signed, at-least-once, persisted retries (§6.1) |
 | Custom domains | Customer-managed DNS, CNAME for subdomains, TXT + A for apex |
@@ -974,5 +981,5 @@ Four checks before v1 ships. None blocks starting implementation; all block call
 |---|---|---|---|
 | V1 | gVisor cold-start under KEDA scale-from-zero | Deploy a representative app image with `scaling_mode: keda_http` and `runtimeClassName: gvisor`, `min_replicas: 0`. Hit it cold. Measure time-to-first-byte, compare against the HTTP Add-on's default request-holding timeout. Half a day. | If TTFB exceeds the hold window, either raise the timeout or make `keda_http` incompatible with `runtime_class: gvisor` and say so in the UI. Scope note: this now affects only opt-in production apps, since previews no longer use KEDA (§4.3) — lower urgency than in prior drafts, but it also gates the v2 decision on preview scale-to-zero. |
 | V2 | Certificate issuance rate under realistic branch churn | Instrument cert-manager's issuance and failure counters; set an alert threshold below Let's Encrypt's per-registered-domain weekly limit. | Whether default `max_preview_environments` and `preview_idle_ttl_hours` are set aggressively enough, and whether issuance needs a platform-level rate limiter. |
-| V3 | Confirm `sslip.io`'s Public Suffix List status | Check the current PSL directly. Five minutes. | Load-bearing twice: it determines whether an install's Let's Encrypt quota is its own or shared globally (§7.6), and whether an install's apps are cross-origin or same-site to each other in the browser. If unlisted, both the preview hostname scheme and the cookie-isolation guidance need rethinking before launch. |
+| V3 | ~~Confirm `sslip.io`'s Public Suffix List status~~ **RESOLVED** | Confirmed absent from PSL (2026-07-25). sslip.io is the default with a documented limitation and startup warning. Operators needing per-install cert quota isolation should configure their own domain. See §7.6. | Resolved — no blocking action required. |
 | V4 | Verify nested virtualization on all app-workload nodes | On each app-workload node, confirm the kernel exposes hardware virtualization (e.g. `/dev/kvm` present, `kvm` module loaded) so the gVisor `runsc` runtime can start. Five minutes per node. | Gates gVisor tenant isolation (§7.1): without nested virtualization the `runsc` RuntimeClass fails closed and no tenant workload can schedule, so this must be confirmed on the operator's bring-your-own-VPS nodes before launch. |

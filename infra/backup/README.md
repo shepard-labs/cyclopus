@@ -31,7 +31,7 @@ because the deploy model is imperative with Postgres as source of truth (§3.2).
 ## Hostname survival across DR (§9.1)
 
 The ingress address is a **floating IP**, so DR reattaches it to the new node and
-every default `{ip-dashed}.sslip.io` hostname resolves unchanged, existing
+every default IP-embedded hostname resolves unchanged, existing
 certificates stay valid, and custom domains pointing at the floating IP need no
 DNS edit. If the address genuinely cannot be recovered, reconcile regenerates
 default hostnames against the new IP, reissues certificates, and emits the full

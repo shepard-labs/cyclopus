@@ -135,7 +135,7 @@ func TestNetworkPolicyProvisionerDefaultExceptCIDRsWithoutExtras(t *testing.T) {
 }
 
 func TestPreviewHostnameProviderUsesPreviewSlugAndConfiguredSuffix(t *testing.T) {
-	provider, err := NewPreviewHostnameProvider("previews.example.test")
+	provider, err := NewSuffixHostnameProvider("previews.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,5 +235,9 @@ func (successfulPolicy) ProvisionAndVerify(context.Context, store.EnvironmentLif
 type staticHostname string
 
 func (value staticHostname) PreviewHostname(context.Context, store.EnvironmentLifecycleJob) (string, error) {
+	return string(value), nil
+}
+
+func (value staticHostname) ProductionHostname(string) (string, error) {
 	return string(value), nil
 }

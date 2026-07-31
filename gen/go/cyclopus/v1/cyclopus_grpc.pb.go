@@ -997,11 +997,12 @@ var ApplicationService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	EnvironmentService_GetEnvironment_FullMethodName            = "/cyclopus.v1.EnvironmentService/GetEnvironment"
-	EnvironmentService_ListEnvironments_FullMethodName          = "/cyclopus.v1.EnvironmentService/ListEnvironments"
-	EnvironmentService_AcceptPreviewPush_FullMethodName         = "/cyclopus.v1.EnvironmentService/AcceptPreviewPush"
-	EnvironmentService_AcceptPreviewBranchDelete_FullMethodName = "/cyclopus.v1.EnvironmentService/AcceptPreviewBranchDelete"
-	EnvironmentService_TeardownEnvironment_FullMethodName       = "/cyclopus.v1.EnvironmentService/TeardownEnvironment"
+	EnvironmentService_GetEnvironment_FullMethodName              = "/cyclopus.v1.EnvironmentService/GetEnvironment"
+	EnvironmentService_ListEnvironments_FullMethodName            = "/cyclopus.v1.EnvironmentService/ListEnvironments"
+	EnvironmentService_AcceptPreviewPush_FullMethodName           = "/cyclopus.v1.EnvironmentService/AcceptPreviewPush"
+	EnvironmentService_AcceptPreviewBranchDelete_FullMethodName   = "/cyclopus.v1.EnvironmentService/AcceptPreviewBranchDelete"
+	EnvironmentService_TeardownEnvironment_FullMethodName         = "/cyclopus.v1.EnvironmentService/TeardownEnvironment"
+	EnvironmentService_CreateProductionEnvironment_FullMethodName = "/cyclopus.v1.EnvironmentService/CreateProductionEnvironment"
 )
 
 // EnvironmentServiceClient is the client API for EnvironmentService service.
@@ -1013,6 +1014,7 @@ type EnvironmentServiceClient interface {
 	AcceptPreviewPush(ctx context.Context, in *PreviewPushRequest, opts ...grpc.CallOption) (*PreviewPushResponse, error)
 	AcceptPreviewBranchDelete(ctx context.Context, in *PreviewBranchDeleteRequest, opts ...grpc.CallOption) (*PreviewBranchDeleteResponse, error)
 	TeardownEnvironment(ctx context.Context, in *TeardownEnvironmentRequest, opts ...grpc.CallOption) (*TeardownEnvironmentResponse, error)
+	CreateProductionEnvironment(ctx context.Context, in *CreateProductionEnvironmentRequest, opts ...grpc.CallOption) (*CreateProductionEnvironmentResponse, error)
 }
 
 type environmentServiceClient struct {
@@ -1073,6 +1075,16 @@ func (c *environmentServiceClient) TeardownEnvironment(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *environmentServiceClient) CreateProductionEnvironment(ctx context.Context, in *CreateProductionEnvironmentRequest, opts ...grpc.CallOption) (*CreateProductionEnvironmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateProductionEnvironmentResponse)
+	err := c.cc.Invoke(ctx, EnvironmentService_CreateProductionEnvironment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EnvironmentServiceServer is the server API for EnvironmentService service.
 // All implementations must embed UnimplementedEnvironmentServiceServer
 // for forward compatibility.
@@ -1082,6 +1094,7 @@ type EnvironmentServiceServer interface {
 	AcceptPreviewPush(context.Context, *PreviewPushRequest) (*PreviewPushResponse, error)
 	AcceptPreviewBranchDelete(context.Context, *PreviewBranchDeleteRequest) (*PreviewBranchDeleteResponse, error)
 	TeardownEnvironment(context.Context, *TeardownEnvironmentRequest) (*TeardownEnvironmentResponse, error)
+	CreateProductionEnvironment(context.Context, *CreateProductionEnvironmentRequest) (*CreateProductionEnvironmentResponse, error)
 	mustEmbedUnimplementedEnvironmentServiceServer()
 }
 
@@ -1106,6 +1119,9 @@ func (UnimplementedEnvironmentServiceServer) AcceptPreviewBranchDelete(context.C
 }
 func (UnimplementedEnvironmentServiceServer) TeardownEnvironment(context.Context, *TeardownEnvironmentRequest) (*TeardownEnvironmentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TeardownEnvironment not implemented")
+}
+func (UnimplementedEnvironmentServiceServer) CreateProductionEnvironment(context.Context, *CreateProductionEnvironmentRequest) (*CreateProductionEnvironmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateProductionEnvironment not implemented")
 }
 func (UnimplementedEnvironmentServiceServer) mustEmbedUnimplementedEnvironmentServiceServer() {}
 func (UnimplementedEnvironmentServiceServer) testEmbeddedByValue()                            {}
@@ -1218,6 +1234,24 @@ func _EnvironmentService_TeardownEnvironment_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EnvironmentService_CreateProductionEnvironment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateProductionEnvironmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnvironmentServiceServer).CreateProductionEnvironment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EnvironmentService_CreateProductionEnvironment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnvironmentServiceServer).CreateProductionEnvironment(ctx, req.(*CreateProductionEnvironmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EnvironmentService_ServiceDesc is the grpc.ServiceDesc for EnvironmentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1244,6 +1278,10 @@ var EnvironmentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TeardownEnvironment",
 			Handler:    _EnvironmentService_TeardownEnvironment_Handler,
+		},
+		{
+			MethodName: "CreateProductionEnvironment",
+			Handler:    _EnvironmentService_CreateProductionEnvironment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

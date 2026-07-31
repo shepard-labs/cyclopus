@@ -49,6 +49,8 @@ config:
   logLevel: info
   httpAddress: "0.0.0.0:8080"
   grpcAddress: "0.0.0.0:9090"
+  # Set to true only for dev/test — bypasses the loopback-only listener check.
+  insecurePublicListeners: false
   database:
     # Non-secret DB connection settings. The full URL (with password) is a
     # secret; see secrets.databaseUrl below.
@@ -58,8 +60,12 @@ config:
     leaseDuration: "60s"
     maxConcurrentDeploys: 4
   kubernetes:
-    # Verified DNS suffix appended to generated preview slugs; the floating-IP
-    # dashed address (§7.5, §9.1), e.g. "203-0-113-7.sslip.io".
+    # DNS suffix appended to all platform-generated hostnames (preview and
+    # production). Set to "{ingress-ip-dashed}.sslip.io" for zero-config
+    # deployments (recommended default; note: sslip.io is not PSL-listed —
+    # cert quota is shared globally). For production use, set to your own
+    # wildcard domain, e.g. "apps.example.com" (requires *.apps.example.com
+    # → ingress-ip DNS record). See §7.5.
     previewHostnameSuffix: ""
     # Platform ingress hostname that custom subdomains CNAME to (§7.5). Defaults
     # to previewHostnameSuffix when left empty; set explicitly only if your

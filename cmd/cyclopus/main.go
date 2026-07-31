@@ -79,6 +79,7 @@ func run(args, environ []string) error {
 	}
 	domainService := service.New(dataStore, service.WithLogger(logger),
 		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget),
+		service.WithHostnameSuffix(cfg.Kubernetes.PreviewHostnameSuffix),
 		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer))
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)

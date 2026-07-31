@@ -23,8 +23,7 @@ Status: complete.
   LimitRange, both required NetworkPolicies, and removes the pending label only
   after policy read-back and durable readiness. Failed durable completion
   restores the pending label.
-- Preview hostnames use an operator-configured DNS suffix. `sslip.io` remains
-  disabled because the PSL launch-block probe confirms it is absent.
+- Hostnames (preview and production) use `SuffixHostnameProvider` with an operator-configured DNS suffix. `sslip.io` is the recommended default with a documented PSL limitation; operators configure their own domain for production isolation.
 - Teardown handles branch deletion, operator requests, and idle expiry; it
   drains queued/leased work, continues active GitHub/deploy recovery to terminal
   state, verifies namespace ownership, and deletes with a UID precondition.

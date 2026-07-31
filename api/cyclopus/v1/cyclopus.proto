@@ -788,6 +788,19 @@ message DeleteApplicationResponse { Operation operation = 1; }
 message GetEnvironmentRequest { string environment_id = 1; }
 message GetEnvironmentResponse { Environment environment = 1; }
 
+// CreateProductionEnvironmentRequest provisions a production environment for
+// an application. hostname is optional: when empty the platform auto-generates
+// it from the app's hostname_label and the configured preview_hostname_suffix
+// (§7.5). When provided it is used as-is, which is how operators attach their
+// own domain after initial setup.
+message CreateProductionEnvironmentRequest {
+  string application_id = 1;
+  string branch = 2;         // optional; defaults to "main" when empty
+  string hostname = 3;       // optional; auto-generated when empty
+  string idempotency_key = 4;
+}
+message CreateProductionEnvironmentResponse { Environment environment = 1; }
+
 message ListEnvironmentsRequest {
   string application_id = 1;
   int32 page_size = 2;
@@ -1044,6 +1057,9 @@ service EnvironmentService {
   }
   rpc TeardownEnvironment(TeardownEnvironmentRequest) returns (TeardownEnvironmentResponse) {
     option (google.api.http) = { post: "/v1/environments/{environment_id}:teardown" body: "*" };
+  }
+  rpc CreateProductionEnvironment(CreateProductionEnvironmentRequest) returns (CreateProductionEnvironmentResponse) {
+    option (google.api.http) = { post: "/v1/applications/{application_id}/production-environment" body: "*" };
   }
 }
 

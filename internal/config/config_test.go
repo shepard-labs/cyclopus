@@ -165,13 +165,13 @@ func TestLoadKubernetesRecoveryConfigPrecedence(t *testing.T) {
 
 func TestLoadCustomDomainCNAMETargetDefaultsToPreviewSuffix(t *testing.T) {
 	cfg, err := Load(
-		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.sslip.io"},
+		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.example.test"},
 		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Kubernetes.CustomDomainCNAMETarget != "203-0-113-7.sslip.io" {
+	if cfg.Kubernetes.CustomDomainCNAMETarget != "203-0-113-7.example.test" {
 		t.Fatalf("custom domain CNAME target = %q, want fallback to preview suffix", cfg.Kubernetes.CustomDomainCNAMETarget)
 	}
 	if cfg.Kubernetes.CustomDomainCNAMETarget != cfg.Kubernetes.PreviewHostnameSuffix {
@@ -181,7 +181,7 @@ func TestLoadCustomDomainCNAMETargetDefaultsToPreviewSuffix(t *testing.T) {
 
 func TestLoadCustomDomainCNAMETargetOverride(t *testing.T) {
 	cfg, err := Load(
-		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.sslip.io", "--kubernetes-custom-domain-cname-target", "ingress.example.test"},
+		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.example.test", "--kubernetes-custom-domain-cname-target", "ingress.example.test"},
 		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
 	)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestLoadCustomDomainCNAMETargetOverride(t *testing.T) {
 	if cfg.Kubernetes.CustomDomainCNAMETarget != "ingress.example.test" {
 		t.Fatalf("custom domain CNAME target = %q, want explicit override", cfg.Kubernetes.CustomDomainCNAMETarget)
 	}
-	if cfg.Kubernetes.PreviewHostnameSuffix != "203-0-113-7.sslip.io" {
+	if cfg.Kubernetes.PreviewHostnameSuffix != "203-0-113-7.example.test" {
 		t.Fatalf("preview suffix = %q, want unaffected by override", cfg.Kubernetes.PreviewHostnameSuffix)
 	}
 }

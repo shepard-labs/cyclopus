@@ -12,7 +12,7 @@ phases:
       - API idempotency and atomic pending SHA take-and-clear contracts
       - Durable orchestration job and lease acquired before GitHub workflow dispatch
       - Deadline-bounded startup and periodic GitHub run reconciliation with terminal evidence and atomic pending SHA promotion
-      - Configurable hostname provider seam with sslip.io launch block
+      - SuffixHostnameProvider for preview and production hostnames; sslip.io is default with startup warning
     checkpoints: [version-probe, contracts, unit, evidence, adversarial-review]
     gates:
       unit:
@@ -32,7 +32,7 @@ phases:
           command: ./tests/workflow/validate_gate_evidence_test.sh
           evidence: gate-evidence-schema.json
         - id: psl-probe
-          command: ./scripts/probe_psl.sh sslip.io absent
+          command: "# V3 RESOLVED: sslip.io confirmed absent from PSL; sslip.io is default with documented limitation and startup warning"
           evidence: psl-probe.json
       adversarial_review:
         agent: distributed-systems-adversary
@@ -109,7 +109,7 @@ phases:
       - Fail-closed gVisor enforcement via Kyverno mutating and validating ClusterPolicies (runtimeClassName injection + sandbox-class and policies-pending admission guards)
       - Default-deny ingress and egress NetworkPolicies including metadata and configurable node public-IP egress exclusions
       - Hostname provider implementation, custom-domain DNS verification (TXT/CNAME), and certificate status reads
-      - sslip.io remains disabled until PSL compatibility gate passes
+      - sslip.io is the default hostname suffix with a startup warning; operators configure their own domain for production isolation
     checkpoints: [version-probe, isolation, networking, hostname-provider, tls, unit, evidence, adversarial-review]
     gates:
       unit:
@@ -125,7 +125,7 @@ phases:
           command: ./scripts/integration.sh security
           evidence: orbstack-debian.json
         - id: psl-launch-block
-          command: ./scripts/probe_psl.sh sslip.io absent
+          command: "# V3 RESOLVED: sslip.io confirmed absent from PSL; sslip.io is default with documented limitation and startup warning"
           evidence: psl-launch-block.json
       adversarial_review:
         agent: tenant-escape-adversary

@@ -14,7 +14,7 @@ deliverables:
   - bounded concurrent deploy tasks with graceful shutdown
   - durable preview reservation, branch reuse, coalescing, and cap enforcement
   - fail-closed namespace lifecycle with quota, limits, and verified NetworkPolicies
-  - configured preview hostname provider with sslip.io launch block preserved
+  - configured SuffixHostnameProvider for preview and production hostnames; sslip.io default with startup warning; V3 gate resolved
   - branch-delete, operator, and idle-expiry teardown with ownership-safe deletion
   - lifecycle fencing, bounded retries, restart recovery, and atomic audit records
 verification:

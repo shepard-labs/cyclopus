@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"regexp"
@@ -608,6 +609,16 @@ func (c Config) Validate() error {
 	}
 	if suffix := strings.TrimSpace(c.Kubernetes.PreviewHostnameSuffix); suffix == "" || len(suffix) > 253 || strings.ContainsAny(suffix, "/:@") {
 		errs = append(errs, fmt.Errorf("kubernetes.preview_hostname_suffix must be a DNS suffix"))
+	} else {
+		lower := strings.ToLower(suffix)
+		for _, blocked := range []string{"sslip.io", "nip.io"} {
+			if strings.HasSuffix(lower, "."+blocked) || lower == blocked {
+				slog.Warn("kubernetes.preview_hostname_suffix uses a service that is absent from the Public Suffix List; "+
+					"Let's Encrypt certificate quota is shared globally — configure your own domain for production use",
+					"suffix", suffix, "service", blocked)
+				break
+			}
+		}
 	}
 	if target := strings.TrimSpace(c.Kubernetes.CustomDomainCNAMETarget); target == "" || len(target) > 253 || strings.ContainsAny(target, "/:@") {
 		errs = append(errs, fmt.Errorf("kubernetes.custom_domain_cname_target must be a DNS suffix"))

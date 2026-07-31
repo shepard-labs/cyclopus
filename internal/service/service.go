@@ -41,6 +41,20 @@ const (
 	idempotencyRetention = 24 * time.Hour
 )
 
+// productionHostname assembles the default production hostname for an app as
+// hostnameLabel + "." + suffix. Returns an error when suffix is empty, which
+// happens when the operator has not configured a hostname suffix and must
+// supply an explicit hostname at environment creation time.
+func productionHostname(hostnameLabel, suffix string) (string, error) {
+	if suffix == "" {
+		return "", fmt.Errorf("kubernetes.preview_hostname_suffix is not configured; provide an explicit hostname")
+	}
+	if hostnameLabel == "" {
+		return "", fmt.Errorf("hostname_label is required")
+	}
+	return hostnameLabel + "." + suffix, nil
+}
+
 type ActorContext struct {
 	UserID   string
 	OrgID    string
@@ -56,6 +70,7 @@ type Service struct {
 	certReader               CertReader
 	dnsResolver              DNSResolver
 	ingressTarget            string
+	hostnameProvider         string
 	customDomainProvisioner  CustomDomainProvisioner
 	certManagerClusterIssuer string
 }
@@ -100,6 +115,17 @@ func WithDNSResolver(resolver DNSResolver) Option {
 func WithIngressTarget(target string) Option {
 	return func(s *Service) {
 		s.ingressTarget = strings.ToLower(strings.TrimSpace(target))
+	}
+}
+
+// WithHostnameSuffix sets the DNS suffix used to auto-generate production and
+// preview environment hostnames (§7.5). Operators set this to their ingress
+// IP in sslip.io format (e.g. "203-0-113-7.sslip.io") or to their own
+// wildcard domain (e.g. "apps.example.com"). When empty, CreateProductionEnvironment
+// requires the caller to supply an explicit hostname.
+func WithHostnameSuffix(suffix string) Option {
+	return func(s *Service) {
+		s.hostnameProvider = strings.ToLower(strings.TrimSpace(suffix))
 	}
 }
 

@@ -39,6 +39,7 @@ type PolicyProvisioner interface {
 
 type HostnameProvider interface {
 	PreviewHostname(context.Context, store.EnvironmentLifecycleJob) (string, error)
+	ProductionHostname(hostnameLabel string) (string, error)
 }
 
 type NetworkPolicyProvisioner struct {
@@ -126,21 +127,37 @@ func (p *NetworkPolicyProvisioner) ProvisionAndVerify(ctx context.Context, job s
 	return nil
 }
 
-type PreviewHostnameProvider struct{ suffix string }
+// SuffixHostnameProvider implements HostnameProvider for both preview and
+// production environments using a single configured DNS suffix. Preview
+// hostnames are derived from the environment namespace slug; production
+// hostnames are derived from the app's hostname_label.
+type SuffixHostnameProvider struct{ suffix string }
 
-func NewPreviewHostnameProvider(suffix string) (*PreviewHostnameProvider, error) {
+// NewSuffixHostnameProvider validates and returns a SuffixHostnameProvider.
+// suffix is the operator-configured DNS suffix appended to all platform
+// hostnames (e.g. "203-0-113-7.sslip.io" or "apps.example.com").
+func NewSuffixHostnameProvider(suffix string) (*SuffixHostnameProvider, error) {
 	suffix = strings.Trim(strings.ToLower(strings.TrimSpace(suffix)), ".")
 	if suffix == "" || len(suffix) > 253 || strings.ContainsAny(suffix, "/:@") {
-		return nil, errors.New("preview hostname suffix is invalid")
+		return nil, errors.New("hostname suffix is invalid")
 	}
-	return &PreviewHostnameProvider{suffix: suffix}, nil
+	return &SuffixHostnameProvider{suffix: suffix}, nil
 }
 
-func (p *PreviewHostnameProvider) PreviewHostname(_ context.Context, job store.EnvironmentLifecycleJob) (string, error) {
+func (p *SuffixHostnameProvider) PreviewHostname(_ context.Context, job store.EnvironmentLifecycleJob) (string, error) {
 	if !strings.HasPrefix(job.Namespace, "preview-") {
 		return "", ErrHostnameProviderUnavailable
 	}
 	return strings.TrimPrefix(job.Namespace, "preview-") + "." + p.suffix, nil
+}
+
+// ProductionHostname returns the default production hostname for an app,
+// assembled as hostnameLabel + "." + suffix.
+func (p *SuffixHostnameProvider) ProductionHostname(hostnameLabel string) (string, error) {
+	if hostnameLabel == "" {
+		return "", errors.New("hostname_label is required")
+	}
+	return hostnameLabel + "." + p.suffix, nil
 }
 
 type LifecycleStore interface {

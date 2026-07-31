@@ -586,6 +586,28 @@ func (h *apiHandlers) TeardownEnvironment(ctx context.Context, req *cyclopusv1.T
 	return &cyclopusv1.TeardownEnvironmentResponse{Environment: environmentProto(environment)}, nil
 }
 
+func (h *apiHandlers) CreateProductionEnvironment(ctx context.Context, req *cyclopusv1.CreateProductionEnvironmentRequest) (*cyclopusv1.CreateProductionEnvironmentResponse, error) {
+	actor, err := sessionActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUID("application_id", req.GetApplicationId()); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
+		return nil, err
+	}
+	value, err := h.service.CreateProductionEnvironment(ctx, actor, req.GetIdempotencyKey(), service.CreateProductionEnvironmentInput{
+		AppID:    req.GetApplicationId(),
+		Branch:   req.GetBranch(),
+		Hostname: req.GetHostname(),
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateProductionEnvironmentResponse{Environment: environmentProto(value)}, nil
+}
+
 func (h *apiHandlers) Deploy(ctx context.Context, req *cyclopusv1.DeployRequest) (*cyclopusv1.DeployResponse, error) {
 	actor, err := actorFromContext(ctx)
 	if err != nil {

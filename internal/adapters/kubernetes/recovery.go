@@ -148,7 +148,7 @@ func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardSto
 	if !ok {
 		return nil, errors.New("Kubernetes lifecycle store is unavailable")
 	}
-	hostnames, err := NewPreviewHostnameProvider(config.PreviewHostnameSuffix)
+	hostnames, err := NewSuffixHostnameProvider(config.PreviewHostnameSuffix)
 	if err != nil {
 		return nil, err
 	}

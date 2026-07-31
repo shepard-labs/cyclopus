@@ -1105,6 +1105,51 @@ func local_request_EnvironmentService_TeardownEnvironment_0(ctx context.Context,
 	return msg, metadata, err
 }
 
+func request_EnvironmentService_CreateProductionEnvironment_0(ctx context.Context, marshaler runtime.Marshaler, client EnvironmentServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateProductionEnvironmentRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["application_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "application_id")
+	}
+	protoReq.ApplicationId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "application_id", err)
+	}
+	msg, err := client.CreateProductionEnvironment(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_EnvironmentService_CreateProductionEnvironment_0(ctx context.Context, marshaler runtime.Marshaler, server EnvironmentServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq CreateProductionEnvironmentRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["application_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "application_id")
+	}
+	protoReq.ApplicationId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "application_id", err)
+	}
+	msg, err := server.CreateProductionEnvironment(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 func request_ReleaseService_Deploy_0(ctx context.Context, marshaler runtime.Marshaler, client ReleaseServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq DeployRequest
@@ -3373,6 +3418,26 @@ func RegisterEnvironmentServiceHandlerServer(ctx context.Context, mux *runtime.S
 		}
 		forward_EnvironmentService_TeardownEnvironment_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodPost, pattern_EnvironmentService_CreateProductionEnvironment_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.EnvironmentService/CreateProductionEnvironment", runtime.WithHTTPPathPattern("/v1/applications/{application_id}/production-environment"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_EnvironmentService_CreateProductionEnvironment_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_EnvironmentService_CreateProductionEnvironment_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 
 	return nil
 }
@@ -4859,23 +4924,42 @@ func RegisterEnvironmentServiceHandlerClient(ctx context.Context, mux *runtime.S
 		}
 		forward_EnvironmentService_TeardownEnvironment_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodPost, pattern_EnvironmentService_CreateProductionEnvironment_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.EnvironmentService/CreateProductionEnvironment", runtime.WithHTTPPathPattern("/v1/applications/{application_id}/production-environment"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_EnvironmentService_CreateProductionEnvironment_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_EnvironmentService_CreateProductionEnvironment_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	return nil
 }
 
 var (
-	pattern_EnvironmentService_GetEnvironment_0            = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "environments", "environment_id"}, ""))
-	pattern_EnvironmentService_ListEnvironments_0          = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "applications", "application_id", "environments"}, ""))
-	pattern_EnvironmentService_AcceptPreviewPush_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "internal", "preview-pushes"}, ""))
-	pattern_EnvironmentService_AcceptPreviewBranchDelete_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "internal", "preview-branch-deletes"}, ""))
-	pattern_EnvironmentService_TeardownEnvironment_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "environments", "environment_id"}, "teardown"))
+	pattern_EnvironmentService_GetEnvironment_0              = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "environments", "environment_id"}, ""))
+	pattern_EnvironmentService_ListEnvironments_0            = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "applications", "application_id", "environments"}, ""))
+	pattern_EnvironmentService_AcceptPreviewPush_0           = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "internal", "preview-pushes"}, ""))
+	pattern_EnvironmentService_AcceptPreviewBranchDelete_0   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "internal", "preview-branch-deletes"}, ""))
+	pattern_EnvironmentService_TeardownEnvironment_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "environments", "environment_id"}, "teardown"))
+	pattern_EnvironmentService_CreateProductionEnvironment_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "applications", "application_id", "production-environment"}, ""))
 )
 
 var (
-	forward_EnvironmentService_GetEnvironment_0            = runtime.ForwardResponseMessage
-	forward_EnvironmentService_ListEnvironments_0          = runtime.ForwardResponseMessage
-	forward_EnvironmentService_AcceptPreviewPush_0         = runtime.ForwardResponseMessage
-	forward_EnvironmentService_AcceptPreviewBranchDelete_0 = runtime.ForwardResponseMessage
-	forward_EnvironmentService_TeardownEnvironment_0       = runtime.ForwardResponseMessage
+	forward_EnvironmentService_GetEnvironment_0              = runtime.ForwardResponseMessage
+	forward_EnvironmentService_ListEnvironments_0            = runtime.ForwardResponseMessage
+	forward_EnvironmentService_AcceptPreviewPush_0           = runtime.ForwardResponseMessage
+	forward_EnvironmentService_AcceptPreviewBranchDelete_0   = runtime.ForwardResponseMessage
+	forward_EnvironmentService_TeardownEnvironment_0         = runtime.ForwardResponseMessage
+	forward_EnvironmentService_CreateProductionEnvironment_0 = runtime.ForwardResponseMessage
 )
 
 // RegisterReleaseServiceHandlerFromEndpoint is same as RegisterReleaseServiceHandler but
