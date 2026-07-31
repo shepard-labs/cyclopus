@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/cyclopus-dev/cyclopus/internal/service"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
 )
 
@@ -25,6 +26,7 @@ type ReconcileStore interface {
 	GetEnvironment(context.Context, string, string) (store.Environment, error)
 	GetApp(context.Context, string, string) (store.App, error)
 	GetRelease(context.Context, string, string) (store.Release, error)
+	ListVerifiedDomainsByApp(context.Context, string, string) ([]store.Domain, error)
 	StartReconciliationRun(context.Context, string, string, string, json.RawMessage, *store.AuditEvent) error
 	AppendReconciliationEvidence(context.Context, string, string, string, store.ReconciliationEvidence) error
 	CompleteReconciliationRun(context.Context, store.CompleteReconciliationRunParams) error
@@ -82,6 +84,11 @@ type envPlan struct {
 	execution store.DeployExecution
 	objects   DesiredObjects
 	ops       []objectAction
+	// customDomains holds the desired custom-domain Ingress requests derived from
+	// verified domains (production environments only). They are keyed by the
+	// Ingress object name so applyOperation can locate the request for a planned
+	// custom-domain op.
+	customDomains map[string]service.CustomDomainRequest
 }
 
 func (e *reconcileExec) execute(ctx context.Context) error {
@@ -320,10 +327,63 @@ func (e *reconcileExec) planEnvironment(ctx context.Context, env store.Environme
 		errs = append(errs, fmt.Sprintf("env %s: get app: %s", env.ID, err.Error()))
 	} else {
 		drift = append(drift, e.runtimeClassDrift(ctx, env.Namespace, app.RuntimeClass)...)
+		// Custom-domain Ingresses are Postgres-derived state for the production
+		// environment: each verified domain expects an Ingress. Plan them so
+		// reconcile reports and (on apply) restores any that are missing (§9.1).
+		cdErrs := e.planCustomDomains(ctx, &ep, app)
+		errs = append(errs, cdErrs...)
 	}
 	drift = append(drift, e.networkPolicyDrift(ctx, env.Namespace)...)
 
 	return ep, drift, errs, nil
+}
+
+// planCustomDomains adds create/patch/no_op operations for the custom-domain
+// Ingresses expected for the environment. Custom domains route to the app's
+// production environment only, so previews are skipped. It builds the same
+// provisioning request the DomainService uses so an applied reconcile restores
+// exactly the object VerifyDomain would have created.
+func (e *reconcileExec) planCustomDomains(ctx context.Context, ep *envPlan, app store.App) []string {
+	if ep.env.Kind != "production" || ep.env.Namespace == "" {
+		return nil
+	}
+	domains, err := e.rs.ListVerifiedDomainsByApp(ctx, ep.env.OrgID, ep.env.AppID)
+	if err != nil {
+		return []string{fmt.Sprintf("env %s: list verified domains: %s", ep.env.ID, err.Error())}
+	}
+	if len(domains) == 0 {
+		return nil
+	}
+	ep.customDomains = make(map[string]service.CustomDomainRequest, len(domains))
+	for _, domain := range domains {
+		req := service.CustomDomainRequest{
+			Namespace:     ep.env.Namespace,
+			EnvironmentID: ep.env.ID,
+			DomainID:      domain.ID,
+			Hostname:      domain.Hostname,
+			ServiceName:   app.Slug,
+			ServicePort:   80,
+			TLSSecretName: service.CustomDomainTLSSecretName(domain.ID),
+			ClusterIssuer: e.adapter.config.CertManagerClusterIssuer,
+		}
+		name := CustomDomainIngressName(domain.ID)
+		ep.customDomains[name] = req
+		ep.ops = append(ep.ops, e.compareObj(ctx, ep.env, "CustomDomainIngress", name, ep.env.Namespace, domain.Hostname,
+			func(name, ns string) (string, bool) {
+				ing, err := e.adapter.client.NetworkingV1().Ingresses(ns).Get(ctx, name, metav1.GetOptions{})
+				if err != nil {
+					return "", apierrors.IsNotFound(err)
+				}
+				// Compare on the served host so a hostname change (should not
+				// happen, hostname is immutable per-row) or a missing rule is
+				// reported as drift and re-applied.
+				if len(ing.Spec.Rules) > 0 {
+					return ing.Spec.Rules[0].Host, false
+				}
+				return "", false
+			}))
+	}
+	return nil
 }
 
 func (e *reconcileExec) compareObj(ctx context.Context, env store.Environment, kind, name, ns, desiredHash string,
@@ -362,6 +422,14 @@ func (e *reconcileExec) applyOperation(ctx context.Context, ep *envPlan, op obje
 		return e.adapter.applyService(applyCtx, &execution, ep.objects.Service)
 	case "HorizontalPodAutoscaler":
 		return e.adapter.applyHPA(applyCtx, &execution, ep.objects.HPA)
+	case "CustomDomainIngress":
+		req, ok := ep.customDomains[op.ObjectName]
+		if !ok {
+			return fmt.Errorf("no custom-domain request for %s", op.ObjectName)
+		}
+		// Reuse the shared, idempotent provisioner so reconcile restores exactly
+		// the object VerifyDomain creates (get-or-create with ownership check).
+		return NewCustomDomainProvisioner(e.adapter.client).ProvisionCustomDomain(applyCtx, req)
 	default:
 		return fmt.Errorf("unsupported object kind for apply: %s", op.ObjectKind)
 	}

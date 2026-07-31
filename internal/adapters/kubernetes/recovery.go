@@ -31,6 +31,10 @@ const (
 	ManagedByLabel              = "app.kubernetes.io/managed-by"
 	EnvironmentIDLabel          = "cyclopus.dev/environment-id"
 	ManagedByValue              = "cyclopus"
+	// CertManagerClusterIssuerAnnotation is the cert-manager annotation that, when
+	// present on an Ingress, makes cert-manager issue a Certificate (and populate
+	// the referenced TLS Secret) for that Ingress's TLS hosts (§7.5).
+	CertManagerClusterIssuerAnnotation = "cert-manager.io/cluster-issuer"
 )
 
 var (
@@ -43,6 +47,13 @@ type Config struct {
 	ConflictRetries       int
 	APITimeout            time.Duration
 	PreviewHostnameSuffix string
+	// CertManagerClusterIssuer, when non-empty, is annotated onto the environment
+	// and custom-domain Ingresses as cert-manager.io/cluster-issuer so
+	// cert-manager issues a TLS certificate for each served hostname (§7.5). Empty
+	// disables the annotation (manual TLS / no cert-manager configured), which
+	// preserves the prior behavior where the TLS SecretName is set but never
+	// populated by cert-manager.
+	CertManagerClusterIssuer string
 	// NetworkEgressExcludedCIDRs are operator-supplied CIDRs (e.g. node public
 	// IPs) appended to the default-deny-egress policy Except list (spec §7.2).
 	NetworkEgressExcludedCIDRs []string

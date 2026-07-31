@@ -96,6 +96,31 @@ func TestDomainStoreCRUDIntegration(t *testing.T) {
 	}
 }
 
+func TestGetProductionEnvironmentOrgScopedIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+
+	// Same org resolves the app's production environment.
+	env, err := dataStore.GetProductionEnvironment(ctx, orgOneID, appOneID)
+	if err != nil {
+		t.Fatalf("GetProductionEnvironment(same org) error = %v", err)
+	}
+	if env.ID != environmentOneID || env.Kind != "production" || env.Namespace != "app-one-production" {
+		t.Fatalf("production environment = %+v, want environmentOne production/app-one-production", env)
+	}
+
+	// Cross-org: another org cannot resolve this app's production environment.
+	if _, err := dataStore.GetProductionEnvironment(ctx, orgTwoID, appOneID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetProductionEnvironment(other org) error = %v, want ErrNotFound", err)
+	}
+
+	// Unknown app in the same org: not found.
+	if _, err := dataStore.GetProductionEnvironment(ctx, orgOneID, "00000000-0000-0000-0000-00000000ffff"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetProductionEnvironment(unknown app) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestDomainStoreCreateMissingAppIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())

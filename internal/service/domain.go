@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"regexp"
 	"strings"
@@ -161,12 +162,109 @@ func (s *Service) VerifyDomain(ctx context.Context, actor ActorContext, key, id 
 	if err != nil {
 		return store.Domain{}, DomainInstructions{}, mapError(err)
 	}
-	// TODO(§7.5 custom-domain Ingress): once a domain is verified, its Ingress +
-	// TLS certificate should be provisioned by reusing the release Ingress path
-	// (see deploymentSnapshot's store.IngressIntent). That wiring is a follow-up;
-	// this phase intentionally stops at setting verified_at and returning DNS
-	// instructions.
+	// verified_at is now committed: the customer proved DNS control. Provision the
+	// live routing (custom-domain Ingress + TLS + cert-manager issuer annotation)
+	// so traffic actually reaches the app (§7.5). DECISION: provisioning failure
+	// must NOT roll back verified_at — verification is a durable fact about DNS
+	// control, distinct from whether cluster routing is currently live. On a
+	// provisioning error we therefore return the verified domain together with the
+	// wrapped error so the caller learns routing is not live yet and can retry
+	// (re-verify is idempotent). A nil provisioner (no cluster wiring) is not an
+	// error: verification succeeds and provisioning is skipped, mirroring how a
+	// nil CertReader degrades gracefully.
+	if err := s.provisionCustomDomain(ctx, actor, verified); err != nil {
+		return verified, s.domainInstructions(verified), err
+	}
 	return verified, s.domainInstructions(verified), nil
+}
+
+// provisionCustomDomain resolves the app's production environment (org-scoped)
+// and asks the provisioner to create/patch the custom-domain Ingress. It is a
+// no-op when no provisioner is wired. Provisioning is skipped (not an error)
+// when the app has no ready production environment yet — routing is created once
+// the environment exists and the operator re-verifies or reconcile runs. It is
+// idempotent: the provisioner get-or-creates the Ingress.
+func (s *Service) provisionCustomDomain(ctx context.Context, actor ActorContext, domain store.Domain) error {
+	if s.customDomainProvisioner == nil {
+		s.log().Info("custom_domain.provision_skipped", "event", "custom_domain.provision_skipped",
+			"reason", "provisioner_unavailable", "domain_id", domain.ID, "org_id", domain.OrgID)
+		return nil
+	}
+	req, ok, err := s.customDomainRequest(ctx, actor, domain)
+	if err != nil {
+		return mapError(err)
+	}
+	if !ok {
+		s.log().Info("custom_domain.provision_skipped", "event", "custom_domain.provision_skipped",
+			"reason", "production_environment_not_ready", "domain_id", domain.ID, "org_id", domain.OrgID)
+		return nil
+	}
+	if err := s.customDomainProvisioner.ProvisionCustomDomain(ctx, req); err != nil {
+		s.log().Warn("custom_domain.provision_failed", "event", "custom_domain.provision_failed",
+			"domain_id", domain.ID, "org_id", domain.OrgID, "hostname", domain.Hostname, "error", err.Error())
+		return err
+	}
+	s.log().Info("custom_domain.provisioned", "event", "custom_domain.provisioned",
+		"domain_id", domain.ID, "org_id", domain.OrgID, "hostname", domain.Hostname, "namespace", req.Namespace)
+	return nil
+}
+
+// customDomainRequest resolves the app's production environment (org-scoped) and
+// builds the provisioning request. ok is false (with no error) when the app has
+// no ready production environment — that is a normal, non-fatal state (the domain
+// may be verified before the app is deployed). A cross-org app_id can never
+// surface another tenant's environment because the lookup is org-scoped.
+func (s *Service) customDomainRequest(ctx context.Context, actor ActorContext, domain store.Domain) (CustomDomainRequest, bool, error) {
+	environment, err := s.store.GetProductionEnvironment(ctx, actor.OrgID, domain.AppID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return CustomDomainRequest{}, false, nil
+		}
+		return CustomDomainRequest{}, false, err
+	}
+	if environment.Namespace == "" {
+		return CustomDomainRequest{}, false, nil
+	}
+	app, err := s.store.GetApp(ctx, actor.OrgID, domain.AppID)
+	if err != nil {
+		return CustomDomainRequest{}, false, err
+	}
+	return CustomDomainRequest{
+		Namespace:     environment.Namespace,
+		EnvironmentID: environment.ID,
+		DomainID:      domain.ID,
+		Hostname:      domain.Hostname,
+		ServiceName:   app.Slug,
+		ServicePort:   80,
+		TLSSecretName: CustomDomainTLSSecretName(domain.ID),
+		ClusterIssuer: s.certManagerClusterIssuer,
+	}, true, nil
+}
+
+// CustomDomainTLSSecretName derives the per-domain TLS Secret name from the
+// domain's ID (a uuidv7). It is keyed on the ID rather than the hostname so it
+// is collision-free: two distinct hostnames (e.g. "a.b.com" and "a-b.com") that
+// would sanitize to the same string cannot share — and thereby fight over — one
+// TLS Secret. This mirrors the custom-domain Ingress name, which is also
+// ID-derived. The result is deterministic so re-provisioning targets the same
+// Secret, and is a valid DNS-1123 Secret name (uuid chars are [0-9a-f-], the
+// prefix and suffix are label-safe, total length well under 253).
+func CustomDomainTLSSecretName(domainID string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r + ('a' - 'A')
+		default:
+			return '-'
+		}
+	}, strings.TrimSpace(domainID))
+	sanitized = strings.Trim(sanitized, "-")
+	if sanitized == "" {
+		sanitized = "domain"
+	}
+	return "custom-domain-" + sanitized + "-tls"
 }
 
 func (s *Service) DeleteDomain(ctx context.Context, actor ActorContext, key, id string) error {
@@ -176,15 +274,54 @@ func (s *Service) DeleteDomain(ctx context.Context, actor ActorContext, key, id 
 	if err := validateHostnameID(id); err != nil {
 		return err
 	}
+	// Load the domain first so teardown can target the custom-domain Ingress by
+	// AppID/Hostname. A missing domain maps to NotFound here rather than at the
+	// store delete, and gives us the app_id needed to resolve the namespace.
+	domain, err := s.store.GetDomain(ctx, actor.OrgID, id)
+	if err != nil {
+		return mapError(err)
+	}
 	request := struct{ ID string }{id}
 	var replay struct{}
 	claimed, err := s.claim(ctx, actor, "domain.delete", key, request, &replay)
 	if err != nil || !claimed {
 		return err
 	}
+	// Tear down the live routing before deleting the row. Deprovision is
+	// idempotent (not-found is a no-op) so deleting a never-verified/unprovisioned
+	// domain does not error, and a nil provisioner is skipped. Deleting the
+	// Ingress lets cert-manager GC the Certificate and TLS Secret it created.
+	if err := s.deprovisionCustomDomain(ctx, actor, domain); err != nil {
+		return err
+	}
 	idem := s.completion(actor, "domain.delete", key, request, json.RawMessage(`{}`), 200)
 	idem.OrgID = actor.OrgID
 	return mapError(s.store.DeleteDomain(ctx, actor.OrgID, id, idem, audit(actor)))
+}
+
+// deprovisionCustomDomain deletes the custom-domain Ingress for a domain being
+// removed. It resolves the production environment org-scoped; when the app has
+// no production environment (nothing was provisioned) it is a no-op. A nil
+// provisioner is skipped.
+func (s *Service) deprovisionCustomDomain(ctx context.Context, actor ActorContext, domain store.Domain) error {
+	if s.customDomainProvisioner == nil {
+		return nil
+	}
+	req, ok, err := s.customDomainRequest(ctx, actor, domain)
+	if err != nil {
+		return mapError(err)
+	}
+	if !ok {
+		return nil
+	}
+	if err := s.customDomainProvisioner.DeprovisionCustomDomain(ctx, req); err != nil {
+		s.log().Warn("custom_domain.deprovision_failed", "event", "custom_domain.deprovision_failed",
+			"domain_id", domain.ID, "org_id", domain.OrgID, "hostname", domain.Hostname, "error", err.Error())
+		return err
+	}
+	s.log().Info("custom_domain.deprovisioned", "event", "custom_domain.deprovisioned",
+		"domain_id", domain.ID, "org_id", domain.OrgID, "hostname", domain.Hostname, "namespace", req.Namespace)
+	return nil
 }
 
 // checkDNSChallenge performs the live DNS lookup that proves control. It is the

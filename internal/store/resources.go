@@ -319,6 +319,19 @@ func (s *Store) GetEnvironment(ctx context.Context, orgID, id string) (Environme
 	return v, resourceQueryError("get environment", err)
 }
 
+// GetProductionEnvironment returns the app's single production environment,
+// org-scoped so a cross-org app_id can never surface another tenant's
+// environment. There is exactly one live (not torn-down) production environment
+// per app; a missing one yields ErrNotFound. Custom-domain routing targets this
+// environment's namespace and Service (§7.5).
+func (s *Store) GetProductionEnvironment(ctx context.Context, orgID, appID string) (Environment, error) {
+	var v Environment
+	err := scanEnvironment(s.db.QueryRow(ctx, environmentSelect+
+		` WHERE environment.org_id=$1 AND environment.app_id=$2 AND environment.kind='production' AND environment.torn_down_at IS NULL`,
+		orgID, appID), &v)
+	return v, resourceQueryError("get production environment", err)
+}
+
 const environmentSelect = `SELECT environment.id::text,environment.org_id::text,environment.app_id::text,environment.branch,environment.kind,environment.preview_slug,environment.namespace,environment.planned_hostname,environment.lifecycle_status,environment.lifecycle_reason,environment.lifecycle_error_code,environment.lifecycle_error_message,
 	(SELECT release.id::text FROM releases release WHERE release.org_id=environment.org_id AND release.environment_id=environment.id AND release.status='live' ORDER BY release.created_at DESC,release.id DESC LIMIT 1),
 	environment.in_progress_release_id::text,environment.current_env_var_revision_id::text,environment.pending_commit_sha,environment.created_at,environment.teardown_requested_at,environment.torn_down_at FROM environments environment`

@@ -64,6 +64,60 @@ func TestLoadPrecedence(t *testing.T) {
 	if cfg.Kubernetes.RecoveryPollInterval != 2*time.Second || cfg.Kubernetes.ConflictRetries != 5 || cfg.Kubernetes.PreviewHostnameSuffix != "preview.invalid" {
 		t.Fatalf("kubernetes config = %+v, want default values", cfg.Kubernetes)
 	}
+	if cfg.Kubernetes.CertManagerClusterIssuer != "letsencrypt" {
+		t.Fatalf("cert-manager cluster issuer = %q, want default letsencrypt", cfg.Kubernetes.CertManagerClusterIssuer)
+	}
+}
+
+func TestLoadCertManagerClusterIssuerPrecedence(t *testing.T) {
+	// Flag overrides env, mirroring the other kubernetes fields.
+	cfg, err := Load(
+		[]string{"--kubernetes-cert-manager-cluster-issuer", "letsencrypt-prod"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER=letsencrypt-staging"},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Kubernetes.CertManagerClusterIssuer != "letsencrypt-prod" {
+		t.Fatalf("cert-manager cluster issuer = %q, want flag value letsencrypt-prod", cfg.Kubernetes.CertManagerClusterIssuer)
+	}
+}
+
+func TestLoadCertManagerClusterIssuerFromEnv(t *testing.T) {
+	cfg, err := Load(
+		nil,
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER=letsencrypt-staging"},
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Kubernetes.CertManagerClusterIssuer != "letsencrypt-staging" {
+		t.Fatalf("cert-manager cluster issuer = %q, want env value letsencrypt-staging", cfg.Kubernetes.CertManagerClusterIssuer)
+	}
+}
+
+func TestLoadCertManagerClusterIssuerEmptyAllowed(t *testing.T) {
+	// An explicitly empty issuer disables the annotation and must validate.
+	cfg, err := Load(
+		[]string{"--kubernetes-cert-manager-cluster-issuer", ""},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err != nil {
+		t.Fatalf("Load() with empty issuer error = %v", err)
+	}
+	if cfg.Kubernetes.CertManagerClusterIssuer != "" {
+		t.Fatalf("cert-manager cluster issuer = %q, want empty", cfg.Kubernetes.CertManagerClusterIssuer)
+	}
+}
+
+func TestLoadCertManagerClusterIssuerRejectsInvalid(t *testing.T) {
+	_, err := Load(
+		[]string{"--kubernetes-cert-manager-cluster-issuer", "Bad Issuer!"},
+		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "kubernetes.cert_manager_cluster_issuer must be a valid Kubernetes resource name") {
+		t.Fatalf("Load() error = %v, want cert-manager cluster issuer validation", err)
+	}
 }
 
 func TestLoadGitHubConfigPrecedence(t *testing.T) {

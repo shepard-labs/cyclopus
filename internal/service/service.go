@@ -48,14 +48,16 @@ type ActorContext struct {
 }
 
 type Service struct {
-	store         *store.Store
-	now           func() time.Time
-	previewSlugs  PreviewSlugGenerator
-	logger        *slog.Logger
-	telemetry     TelemetryProvider
-	certReader    CertReader
-	dnsResolver   DNSResolver
-	ingressTarget string
+	store                    *store.Store
+	now                      func() time.Time
+	previewSlugs             PreviewSlugGenerator
+	logger                   *slog.Logger
+	telemetry                TelemetryProvider
+	certReader               CertReader
+	dnsResolver              DNSResolver
+	ingressTarget            string
+	customDomainProvisioner  CustomDomainProvisioner
+	certManagerClusterIssuer string
 }
 
 type Option func(*Service)
@@ -98,6 +100,16 @@ func WithDNSResolver(resolver DNSResolver) Option {
 func WithIngressTarget(target string) Option {
 	return func(s *Service) {
 		s.ingressTarget = strings.ToLower(strings.TrimSpace(target))
+	}
+}
+
+// WithCertManagerClusterIssuer sets the cert-manager ClusterIssuer name the
+// service passes to the CustomDomainProvisioner so a verified custom domain's
+// Ingress is annotated for TLS issuance (§7.5). Empty means no issuer annotation
+// (manual TLS / no cert-manager configured).
+func WithCertManagerClusterIssuer(issuer string) Option {
+	return func(s *Service) {
+		s.certManagerClusterIssuer = strings.TrimSpace(issuer)
 	}
 }
 

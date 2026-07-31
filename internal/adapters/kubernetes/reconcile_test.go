@@ -32,6 +32,7 @@ type fakeReconcileStore struct {
 	completeParam store.CompleteReconciliationRunParams
 	listByOrgHit  bool
 	listByAppHit  bool
+	verifiedDoms  []store.Domain
 	appendErr     func(store.ReconciliationEvidence) error
 }
 
@@ -51,6 +52,9 @@ func (f *fakeReconcileStore) GetApp(context.Context, string, string) (store.App,
 }
 func (f *fakeReconcileStore) GetRelease(context.Context, string, string) (store.Release, error) {
 	return f.release, nil
+}
+func (f *fakeReconcileStore) ListVerifiedDomainsByApp(context.Context, string, string) ([]store.Domain, error) {
+	return f.verifiedDoms, nil
 }
 func (f *fakeReconcileStore) StartReconciliationRun(_ context.Context, _, _, _ string, plan json.RawMessage, _ *store.AuditEvent) error {
 	f.started = true
@@ -320,6 +324,73 @@ func TestReconcileAppliesOnNonDryRun(t *testing.T) {
 	}
 	if rs.completeParam.Status != "completed" {
 		t.Fatalf("run status = %q, want completed", rs.completeParam.Status)
+	}
+}
+
+func productionReconcileEnv() store.Environment {
+	env := reconcileEnv()
+	env.Kind = "production"
+	return env
+}
+
+func TestReconcileRestoresMissingCustomDomainIngress(t *testing.T) {
+	release := reconcileTestRelease(t)
+	client := fake.NewSimpleClientset() // no custom-domain Ingress exists
+	rs := &fakeReconcileStore{
+		env:          productionReconcileEnv(),
+		release:      release,
+		app:          store.App{RuntimeClass: "gvisor", Slug: "app"},
+		verifiedDoms: []store.Domain{{ID: "domain-1", OrgID: "org", AppID: "app", Hostname: "app.customer.test"}},
+	}
+	adapter := &RecoveryAdapter{
+		config: Config{PollInterval: time.Nanosecond, ConflictRetries: 3, APITimeout: time.Second, CertManagerClusterIssuer: "letsencrypt"},
+		client: client,
+		store:  rs,
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: false}
+	if err := adapter.ExecuteReconciliation(context.Background(), run, "worker-one"); err != nil {
+		t.Fatal(err)
+	}
+	ing, err := client.NetworkingV1().Ingresses("tenant").Get(context.Background(), "custom-domain-domain-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("custom-domain Ingress not restored: %v", err)
+	}
+	if ing.Spec.Rules[0].Host != "app.customer.test" || ing.Annotations[CertManagerClusterIssuerAnnotation] != "letsencrypt" {
+		t.Fatalf("restored ingress = host %q issuer %q", ing.Spec.Rules[0].Host, ing.Annotations[CertManagerClusterIssuerAnnotation])
+	}
+	if ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name != "app" {
+		t.Fatalf("restored ingress backend = %+v, want app", ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service)
+	}
+}
+
+func TestReconcileReportsMissingCustomDomainIngressOnDryRun(t *testing.T) {
+	release := reconcileTestRelease(t)
+	client := fake.NewSimpleClientset()
+	rs := &fakeReconcileStore{
+		env:          productionReconcileEnv(),
+		release:      release,
+		app:          store.App{RuntimeClass: "gvisor", Slug: "app"},
+		verifiedDoms: []store.Domain{{ID: "domain-1", OrgID: "org", AppID: "app", Hostname: "app.customer.test"}},
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: true}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	plan := planFrom(t, rs)
+	found := false
+	for _, op := range plan.Operations {
+		if op.ObjectKind == "CustomDomainIngress" && op.ObjectName == "custom-domain-domain-1" && op.Action == "create" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected CustomDomainIngress create op, plan = %+v", plan.Operations)
+	}
+	// Dry-run must not mutate.
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "create" || action.GetVerb() == "update" {
+			t.Fatalf("dry-run mutated: %+v", action)
+		}
 	}
 }
 

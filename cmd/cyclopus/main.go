@@ -77,7 +77,9 @@ func run(args, environ []string) error {
 	if err != nil {
 		return fmt.Errorf("construct authentication service: %w", err)
 	}
-	domainService := service.New(dataStore, service.WithLogger(logger), service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget))
+	domainService := service.New(dataStore, service.WithLogger(logger),
+		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget),
+		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer))
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)
 	services.Authenticator = authenticator
@@ -101,6 +103,9 @@ func run(args, environ []string) error {
 	}
 	if reader := buildCertReader(adapters); reader != nil {
 		domainService.SetCertReader(reader)
+	}
+	if provisioner := buildCustomDomainProvisioner(adapters); provisioner != nil {
+		domainService.SetCustomDomainProvisioner(provisioner)
 	}
 	var ready atomic.Bool
 	readiness := func(ctx context.Context) error {
@@ -196,6 +201,25 @@ func buildCertReader(adapters worker.RecoveryAdapters) service.CertReader {
 	return kubernetesadapter.NewCertificateReader(client)
 }
 
+// buildCustomDomainProvisioner constructs the custom-domain Ingress provisioner
+// from the Kubernetes adapter's typed client. It returns nil when the adapter
+// does not expose a Kubernetes client (leaving custom-domain verification to
+// succeed without provisioning routing), and uses only the typed networkingv1
+// client — no cert-manager Go module.
+func buildCustomDomainProvisioner(adapters worker.RecoveryAdapters) service.CustomDomainProvisioner {
+	holder, ok := adapters.Kubernetes.(interface {
+		KubernetesClient() kubernetes.Interface
+	})
+	if !ok {
+		return nil
+	}
+	client := holder.KubernetesClient()
+	if client == nil {
+		return nil
+	}
+	return kubernetesadapter.NewCustomDomainProvisioner(client)
+}
+
 type adapterConstructors struct {
 	github     func(config.GitHub) (worker.GitHubRecoveryAdapter, error)
 	kubernetes func(config.Kubernetes) (worker.KubernetesRecoveryAdapter, error)
@@ -278,6 +302,7 @@ func productionAdapterConstructors(dataStore *store.Store, owner string, logger 
 			return kubernetesadapter.NewAdapter(kubernetesadapter.Config{
 				PollInterval: cfg.RecoveryPollInterval, ConflictRetries: cfg.ConflictRetries,
 				PreviewHostnameSuffix:      cfg.PreviewHostnameSuffix,
+				CertManagerClusterIssuer:   cfg.CertManagerClusterIssuer,
 				NetworkEgressExcludedCIDRs: cfg.NetworkEgressExcludedCIDRs,
 			}, client, dataStore, kubernetesadapter.WithDynamicClient(dynamicClient), kubernetesadapter.WithLogger(logger))
 		},

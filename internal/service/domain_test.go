@@ -181,6 +181,30 @@ func TestDomainInstructions(t *testing.T) {
 	}
 }
 
+func TestCustomDomainTLSSecretName(t *testing.T) {
+	for _, tc := range []struct{ domainID, want string }{
+		{"0192f1a0-1111-7abc-8def-000000000001", "custom-domain-0192f1a0-1111-7abc-8def-000000000001-tls"},
+		{"0192F1A0-2222-7ABC-8DEF-000000000002", "custom-domain-0192f1a0-2222-7abc-8def-000000000002-tls"},
+		{"", "custom-domain-domain-tls"},
+	} {
+		got := CustomDomainTLSSecretName(tc.domainID)
+		if got != tc.want {
+			t.Fatalf("CustomDomainTLSSecretName(%q) = %q, want %q", tc.domainID, got, tc.want)
+		}
+		if len(got) > 253 {
+			t.Fatalf("secret name %q exceeds 253 chars", got)
+		}
+	}
+	// Collision safety: distinct domain IDs never share a TLS secret, so two
+	// hostnames that would sanitize identically (e.g. "a.b.com" and "a-b.com")
+	// cannot fight over one Secret because each domain row has a distinct ID.
+	a := CustomDomainTLSSecretName("0192f1a0-aaaa-7abc-8def-00000000000a")
+	b := CustomDomainTLSSecretName("0192f1a0-bbbb-7abc-8def-00000000000b")
+	if a == b {
+		t.Fatalf("distinct domain IDs must yield distinct secret names, both = %q", a)
+	}
+}
+
 func TestDomainActorValidation(t *testing.T) {
 	svc := New(nil)
 	if _, _, err := svc.CreateDomain(context.Background(), ActorContext{}, "key", DomainInput{AppID: "app", Hostname: "customer.com"}); !errors.Is(err, ErrForbidden) {

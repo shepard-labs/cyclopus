@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,12 @@ import (
 )
 
 const envPrefix = "CYCLOPUS_"
+
+// clusterIssuerNamePattern is a DNS-1123 subdomain (the shape of a Kubernetes
+// object name such as a cert-manager ClusterIssuer): lowercase alphanumerics,
+// '-' and '.' with alphanumeric start/end, <= 253 chars. An empty issuer is
+// allowed (it disables the annotation) and is not checked against this pattern.
+var clusterIssuerNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
 
 const MaxSessionTTL = 7 * 24 * time.Hour
 
@@ -148,6 +155,7 @@ type Kubernetes struct {
 	ConflictRetries            int
 	PreviewHostnameSuffix      string
 	CustomDomainCNAMETarget    string
+	CertManagerClusterIssuer   string
 	NetworkEgressExcludedCIDRs []string
 }
 
@@ -195,6 +203,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.Int("kubernetes-conflict-retries", 0, "Kubernetes optimistic update conflict retries")
 	flags.String("kubernetes-preview-hostname-suffix", "", "verified DNS suffix appended to generated preview slugs")
 	flags.String("kubernetes-custom-domain-cname-target", "", "platform ingress hostname that custom subdomains CNAME to (§7.5); defaults to the preview hostname suffix when empty")
+	flags.String("kubernetes-cert-manager-cluster-issuer", "", "cert-manager ClusterIssuer name annotated onto environment and custom-domain Ingresses so TLS certs are issued (§7.5); empty disables the annotation (manual TLS)")
 	flags.StringSlice("kubernetes-network-egress-excluded-cidrs", nil, "additional CIDRs (e.g. node public IPs) appended to the default-deny-egress policy Except list")
 	flags.String("observability-openobserve-base-url", "", "OpenObserve HTTPS base URL for proxied logs/traces queries")
 	flags.String("observability-openobserve-organization", "", "OpenObserve organization slug")
@@ -264,6 +273,7 @@ func Load(args, environ []string) (Config, error) {
 		"kubernetes-conflict-retries":                 "kubernetes.conflict_retries",
 		"kubernetes-preview-hostname-suffix":          "kubernetes.preview_hostname_suffix",
 		"kubernetes-custom-domain-cname-target":       "kubernetes.custom_domain_cname_target",
+		"kubernetes-cert-manager-cluster-issuer":      "kubernetes.cert_manager_cluster_issuer",
 		"kubernetes-network-egress-excluded-cidrs":    "kubernetes.network_egress_excluded_cidrs",
 		"observability-openobserve-base-url":          "observability.openobserve_base_url",
 		"observability-openobserve-organization":      "observability.openobserve_organization",
@@ -342,6 +352,7 @@ func Load(args, environ []string) (Config, error) {
 			ConflictRetries:            v.GetInt("kubernetes.conflict_retries"),
 			PreviewHostnameSuffix:      v.GetString("kubernetes.preview_hostname_suffix"),
 			CustomDomainCNAMETarget:    customDomainTarget,
+			CertManagerClusterIssuer:   strings.TrimSpace(v.GetString("kubernetes.cert_manager_cluster_issuer")),
 			NetworkEgressExcludedCIDRs: normalizeSliceValues(v.GetStringSlice("kubernetes.network_egress_excluded_cidrs")),
 		},
 		Observability: Observability{
@@ -390,6 +401,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("kubernetes.recovery_poll_interval", "2s")
 	v.SetDefault("kubernetes.conflict_retries", 5)
 	v.SetDefault("kubernetes.preview_hostname_suffix", "preview.invalid")
+	v.SetDefault("kubernetes.cert_manager_cluster_issuer", "letsencrypt")
 }
 
 func environment(environ []string) map[string]string {
@@ -434,6 +446,7 @@ func environment(environ []string) map[string]string {
 		"KUBERNETES_CONFLICT_RETRIES":                 "kubernetes.conflict_retries",
 		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":          "kubernetes.preview_hostname_suffix",
 		"KUBERNETES_CUSTOM_DOMAIN_CNAME_TARGET":       "kubernetes.custom_domain_cname_target",
+		"KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER":      "kubernetes.cert_manager_cluster_issuer",
 		"KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS":    "kubernetes.network_egress_excluded_cidrs",
 		"OBSERVABILITY_OPENOBSERVE_BASE_URL":          "observability.openobserve_base_url",
 		"OBSERVABILITY_OPENOBSERVE_ORGANIZATION":      "observability.openobserve_organization",
@@ -598,6 +611,12 @@ func (c Config) Validate() error {
 	}
 	if target := strings.TrimSpace(c.Kubernetes.CustomDomainCNAMETarget); target == "" || len(target) > 253 || strings.ContainsAny(target, "/:@") {
 		errs = append(errs, fmt.Errorf("kubernetes.custom_domain_cname_target must be a DNS suffix"))
+	}
+	// An empty cert-manager cluster issuer is valid: it disables the issuer
+	// annotation so installs without cert-manager (or using manual TLS) keep the
+	// prior behavior. A non-empty value must be a valid Kubernetes object name.
+	if issuer := strings.TrimSpace(c.Kubernetes.CertManagerClusterIssuer); issuer != "" && (len(issuer) > 253 || !clusterIssuerNamePattern.MatchString(issuer)) {
+		errs = append(errs, fmt.Errorf("kubernetes.cert_manager_cluster_issuer must be a valid Kubernetes resource name"))
 	}
 	for _, cidr := range c.Kubernetes.NetworkEgressExcludedCIDRs {
 		if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {

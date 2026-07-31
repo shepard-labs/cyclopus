@@ -102,6 +102,27 @@ func (s *Store) GetDomain(ctx context.Context, orgID, id string) (Domain, error)
 	return value, resourceQueryError("get domain", err)
 }
 
+// ListVerifiedDomainsByApp returns the verified custom domains for an app in the
+// org (verified_at IS NOT NULL), ordered stably. Reconcile uses it to re-derive
+// the expected custom-domain Ingresses from Postgres so DR/reconcile can restore
+// routing objects that are the source-of-truth for verified domains (§9.1).
+func (s *Store) ListVerifiedDomainsByApp(ctx context.Context, orgID, appID string) ([]Domain, error) {
+	rows, err := s.db.Query(ctx, domainSelect+` WHERE org_id=$1 AND app_id=$2 AND verified_at IS NOT NULL ORDER BY created_at,id`, orgID, appID)
+	if err != nil {
+		return nil, fmt.Errorf("list verified domains: %w", err)
+	}
+	defer rows.Close()
+	var values []Domain
+	for rows.Next() {
+		var value Domain
+		if err := scanDomain(rows, &value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 // ListDomains returns every domain for an app in the org, ordered stably for
 // pagination.
 func (s *Store) ListDomains(ctx context.Context, orgID, appID string) ([]Domain, error) {

@@ -65,6 +65,11 @@ config:
     # to previewHostnameSuffix when left empty; set explicitly only if your
     # custom-domain ingress endpoint differs from the preview parent suffix.
     customDomainCnameTarget: ""
+    # cert-manager ClusterIssuer name annotated onto the environment and
+    # custom-domain Ingresses (cert-manager.io/cluster-issuer) so TLS certs are
+    # issued for served hostnames (§7.5). Leave empty to disable the annotation
+    # (manual TLS / installs without cert-manager).
+    certManagerClusterIssuer: "letsencrypt"
   observability:
     openobserveBaseUrl: "http://openobserve.cyclopus-observability.svc:5080"
     openobserveOrganization: "cyclopus"

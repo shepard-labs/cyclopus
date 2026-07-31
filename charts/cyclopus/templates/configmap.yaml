@@ -17,6 +17,7 @@ data:
   WORKER_MAX_CONCURRENT_DEPLOYS: {{ .Values.config.worker.maxConcurrentDeploys | quote }}
   KUBERNETES_PREVIEW_HOSTNAME_SUFFIX: {{ .Values.config.kubernetes.previewHostnameSuffix | quote }}
   KUBERNETES_CUSTOM_DOMAIN_CNAME_TARGET: {{ .Values.config.kubernetes.customDomainCnameTarget | quote }}
+  KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER: {{ .Values.config.kubernetes.certManagerClusterIssuer | quote }}
   OBSERVABILITY_OPENOBSERVE_BASE_URL: {{ .Values.config.observability.openobserveBaseUrl | quote }}
   OBSERVABILITY_OPENOBSERVE_ORGANIZATION: {{ .Values.config.observability.openobserveOrganization | quote }}
   OBSERVABILITY_OPENOBSERVE_LOG_STREAM: {{ .Values.config.observability.openobserveLogStream | quote }}

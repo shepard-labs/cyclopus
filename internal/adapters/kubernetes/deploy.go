@@ -737,6 +737,13 @@ func isForwardRetryable(err error) bool {
 }
 
 func (a *RecoveryAdapter) applyIngress(ctx context.Context, execution *store.DeployExecution, desired *networkingv1.Ingress) error {
+	// Stamp the cert-manager cluster-issuer annotation on the environment Ingress
+	// so cert-manager issues a TLS certificate for the served hostname (§7.5).
+	// This is applied deterministically on every apply — the same config yields
+	// the same annotation set — so re-deploys/reconciles never churn the object.
+	// When the issuer is empty the annotation is omitted, preserving the prior
+	// behavior for installs without cert-manager.
+	setClusterIssuerAnnotation(&desired.ObjectMeta, a.config.CertManagerClusterIssuer)
 	return a.retryMutation(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
 		stampFence(&desired.ObjectMeta, lease)
 		current, err := a.client.NetworkingV1().Ingresses(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
@@ -1113,7 +1120,24 @@ func mergeManagedMetadata(candidate *metav1.ObjectMeta, desired metav1.ObjectMet
 }
 
 func isCyclopusManagedMetadataKey(key string) bool {
-	return strings.HasPrefix(key, "cyclopus.dev/") || key == ManagedByLabel || key == "app.kubernetes.io/name"
+	return strings.HasPrefix(key, "cyclopus.dev/") || key == ManagedByLabel || key == "app.kubernetes.io/name" ||
+		key == CertManagerClusterIssuerAnnotation
+}
+
+// setClusterIssuerAnnotation stamps (or, when issuer is empty, removes) the
+// cert-manager cluster-issuer annotation on an Ingress ObjectMeta. It is
+// idempotent: the same issuer always yields the same annotation state, so
+// re-applies do not churn the object.
+func setClusterIssuerAnnotation(metadata *metav1.ObjectMeta, issuer string) {
+	issuer = strings.TrimSpace(issuer)
+	if issuer == "" {
+		delete(metadata.Annotations, CertManagerClusterIssuerAnnotation)
+		return
+	}
+	if metadata.Annotations == nil {
+		metadata.Annotations = map[string]string{}
+	}
+	metadata.Annotations[CertManagerClusterIssuerAnnotation] = issuer
 }
 
 func stampFence(metadata *metav1.ObjectMeta, lease store.DeployLease) {
