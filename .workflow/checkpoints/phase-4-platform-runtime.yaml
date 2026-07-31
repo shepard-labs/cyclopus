@@ -1,0 +1,11 @@
+schema_version: 1
+workflow: cyclopus-api-platform-v1
+phase: phase-4
+checkpoint: platform-runtime
+status: passed
+source_revision: "366371732c82e3323239f58f5ca917d8200c664e"
+input_digest: "de458be59a1c252cca95d38ee0e0de1347e053c0f3604873a6666dc158a9f360"
+prerequisite_evidence:
+  - path: versions.yaml
+    sha256: f2506a3b98d8b71d0bc64992b2327df912936885b1c715297e46bbf29e31c336
+completed_at: "2026-07-30T22:15:00Z"
