@@ -7,8 +7,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ghcr.io/cyclopus-dev/cyclopus
-  CHART_REGISTRY: ghcr.io/cyclopus-dev/charts
+  IMAGE: ghcr.io/shepard-labs/cyclopus
+  CHART_REGISTRY: ghcr.io/shepard-labs/charts
 
 jobs:
   release:
