@@ -1,0 +1,16 @@
+/* ui.css — Cyclopus UI manifest. Pages link only this file; it imports the
+   modular layers in cascade order. Page-specific styles live in pages/*.css
+   and are linked individually by the page's own template.
+   Layer order: tokens → base → components → utilities (utilities win ties). */
+@import "./tokens.css";
+@import "./base.css";
+@import "./components/sidebar.css";
+@import "./components/topbar.css";
+@import "./components/button.css";
+@import "./components/badge.css";
+@import "./components/card.css";
+@import "./components/form.css";
+@import "./components/table.css";
+@import "./components/alert.css";
+@import "./components/status.css";
+@import "./utilities.css";

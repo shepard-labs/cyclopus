@@ -2,65 +2,65 @@ package pages
 
 import (
 	"fmt"
-	"strings"
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ AppOverview(app ui.Application, project ui.Project, prodEnv *ui.Environment, prodAlias *ui.Alias, prodRelease *ui.Release, previews []ui.Environment, user ui.User, org ui.Organization, flash *ui.FlashMessage) {
+templ AppOverview(app store.App, project store.Project, prodEnv *store.Environment, prodAlias *store.Alias, prodRelease *store.Release, previews []store.Environment, user store.User, org store.Organization, flash *ui.FlashMessage) {
 	@components.Page(app.Name, user, org, flash, "/projects", appOverviewContent(app, project, prodEnv, prodAlias, prodRelease, previews))
 }
 
-templ appOverviewContent(app ui.Application, project ui.Project, prodEnv *ui.Environment, prodAlias *ui.Alias, prodRelease *ui.Release, previews []ui.Environment) {
+templ appOverviewContent(app store.App, project store.Project, prodEnv *store.Environment, prodAlias *store.Alias, prodRelease *store.Release, previews []store.Environment) {
 	<div class="space-y-6">
-		<div class="flex items-center gap-2 text-sm text-zinc-400">
-			<a href="/projects" class="hover:text-violet-300">Projects</a>
+		<div class="flex items-center gap-2 text-sm text-base-content/65">
+			<a href="/projects" class="hover:text-accent">Projects</a>
 			<span>/</span>
-			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
 			<span>/</span>
-			<span class="text-zinc-100">{ app.Name }</span>
+			<span class="text-base-content">{ app.Name }</span>
 		</div>
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-3">
-				<h1 class="text-xl font-semibold text-zinc-100">{ app.Name }</h1>
+				<h1 class="text-xl font-semibold text-base-content">{ app.Name }</h1>
 				@components.RuntimeClassBadge(app.RuntimeClass)
 			</div>
 			<a href={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="btn btn-secondary btn-sm">Settings</a>
 		</div>
 		<div class="card" id="prod-status">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-zinc-300">Production</h2>
+				<h2 class="text-sm font-semibold text-base-content/80">Production</h2>
 				if prodEnv != nil {
 					@components.EnvLifecycleBadge(prodEnv.LifecycleStatus)
 				}
 			</div>
 			if prodEnv == nil {
-				<p class="text-sm text-zinc-400">No production environment yet. Push to the default branch to create one.</p>
+				<p class="text-sm text-base-content/65">No production environment yet. Push to the default branch to create one.</p>
 			} else {
 				<div class="space-y-3">
 					if prodAlias != nil && prodAlias.Hostname != "" {
 						<div class="flex items-center justify-between">
-							<span class="text-xs text-zinc-500">Hostname</span>
-							<a href={ templ.SafeURL("https://" + prodAlias.Hostname) } target="_blank" rel="noopener" class="text-sm font-mono text-violet-400 hover:text-violet-300">{ prodAlias.Hostname } ↗</a>
+							<span class="text-xs text-base-content/50">Hostname</span>
+							<a href={ templ.SafeURL("https://" + prodAlias.Hostname) } target="_blank" rel="noopener" class="text-sm font-mono text-primary hover:text-accent">{ prodAlias.Hostname } ↗</a>
 						</div>
-					} else if prodEnv.PlannedHostname != "" {
+					} else if prodEnv.PlannedHostname != nil {
 						<div class="flex items-center justify-between">
-							<span class="text-xs text-zinc-500">Planned hostname</span>
-							<span class="text-sm font-mono text-zinc-400">{ prodEnv.PlannedHostname }</span>
+							<span class="text-xs text-base-content/50">Planned hostname</span>
+							<span class="text-sm font-mono text-base-content/65">{ strptr(prodEnv.PlannedHostname) }</span>
 						</div>
 					}
 					if prodRelease != nil {
 						<div class="flex items-center justify-between">
-							<span class="text-xs text-zinc-500">Current release</span>
+							<span class="text-xs text-base-content/50">Current release</span>
 							<div class="flex items-center gap-2">
 								@components.ReleaseStatusBadge(prodRelease.Status)
-								<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="text-xs text-zinc-400 font-mono hover:text-zinc-200">{ shortID(prodRelease.ID) }</a>
+								<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="text-xs text-base-content/65 font-mono hover:text-base-content/90">{ shortID(prodRelease.ID) }</a>
 							</div>
 						</div>
 					}
-					if prodEnv.InProgressReleaseID != "" {
+					if prodEnv.InProgressReleaseID != nil {
 						<div
-							class="flex items-center gap-2 p-3 bg-blue-500/20 rounded text-sm text-blue-400 animate-pulse"
+							class="alert alert-info animate-pulse"
 							hx-get={ "/environments/" + prodEnv.ID + "/status-fragment" }
 							hx-trigger="every 3s"
 							hx-swap="outerHTML"
@@ -78,30 +78,30 @@ templ appOverviewContent(app ui.Application, project ui.Project, prodEnv *ui.Env
 		</div>
 		<div class="card">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-zinc-300">Preview environments</h2>
-				<span class="text-xs text-zinc-500">{ fmt.Sprintf("%d / %d", len(previews), app.MaxPreviewEnvironments) }</span>
+				<h2 class="text-sm font-semibold text-base-content/80">Preview environments</h2>
+				<span class="text-xs text-base-content/50">{ fmt.Sprintf("%d / %d", len(previews), app.MaxPreviewEnvironments) }</span>
 			</div>
 			if len(previews) == 0 {
-				<p class="text-sm text-zinc-400">No preview environments. Push a non-default branch to create one.</p>
+				<p class="text-sm text-base-content/65">No preview environments. Push a non-default branch to create one.</p>
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+						<tr class="text-xs text-base-content/50 border-b border-base-300">
 							<th class="text-left py-2">Branch</th>
 							<th class="text-left py-2">Hostname</th>
 							<th class="text-left py-2">Status</th>
 							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-zinc-800">
+					<tbody class="divide-y divide-base-300">
 						for _, env := range previews {
-							<tr class="text-zinc-300">
+							<tr class="text-base-content/80">
 								<td class="py-2 font-mono text-xs">{ env.Branch }</td>
 								<td class="py-2">
-									if env.PlannedHostname != "" {
-										<a href={ templ.SafeURL("https://" + env.PlannedHostname) } target="_blank" rel="noopener" class="text-xs font-mono text-violet-400 hover:text-violet-300 truncate max-w-xs inline-block">{ env.PlannedHostname } ↗</a>
+									if env.PlannedHostname != nil {
+										<a href={ templ.SafeURL("https://" + strptr(env.PlannedHostname)) } target="_blank" rel="noopener" class="text-xs font-mono text-primary hover:text-accent truncate max-w-xs inline-block">{ strptr(env.PlannedHostname) } ↗</a>
 									} else {
-										<span class="text-xs text-zinc-500">—</span>
+										<span class="text-xs text-base-content/50">—</span>
 									}
 								</td>
 								<td class="py-2">@components.EnvLifecycleBadge(env.LifecycleStatus)</td>
@@ -115,19 +115,19 @@ templ appOverviewContent(app ui.Application, project ui.Project, prodEnv *ui.Env
 			}
 		</div>
 		<div class="card">
-			<h2 class="text-sm font-semibold text-zinc-300 mb-3">App configuration</h2>
+			<h2 class="text-sm font-semibold text-base-content/80 mb-3">App configuration</h2>
 			<div class="grid grid-cols-2 gap-4 text-sm">
 				<div class="space-y-2">
-					<div class="flex justify-between"><span class="text-zinc-500">Container port</span><span class="font-mono">{ fmt.Sprintf("%d", app.ContainerPort) }</span></div>
-					<div class="flex justify-between"><span class="text-zinc-500">Health check</span><span class="font-mono">{ app.HealthCheckPath }</span></div>
-					<div class="flex justify-between"><span class="text-zinc-500">Scaling</span><span>{ scalingModeLabel(app.ScalingMode) }</span></div>
-					<div class="flex justify-between"><span class="text-zinc-500">Replicas</span><span>{ fmt.Sprintf("%d – %d", app.MinReplicas, app.MaxReplicas) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">Container port</span><span class="font-mono">{ fmt.Sprintf("%d", app.ContainerPort) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">Health check</span><span class="font-mono">{ app.HealthCheckPath }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">Scaling</span><span>{ scalingModeLabel(app.ScalingMode) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">Replicas</span><span>{ fmt.Sprintf("%d – %d", app.MinReplicas, app.MaxReplicas) }</span></div>
 				</div>
 				<div class="space-y-2">
-					<div class="flex justify-between"><span class="text-zinc-500">CPU request</span><span class="font-mono">{ fmt.Sprintf("%dm", app.CPURequestMillicores) }</span></div>
-					<div class="flex justify-between"><span class="text-zinc-500">CPU limit</span><span class="font-mono">{ fmt.Sprintf("%dm", app.CPULimitMillicores) }</span></div>
-					<div class="flex justify-between"><span class="text-zinc-500">Memory request</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryRequestMiB) }</span></div>
-					<div class="flex justify-between"><span class="text-zinc-500">Memory limit</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryLimitMiB) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">CPU request</span><span class="font-mono">{ fmt.Sprintf("%dm", app.CPURequestMillicores) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">CPU limit</span><span class="font-mono">{ fmt.Sprintf("%dm", app.CPULimitMillicores) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">Memory request</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryRequestMiB) }</span></div>
+					<div class="flex justify-between"><span class="text-base-content/50">Memory limit</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryLimitMiB) }</span></div>
 				</div>
 			</div>
 		</div>
@@ -143,13 +143,13 @@ func shortID(id string) string {
 
 func scalingModeLabel(mode string) string {
 	switch mode {
-	case "SCALING_MODE_HPA":
+	case "hpa":
 		return "HPA"
-	case "SCALING_MODE_KEDA_CRON":
+	case "keda_cron":
 		return "KEDA cron"
-	case "SCALING_MODE_KEDA_HTTP":
+	case "keda_http":
 		return "KEDA HTTP"
 	default:
-		return strings.TrimPrefix(mode, "SCALING_MODE_")
+		return mode
 	}
 }

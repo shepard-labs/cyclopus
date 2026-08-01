@@ -10,11 +10,12 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"fmt"
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-func GitConnections(connections []ui.GitConnection, user ui.User, org ui.Organization, flash *ui.FlashMessage, errMsg string) templ.Component {
+func GitConnections(connections []store.GitConnection, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -43,7 +44,7 @@ func GitConnections(connections []ui.GitConnection, user ui.User, org ui.Organiz
 	})
 }
 
-func gitConnectionsContent(connections []ui.GitConnection, org ui.Organization, errMsg string) templ.Component {
+func gitConnectionsContent(connections []store.GitConnection, org store.Organization, errMsg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -64,19 +65,19 @@ func gitConnectionsContent(connections []ui.GitConnection, org ui.Organization, 
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-xl font-semibold\">Git Connections</h1><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-zinc-300\">Add GitHub App connection</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-xl font-semibold\">Git Connections</h1><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Add GitHub App connection</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"p-3 bg-red-500/20 border border-red-500/50 rounded text-sm text-red-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"alert alert-error\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 19, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 20, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -87,63 +88,63 @@ func gitConnectionsContent(connections []ui.GitConnection, org ui.Organization, 
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/settings/git-connections\" class=\"space-y-4\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"input-group\"><label for=\"gc-repo\">Repository (owner/repo)</label> <input type=\"text\" id=\"gc-repo\" name=\"repo_full_name\" required placeholder=\"acme/api\"></div><div class=\"input-group\"><label for=\"gc-installation\">GitHub App Installation ID</label> <input type=\"number\" id=\"gc-installation\" name=\"installation_id\" required placeholder=\"12345678\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"input-group\"><label for=\"gc-branch\">Default branch</label> <input type=\"text\" id=\"gc-branch\" name=\"default_branch\" value=\"main\"></div><div class=\"input-group\"><label for=\"gc-secret\">Webhook secret ref <span class=\"text-zinc-500 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"gc-secret\" name=\"webhook_secret_ref\" required placeholder=\"k8s-secret://cyclopus/webhook-secret#value\"></div></div><button type=\"submit\" class=\"btn btn-primary\">Add connection</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/settings/git-connections\" class=\"space-y-4\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"gc-repo\">Repository (owner/repo)</label> <input type=\"text\" id=\"gc-repo\" name=\"repo_full_name\" required placeholder=\"acme/api\"></div><div class=\"fieldset\"><label for=\"gc-installation\">GitHub App Installation ID</label> <input type=\"number\" id=\"gc-installation\" name=\"installation_id\" required placeholder=\"12345678\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"gc-branch\">Default branch</label> <input type=\"text\" id=\"gc-branch\" name=\"default_branch\" value=\"main\"></div><div class=\"fieldset\"><label for=\"gc-secret\">Webhook secret ref <span class=\"text-base-content/50 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"gc-secret\" name=\"webhook_secret_ref\" required placeholder=\"k8s-secret://cyclopus/webhook-secret#value\"></div></div><button type=\"submit\" class=\"btn btn-primary\">Add connection</button></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(connections) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"card\"><h2 class=\"text-sm font-semibold text-zinc-300 mb-4\">Connections</h2><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-zinc-500 border-b border-zinc-800\"><th class=\"text-left py-2\">Repository</th><th class=\"text-left py-2\">Branch</th><th class=\"text-left py-2\">Installation</th><th class=\"text-left py-2\">Created</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-zinc-800\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"card\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">Connections</h2><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">Repository</th><th class=\"text-left py-2\">Branch</th><th class=\"text-left py-2\">Installation</th><th class=\"text-left py-2\">Created</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, gc := range connections {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<tr class=\"text-zinc-300\"><td class=\"py-2 font-mono text-xs\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<tr class=\"text-base-content/80\"><td class=\"py-2 font-mono text-xs\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(gc.RepoFullName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 61, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 62, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</td><td class=\"py-2 text-xs text-zinc-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</td><td class=\"py-2 text-xs text-base-content/65\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(gc.DefaultBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 62, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 63, Col: 72}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</td><td class=\"py-2 text-xs text-zinc-400 font-mono\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</td><td class=\"py-2 text-xs text-base-content/65 font-mono\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", gc.InstallationID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 63, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 64, Col: 102}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</td><td class=\"py-2 text-xs text-zinc-500\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</td><td class=\"py-2 text-xs text-base-content/50\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(relTimeSettings(gc.CreatedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 64, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 65, Col: 85}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -156,13 +157,13 @@ func gitConnectionsContent(connections []ui.GitConnection, org ui.Organization, 
 				var templ_7745c5c3_Var8 templ.SafeURL
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/git-connections/" + gc.ID + "/delete"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 66, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 67, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" onsubmit=\"return confirm('Delete this connection?')\"><button type=\"submit\" class=\"btn btn-danger btn-sm\">Delete</button></form></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" onsubmit=\"return confirm('Delete this connection?')\"><button type=\"submit\" class=\"btn btn-error btn-sm\">Delete</button></form></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

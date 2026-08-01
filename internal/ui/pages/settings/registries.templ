@@ -1,25 +1,26 @@
 package settings
 
 import (
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ Registries(registries []ui.Registry, user ui.User, org ui.Organization, flash *ui.FlashMessage, errMsg string) {
+templ Registries(registries []store.Registry, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
 	@components.Page("Registries", user, org, flash, "/settings/registries", registriesContent(registries, errMsg))
 }
 
-templ registriesContent(registries []ui.Registry, errMsg string) {
+templ registriesContent(registries []store.Registry, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
 		<h1 class="text-xl font-semibold">Container Registries</h1>
 		<div class="card space-y-4">
-			<h2 class="text-sm font-semibold text-zinc-300">Add registry</h2>
+			<h2 class="text-sm font-semibold text-base-content/80">Add registry</h2>
 			if errMsg != "" {
-				<div class="p-3 bg-red-500/20 border border-red-500/50 rounded text-sm text-red-400">{ errMsg }</div>
+				<div class="alert alert-error">{ errMsg }</div>
 			}
 			<form method="POST" action="/settings/registries" class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
-					<div class="input-group">
+					<div class="fieldset">
 						<label for="reg-provider">Provider</label>
 						<select id="reg-provider" name="provider">
 							<option value="ghcr">GitHub Container Registry (ghcr)</option>
@@ -28,13 +29,13 @@ templ registriesContent(registries []ui.Registry, errMsg string) {
 							<option value="other">Other</option>
 						</select>
 					</div>
-					<div class="input-group">
+					<div class="fieldset">
 						<label for="reg-url">Registry URL</label>
 						<input type="text" id="reg-url" name="registry_url" required placeholder="ghcr.io"/>
 					</div>
 				</div>
-				<div class="input-group">
-					<label for="reg-cred">Credential secret ref <span class="text-zinc-500 font-normal">(k8s-secret://…)</span></label>
+				<div class="fieldset">
+					<label for="reg-cred">Credential secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
 					<input type="text" id="reg-cred" name="credential_secret_ref" required placeholder="k8s-secret://cyclopus/registry-cred#.dockerconfigjson"/>
 				</div>
 				<button type="submit" class="btn btn-primary">Add registry</button>
@@ -44,22 +45,22 @@ templ registriesContent(registries []ui.Registry, errMsg string) {
 			<div class="card">
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+						<tr class="text-xs text-base-content/50 border-b border-base-300">
 							<th class="text-left py-2">Provider</th>
 							<th class="text-left py-2">URL</th>
 							<th class="text-left py-2">Created</th>
 							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-zinc-800">
+					<tbody class="divide-y divide-base-300">
 						for _, r := range registries {
-							<tr class="text-zinc-300">
+							<tr class="text-base-content/80">
 								<td class="py-2 text-xs font-mono">{ r.Provider }</td>
-								<td class="py-2 text-xs text-zinc-400 font-mono">{ r.RegistryURL }</td>
-								<td class="py-2 text-xs text-zinc-500">{ relTimeSettings(r.CreatedAt) }</td>
+								<td class="py-2 text-xs text-base-content/65 font-mono">{ r.RegistryURL }</td>
+								<td class="py-2 text-xs text-base-content/50">{ relTimeSettings(r.CreatedAt) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/registries/" + r.ID + "/delete") } onsubmit="return confirm('Delete this registry?')">
-										<button type="submit" class="btn btn-danger btn-sm">Delete</button>
+										<button type="submit" class="btn btn-error btn-sm">Delete</button>
 									</form>
 								</td>
 							</tr>

@@ -1,0 +1,58 @@
+/* button.css — .btn component and variants (daisyUI class API). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--radius-field);
+  padding: 0.5rem 1rem;
+  transition: background-color 150ms;
+  cursor: pointer;
+  border: none;
+  white-space: nowrap;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: var(--color-primary);
+  color: var(--color-primary-content);
+}
+.btn-primary:hover {
+  background-color: color-mix(in oklab, var(--color-primary), black 15%);
+}
+
+.btn-secondary {
+  background-color: var(--color-secondary);
+  color: var(--color-secondary-content);
+}
+.btn-secondary:hover {
+  background-color: color-mix(in oklab, var(--color-base-300), var(--color-base-content) 10%);
+}
+
+.btn-error {
+  background-color: var(--color-error);
+  color: var(--color-error-content);
+  padding: 0.375rem 0.75rem;
+}
+.btn-error:hover {
+  background-color: color-mix(in oklab, var(--color-error), black 10%);
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: color-mix(in srgb, var(--color-base-content) 65%, transparent);
+  padding: 0.375rem 0.75rem;
+}
+.btn-ghost:hover {
+  background-color: var(--color-base-300);
+  color: var(--color-base-content);
+}
+
+.btn-sm {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+}

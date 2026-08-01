@@ -1,17 +1,17 @@
 package pages
 
 import (
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
 // EnvStatusFragment is the HTMX polling fragment for the production deploy card.
 // When no deploy is in progress it returns a static element that stops polling.
-templ EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release) {
-	if env.InProgressReleaseID != "" {
+templ EnvStatusFragment(env store.Environment, alias *store.Alias, release *store.Release) {
+	if env.InProgressReleaseID != nil {
 		<div
 			id="prod-status"
-			class="flex items-center gap-2 p-3 bg-blue-500/20 rounded text-sm text-blue-400 animate-pulse"
+			class="alert alert-info animate-pulse"
 			hx-get={ "/environments/" + env.ID + "/status-fragment" }
 			hx-trigger="every 3s"
 			hx-swap="outerHTML"
@@ -24,13 +24,13 @@ templ EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release
 		<div id="prod-status" class="space-y-3">
 			if alias != nil && alias.Hostname != "" {
 				<div class="flex items-center justify-between">
-					<span class="text-xs text-zinc-500">Hostname</span>
-					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="text-sm font-mono text-violet-400 hover:text-violet-300">{ alias.Hostname } ↗</a>
+					<span class="text-xs text-base-content/50">Hostname</span>
+					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="text-sm font-mono text-primary hover:text-accent">{ alias.Hostname } ↗</a>
 				</div>
 			}
 			if release != nil {
 				<div class="flex items-center justify-between">
-					<span class="text-xs text-zinc-500">Current release</span>
+					<span class="text-xs text-base-content/50">Current release</span>
 					@components.ReleaseStatusBadge(release.Status)
 				</div>
 			}

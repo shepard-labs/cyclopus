@@ -10,11 +10,12 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"fmt"
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-func Webhooks(webhooks []ui.Webhook, user ui.User, org ui.Organization, flash *ui.FlashMessage, errMsg string) templ.Component {
+func Webhooks(webhooks []store.Webhook, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -43,7 +44,7 @@ func Webhooks(webhooks []ui.Webhook, user ui.User, org ui.Organization, flash *u
 	})
 }
 
-func webhooksContent(webhooks []ui.Webhook, errMsg string) templ.Component {
+func webhooksContent(webhooks []store.Webhook, errMsg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -64,19 +65,19 @@ func webhooksContent(webhooks []ui.Webhook, errMsg string) templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-xl font-semibold\">Webhooks</h1><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-zinc-300\">Add endpoint</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-xl font-semibold\">Webhooks</h1><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Add endpoint</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"p-3 bg-red-500/20 border border-red-500/50 rounded text-sm text-red-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"alert alert-error\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 19, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 20, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -87,24 +88,24 @@ func webhooksContent(webhooks []ui.Webhook, errMsg string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/settings/webhooks\" class=\"space-y-4\"><div class=\"input-group\"><label for=\"wh-url\">Target URL</label> <input type=\"url\" id=\"wh-url\" name=\"target_url\" required placeholder=\"https://example.com/hooks/cyclopus\"></div><div class=\"input-group\"><label for=\"wh-secret\">Signing secret ref <span class=\"text-zinc-500 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"wh-secret\" name=\"secret_ref\" required placeholder=\"k8s-secret://cyclopus/webhook-signing#value\"></div><div class=\"input-group\"><label for=\"wh-events\">Events <span class=\"text-zinc-500 font-normal\">(comma-separated, empty = all)</span></label> <input type=\"text\" id=\"wh-events\" name=\"events\" placeholder=\"deploy.succeeded,deploy.failed\"></div><button type=\"submit\" class=\"btn btn-primary\">Add webhook</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/settings/webhooks\" class=\"space-y-4\"><div class=\"fieldset\"><label for=\"wh-url\">Target URL</label> <input type=\"url\" id=\"wh-url\" name=\"target_url\" required placeholder=\"https://example.com/hooks/cyclopus\"></div><div class=\"fieldset\"><label for=\"wh-secret\">Signing secret ref <span class=\"text-base-content/50 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"wh-secret\" name=\"secret_ref\" required placeholder=\"k8s-secret://cyclopus/webhook-signing#value\"></div><div class=\"fieldset\"><label for=\"wh-events\">Events <span class=\"text-base-content/50 font-normal\">(comma-separated, empty = all)</span></label> <input type=\"text\" id=\"wh-events\" name=\"events\" placeholder=\"deploy.succeeded,deploy.failed\"></div><button type=\"submit\" class=\"btn btn-primary\">Add webhook</button></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(webhooks) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"card\"><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-zinc-500 border-b border-zinc-800\"><th class=\"text-left py-2\">URL</th><th class=\"text-left py-2\">Status</th><th class=\"text-left py-2\">Failures</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-zinc-800\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"card\"><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">URL</th><th class=\"text-left py-2\">Status</th><th class=\"text-left py-2\">Failures</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, w := range webhooks {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<tr class=\"text-zinc-300\"><td class=\"py-2 text-xs font-mono text-zinc-400 truncate max-w-xs\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<tr class=\"text-base-content/80\"><td class=\"py-2 text-xs font-mono text-base-content/65 truncate max-w-xs\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(w.TargetURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 51, Col: 88}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 52, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -114,25 +115,25 @@ func webhooksContent(webhooks []ui.Webhook, errMsg string) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if w.Enabled {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<span class=\"badge badge-green\">Enabled</span>")
+				if w.DisabledAt == nil {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<span class=\"badge badge-soft badge-success\">Enabled</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<span class=\"badge badge-red\">Disabled</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<span class=\"badge badge-soft badge-error\">Disabled</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</td><td class=\"py-2 text-xs text-zinc-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</td><td class=\"py-2 text-xs text-base-content/65\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", w.ConsecutiveFailures))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 59, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 60, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -145,13 +146,13 @@ func webhooksContent(webhooks []ui.Webhook, errMsg string) templ.Component {
 				var templ_7745c5c3_Var6 templ.SafeURL
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/webhooks/" + w.ID + "/delete"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 61, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/webhooks.templ`, Line: 62, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" onsubmit=\"return confirm('Delete this webhook?')\"><button type=\"submit\" class=\"btn btn-danger btn-sm\">Delete</button></form></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" onsubmit=\"return confirm('Delete this webhook?')\"><button type=\"submit\" class=\"btn btn-error btn-sm\">Delete</button></form></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

@@ -88,8 +88,7 @@ func run(args, environ []string) error {
 	services.Authenticator = authenticator
 	services.RateLimiter = server.NewAuthRateLimiter(cfg.Auth.RateLimitPerMinute)
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
-	uiClient := ui.NewClient(cfg.HTTP.Address)
-	services.UIHandler = uihandler.New(uiClient)
+	services.UIHandler = uihandler.New(ui.NewBackend(domainService, authService, cfg.Auth.SessionTTL))
 	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger))
 	if err != nil {
 		return err

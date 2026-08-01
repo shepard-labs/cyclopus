@@ -1,79 +1,82 @@
 package components
 
-// ReleaseStatusBadge renders a colored badge for a release status string.
+// ReleaseStatusBadge renders a colored badge for a release status string
+// (store value: pending/deploying/live/failed/superseded).
 templ ReleaseStatusBadge(status string) {
 	switch status {
-		case "RELEASE_STATUS_LIVE":
-			<span class="badge badge-green">
-				<span class="dot dot-green"></span>
+		case "live":
+			<span class="badge badge-soft badge-success">
+				<span class="status status-success"></span>
 				Live
 			</span>
-		case "RELEASE_STATUS_DEPLOYING":
-			<span class="badge badge-blue animate-pulse">
-				<span class="dot dot-blue"></span>
+		case "deploying":
+			<span class="badge badge-soft badge-info animate-pulse">
+				<span class="status status-info"></span>
 				Deploying
 			</span>
-		case "RELEASE_STATUS_PENDING":
-			<span class="badge badge-yellow animate-pulse">
-				<span class="dot dot-yellow"></span>
+		case "pending":
+			<span class="badge badge-soft badge-warning animate-pulse">
+				<span class="status status-warning"></span>
 				Pending
 			</span>
-		case "RELEASE_STATUS_FAILED":
-			<span class="badge badge-red">
-				<span class="dot dot-red"></span>
+		case "failed":
+			<span class="badge badge-soft badge-error">
+				<span class="status status-error"></span>
 				Failed
 			</span>
-		case "RELEASE_STATUS_SUPERSEDED":
-			<span class="badge badge-gray">Superseded</span>
+		case "superseded":
+			<span class="badge badge-soft badge-neutral">Superseded</span>
 		default:
-			<span class="badge badge-gray">{ status }</span>
+			<span class="badge badge-soft badge-neutral">{ status }</span>
 	}
 }
 
-// EnvLifecycleBadge renders a colored badge for an environment lifecycle status.
+// EnvLifecycleBadge renders a colored badge for an environment lifecycle status
+// (store value: reserved/policy_blocked/ready/teardown_requested/torn_down/failed).
 templ EnvLifecycleBadge(status string) {
 	switch status {
-		case "ENVIRONMENT_LIFECYCLE_STATUS_READY":
-			<span class="badge badge-green">
-				<span class="dot dot-green"></span>
+		case "ready":
+			<span class="badge badge-soft badge-success">
+				<span class="status status-success"></span>
 				Ready
 			</span>
-		case "ENVIRONMENT_LIFECYCLE_STATUS_TORN_DOWN":
-			<span class="badge badge-gray">Torn Down</span>
-		case "ENVIRONMENT_LIFECYCLE_STATUS_FAILED":
-			<span class="badge badge-red">Failed</span>
-		case "ENVIRONMENT_LIFECYCLE_STATUS_POLICY_BLOCKED":
-			<span class="badge badge-yellow">Policy Blocked</span>
-		case "ENVIRONMENT_LIFECYCLE_STATUS_RESERVED":
-			<span class="badge badge-yellow animate-pulse">Provisioning</span>
-		case "ENVIRONMENT_LIFECYCLE_STATUS_TEARDOWN_REQUESTED":
-			<span class="badge badge-yellow animate-pulse">Tearing Down</span>
+		case "torn_down":
+			<span class="badge badge-soft badge-neutral">Torn Down</span>
+		case "failed":
+			<span class="badge badge-soft badge-error">Failed</span>
+		case "policy_blocked":
+			<span class="badge badge-soft badge-warning">Policy Blocked</span>
+		case "reserved":
+			<span class="badge badge-soft badge-warning animate-pulse">Provisioning</span>
+		case "teardown_requested":
+			<span class="badge badge-soft badge-warning animate-pulse">Tearing Down</span>
 		default:
-			<span class="badge badge-gray">{ status }</span>
+			<span class="badge badge-soft badge-neutral">{ status }</span>
 	}
 }
 
 // RuntimeClassBadge shows a warning badge for unsandboxed apps.
 templ RuntimeClassBadge(runtimeClass string) {
-	if runtimeClass == "RUNTIME_CLASS_RUNC" {
-		<span class="badge badge-amber">⚠ UNSANDBOXED</span>
+	if runtimeClass == "runc" {
+		<span class="badge badge-soft badge-warning">⚠ UNSANDBOXED</span>
 	}
 }
 
-// OperationStatusBadge renders a badge for an operation status.
+// OperationStatusBadge renders a badge for an operation status
+// (store value: queued/accepted/leased/running/completed/succeeded/failed/cancelled).
 templ OperationStatusBadge(status string) {
 	switch status {
-		case "OPERATION_STATUS_SUCCEEDED":
-			<span class="badge badge-green">Succeeded</span>
-		case "OPERATION_STATUS_RUNNING":
-			<span class="badge badge-blue animate-pulse">Running</span>
-		case "OPERATION_STATUS_QUEUED":
-			<span class="badge badge-yellow">Queued</span>
-		case "OPERATION_STATUS_FAILED":
-			<span class="badge badge-red">Failed</span>
-		case "OPERATION_STATUS_CANCELLED":
-			<span class="badge badge-gray">Cancelled</span>
+		case "completed", "succeeded":
+			<span class="badge badge-soft badge-success">Succeeded</span>
+		case "leased", "running":
+			<span class="badge badge-soft badge-info animate-pulse">Running</span>
+		case "queued", "accepted":
+			<span class="badge badge-soft badge-warning">Queued</span>
+		case "failed":
+			<span class="badge badge-soft badge-error">Failed</span>
+		case "cancelled":
+			<span class="badge badge-soft badge-neutral">Cancelled</span>
 		default:
-			<span class="badge badge-gray">{ status }</span>
+			<span class="badge badge-soft badge-neutral">{ status }</span>
 	}
 }

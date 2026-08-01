@@ -13,21 +13,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/pages"
-	adminpages "github.com/cyclopus-dev/cyclopus/internal/ui/pages/admin"
-	settingspages "github.com/cyclopus-dev/cyclopus/internal/ui/pages/settings"
+	"github.com/shepard-labs/cyclopus/internal/service"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/pages"
+	adminpages "github.com/shepard-labs/cyclopus/internal/ui/pages/admin"
+	settingspages "github.com/shepard-labs/cyclopus/internal/ui/pages/settings"
 )
 
 // Handler is the chi router serving all Cyclopus UI routes.
 type Handler struct {
-	client *ui.Client
+	client *ui.Backend
 }
 
-// New constructs the UI http.Handler. The client must point at the same
-// process's grpc-gateway listener (loopback) so every UI action is rooted
-// in the defined REST API.
-func New(client *ui.Client) http.Handler {
+// New constructs the UI http.Handler. The backend resolves UI reads and writes
+// in-process against the service/auth layers.
+func New(client *ui.Backend) http.Handler {
 	h := &Handler{client: client}
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Recoverer)
@@ -93,18 +94,18 @@ func New(client *ui.Client) http.Handler {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// pageCtx fetches the current user and their organization from the API.
-// Every protected page calls this to populate the layout.
-func (h *Handler) pageCtx(ctx context.Context, token string) (ui.User, ui.Organization, error) {
+// pageCtx fetches the current user and their organization. Every protected
+// page calls this to populate the layout.
+func (h *Handler) pageCtx(ctx context.Context, token string) (store.User, store.Organization, error) {
 	user, err := h.client.GetCurrentUser(ctx, token)
 	if err != nil {
-		return ui.User{}, ui.Organization{}, err
+		return store.User{}, store.Organization{}, err
 	}
-	org, err := h.client.GetOrganization(ctx, token, user.OrganizationID)
+	org, err := h.client.GetOrganization(ctx, token, user.OrgID)
 	if err != nil {
-		return ui.User{}, ui.Organization{}, err
+		return store.User{}, store.Organization{}, err
 	}
-	return *user, *org, nil
+	return user, org, nil
 }
 
 // handleErr handles API errors: 401 clears the cookie and redirects to /login,
@@ -290,13 +291,13 @@ func (h *Handler) postApp(w http.ResponseWriter, r *http.Request) {
 			port = 8080
 		}
 	}
-	app := ui.Application{Name: name, Slug: slug, HostnameLabel: hostnameLabel, ContainerPort: port, HealthCheckPath: "/"}
-	created, err := h.client.CreateApplication(r.Context(), token, projectID, newIdemKey(), app)
+	input := service.AppInput{Name: name, Slug: slug, HostnameLabel: hostnameLabel, ContainerPort: port, HealthCheckPath: "/", ProjectID: projectID}
+	created, err := h.client.CreateApplication(r.Context(), token, projectID, newIdemKey(), input)
 	if err != nil {
 		proj, _ := h.client.GetProject(r.Context(), token, projectID)
 		apps, _, _ := h.client.ListApplications(r.Context(), token, projectID, "")
 		if proj == nil {
-			proj = &ui.Project{ID: projectID}
+			proj = &store.Project{ID: projectID}
 		}
 		render(w, r, pages.ProjectDetail(*proj, apps, user, org, nil, err.Error()))
 		return
@@ -319,31 +320,31 @@ func (h *Handler) getApp(w http.ResponseWriter, r *http.Request) {
 	}
 	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
 	if proj == nil {
-		proj = &ui.Project{ID: app.ProjectID}
+		proj = &store.Project{ID: app.ProjectID}
 	}
 	envs, err := h.client.ListEnvironments(r.Context(), token, appID, false)
 	if err != nil {
 		h.handleErr(w, r, err)
 		return
 	}
-	var prodEnv *ui.Environment
-	var previews []ui.Environment
+	var prodEnv *store.Environment
+	var previews []store.Environment
 	for i := range envs {
-		if envs[i].Kind == "ENVIRONMENT_KIND_PRODUCTION" {
+		if envs[i].Kind == "production" {
 			e := envs[i]
 			prodEnv = &e
 		} else {
 			previews = append(previews, envs[i])
 		}
 	}
-	var prodAlias *ui.Alias
-	var prodRelease *ui.Release
+	var prodAlias *store.Alias
+	var prodRelease *store.Release
 	if prodEnv != nil {
 		if aliases, e := h.client.ListAliases(r.Context(), token, prodEnv.ID); e == nil && len(aliases) > 0 {
 			prodAlias = &aliases[0]
 		}
-		if prodEnv.CurrentReleaseID != "" {
-			prodRelease, _ = h.client.GetRelease(r.Context(), token, prodEnv.CurrentReleaseID)
+		if prodEnv.CurrentReleaseID != nil {
+			prodRelease, _ = h.client.GetRelease(r.Context(), token, *prodEnv.CurrentReleaseID)
 		}
 	}
 	render(w, r, pages.AppOverview(*app, *proj, prodEnv, prodAlias, prodRelease, previews, user, org, flashFromQuery(r)))
@@ -364,7 +365,7 @@ func (h *Handler) getAppSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
 	if proj == nil {
-		proj = &ui.Project{ID: app.ProjectID}
+		proj = &store.Project{ID: app.ProjectID}
 	}
 	render(w, r, pages.AppSettings(*app, *proj, user, org, flashFromQuery(r), ""))
 }
@@ -384,7 +385,7 @@ func (h *Handler) postAppSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
 	if proj == nil {
-		proj = &ui.Project{ID: app.ProjectID}
+		proj = &store.Project{ID: app.ProjectID}
 	}
 
 	fields := map[string]any{}
@@ -441,7 +442,7 @@ func (h *Handler) getLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
 	if proj == nil {
-		proj = &ui.Project{ID: app.ProjectID}
+		proj = &store.Project{ID: app.ProjectID}
 	}
 	envID := r.URL.Query().Get("env")
 	cursor := r.URL.Query().Get("cursor")
@@ -469,37 +470,33 @@ func (h *Handler) getEnvironment(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	app, err := h.client.GetApplication(r.Context(), token, env.ApplicationID)
+	app, err := h.client.GetApplication(r.Context(), token, env.AppID)
 	if err != nil {
 		h.handleErr(w, r, err)
 		return
 	}
 	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
 	if proj == nil {
-		proj = &ui.Project{ID: app.ProjectID}
+		proj = &store.Project{ID: app.ProjectID}
 	}
 	releases, _, _ := h.client.ListReleases(r.Context(), token, envID, "")
 	aliases, _ := h.client.ListAliases(r.Context(), token, envID)
 	certs, _ := h.client.ListCertificates(r.Context(), token, envID)
 	domains, _ := h.client.ListDomains(r.Context(), token, app.ID)
 	envVars, _ := h.client.GetEnvVars(r.Context(), token, envID)
-	var alias *ui.Alias
+	var alias *store.Alias
 	if len(aliases) > 0 {
 		a := aliases[0]
 		alias = &a
 	}
-	var evr ui.EnvVarRevision
-	if envVars != nil {
-		evr = *envVars
-	}
-	render(w, r, pages.EnvironmentDetail(*env, *app, *proj, releases, alias, certs, domains, evr, user, org, flashFromQuery(r)))
+	render(w, r, pages.EnvironmentDetail(*env, *app, *proj, releases, alias, certs, domains, envVars, user, org, flashFromQuery(r)))
 }
 
 func (h *Handler) postRollback(w http.ResponseWriter, r *http.Request) {
 	token := ui.TokenFromContext(r.Context())
 	envID := chi.URLParam(r, "envID")
 	releaseID := r.FormValue("release_id")
-	_, err := h.client.Rollback(r.Context(), token, newIdemKey(), envID, releaseID)
+	err := h.client.Rollback(r.Context(), token, newIdemKey(), envID, releaseID)
 	if err != nil {
 		redirectWithFlash(w, r, "/environments/"+envID, "error", "Rollback failed: "+err.Error())
 		return
@@ -516,14 +513,14 @@ func (h *Handler) getEnvStatusFragment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	aliases, _ := h.client.ListAliases(r.Context(), token, envID)
-	var alias *ui.Alias
+	var alias *store.Alias
 	if len(aliases) > 0 {
 		a := aliases[0]
 		alias = &a
 	}
-	var release *ui.Release
-	if env.CurrentReleaseID != "" {
-		release, _ = h.client.GetRelease(r.Context(), token, env.CurrentReleaseID)
+	var release *store.Release
+	if env.CurrentReleaseID != nil {
+		release, _ = h.client.GetRelease(r.Context(), token, *env.CurrentReleaseID)
 	}
 	render(w, r, pages.EnvStatusFragment(*env, alias, release))
 }
@@ -550,7 +547,7 @@ func (h *Handler) postGitConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	var installID int64
 	fmt.Sscanf(r.FormValue("installation_id"), "%d", &installID)
-	gc := ui.GitConnection{
+	gc := service.GitConnectionInput{
 		RepoFullName:     r.FormValue("repo_full_name"),
 		DefaultBranch:    r.FormValue("default_branch"),
 		InstallationID:   installID,
@@ -597,7 +594,7 @@ func (h *Handler) postRegistry(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	reg := ui.Registry{
+	reg := service.RegistryInput{
 		Provider:            r.FormValue("provider"),
 		RegistryURL:         r.FormValue("registry_url"),
 		CredentialSecretRef: r.FormValue("credential_secret_ref"),
@@ -648,7 +645,7 @@ func (h *Handler) postWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	wh := ui.Webhook{TargetURL: r.FormValue("target_url"), Events: events, SecretRef: r.FormValue("secret_ref")}
+	wh := service.WebhookInput{TargetURL: r.FormValue("target_url"), Events: events, SecretRef: r.FormValue("secret_ref")}
 	_, err = h.client.CreateWebhook(r.Context(), token, newIdemKey(), org.ID, wh)
 	if err != nil {
 		hooks, _ := h.client.ListWebhooks(r.Context(), token, org.ID)
@@ -696,7 +693,7 @@ func (h *Handler) postToken(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	secret, _, err := h.client.CreateAPIToken(r.Context(), token, newIdemKey(), name, scopes)
+	secret, err := h.client.CreateAPIToken(r.Context(), token, newIdemKey(), name, scopes)
 	if err != nil {
 		tokens, _ := h.client.ListAPITokens(r.Context(), token)
 		render(w, r, settingspages.Tokens(tokens, "", user, org, nil, err.Error()))
@@ -750,7 +747,7 @@ func (h *Handler) postReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dryRun := r.FormValue("dry_run") == "true" || r.FormValue("dry_run") == "on"
-	_, err = h.client.StartReconciliation(r.Context(), token, newIdemKey(), org.ID, dryRun)
+	err = h.client.StartReconciliation(r.Context(), token, newIdemKey(), org.ID, dryRun)
 	if err != nil {
 		redirectWithFlash(w, r, "/admin/reconcile", "error", "Reconciliation failed: "+err.Error())
 		return

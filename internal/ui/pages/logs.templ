@@ -2,25 +2,26 @@ package pages
 
 import (
 	"fmt"
-	"strings"
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ Logs(app ui.Application, project ui.Project, entries []ui.LogEntry, nextCursor string, envID string, user ui.User, org ui.Organization, flash *ui.FlashMessage) {
-	@components.Page("Logs — "+app.Name, user, org, flash, "/projects", logsContent(app, project, entries, nextCursor, envID))
+templ Logs(app store.App, project store.Project, entries []observability.LogEntry, nextCursor string, envID string, user store.User, org store.Organization, flash *ui.FlashMessage) {
+	@components.Page("Logs — "+app.Name, user, org, flash, "/projects", logsContent(app, project, entries, nextCursor, envID), "/static/css/pages/logs.css")
 }
 
-templ logsContent(app ui.Application, project ui.Project, entries []ui.LogEntry, nextCursor string, envID string) {
+templ logsContent(app store.App, project store.Project, entries []observability.LogEntry, nextCursor string, envID string) {
 	<div class="space-y-4 h-full flex flex-col">
-		<div class="flex items-center gap-2 text-sm text-zinc-400">
-			<a href="/projects" class="hover:text-violet-300">Projects</a>
+		<div class="flex items-center gap-2 text-sm text-base-content/65">
+			<a href="/projects" class="hover:text-accent">Projects</a>
 			<span>/</span>
-			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
 			<span>/</span>
-			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-violet-300">{ app.Name }</a>
+			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-accent">{ app.Name }</a>
 			<span>/</span>
-			<span class="text-zinc-100">Logs</span>
+			<span class="text-base-content">Logs</span>
 		</div>
 		<div class="flex items-center gap-3">
 			<h1 class="text-xl font-semibold">Logs</h1>
@@ -35,19 +36,19 @@ templ logsContent(app ui.Application, project ui.Project, entries []ui.LogEntry,
 		<div class="flex-1 card overflow-hidden flex flex-col">
 			<div id="log-entries" class="log-viewer flex-1 overflow-y-auto">
 				if len(entries) == 0 {
-					<div class="text-zinc-500 text-center py-8">No log entries found.</div>
+					<div class="text-base-content/50 text-center py-8">No log entries found.</div>
 				} else {
 					for _, e := range entries {
 						<div class="log-entry flex gap-3">
-							<span class="text-zinc-600 flex-shrink-0">{ e.Timestamp.Format("15:04:05.000") }</span>
+							<span class="text-base-content/35 flex-shrink-0">{ e.Timestamp.Format("15:04:05.000") }</span>
 							<span class={ logSeverityClass(e.Severity) + " flex-shrink-0 w-12 text-right uppercase text-xs font-mono" }>{ shortSeverity(e.Severity) }</span>
-							<span class="text-zinc-300 break-all">{ e.Body }</span>
+							<span class="text-base-content/80 break-all">{ e.Body }</span>
 						</div>
 					}
 				}
 			</div>
 			if nextCursor != "" {
-				<div class="p-3 border-t border-zinc-800">
+				<div class="p-3 border-t border-base-300">
 					<button
 						class="btn btn-secondary btn-sm w-full"
 						hx-get={ fmt.Sprintf("/apps/%s/logs?cursor=%s&env=%s", app.ID, nextCursor, envID) }
@@ -63,36 +64,36 @@ templ logsContent(app ui.Application, project ui.Project, entries []ui.LogEntry,
 	</div>
 }
 
-func logSeverityClass(sev string) string {
+func logSeverityClass(sev observability.Severity) string {
 	switch sev {
-	case "LOG_SEVERITY_ERROR", "LOG_SEVERITY_FATAL":
-		return "text-red-400"
-	case "LOG_SEVERITY_WARN":
-		return "text-amber-400"
-	case "LOG_SEVERITY_INFO":
-		return "text-blue-400"
-	case "LOG_SEVERITY_DEBUG", "LOG_SEVERITY_TRACE":
-		return "text-zinc-500"
+	case observability.SeverityError, observability.SeverityFatal:
+		return "text-error"
+	case observability.SeverityWarn:
+		return "text-warning"
+	case observability.SeverityInfo:
+		return "text-info"
+	case observability.SeverityDebug, observability.SeverityTrace:
+		return "text-base-content/50"
 	default:
-		return "text-zinc-400"
+		return "text-base-content/65"
 	}
 }
 
-func shortSeverity(sev string) string {
+func shortSeverity(sev observability.Severity) string {
 	switch sev {
-	case "LOG_SEVERITY_FATAL":
+	case observability.SeverityFatal:
 		return "FATAL"
-	case "LOG_SEVERITY_ERROR":
+	case observability.SeverityError:
 		return "ERROR"
-	case "LOG_SEVERITY_WARN":
+	case observability.SeverityWarn:
 		return "WARN"
-	case "LOG_SEVERITY_INFO":
+	case observability.SeverityInfo:
 		return "INFO"
-	case "LOG_SEVERITY_DEBUG":
+	case observability.SeverityDebug:
 		return "DEBUG"
-	case "LOG_SEVERITY_TRACE":
+	case observability.SeverityTrace:
 		return "TRACE"
 	default:
-		return strings.TrimPrefix(sev, "LOG_SEVERITY_")
+		return "?"
 	}
 }

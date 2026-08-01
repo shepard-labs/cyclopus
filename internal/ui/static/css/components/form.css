@@ -1,0 +1,49 @@
+/* form.css — form controls and .fieldset (daisyUI v5 name for a label+control stack). */
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+input,
+select,
+textarea {
+  background-color: var(--color-base-300);
+  border: var(--border) solid color-mix(in srgb, var(--color-base-content) 15%, transparent);
+  border-radius: var(--radius-field);
+  padding: 0.5rem 0.75rem;
+  color: var(--color-base-content);
+  font-size: 0.875rem;
+  width: 100%;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
+}
+input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  border-radius: var(--radius-selector);
+  border-color: color-mix(in srgb, var(--color-base-content) 30%, transparent);
+  cursor: pointer;
+}
+
+label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-base-content) 80%, transparent);
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+select option {
+  background-color: var(--color-base-300);
+  color: var(--color-base-content);
+}

@@ -3,76 +3,78 @@ package pages
 import (
 	"fmt"
 	"time"
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/service"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
 templ EnvironmentDetail(
-	env ui.Environment,
-	app ui.Application,
-	project ui.Project,
-	releases []ui.Release,
-	alias *ui.Alias,
-	certs []ui.Certificate,
-	domains []ui.Domain,
-	envVars ui.EnvVarRevision,
-	user ui.User,
-	org ui.Organization,
+	env store.Environment,
+	app store.App,
+	project store.Project,
+	releases []store.Release,
+	alias *store.Alias,
+	certs []service.CertificateStatus,
+	domains []store.Domain,
+	envVars store.EnvironmentVariableRevision,
+	user store.User,
+	org store.Organization,
 	flash *ui.FlashMessage,
 ) {
 	@components.Page("Environment — "+env.Branch, user, org, flash, "/projects", envDetailContent(env, app, project, releases, alias, certs, domains, envVars))
 }
 
 templ envDetailContent(
-	env ui.Environment,
-	app ui.Application,
-	project ui.Project,
-	releases []ui.Release,
-	alias *ui.Alias,
-	certs []ui.Certificate,
-	domains []ui.Domain,
-	envVars ui.EnvVarRevision,
+	env store.Environment,
+	app store.App,
+	project store.Project,
+	releases []store.Release,
+	alias *store.Alias,
+	certs []service.CertificateStatus,
+	domains []store.Domain,
+	envVars store.EnvironmentVariableRevision,
 ) {
 	<div class="space-y-6">
-		<div class="flex items-center gap-2 text-sm text-zinc-400">
-			<a href="/projects" class="hover:text-violet-300">Projects</a>
+		<div class="flex items-center gap-2 text-sm text-base-content/65">
+			<a href="/projects" class="hover:text-accent">Projects</a>
 			<span>/</span>
-			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
 			<span>/</span>
-			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-violet-300">{ app.Name }</a>
+			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-accent">{ app.Name }</a>
 			<span>/</span>
-			<span class="text-zinc-100">{ env.Branch }</span>
+			<span class="text-base-content">{ env.Branch }</span>
 		</div>
 		<div class="flex items-center gap-3">
-			<h1 class="text-xl font-semibold text-zinc-100 font-mono">{ env.Branch }</h1>
+			<h1 class="text-xl font-semibold text-base-content font-mono">{ env.Branch }</h1>
 			@components.EnvLifecycleBadge(env.LifecycleStatus)
 			if env.TornDownAt != nil {
-				<span class="text-xs text-zinc-500">torn down { relTime(*env.TornDownAt) }</span>
+				<span class="text-xs text-base-content/50">torn down { relTime(*env.TornDownAt) }</span>
 			}
 		</div>
 		if alias != nil && alias.Hostname != "" {
 			<div class="card flex items-center justify-between">
 				<div>
-					<span class="text-xs text-zinc-500 block mb-1">Live URL</span>
-					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="font-mono text-violet-400 hover:text-violet-300">
+					<span class="text-xs text-base-content/50 block mb-1">Live URL</span>
+					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="font-mono text-primary hover:text-accent">
 						https://{ alias.Hostname } ↗
 					</a>
 				</div>
 			</div>
-		} else if env.PlannedHostname != "" {
+		} else if env.PlannedHostname != nil {
 			<div class="card">
-				<span class="text-xs text-zinc-500 block mb-1">Planned hostname (cert pending)</span>
-				<span class="font-mono text-zinc-300">{ env.PlannedHostname }</span>
+				<span class="text-xs text-base-content/50 block mb-1">Planned hostname (cert pending)</span>
+				<span class="font-mono text-base-content/80">{ strptr(env.PlannedHostname) }</span>
 			</div>
 		}
 		<div class="card">
-			<h2 class="text-sm font-semibold text-zinc-300 mb-4">Releases</h2>
+			<h2 class="text-sm font-semibold text-base-content/80 mb-4">Releases</h2>
 			if len(releases) == 0 {
-				<p class="text-sm text-zinc-400">No releases yet.</p>
+				<p class="text-sm text-base-content/65">No releases yet.</p>
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+						<tr class="text-xs text-base-content/50 border-b border-base-300">
 							<th class="text-left py-2 pr-4">ID</th>
 							<th class="text-left py-2 pr-4">Status</th>
 							<th class="text-left py-2 pr-4">Kind</th>
@@ -82,23 +84,23 @@ templ envDetailContent(
 							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-zinc-800">
+					<tbody class="divide-y divide-base-300">
 						for _, r := range releases {
-							<tr class="text-zinc-300">
-								<td class="py-2 pr-4 font-mono text-xs text-zinc-400">{ shortID(r.ID) }</td>
+							<tr class="text-base-content/80">
+								<td class="py-2 pr-4 font-mono text-xs text-base-content/65">{ shortID(r.ID) }</td>
 								<td class="py-2 pr-4">@components.ReleaseStatusBadge(r.Status)</td>
-								<td class="py-2 pr-4 text-xs text-zinc-500">{ releaseKindLabel(r.Kind) }</td>
-								<td class="py-2 pr-4 font-mono text-xs text-zinc-400 max-w-xs truncate">{ shortImageRef(r.ImageRef) }</td>
-								<td class="py-2 pr-4 font-mono text-xs text-zinc-400">
-									if r.GitCommitSHA != "" {
-										{ r.GitCommitSHA[:min(7, len(r.GitCommitSHA))] }
+								<td class="py-2 pr-4 text-xs text-base-content/50">{ releaseKindLabel(r.Kind) }</td>
+								<td class="py-2 pr-4 font-mono text-xs text-base-content/65 max-w-xs truncate">{ shortImageRef(r.ImageRef) }</td>
+								<td class="py-2 pr-4 font-mono text-xs text-base-content/65">
+									if r.GitCommitSHA != nil {
+										{ (*r.GitCommitSHA)[:min(7, len(*r.GitCommitSHA))] }
 									} else {
-										<span class="text-zinc-600">—</span>
+										<span class="text-base-content/35">—</span>
 									}
 								</td>
-								<td class="py-2 pr-4 text-xs text-zinc-500">{ relTime(r.CreatedAt) }</td>
+								<td class="py-2 pr-4 text-xs text-base-content/50">{ relTime(r.CreatedAt) }</td>
 								<td class="py-2 text-right">
-									if r.Status != "RELEASE_STATUS_LIVE" && r.Status != "RELEASE_STATUS_DEPLOYING" && r.Status != "RELEASE_STATUS_PENDING" {
+									if r.Status != "live" && r.Status != "deploying" && r.Status != "pending" {
 										<form method="POST" action={ templ.SafeURL("/environments/" + env.ID + "/rollback") }>
 											<input type="hidden" name="release_id" value={ r.ID }/>
 											<button
@@ -119,50 +121,50 @@ templ envDetailContent(
 		</div>
 		<div class="grid grid-cols-1 gap-4">
 			<div class="card">
-				<h2 class="text-sm font-semibold text-zinc-300 mb-3">Environment variables</h2>
+				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Environment variables</h2>
 				if len(envVars.Variables) == 0 {
-					<p class="text-sm text-zinc-400">No environment variables set.</p>
+					<p class="text-sm text-base-content/65">No environment variables set.</p>
 				} else {
-					<div class="text-xs text-zinc-500 mb-2">Revision { fmt.Sprintf("%d", envVars.Revision) } · { len(envVars.Variables) } variables</div>
+					<div class="text-xs text-base-content/50 mb-2">Revision { fmt.Sprintf("%d", envVars.Revision) } · { len(envVars.Variables) } variables</div>
 					<div class="space-y-1">
 						for _, v := range envVars.Variables {
-							<div class="flex items-center justify-between py-1 border-b border-zinc-800 last:border-0">
-								<span class="font-mono text-sm text-zinc-300">{ v.Key }</span>
-								<span class="text-xs text-zinc-600">••••••••</span>
+							<div class="flex items-center justify-between py-1 border-b border-base-300 last:border-0">
+								<span class="font-mono text-sm text-base-content/80">{ v.Key }</span>
+								<span class="text-xs text-base-content/35">••••••••</span>
 							</div>
 						}
 					</div>
 				}
 			</div>
 			<div class="card">
-				<h2 class="text-sm font-semibold text-zinc-300 mb-3">Certificates</h2>
+				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Certificates</h2>
 				if len(certs) == 0 {
-					<p class="text-sm text-zinc-400">No certificates found.</p>
+					<p class="text-sm text-base-content/65">No certificates found.</p>
 				} else {
 					<table class="table-auto w-full text-sm">
 						<thead>
-							<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<tr class="text-xs text-base-content/50 border-b border-base-300">
 								<th class="text-left py-2">Hostname</th>
 								<th class="text-left py-2">Status</th>
 								<th class="text-left py-2">Expires</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-zinc-800">
+						<tbody class="divide-y divide-base-300">
 							for _, cert := range certs {
-								<tr class="text-zinc-300">
+								<tr class="text-base-content/80">
 									<td class="py-2 font-mono text-xs">{ cert.Hostname }</td>
 									<td class="py-2">
 										if cert.Ready {
-											<span class="badge badge-green">Ready</span>
+											<span class="badge badge-soft badge-success">Ready</span>
 										} else {
-											<span class="badge badge-yellow animate-pulse">{ cert.Reason }</span>
+											<span class="badge badge-soft badge-warning animate-pulse">{ cert.Reason }</span>
 										}
 									</td>
-									<td class="py-2 text-xs text-zinc-400">
+									<td class="py-2 text-xs text-base-content/65">
 										if cert.NotAfter != nil {
 											{ cert.NotAfter.Format("2006-01-02") }
 										} else {
-											<span class="text-zinc-600">—</span>
+											<span class="text-base-content/35">—</span>
 										}
 									</td>
 								</tr>
@@ -172,28 +174,28 @@ templ envDetailContent(
 				}
 			</div>
 			<div class="card">
-				<h2 class="text-sm font-semibold text-zinc-300 mb-3">Custom domains</h2>
+				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Custom domains</h2>
 				if len(domains) == 0 {
-					<p class="text-sm text-zinc-400 mb-4">No custom domains configured.</p>
+					<p class="text-sm text-base-content/65 mb-4">No custom domains configured.</p>
 				} else {
 					<table class="table-auto w-full text-sm mb-4">
 						<thead>
-							<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<tr class="text-xs text-base-content/50 border-b border-base-300">
 								<th class="text-left py-2">Hostname</th>
 								<th class="text-left py-2">Method</th>
 								<th class="text-left py-2">Verified</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-zinc-800">
+						<tbody class="divide-y divide-base-300">
 							for _, d := range domains {
-								<tr class="text-zinc-300">
+								<tr class="text-base-content/80">
 									<td class="py-2 font-mono text-xs">{ d.Hostname }</td>
-									<td class="py-2 text-xs text-zinc-400">{ d.VerificationMethod }</td>
+									<td class="py-2 text-xs text-base-content/65">{ d.VerificationMethod }</td>
 									<td class="py-2">
 										if d.VerifiedAt != nil {
-											<span class="badge badge-green">Verified</span>
+											<span class="badge badge-soft badge-success">Verified</span>
 										} else {
-											<span class="badge badge-yellow">Pending</span>
+											<span class="badge badge-soft badge-warning">Pending</span>
 										}
 									</td>
 								</tr>
@@ -222,13 +224,13 @@ func relTime(t time.Time) string {
 
 func releaseKindLabel(kind string) string {
 	switch kind {
-	case "RELEASE_KIND_DEPLOY":
+	case "deploy":
 		return "deploy"
-	case "RELEASE_KIND_ROLLBACK":
+	case "rollback":
 		return "rollback"
-	case "RELEASE_KIND_ENV_CHANGE":
+	case "env_change":
 		return "env change"
-	case "RELEASE_KIND_RECONCILE":
+	case "reconcile":
 		return "reconcile"
 	default:
 		return kind

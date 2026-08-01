@@ -131,7 +131,7 @@ flowchart TB
 | Pod autoscaling | Kubernetes HPA | Default for production environments; floor >=1, no scale-to-zero. Not attached to preview environments (§4.3) | Built into k3s |
 | Scale-to-zero | KEDA core (cron) + KEDA HTTP Add-on (beta) | **Opt-in per production app** via `scaling_mode` — apps on plain `hpa` never touch this | Once, via Helm |
 | Control-plane API | Go + client-go + grpc-go + grpc-gateway | Typed gRPC internally, REST/JSON externally, from one .proto | Cyclopus's own binary, packaged as a Helm chart |
-| Control-plane UI | templ + htmx + Tailwind (standalone CLI), served via chi | Server-rendered admin dashboard, same Go binary | Same binary |
+| Control-plane UI | templ + htmx + hand-rolled daisyUI-token CSS (no build step), served via chi | Server-rendered admin dashboard, same Go binary | Same binary |
 | Control-plane state | Postgres 18 | Resource records, releases, audit log | Once, via Helm (or external) |
 | Config | Viper | Env vars / files / flags, unified | Compiled into the binary |
 | Postgres driver | jackc/pgx/v5 | | Compiled into the binary |
@@ -185,7 +185,7 @@ Postgres 18 and the stateless API design leave the door open to multiple API rep
 
 ### 3.1 Control-plane language: Go
 
-Reference implementation ecosystem for Kubernetes tooling (`client-go`); every dependency in this spec (Traefik, cert-manager, Kyverno, KEDA) is Go. Paired with chi + templ + htmx + Tailwind for the UI and grpc-go + grpc-gateway for the API, the whole control plane is one dependency-free binary.
+Reference implementation ecosystem for Kubernetes tooling (`client-go`); every dependency in this spec (Traefik, cert-manager, Kyverno, KEDA) is Go. Paired with chi + templ + htmx + modular hand-rolled CSS (daisyUI token naming, no Node toolchain) for the UI and grpc-go + grpc-gateway for the API, the whole control plane is one dependency-free binary.
 
 **Rejected:** Iris, despite being a technically functional Go framework — a long-running, well-documented pattern of the maintainer mishandling community-reported issues (deleting critical bug reports, disputing its own linked benchmark results, banning users who raised problems) makes it a poor foundation for infrastructure other people will depend on, independent of its code quality.
 
@@ -951,7 +951,7 @@ Helm chart upgrades that touch platform dependencies (Traefik, cert-manager, Kyv
 | Config | Viper |
 | Postgres driver | jackc/pgx/v5 |
 | Schema migrations | golang-migrate, embedded via `embed.FS`, applied at boot under an advisory lock (§9.3) |
-| Control-plane UI | templ + htmx + Tailwind (standalone CLI) |
+| Control-plane UI | templ + htmx + hand-rolled daisyUI-token CSS (no build step) |
 | Control-plane DB | Postgres 18 |
 | Caching/queue | None in v1 |
 | Ingress / TLS | Traefik (managed install) + cert-manager (HTTP-01 only, no wildcards) |

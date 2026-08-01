@@ -9,13 +9,13 @@ import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
 import (
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
 // EnvStatusFragment is the HTMX polling fragment for the production deploy card.
 // When no deploy is in progress it returns a static element that stops polling.
-func EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release) templ.Component {
+func EnvStatusFragment(env store.Environment, alias *store.Alias, release *store.Release) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -36,8 +36,8 @@ func EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release)
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		if env.InProgressReleaseID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"prod-status\" class=\"flex items-center gap-2 p-3 bg-blue-500/20 rounded text-sm text-blue-400 animate-pulse\" hx-get=\"")
+		if env.InProgressReleaseID != nil {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"prod-status\" class=\"alert alert-info animate-pulse\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -60,7 +60,7 @@ func EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release)
 				return templ_7745c5c3_Err
 			}
 			if alias != nil && alias.Hostname != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"flex items-center justify-between\"><span class=\"text-xs text-zinc-500\">Hostname</span> <a href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"flex items-center justify-between\"><span class=\"text-xs text-base-content/50\">Hostname</span> <a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -73,14 +73,14 @@ func EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" target=\"_blank\" rel=\"noopener\" class=\"text-sm font-mono text-violet-400 hover:text-violet-300\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" target=\"_blank\" rel=\"noopener\" class=\"text-sm font-mono text-primary hover:text-accent\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(alias.Hostname)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/env_status.templ`, Line: 28, Col: 171}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/env_status.templ`, Line: 28, Col: 164}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -92,7 +92,7 @@ func EnvStatusFragment(env ui.Environment, alias *ui.Alias, release *ui.Release)
 				}
 			}
 			if release != nil {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"flex items-center justify-between\"><span class=\"text-xs text-zinc-500\">Current release</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"flex items-center justify-between\"><span class=\"text-xs text-base-content/50\">Current release</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

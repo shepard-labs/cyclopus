@@ -8,9 +8,9 @@ package components
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/cyclopus-dev/cyclopus/internal/ui"
+import "github.com/shepard-labs/cyclopus/internal/store"
 
-func Sidebar(org ui.Organization, user ui.User, currentPath string) templ.Component {
+func Sidebar(org store.Organization, user store.User, currentPath string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -31,14 +31,14 @@ func Sidebar(org ui.Organization, user ui.User, currentPath string) templ.Compon
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<nav class=\"sidebar\"><div class=\"p-4 border-b border-zinc-800\"><div class=\"flex items-center gap-2 mb-1\"><svg class=\"w-6 h-6 text-violet-400\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle> <line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"12\"></line> <line x1=\"12\" y1=\"16\" x2=\"12.01\" y2=\"16\"></line></svg> <span class=\"font-semibold text-zinc-100\">Cyclopus</span></div><div class=\"text-xs text-zinc-500 truncate pl-8\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<nav class=\"sidebar\"><div class=\"p-4 border-b border-base-300\"><div class=\"flex items-center gap-2 mb-1\"><svg class=\"w-6 h-6 text-primary\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle> <line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"12\"></line> <line x1=\"12\" y1=\"16\" x2=\"12.01\" y2=\"16\"></line></svg> <span class=\"font-semibold text-base-content\">Cyclopus</span></div><div class=\"text-xs text-base-content/50 truncate pl-8\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(org.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/nav.templ`, Line: 16, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/nav.templ`, Line: 16, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -74,7 +74,7 @@ func Sidebar(org ui.Organization, user ui.User, currentPath string) templ.Compon
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "Projects</a><div class=\"pt-4 pb-1 px-3\"><span class=\"text-xs font-medium text-zinc-600 uppercase tracking-wide\">Settings</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "Projects</a><div class=\"pt-4 pb-1 px-3\"><span class=\"text-xs font-medium text-base-content/35 uppercase tracking-wide\">Settings</span></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -224,7 +224,7 @@ func Sidebar(org ui.Organization, user ui.User, currentPath string) templ.Compon
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "Audit Log</a><div class=\"pt-4 pb-1 px-3\"><span class=\"text-xs font-medium text-zinc-600 uppercase tracking-wide\">Admin</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "Audit Log</a><div class=\"pt-4 pb-1 px-3\"><span class=\"text-xs font-medium text-base-content/35 uppercase tracking-wide\">Admin</span></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -254,7 +254,7 @@ func Sidebar(org ui.Organization, user ui.User, currentPath string) templ.Compon
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "Reconcile</a></div><div class=\"p-2 border-t border-zinc-800\"><div class=\"sidebar-item text-zinc-500 cursor-default\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "Reconcile</a></div><div class=\"p-2 border-t border-base-300\"><div class=\"sidebar-item text-base-content/50 cursor-default\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

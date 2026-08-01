@@ -1,0 +1,23 @@
+/* status.css — .status dot indicator (daisyUI v5 class API). */
+.status {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.status-success {
+  background-color: var(--color-success);
+}
+.status-warning {
+  background-color: var(--color-warning);
+}
+.status-error {
+  background-color: var(--color-error);
+}
+.status-info {
+  background-color: var(--color-info);
+}
+.status-neutral {
+  background-color: var(--color-neutral);
+}

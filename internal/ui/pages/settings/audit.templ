@@ -1,24 +1,25 @@
 package settings
 
 import (
-	"github.com/cyclopus-dev/cyclopus/internal/ui"
-	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ AuditLog(events []ui.AuditEvent, nextPageToken string, user ui.User, org ui.Organization, flash *ui.FlashMessage) {
+templ AuditLog(events []store.AuditEventRecord, nextPageToken string, user store.User, org store.Organization, flash *ui.FlashMessage) {
 	@components.Page("Audit Log", user, org, flash, "/settings/audit", auditLogContent(events, nextPageToken))
 }
 
-templ auditLogContent(events []ui.AuditEvent, nextPageToken string) {
+templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 	<div class="space-y-6 max-w-5xl">
 		<h1 class="text-xl font-semibold">Audit Log</h1>
 		<div class="card">
 			if len(events) == 0 {
-				<p class="text-sm text-zinc-400 text-center py-8">No audit events.</p>
+				<p class="text-sm text-base-content/65 text-center py-8">No audit events.</p>
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+						<tr class="text-xs text-base-content/50 border-b border-base-300">
 							<th class="text-left py-2 pr-4">Time</th>
 							<th class="text-left py-2 pr-4">Actor</th>
 							<th class="text-left py-2 pr-4">Action</th>
@@ -26,26 +27,26 @@ templ auditLogContent(events []ui.AuditEvent, nextPageToken string) {
 							<th class="text-left py-2">Target ID</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-zinc-800">
+					<tbody class="divide-y divide-base-300">
 						for _, e := range events {
-							<tr class="text-zinc-300">
-								<td class="py-2 pr-4 text-xs text-zinc-500 whitespace-nowrap">{ e.CreatedAt.Format("2006-01-02 15:04:05") }</td>
-								<td class="py-2 pr-4 text-xs font-mono text-zinc-400">
-									if e.ActorUserID != "" {
-										{ e.ActorUserID[:8] }
+							<tr class="text-base-content/80">
+								<td class="py-2 pr-4 text-xs text-base-content/50 whitespace-nowrap">{ e.CreatedAt.Format("2006-01-02 15:04:05") }</td>
+								<td class="py-2 pr-4 text-xs font-mono text-base-content/65">
+									if e.ActorUserID != nil {
+										{ (*e.ActorUserID)[:8] }
 									} else {
-										<span class="text-zinc-600">system</span>
+										<span class="text-base-content/35">system</span>
 									}
 								</td>
 								<td class="py-2 pr-4 text-xs font-mono">{ e.Action }</td>
-								<td class="py-2 pr-4 text-xs text-zinc-400">{ e.TargetType }</td>
-								<td class="py-2 text-xs font-mono text-zinc-400">{ e.TargetID[:8] }</td>
+								<td class="py-2 pr-4 text-xs text-base-content/65">{ e.TargetType }</td>
+								<td class="py-2 text-xs font-mono text-base-content/65">{ e.TargetID[:8] }</td>
 							</tr>
 						}
 					</tbody>
 				</table>
 				if nextPageToken != "" {
-					<div class="p-3 border-t border-zinc-800 text-center">
+					<div class="p-3 border-t border-base-300 text-center">
 						<a href={ templ.SafeURL("/settings/audit?page_token=" + nextPageToken) } class="btn btn-secondary btn-sm">Load more</a>
 					</div>
 				}
