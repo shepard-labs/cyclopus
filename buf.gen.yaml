@@ -13,3 +13,9 @@ plugins:
     out: gen/go
     opt:
       - paths=source_relative
+  # OpenAPI for the docs site: same gateway annotations → Swagger 2.0 JSON,
+  # then cmd/gen-openapi converts to OpenAPI 3 (internal/apidocs/openapi.json).
+  - remote: buf.build/grpc-ecosystem/openapiv2:v2.29.0
+    out: gen/openapi
+    opt:
+      - allow_repeated_fields_in_body=true

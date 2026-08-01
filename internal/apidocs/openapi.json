@@ -1,0 +1,5225 @@
+{
+  "components": {
+    "schemas": {
+      "DomainServiceVerifyDomainBody": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EnvironmentServiceCreateProductionEnvironmentBody": {
+        "description": "CreateProductionEnvironmentRequest provisions a production environment for\nan application. hostname is optional: when empty the platform auto-generates\nit from the app's hostname_label and the configured preview_hostname_suffix\n(§7.5). When provided it is used as-is, which is how operators attach their\nown domain after initial setup.",
+        "properties": {
+          "branch": {
+            "title": "optional; defaults to \"main\" when empty",
+            "type": "string"
+          },
+          "hostname": {
+            "title": "optional; auto-generated when empty",
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EnvironmentServiceTeardownEnvironmentBody": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReleaseServiceDeployBody": {
+        "properties": {
+          "gitCommitSha": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "imageRef": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReleaseServiceRollbackBody": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "releaseId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReleaseServiceSetEnvironmentVariablesBody": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "variables": {
+            "items": {
+              "$ref": "#/components/schemas/v1EnvironmentVariable"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "protobufAny": {
+        "additionalProperties": {},
+        "properties": {
+          "@type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "protobufNullValue": {
+        "default": "NULL_VALUE",
+        "description": "`NullValue` is a singleton enumeration to represent the null value for the\n`Value` type union.\n\nThe JSON representation for `NullValue` is JSON `null`.\n\n - NULL_VALUE: Null value.",
+        "enum": [
+          "NULL_VALUE"
+        ],
+        "type": "string"
+      },
+      "rpcStatus": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "details": {
+            "items": {
+              "$ref": "#/components/schemas/protobufAny"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1Alias": {
+        "description": "Alias is one row of the aliases table: a bookkeeping record of which release\ncurrently serves at a hostname for an environment (§3.7). There is at most\none alias per environment (UNIQUE(environment_id)).",
+        "properties": {
+          "environmentId": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "releaseId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ApiToken": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "userId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1Application": {
+        "properties": {
+          "ciWorkflowId": {
+            "type": "string"
+          },
+          "containerPort": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "cpuLimitMillicores": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "cpuRequestMillicores": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deployTimeoutSeconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "healthCheckPath": {
+            "type": "string"
+          },
+          "hostnameLabel": {
+            "type": "string"
+          },
+          "hpaTargetCpuPercent": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageRepository": {
+            "type": "string"
+          },
+          "kedaCronSchedules": {
+            "description": "Cron windows applied when scaling_mode is KEDA_CRON; must be non-empty\nfor that mode and is ignored otherwise.",
+            "items": {
+              "$ref": "#/components/schemas/v1KedaCronSchedule"
+            },
+            "type": "array"
+          },
+          "kedaHttpTargetPendingRequests": {
+            "description": "HTTP add-on concurrency target applied when scaling_mode is KEDA_HTTP.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "maxPreviewEnvironments": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "maxReplicas": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "memoryLimitMib": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "memoryRequestMib": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "minReplicas": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "previewIdleTtlHours": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "previewsEnabled": {
+            "type": "boolean"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "registryId": {
+            "type": "string"
+          },
+          "releaseRetentionCount": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "runtimeClass": {
+            "$ref": "#/components/schemas/v1RuntimeClass"
+          },
+          "scalingMode": {
+            "$ref": "#/components/schemas/v1ScalingMode"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1AuditEvent": {
+        "description": "AuditEvent is one row of the audit_events table: an immutable record of a\ncontrol-plane mutation (§9). before/after carry the prior and resulting\nresource state as JSON objects. These are org-scoped; a caller can only read\ntheir own org's audit trail. The stored `after` for secret-bearing resources\n(e.g. registries) contains the secret REFERENCE, never a plaintext secret.",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actorUserId": {
+            "description": "actor_user_id is the user who performed the action; empty for\nsystem-originated events.",
+            "type": "string"
+          },
+          "after": {
+            "type": "object"
+          },
+          "before": {
+            "description": "before/after are the JSON object states of the target resource. They are\nexposed as google.protobuf.Struct because the stored jsonb is always a JSON\nobject (or null), mapping cleanly to Struct; this preserves structure for\nclients rather than an opaque string.",
+            "type": "object"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "targetType": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1BootstrapRequest": {
+        "properties": {
+          "bootstrapToken": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1BootstrapResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/v1Session"
+          }
+        },
+        "type": "object"
+      },
+      "v1CertificateStatus": {
+        "description": "CertificateStatus is the live status of a cert-manager Certificate serving an\nenvironment's hostname, read directly from the cluster (read-only, §6). It is\nnot stored in Postgres; it is projected from the Certificate CRD's spec and\nstatus. ready reflects the Ready condition; reason carries the condition's\nmessage; not_after is the certificate expiry when known.",
+        "properties": {
+          "dnsNames": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "notAfter": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "secretName": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateApiTokenRequest": {
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateApiTokenResponse": {
+        "properties": {
+          "apiToken": {
+            "$ref": "#/components/schemas/v1ApiToken"
+          },
+          "result": {
+            "$ref": "#/components/schemas/v1CreateApiTokenResult"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateApiTokenResult": {
+        "default": "CREATE_API_TOKEN_RESULT_UNSPECIFIED",
+        "enum": [
+          "CREATE_API_TOKEN_RESULT_UNSPECIFIED",
+          "CREATE_API_TOKEN_RESULT_CREATED",
+          "CREATE_API_TOKEN_RESULT_ALREADY_CREATED_SECRET_NOT_REPLAYABLE"
+        ],
+        "type": "string"
+      },
+      "v1CreateApplicationResponse": {
+        "properties": {
+          "application": {
+            "$ref": "#/components/schemas/v1Application"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateDomainResponse": {
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/v1Domain"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateGitConnectionResponse": {
+        "properties": {
+          "gitConnection": {
+            "$ref": "#/components/schemas/v1GitConnection"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateProductionEnvironmentResponse": {
+        "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/v1Environment"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateProjectResponse": {
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/v1Project"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateRegistryResponse": {
+        "properties": {
+          "registry": {
+            "$ref": "#/components/schemas/v1Registry"
+          }
+        },
+        "type": "object"
+      },
+      "v1CreateWebhookResponse": {
+        "properties": {
+          "webhook": {
+            "$ref": "#/components/schemas/v1WebhookEndpoint"
+          }
+        },
+        "type": "object"
+      },
+      "v1DeleteApplicationResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1DeleteDomainResponse": {
+        "type": "object"
+      },
+      "v1DeleteGitConnectionResponse": {
+        "type": "object"
+      },
+      "v1DeleteOrganizationResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1DeleteProjectResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1DeleteRegistryResponse": {
+        "type": "object"
+      },
+      "v1DeleteWebhookResponse": {
+        "type": "object"
+      },
+      "v1DeployResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1Domain": {
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instructions": {
+            "$ref": "#/components/schemas/v1DomainDnsInstructions"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "verificationMethod": {
+            "$ref": "#/components/schemas/v1DomainVerificationMethod"
+          },
+          "verificationToken": {
+            "description": "verification_token is only populated for dns_txt domains; it is the value\nthe customer must publish in the challenge TXT record. It is null/empty for\ncname domains.",
+            "type": "string"
+          },
+          "verifiedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1DomainDnsInstructions": {
+        "description": "DomainDnsInstructions is the operator-facing guidance the UI/CLI renders so\nthe customer can create the records Cyclopus checks (§7.5).",
+        "properties": {
+          "apexARecordTarget": {
+            "description": "apex_a_record_target is set for dns_txt domains only: after verification the\ncustomer points an A record at this ingress IP/target. Cyclopus does not\nverify this record in this phase; it is operational guidance.",
+            "type": "string"
+          },
+          "recordName": {
+            "description": "record_name is the fully-qualified name the customer creates the record on\n(e.g. \"app.customer.com\" for CNAME, \"_cyclopus-challenge.customer.com\" for\nTXT).",
+            "type": "string"
+          },
+          "recordType": {
+            "description": "record_type is \"CNAME\" or \"TXT\".",
+            "type": "string"
+          },
+          "recordValue": {
+            "description": "record_value is the expected value: the ingress target for CNAME, or the\nchallenge token for TXT.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1DomainVerificationMethod": {
+        "default": "DOMAIN_VERIFICATION_METHOD_UNSPECIFIED",
+        "description": "DomainVerificationMethod selects how a custom domain proves control (§7.5).\nCNAME is used for subdomains (the CNAME both proves control and routes\ntraffic); DNS_TXT is used for apex/root domains via a challenge TXT record.",
+        "enum": [
+          "DOMAIN_VERIFICATION_METHOD_UNSPECIFIED",
+          "DOMAIN_VERIFICATION_METHOD_DNS_TXT",
+          "DOMAIN_VERIFICATION_METHOD_CNAME"
+        ],
+        "type": "string"
+      },
+      "v1Environment": {
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currentEnvVarRevisionId": {
+            "type": "string"
+          },
+          "currentReleaseId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inProgressReleaseId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/v1EnvironmentKind"
+          },
+          "lifecycleErrorCode": {
+            "type": "string"
+          },
+          "lifecycleErrorMessage": {
+            "type": "string"
+          },
+          "lifecycleReason": {
+            "type": "string"
+          },
+          "lifecycleStatus": {
+            "$ref": "#/components/schemas/v1EnvironmentLifecycleStatus"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "plannedHostname": {
+            "type": "string"
+          },
+          "previewSlug": {
+            "type": "string"
+          },
+          "teardownRequestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tornDownAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1EnvironmentKind": {
+        "default": "ENVIRONMENT_KIND_UNSPECIFIED",
+        "enum": [
+          "ENVIRONMENT_KIND_UNSPECIFIED",
+          "ENVIRONMENT_KIND_PRODUCTION",
+          "ENVIRONMENT_KIND_PREVIEW"
+        ],
+        "type": "string"
+      },
+      "v1EnvironmentLifecycleStatus": {
+        "default": "ENVIRONMENT_LIFECYCLE_STATUS_UNSPECIFIED",
+        "enum": [
+          "ENVIRONMENT_LIFECYCLE_STATUS_UNSPECIFIED",
+          "ENVIRONMENT_LIFECYCLE_STATUS_RESERVED",
+          "ENVIRONMENT_LIFECYCLE_STATUS_POLICY_BLOCKED",
+          "ENVIRONMENT_LIFECYCLE_STATUS_READY",
+          "ENVIRONMENT_LIFECYCLE_STATUS_TEARDOWN_REQUESTED",
+          "ENVIRONMENT_LIFECYCLE_STATUS_TORN_DOWN",
+          "ENVIRONMENT_LIFECYCLE_STATUS_FAILED"
+        ],
+        "type": "string"
+      },
+      "v1EnvironmentVariable": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1EnvironmentVariableRevision": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdByUserId": {
+            "type": "string"
+          },
+          "environmentId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "string"
+          },
+          "variables": {
+            "items": {
+              "$ref": "#/components/schemas/v1EnvironmentVariable"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetAliasResponse": {
+        "properties": {
+          "alias": {
+            "$ref": "#/components/schemas/v1Alias"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetApplicationResponse": {
+        "properties": {
+          "application": {
+            "$ref": "#/components/schemas/v1Application"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetApplicationTraceResponse": {
+        "properties": {
+          "trace": {
+            "$ref": "#/components/schemas/v1TraceSummary"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetCurrentUserResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/v1User"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetDomainResponse": {
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/v1Domain"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetEnvironmentResponse": {
+        "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/v1Environment"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetEnvironmentVariablesResponse": {
+        "properties": {
+          "revision": {
+            "$ref": "#/components/schemas/v1EnvironmentVariableRevision"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetGitConnectionResponse": {
+        "properties": {
+          "gitConnection": {
+            "$ref": "#/components/schemas/v1GitConnection"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetOperatorMetricsResponse": {
+        "properties": {
+          "metrics": {
+            "description": "Operator-level only. Any authenticated org member may read these; they are\ndeliberately install-scoped and expose no tenant data.",
+            "items": {
+              "$ref": "#/components/schemas/v1OperatorMetric"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetOrganizationResponse": {
+        "properties": {
+          "organization": {
+            "$ref": "#/components/schemas/v1Organization"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetProjectResponse": {
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/v1Project"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetReconciliationResponse": {
+        "properties": {
+          "reconciliation": {
+            "$ref": "#/components/schemas/v1ReconciliationRun"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetRegistryResponse": {
+        "properties": {
+          "registry": {
+            "$ref": "#/components/schemas/v1Registry"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetReleaseResponse": {
+        "properties": {
+          "release": {
+            "$ref": "#/components/schemas/v1Release"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetWebhookResponse": {
+        "properties": {
+          "webhook": {
+            "$ref": "#/components/schemas/v1WebhookEndpoint"
+          }
+        },
+        "type": "object"
+      },
+      "v1GitConnection": {
+        "description": "GitConnection is one row of the git_connections table: a GitHub App\ninstallation bound to a single repository. webhook_secret_ref is a\nk8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e REFERENCE to the webhook signing\nsecret; the raw secret is never accepted or stored in Postgres.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installationId": {
+            "format": "int64",
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "provider is \"github\" (the only supported value in v1).",
+            "type": "string"
+          },
+          "repoFullName": {
+            "type": "string"
+          },
+          "webhookSecretRef": {
+            "description": "webhook_secret_ref is a k8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e reference to\nthe webhook signing secret, NOT a plaintext secret.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1KedaCronSchedule": {
+        "properties": {
+          "desiredReplicas": {
+            "description": "Replicas to hold during the window.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "end": {
+            "description": "5-field cron expression marking the end of the scale-out window.",
+            "type": "string"
+          },
+          "start": {
+            "description": "5-field cron expression marking the start of the scale-out window.",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA timezone name for the cron window (for example \"Europe/Berlin\").",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListAliasesResponse": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "$ref": "#/components/schemas/v1Alias"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListApiTokensResponse": {
+        "properties": {
+          "apiTokens": {
+            "items": {
+              "$ref": "#/components/schemas/v1ApiToken"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListApplicationTracesResponse": {
+        "properties": {
+          "nextCursor": {
+            "type": "string"
+          },
+          "traces": {
+            "items": {
+              "$ref": "#/components/schemas/v1TraceSummary"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListApplicationsResponse": {
+        "properties": {
+          "applications": {
+            "items": {
+              "$ref": "#/components/schemas/v1Application"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListAuditEventsResponse": {
+        "properties": {
+          "auditEvents": {
+            "items": {
+              "$ref": "#/components/schemas/v1AuditEvent"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListCertificatesResponse": {
+        "properties": {
+          "certificates": {
+            "items": {
+              "$ref": "#/components/schemas/v1CertificateStatus"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListDomainsResponse": {
+        "properties": {
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/v1Domain"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListEnvironmentsResponse": {
+        "properties": {
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/v1Environment"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListGitConnectionsResponse": {
+        "properties": {
+          "gitConnections": {
+            "items": {
+              "$ref": "#/components/schemas/v1GitConnection"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListProjectsResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/v1Project"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListReconciliationEvidenceResponse": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationEvidence"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListReconciliationsResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "reconciliations": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationRun"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListRegistriesResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "registries": {
+            "items": {
+              "$ref": "#/components/schemas/v1Registry"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListReleasesResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/v1Release"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListWebhooksResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "webhooks": {
+            "items": {
+              "$ref": "#/components/schemas/v1WebhookEndpoint"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1LogEntry": {
+        "description": "LogEntry is a single tenant-scoped log record returned from OpenObserve. The\ntenant fields that determine ownership are stamped by the OpenTelemetry\nCollector at ingest (spec 8.1), never claimed by the app.",
+        "properties": {
+          "attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "body": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/v1LogSeverity"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1LogSeverity": {
+        "default": "LOG_SEVERITY_UNSPECIFIED",
+        "description": "LogSeverity is the coarse severity band a log query may filter on. Cyclopus\nmaps it to an OpenObserve severity predicate that is ANDed onto the mandatory\ntenant filter; it can never widen scope.",
+        "enum": [
+          "LOG_SEVERITY_UNSPECIFIED",
+          "LOG_SEVERITY_TRACE",
+          "LOG_SEVERITY_DEBUG",
+          "LOG_SEVERITY_INFO",
+          "LOG_SEVERITY_WARN",
+          "LOG_SEVERITY_ERROR",
+          "LOG_SEVERITY_FATAL"
+        ],
+        "type": "string"
+      },
+      "v1LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1LoginResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/v1Session"
+          }
+        },
+        "type": "object"
+      },
+      "v1LogoutRequest": {
+        "type": "object"
+      },
+      "v1LogoutResponse": {
+        "type": "object"
+      },
+      "v1NetworkPolicyDriftFinding": {
+        "properties": {
+          "missingPolicies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1Operation": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "resourceName": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/v1OperationStatus"
+          }
+        },
+        "type": "object"
+      },
+      "v1OperationStatus": {
+        "default": "OPERATION_STATUS_UNSPECIFIED",
+        "enum": [
+          "OPERATION_STATUS_UNSPECIFIED",
+          "OPERATION_STATUS_QUEUED",
+          "OPERATION_STATUS_RUNNING",
+          "OPERATION_STATUS_SUCCEEDED",
+          "OPERATION_STATUS_FAILED",
+          "OPERATION_STATUS_CANCELLED"
+        ],
+        "type": "string"
+      },
+      "v1OperatorMetric": {
+        "description": "OperatorMetric is one install-level host/system metric proxied from Beszel.\nThese are NOT tenant-scoped: they describe the operator's own hosts and carry\nno per-application attribution (spec 8, design note: Beszel is operator/\ninstall-level bounded metrics, not a transparent per-tenant proxy).",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "observedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "v1Organization": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1PreviewBranchDeleteRequest": {
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1PreviewBranchDeleteResponse": {
+        "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/v1Environment"
+          }
+        },
+        "type": "object"
+      },
+      "v1PreviewPushRequest": {
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commitSha": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1PreviewPushResponse": {
+        "properties": {
+          "disposition": {
+            "type": "string"
+          },
+          "dropped": {
+            "type": "boolean"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/v1Environment"
+          }
+        },
+        "type": "object"
+      },
+      "v1Project": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "gitConnectionId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1QueryApplicationLogsResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/v1LogEntry"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconcileCategory": {
+        "default": "RECONCILE_CATEGORY_UNSPECIFIED",
+        "enum": [
+          "RECONCILE_CATEGORY_UNSPECIFIED",
+          "RECONCILE_CATEGORY_DATABASE",
+          "RECONCILE_CATEGORY_NAMESPACE",
+          "RECONCILE_CATEGORY_WORKLOAD",
+          "RECONCILE_CATEGORY_NETWORK_POLICY",
+          "RECONCILE_CATEGORY_INGRESS",
+          "RECONCILE_CATEGORY_TLS",
+          "RECONCILE_CATEGORY_SCALING",
+          "RECONCILE_CATEGORY_ENVIRONMENT_VARIABLES",
+          "RECONCILE_CATEGORY_ORCHESTRATION"
+        ],
+        "type": "string"
+      },
+      "v1ReconcileFinding": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/v1ReconcileCategory"
+          },
+          "networkPolicyDrift": {
+            "$ref": "#/components/schemas/v1NetworkPolicyDriftFinding"
+          },
+          "observedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resourceName": {
+            "type": "string"
+          },
+          "runtimeClassDrift": {
+            "$ref": "#/components/schemas/v1RuntimeClassDriftFinding"
+          },
+          "status": {
+            "$ref": "#/components/schemas/v1ReconcileFindingStatus"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconcileFindingStatus": {
+        "default": "RECONCILE_FINDING_STATUS_UNSPECIFIED",
+        "enum": [
+          "RECONCILE_FINDING_STATUS_UNSPECIFIED",
+          "RECONCILE_FINDING_STATUS_IN_SYNC",
+          "RECONCILE_FINDING_STATUS_DRIFTED",
+          "RECONCILE_FINDING_STATUS_MISSING",
+          "RECONCILE_FINDING_STATUS_ORPHANED",
+          "RECONCILE_FINDING_STATUS_ERROR"
+        ],
+        "type": "string"
+      },
+      "v1ReconcileScope": {
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "environmentId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/v1ReconcileScopeKind"
+          },
+          "organizationId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconcileScopeKind": {
+        "default": "RECONCILE_SCOPE_KIND_UNSPECIFIED",
+        "enum": [
+          "RECONCILE_SCOPE_KIND_UNSPECIFIED",
+          "RECONCILE_SCOPE_KIND_ORGANIZATION",
+          "RECONCILE_SCOPE_KIND_APPLICATION",
+          "RECONCILE_SCOPE_KIND_ENVIRONMENT"
+        ],
+        "type": "string"
+      },
+      "v1ReconciliationEvidence": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "desiredHash": {
+            "type": "string"
+          },
+          "details": {},
+          "kind": {
+            "type": "string"
+          },
+          "object": {
+            "$ref": "#/components/schemas/v1ReconciliationObject"
+          },
+          "observedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "observedHash": {
+            "type": "string"
+          },
+          "sequence": {
+            "format": "int64",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconciliationObject": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconciliationPlan": {
+        "properties": {
+          "create": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationPlanOperation"
+            },
+            "type": "array"
+          },
+          "delete": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationPlanOperation"
+            },
+            "type": "array"
+          },
+          "patch": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationPlanOperation"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconciliationPlanOperation": {
+        "properties": {
+          "desiredHash": {
+            "type": "string"
+          },
+          "details": {},
+          "object": {
+            "$ref": "#/components/schemas/v1ReconciliationObject"
+          },
+          "observedHash": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconciliationReport": {
+        "properties": {
+          "applied": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "orphans": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationObject"
+            },
+            "type": "array"
+          },
+          "planned": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "pruned": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconciliationObject"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReconciliationRun": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconcileCategory"
+            },
+            "type": "array"
+          },
+          "completedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconcileFinding"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/v1ReconciliationPlan"
+          },
+          "prune": {
+            "type": "boolean"
+          },
+          "report": {
+            "$ref": "#/components/schemas/v1ReconciliationReport"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/v1ReconcileScope"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/v1OperationStatus"
+          }
+        },
+        "type": "object"
+      },
+      "v1Registry": {
+        "description": "Registry is one row of the registries table: an OCI image registry an app\npulls container images from. credential_secret_ref is a\nk8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e REFERENCE to the pull credential; the\nraw credential is never accepted or stored in Postgres — only the reference.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credentialSecretRef": {
+            "description": "credential_secret_ref is a k8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e reference\nto the pull credential, NOT a plaintext credential.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "provider identifies the registry flavour: one of \"ghcr\", \"gcr\", \"ecr\",\n\"other\".",
+            "type": "string"
+          },
+          "registryUrl": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1Release": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "envVarRevisionId": {
+            "type": "string"
+          },
+          "environmentId": {
+            "type": "string"
+          },
+          "failureReason": {
+            "type": "string"
+          },
+          "gitCommitSha": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageRef": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/v1ReleaseKind"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/v1ReleaseStatus"
+          },
+          "triggeredByUserId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ReleaseKind": {
+        "default": "RELEASE_KIND_UNSPECIFIED",
+        "enum": [
+          "RELEASE_KIND_UNSPECIFIED",
+          "RELEASE_KIND_DEPLOY",
+          "RELEASE_KIND_ENV_CHANGE",
+          "RELEASE_KIND_ROLLBACK",
+          "RELEASE_KIND_RECONCILE"
+        ],
+        "type": "string"
+      },
+      "v1ReleaseStatus": {
+        "default": "RELEASE_STATUS_UNSPECIFIED",
+        "enum": [
+          "RELEASE_STATUS_UNSPECIFIED",
+          "RELEASE_STATUS_PENDING",
+          "RELEASE_STATUS_DEPLOYING",
+          "RELEASE_STATUS_LIVE",
+          "RELEASE_STATUS_FAILED",
+          "RELEASE_STATUS_SUPERSEDED"
+        ],
+        "type": "string"
+      },
+      "v1RevokeApiTokenResponse": {
+        "type": "object"
+      },
+      "v1RollbackResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1RuntimeClass": {
+        "default": "RUNTIME_CLASS_UNSPECIFIED",
+        "enum": [
+          "RUNTIME_CLASS_UNSPECIFIED",
+          "RUNTIME_CLASS_GVISOR",
+          "RUNTIME_CLASS_RUNC"
+        ],
+        "type": "string"
+      },
+      "v1RuntimeClassDriftFinding": {
+        "properties": {
+          "expectedRuntimeClass": {
+            "type": "string"
+          },
+          "observedRuntimeClass": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ScalingMode": {
+        "default": "SCALING_MODE_UNSPECIFIED",
+        "enum": [
+          "SCALING_MODE_UNSPECIFIED",
+          "SCALING_MODE_HPA",
+          "SCALING_MODE_KEDA_CRON",
+          "SCALING_MODE_KEDA_HTTP"
+        ],
+        "type": "string"
+      },
+      "v1Session": {
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/v1User"
+          }
+        },
+        "type": "object"
+      },
+      "v1SetEnvironmentVariablesResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1StartReconciliationRequest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/v1ReconcileCategory"
+            },
+            "type": "array"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "prune": {
+            "type": "boolean"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/v1ReconcileScope"
+          }
+        },
+        "type": "object"
+      },
+      "v1StartReconciliationResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1TeardownEnvironmentResponse": {
+        "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/v1Environment"
+          }
+        },
+        "type": "object"
+      },
+      "v1TraceStatus": {
+        "default": "TRACE_STATUS_UNSPECIFIED",
+        "enum": [
+          "TRACE_STATUS_UNSPECIFIED",
+          "TRACE_STATUS_OK",
+          "TRACE_STATUS_ERROR"
+        ],
+        "type": "string"
+      },
+      "v1TraceSummary": {
+        "properties": {
+          "durationMs": {
+            "format": "int64",
+            "type": "string"
+          },
+          "rootName": {
+            "type": "string"
+          },
+          "startTime": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/v1TraceStatus"
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1UpdateApplicationResponse": {
+        "properties": {
+          "application": {
+            "$ref": "#/components/schemas/v1Application"
+          }
+        },
+        "type": "object"
+      },
+      "v1UpdateProjectResponse": {
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/v1Project"
+          }
+        },
+        "type": "object"
+      },
+      "v1UpdateWebhookResponse": {
+        "properties": {
+          "webhook": {
+            "$ref": "#/components/schemas/v1WebhookEndpoint"
+          }
+        },
+        "type": "object"
+      },
+      "v1User": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1VerifyDomainResponse": {
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/v1Domain"
+          }
+        },
+        "type": "object"
+      },
+      "v1WebhookEndpoint": {
+        "properties": {
+          "consecutiveFailures": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "disabledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "secretRef": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerToken": {
+        "description": "Session, API, or deployment token (cyp_v1_...)",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Cyclopus is a self-hosted PaaS with hard workload isolation. This document describes the public REST API served at /v1/*; all operations except /v1/auth/bootstrap and /v1/auth/login require a Bearer credential.",
+    "title": "Cyclopus API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/v1/aliases/{aliasId}": {
+      "get": {
+        "operationId": "AliasService_GetAlias",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "aliasId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetAliasResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AliasService"
+        ]
+      }
+    },
+    "/v1/applications/{application.id}": {
+      "patch": {
+        "operationId": "ApplicationService_UpdateApplication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application.id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ciWorkflowId": {
+                    "type": "string"
+                  },
+                  "containerPort": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "cpuLimitMillicores": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "cpuRequestMillicores": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "createdAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "deletedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "deployTimeoutSeconds": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "healthCheckPath": {
+                    "type": "string"
+                  },
+                  "hostnameLabel": {
+                    "type": "string"
+                  },
+                  "hpaTargetCpuPercent": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "imageRepository": {
+                    "type": "string"
+                  },
+                  "kedaCronSchedules": {
+                    "description": "Cron windows applied when scaling_mode is KEDA_CRON; must be non-empty\nfor that mode and is ignored otherwise.",
+                    "items": {
+                      "$ref": "#/components/schemas/v1KedaCronSchedule"
+                    },
+                    "type": "array"
+                  },
+                  "kedaHttpTargetPendingRequests": {
+                    "description": "HTTP add-on concurrency target applied when scaling_mode is KEDA_HTTP.",
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "maxPreviewEnvironments": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "maxReplicas": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "memoryLimitMib": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "memoryRequestMib": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "minReplicas": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "previewIdleTtlHours": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "previewsEnabled": {
+                    "type": "boolean"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "registryId": {
+                    "type": "string"
+                  },
+                  "releaseRetentionCount": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "runtimeClass": {
+                    "$ref": "#/components/schemas/v1RuntimeClass"
+                  },
+                  "scalingMode": {
+                    "$ref": "#/components/schemas/v1ScalingMode"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "application"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1UpdateApplicationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ApplicationService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}": {
+      "delete": {
+        "operationId": "ApplicationService_DeleteApplication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalCredentialsRevoked",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteApplicationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ApplicationService"
+        ]
+      },
+      "get": {
+        "operationId": "ApplicationService_GetApplication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetApplicationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ApplicationService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}/domains": {
+      "get": {
+        "operationId": "DomainService_ListDomains",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListDomainsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "DomainService"
+        ]
+      },
+      "post": {
+        "operationId": "DomainService_CreateDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1Domain"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "domain"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateDomainResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "DomainService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}/environments": {
+      "get": {
+        "operationId": "EnvironmentService_ListEnvironments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeTornDown",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListEnvironmentsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "EnvironmentService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}/logs": {
+      "get": {
+        "operationId": "ObservabilityService_QueryApplicationLogs",
+        "parameters": [
+          {
+            "description": "Required: the application whose logs are requested. Ownership is validated\nagainst the caller's organization before any upstream query is issued.",
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional additional scoping. When set they must belong to application_id.",
+            "in": "query",
+            "name": "environmentId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "releaseId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional coarse severity floor. Records below it are excluded.",
+            "in": "query",
+            "name": "minSeverity",
+            "schema": {
+              "default": "LOG_SEVERITY_UNSPECIFIED",
+              "enum": [
+                "LOG_SEVERITY_UNSPECIFIED",
+                "LOG_SEVERITY_TRACE",
+                "LOG_SEVERITY_DEBUG",
+                "LOG_SEVERITY_INFO",
+                "LOG_SEVERITY_WARN",
+                "LOG_SEVERITY_ERROR",
+                "LOG_SEVERITY_FATAL"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional free-text substring filter. Validated as a safe literal and ANDed\nonto the mandatory tenant filter; it cannot remove or widen tenant scope.",
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1QueryApplicationLogsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ObservabilityService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}/production-environment": {
+      "post": {
+        "operationId": "EnvironmentService_CreateProductionEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentServiceCreateProductionEnvironmentBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateProductionEnvironmentResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "EnvironmentService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}/traces": {
+      "get": {
+        "operationId": "ObservabilityService_ListApplicationTraces",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "environmentId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListApplicationTracesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ObservabilityService"
+        ]
+      }
+    },
+    "/v1/applications/{applicationId}/traces/{traceId}": {
+      "get": {
+        "operationId": "ObservabilityService_GetApplicationTrace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "traceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "environmentId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetApplicationTraceResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ObservabilityService"
+        ]
+      }
+    },
+    "/v1/auth/bootstrap": {
+      "post": {
+        "operationId": "AuthenticationService_Bootstrap",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1BootstrapRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1BootstrapResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "AuthenticationService_Login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1LoginRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1LoginResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthenticationService_Logout",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1LogoutRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1LogoutResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/domains/{domainId}": {
+      "delete": {
+        "operationId": "DomainService_DeleteDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domainId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteDomainResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "DomainService"
+        ]
+      },
+      "get": {
+        "operationId": "DomainService_GetDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domainId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetDomainResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "DomainService"
+        ]
+      }
+    },
+    "/v1/domains/{domainId}:verify": {
+      "post": {
+        "operationId": "DomainService_VerifyDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domainId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainServiceVerifyDomainBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1VerifyDomainResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "DomainService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}": {
+      "get": {
+        "operationId": "EnvironmentService_GetEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetEnvironmentResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "EnvironmentService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/aliases": {
+      "get": {
+        "operationId": "AliasService_ListAliases",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListAliasesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AliasService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/certificates": {
+      "get": {
+        "operationId": "CertificateService_ListCertificates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListCertificatesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "CertificateService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/deploys": {
+      "post": {
+        "operationId": "ReleaseService_Deploy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseServiceDeployBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeployResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReleaseService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/env-vars": {
+      "get": {
+        "operationId": "ReleaseService_GetEnvironmentVariables",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetEnvironmentVariablesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReleaseService"
+        ]
+      },
+      "put": {
+        "operationId": "ReleaseService_SetEnvironmentVariables",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseServiceSetEnvironmentVariablesBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1SetEnvironmentVariablesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReleaseService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/releases": {
+      "get": {
+        "operationId": "ReleaseService_ListReleases",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "statuses",
+            "schema": {
+              "items": {
+                "enum": [
+                  "RELEASE_STATUS_UNSPECIFIED",
+                  "RELEASE_STATUS_PENDING",
+                  "RELEASE_STATUS_DEPLOYING",
+                  "RELEASE_STATUS_LIVE",
+                  "RELEASE_STATUS_FAILED",
+                  "RELEASE_STATUS_SUPERSEDED"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListReleasesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReleaseService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/rollbacks": {
+      "post": {
+        "operationId": "ReleaseService_Rollback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseServiceRollbackBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1RollbackResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReleaseService"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}:teardown": {
+      "post": {
+        "operationId": "EnvironmentService_TeardownEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environmentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentServiceTeardownEnvironmentBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1TeardownEnvironmentResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "EnvironmentService"
+        ]
+      }
+    },
+    "/v1/git-connections/{gitConnectionId}": {
+      "delete": {
+        "operationId": "GitConnectionService_DeleteGitConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gitConnectionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteGitConnectionResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitConnectionService"
+        ]
+      },
+      "get": {
+        "operationId": "GitConnectionService_GetGitConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gitConnectionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetGitConnectionResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitConnectionService"
+        ]
+      }
+    },
+    "/v1/internal/preview-branch-deletes": {
+      "post": {
+        "operationId": "EnvironmentService_AcceptPreviewBranchDelete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1PreviewBranchDeleteRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1PreviewBranchDeleteResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "EnvironmentService"
+        ]
+      }
+    },
+    "/v1/internal/preview-pushes": {
+      "post": {
+        "operationId": "EnvironmentService_AcceptPreviewPush",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1PreviewPushRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1PreviewPushResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "EnvironmentService"
+        ]
+      }
+    },
+    "/v1/operator/metrics": {
+      "get": {
+        "operationId": "ObservabilityService_GetOperatorMetrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetOperatorMetricsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ObservabilityService"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}": {
+      "delete": {
+        "operationId": "OrganizationService_DeleteOrganization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalCredentialsRevoked",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteOrganizationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "OrganizationService"
+        ]
+      },
+      "get": {
+        "operationId": "OrganizationService_GetOrganization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetOrganizationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "OrganizationService"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/audit-events": {
+      "get": {
+        "operationId": "AuditEventService_ListAuditEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional filters. When set, only events whose target matches are returned.",
+            "in": "query",
+            "name": "targetType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "targetId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListAuditEventsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuditEventService"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/git-connections": {
+      "get": {
+        "operationId": "GitConnectionService_ListGitConnections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListGitConnectionsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitConnectionService"
+        ]
+      },
+      "post": {
+        "operationId": "GitConnectionService_CreateGitConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1GitConnection"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "gitConnection"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateGitConnectionResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitConnectionService"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/projects": {
+      "get": {
+        "operationId": "ProjectService_ListProjects",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListProjectsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ProjectService"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectService_CreateProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1Project"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "project"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateProjectResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/registries": {
+      "get": {
+        "operationId": "RegistryService_ListRegistries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListRegistriesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "RegistryService"
+        ]
+      },
+      "post": {
+        "operationId": "RegistryService_CreateRegistry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1Registry"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "registry"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateRegistryResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "RegistryService"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/webhooks": {
+      "get": {
+        "operationId": "WebhookService_ListWebhooks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListWebhooksResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "WebhookService"
+        ]
+      },
+      "post": {
+        "operationId": "WebhookService_CreateWebhook",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organizationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1WebhookEndpoint"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "webhook"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateWebhookResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "WebhookService"
+        ]
+      }
+    },
+    "/v1/projects/{project.id}": {
+      "patch": {
+        "operationId": "ProjectService_UpdateProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project.id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "createdAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "deletedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "gitConnectionId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "project"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1UpdateProjectResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}": {
+      "delete": {
+        "operationId": "ProjectService_DeleteProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "externalCredentialsRevoked",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteProjectResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ProjectService"
+        ]
+      },
+      "get": {
+        "operationId": "ProjectService_GetProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetProjectResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/applications": {
+      "get": {
+        "operationId": "ApplicationService_ListApplications",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListApplicationsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ApplicationService"
+        ]
+      },
+      "post": {
+        "operationId": "ApplicationService_CreateApplication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1Application"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "application"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateApplicationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ApplicationService"
+        ]
+      }
+    },
+    "/v1/reconciliations": {
+      "get": {
+        "operationId": "ReconciliationService_ListReconciliations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organizationId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "applicationId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "environmentId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListReconciliationsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReconciliationService"
+        ]
+      },
+      "post": {
+        "operationId": "ReconciliationService_StartReconciliation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1StartReconciliationRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1StartReconciliationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReconciliationService"
+        ]
+      }
+    },
+    "/v1/reconciliations/{reconciliationId}": {
+      "get": {
+        "operationId": "ReconciliationService_GetReconciliation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reconciliationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetReconciliationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReconciliationService"
+        ]
+      }
+    },
+    "/v1/reconciliations/{reconciliationId}/evidence": {
+      "get": {
+        "operationId": "ReconciliationService_ListReconciliationEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reconciliationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListReconciliationEvidenceResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReconciliationService"
+        ]
+      }
+    },
+    "/v1/registries/{registryId}": {
+      "delete": {
+        "operationId": "RegistryService_DeleteRegistry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "registryId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteRegistryResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "RegistryService"
+        ]
+      },
+      "get": {
+        "operationId": "RegistryService_GetRegistry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "registryId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetRegistryResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "RegistryService"
+        ]
+      }
+    },
+    "/v1/releases/{releaseId}": {
+      "get": {
+        "operationId": "ReleaseService_GetRelease",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "releaseId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetReleaseResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ReleaseService"
+        ]
+      }
+    },
+    "/v1/user": {
+      "get": {
+        "operationId": "AuthenticationService_GetCurrentUser",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetCurrentUserResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/user/api-tokens": {
+      "get": {
+        "operationId": "AuthenticationService_ListApiTokens",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListApiTokensResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      },
+      "post": {
+        "operationId": "AuthenticationService_CreateApiToken",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1CreateApiTokenRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1CreateApiTokenResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/user/api-tokens/{apiTokenId}": {
+      "delete": {
+        "operationId": "AuthenticationService_RevokeApiToken",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "apiTokenId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1RevokeApiTokenResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/webhooks/{webhook.id}": {
+      "patch": {
+        "operationId": "WebhookService_UpdateWebhook",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook.id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "consecutiveFailures": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "createdAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "disabledAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "secretRef": {
+                    "type": "string"
+                  },
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "webhook"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1UpdateWebhookResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "WebhookService"
+        ]
+      }
+    },
+    "/v1/webhooks/{webhookId}": {
+      "delete": {
+        "operationId": "WebhookService_DeleteWebhook",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhookId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idempotencyKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DeleteWebhookResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "WebhookService"
+        ]
+      },
+      "get": {
+        "operationId": "WebhookService_GetWebhook",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhookId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetWebhookResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "WebhookService"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "AuthenticationService"
+    },
+    {
+      "name": "OrganizationService"
+    },
+    {
+      "name": "ProjectService"
+    },
+    {
+      "name": "ApplicationService"
+    },
+    {
+      "name": "EnvironmentService"
+    },
+    {
+      "name": "ReleaseService"
+    },
+    {
+      "name": "ReconciliationService"
+    },
+    {
+      "name": "WebhookService"
+    },
+    {
+      "name": "DomainService"
+    },
+    {
+      "name": "RegistryService"
+    },
+    {
+      "name": "GitConnectionService"
+    },
+    {
+      "name": "ObservabilityService"
+    },
+    {
+      "name": "AliasService"
+    },
+    {
+      "name": "AuditEventService"
+    },
+    {
+      "name": "CertificateService"
+    }
+  ]
+}

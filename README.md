@@ -88,6 +88,7 @@ flowchart TB
 
 ### 🚀 Core Capabilities
 - ✅ Full gRPC/REST API surface (15 service interfaces)
+- ✅ Canonical OpenAPI 3 document at `/openapi.json` + browsable Scalar API reference at `/docs` (generated from the proto, publicly served)
 - ✅ Complete store layer (34 files) and service layer (24 files) with integration tests
 - ✅ Deploy worker with async loop, lease management, orphan recovery
 - ✅ Kubernetes orchestration with automatic rollout management
@@ -118,6 +119,8 @@ flowchart TB
 **🔧 Go:** Reference Kubernetes ecosystem (`client-go`). Single binary with no external dependencies.
 
 **📡 gRPC + grpc-gateway:** One `.proto` definition, typed gRPC internally, REST/JSON for external callers from the same schema.
+
+**📖 API reference:** The same proto generates the public docs — `buf generate` (adds `protoc-gen-openapiv2` → Swagger 2.0) then `go run ./cmd/gen-openapi gen/openapi/cyclopus/v1/cyclopus.swagger.json internal/apidocs/openapi.json` converts to the canonical OpenAPI 3 document, embedded and served publicly at `/openapi.json` with a Scalar reference UI at `/docs`. When the proto changes, docs regenerate — they can never drift.
 
 **💾 Postgres 18:** Native `uuidv7()` for time-sortable IDs, atomic `RETURNING WITH (OLD AS...)` for queued commit coalescing (prevents silent commit drops under concurrent pushes).
 
@@ -160,8 +163,9 @@ flowchart TB
 
 ```
 .
-├── cmd/                      # Main entrypoint
+├── cmd/                      # Main entrypoint (+ gen-openapi: swagger→OpenAPI 3 converter)
 ├── internal/
+│   ├── apidocs/             # Embedded OpenAPI 3 spec + /openapi.json & /docs handlers
 │   ├── server/              # gRPC handlers (1988 lines)
 │   ├── service/             # Business logic layer (24 files)
 │   ├── store/               # Postgres data layer (34 files)

@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
+	"github.com/shepard-labs/cyclopus/internal/apidocs"
 	"github.com/shepard-labs/cyclopus/internal/config"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -202,6 +203,12 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 	api = requestBodyLimitHTTPMiddleware(maxBodyBytes, services.RequestBodyBytes, api)
 	api = readinessHTTPMiddleware(readiness, api)
 	api = clientContextHTTPMiddleware(api)
+	// Public, side-effect-free API documentation (spec + reference UI).
+	// Outside the gateway middleware: docs describe the API, they never call
+	// it, so a session is not required. chi matches these exact routes before
+	// the / mount below.
+	router.Handle("/openapi.json", apidocs.SpecHandler())
+	router.Handle("/docs", apidocs.DocsHandler())
 	if services.UIHandler != nil {
 		// UI is mounted at / ; API gateway only handles /v1/* paths.
 		router.Handle("/v1/*", api)
