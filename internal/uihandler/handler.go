@@ -167,11 +167,21 @@ func (h *Handler) postLogin(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	sess, err := h.client.Login(r.Context(), email, password)
 	if err != nil {
-		render(w, r, pages.Login("Invalid email or password."))
+		render(w, r, pages.Login(loginErrorMessage(err)))
 		return
 	}
 	ui.SetSession(w, sess.AccessToken, sess.ExpiresAt)
 	http.Redirect(w, r, "/projects", http.StatusSeeOther)
+}
+
+// loginErrorMessage maps an API error to a message the operator can act on.
+// A 401 is a genuine bad credential; anything else (e.g. 503 while the control
+// plane is still starting) should say so rather than blame the credentials.
+func loginErrorMessage(err error) string {
+	if ui.IsUnauthorized(err) {
+		return "Invalid email or password."
+	}
+	return "Sign in failed: " + err.Error()
 }
 
 func (h *Handler) getBootstrap(w http.ResponseWriter, r *http.Request) {

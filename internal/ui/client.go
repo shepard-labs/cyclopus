@@ -40,22 +40,26 @@ func NewClient(listenAddr string) *Client {
 // ── Auth ────────────────────────────────────────────────────────────────────
 
 func (c *Client) Login(ctx context.Context, email, password string) (*Session, error) {
-	var sess Session
+	var resp struct {
+		Session Session `json:"session"`
+	}
 	err := c.post(ctx, "", "/v1/auth/login", map[string]string{
 		"email":    email,
 		"password": password,
-	}, &sess)
-	return &sess, err
+	}, &resp)
+	return &resp.Session, err
 }
 
 func (c *Client) Bootstrap(ctx context.Context, email, password, bootstrapToken string) (*Session, error) {
-	var sess Session
+	var resp struct {
+		Session Session `json:"session"`
+	}
 	err := c.post(ctx, "", "/v1/auth/bootstrap", map[string]string{
 		"email":          email,
 		"password":       password,
 		"bootstrapToken": bootstrapToken,
-	}, &sess)
-	return &sess, err
+	}, &resp)
+	return &resp.Session, err
 }
 
 func (c *Client) Logout(ctx context.Context, token string) error {

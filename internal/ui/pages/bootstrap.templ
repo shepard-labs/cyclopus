@@ -33,8 +33,9 @@ templ Bootstrap(errMsg string) {
 						<input type="password" id="password" name="password" required placeholder="••••••••" minlength="8"/>
 					</div>
 					<div class="input-group">
-						<label for="bootstrap_token">Bootstrap token <span class="text-zinc-500">(optional)</span></label>
-						<input type="password" id="bootstrap_token" name="bootstrap_token" placeholder="Token from CYCLOPUS_AUTH_BOOTSTRAP_SECRET"/>
+						<label for="bootstrap_token">Bootstrap token</label>
+						<input type="password" id="bootstrap_token" name="bootstrap_token" required placeholder="Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET"/>
+						<span class="text-xs text-zinc-500 mt-1">Must match the <code class="text-zinc-400">CYCLOPUS_AUTH_BOOTSTRAP_SECRET</code> the server was started with.</span>
 					</div>
 					<button type="submit" class="btn btn-primary w-full justify-center mt-2">Create account</button>
 				</form>
