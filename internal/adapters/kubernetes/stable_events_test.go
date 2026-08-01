@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 func captureRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {

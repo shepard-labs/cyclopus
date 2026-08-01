@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
-	"github.com/cyclopus-dev/cyclopus/internal/worker"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/worker"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	appsv1 "k8s.io/api/apps/v1"

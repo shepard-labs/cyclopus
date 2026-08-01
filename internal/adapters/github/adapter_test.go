@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 	gh "github.com/google/go-github/v88/github"
 )
 

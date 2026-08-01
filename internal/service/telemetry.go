@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/adapters/observability"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // ErrTelemetryUnavailable is returned when no observability provider is wired.

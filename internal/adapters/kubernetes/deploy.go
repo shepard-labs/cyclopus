@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
+	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"

@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // challengeLabelPrefix is the fixed subdomain label under which apex/root

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // maxAuditEventScan bounds how many audit rows a single list may scan before

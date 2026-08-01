@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
-	internalauth "github.com/cyclopus-dev/cyclopus/internal/auth"
-	"github.com/cyclopus-dev/cyclopus/internal/service"
+	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
+	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
+	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 )
 
 // recordingTelemetry is a fake TelemetryProvider that records whether it was

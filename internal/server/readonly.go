@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
-	"github.com/cyclopus-dev/cyclopus/internal/service"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
+	"github.com/shepard-labs/cyclopus/internal/service"
+	"github.com/shepard-labs/cyclopus/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"

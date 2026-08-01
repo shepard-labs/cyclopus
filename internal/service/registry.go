@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // registryProviders is the allowed set for registries.provider, validated in the

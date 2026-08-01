@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // GetAlias returns a single alias org-scoped to the actor. It is a pure read:

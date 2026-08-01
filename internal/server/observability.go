@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
-	"github.com/cyclopus-dev/cyclopus/internal/adapters/observability"
-	"github.com/cyclopus-dev/cyclopus/internal/service"
+	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
+	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	"google.golang.org/grpc/peer"
 )
 

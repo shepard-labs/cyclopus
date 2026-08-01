@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // These integration tests reuse the two-tenant fixture from the telemetry

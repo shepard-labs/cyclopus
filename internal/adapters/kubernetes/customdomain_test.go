@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cyclopus-dev/cyclopus/internal/service"
+	"github.com/shepard-labs/cyclopus/internal/service"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

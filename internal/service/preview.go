@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/google/uuid"
 )
 

@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // gitConnectionProvider is the only allowed value for git_connections.provider

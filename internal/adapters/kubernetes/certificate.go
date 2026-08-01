@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/service"
+	"github.com/shepard-labs/cyclopus/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"

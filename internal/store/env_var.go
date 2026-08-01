@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/jackc/pgx/v5"
 )
 

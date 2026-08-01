@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // fakeCustomDomainProvisioner records the provision/deprovision calls so tests

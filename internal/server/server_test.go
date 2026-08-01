@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
-	"github.com/cyclopus-dev/cyclopus/internal/config"
+	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
+	"github.com/shepard-labs/cyclopus/internal/config"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

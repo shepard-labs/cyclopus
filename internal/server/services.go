@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
+	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 )
 
 type Services struct {

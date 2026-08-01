@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 // CreateProductionEnvironmentInput holds the caller-supplied parameters for

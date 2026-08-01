@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
 )
 
 var cronShapePattern = regexp.MustCompile(`^\S+( \S+){4}$`)

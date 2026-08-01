@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/config"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
-	"github.com/cyclopus-dev/cyclopus/internal/worker"
+	"github.com/shepard-labs/cyclopus/internal/config"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/worker"
 	"k8s.io/client-go/kubernetes"
 	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 )

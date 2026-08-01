@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cyclopus-dev/cyclopus/internal/secretref"
-	"github.com/cyclopus-dev/cyclopus/internal/store"
-	"github.com/cyclopus-dev/cyclopus/internal/webhook"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/webhook"
 	"github.com/google/uuid"
 	cronparser "github.com/robfig/cron/v3"
 )

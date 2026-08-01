@@ -8,7 +8,7 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/rpc/error_details.proto";
 
-option go_package = "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1;cyclopusv1";
+option go_package = "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1;cyclopusv1";
 
 // The imported error detail messages are the required typed error vocabulary.
 message ErrorDetailTypes {

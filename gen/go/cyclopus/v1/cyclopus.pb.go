@@ -11137,7 +11137,7 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"\x11AuditEventService\x12\x96\x01\n" +
 	"\x0fListAuditEvents\x12#.cyclopus.v1.ListAuditEventsRequest\x1a$.cyclopus.v1.ListAuditEventsResponse\"8\x82\xd3\xe4\x93\x022\x120/v1/organizations/{organization_id}/audit-events2\xae\x01\n" +
 	"\x12CertificateService\x12\x97\x01\n" +
-	"\x10ListCertificates\x12$.cyclopus.v1.ListCertificatesRequest\x1a%.cyclopus.v1.ListCertificatesResponse\"6\x82\xd3\xe4\x93\x020\x12./v1/environments/{environment_id}/certificatesB@Z>github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1;cyclopusv1b\x06proto3"
+	"\x10ListCertificates\x12$.cyclopus.v1.ListCertificatesRequest\x1a%.cyclopus.v1.ListCertificatesResponse\"6\x82\xd3\xe4\x93\x020\x12./v1/environments/{environment_id}/certificatesB@Z>github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1;cyclopusv1b\x06proto3"
 
 var (
 	file_cyclopus_v1_cyclopus_proto_rawDescOnce sync.Once
