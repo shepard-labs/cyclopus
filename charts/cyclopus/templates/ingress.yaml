@@ -1,0 +1,34 @@
+{{- if .Values.ingress.enabled }}
+{{- if not .Values.ingress.host }}
+{{- fail "ingress.enabled=true requires ingress.host (the console FQDN)" }}
+{{- end }}
+{{- $issuer := .Values.ingress.clusterIssuer | default .Values.config.kubernetes.certManagerClusterIssuer }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+  annotations:
+    {{- if $issuer }}
+    cert-manager.io/cluster-issuer: {{ $issuer | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "cyclopus.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tlsSecretName | quote }}
+{{- end }}

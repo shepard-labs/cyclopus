@@ -43,6 +43,21 @@ service:
   httpPort: 8080
   grpcPort: 9090
 
+# Control-plane console Ingress (§7.5). When enabled, the UI + REST API (same
+# process, mounted at / and /v1/*) are exposed via Traefik at https://{host} with
+# a cert-manager-issued Let's Encrypt certificate. TLS terminates at Traefik; the
+# pod itself stays plaintext inside the cluster (no insecure_public_listeners).
+ingress:
+  enabled: false
+  className: traefik
+  # FQDN the console is served on, e.g. cyclopus.203-0-113-7.sslip.io
+  host: ""
+  # cert-manager ClusterIssuer for the console certificate. Defaults to
+  # config.kubernetes.certManagerClusterIssuer when empty.
+  clusterIssuer: ""
+  # TLS Secret name cert-manager populates for the console certificate.
+  tlsSecretName: "cyclopus-console-tls"
+
 # The Cyclopus binary reads config from CYCLOPUS_*-prefixed env vars.
 # Non-secret settings go in the ConfigMap; secrets are referenced from a Secret.
 config:
@@ -74,8 +89,9 @@ config:
     # cert-manager ClusterIssuer name annotated onto the environment and
     # custom-domain Ingresses (cert-manager.io/cluster-issuer) so TLS certs are
     # issued for served hostnames (§7.5). Leave empty to disable the annotation
-    # (manual TLS / installs without cert-manager).
-    certManagerClusterIssuer: "letsencrypt"
+    # (manual TLS / installs without cert-manager). Default is letsencrypt-production
+    # (real certs, green padlock); use letsencrypt-staging for unlimited testing with fake certs.
+    certManagerClusterIssuer: "letsencrypt-production"
   observability:
     openobserveBaseUrl: "http://openobserve.cyclopus-observability.svc:5080"
     openobserveOrganization: "cyclopus"
