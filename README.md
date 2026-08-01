@@ -195,7 +195,7 @@ flowchart TB
 - SSH access
 - Nested virtualization enabled (`/dev/kvm` present)
 
-**One-line install (similar to Coolify):**
+**One-line install:**
 ```bash
 curl -fsSL https://get.cyclopus.dev | bash
 ```
