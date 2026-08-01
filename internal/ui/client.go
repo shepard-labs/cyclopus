@@ -160,37 +160,15 @@ func (c *Client) CreateApplication(ctx context.Context, token, projectID, idemKe
 	var resp struct {
 		Application Application `json:"application"`
 	}
-	// `body: "application"` — body is the Application object only. The service
-	// writes every field verbatim (no server-side defaults), so the create must
-	// carry spec defaults (§5) or the DB CHECK constraints reject zero values.
-	hp := app.HealthCheckPath
-	if hp == "" {
-		hp = "/"
-	}
-	cp := app.ContainerPort
-	if cp == 0 {
-		cp = 8080
-	}
+	// `body: "application"` — body is the Application object only. Unset fields
+	// are defaulted server-side (service.applyAppCreateDefaults, §5), so the UI
+	// only sends what the operator entered.
 	body := map[string]any{
-		"name":                     app.Name,
-		"slug":                     app.Slug,
-		"hostname_label":           app.HostnameLabel,
-		"container_port":           cp,
-		"health_check_path":        hp,
-		"scaling_mode":             "SCALING_MODE_HPA",
-		"min_replicas":             1,
-		"max_replicas":             3,
-		"hpa_target_cpu_percent":   70,
-		"cpu_request_millicores":   100,
-		"cpu_limit_millicores":     1000,
-		"memory_request_mib":       128,
-		"memory_limit_mib":         512,
-		"previews_enabled":         true,
-		"max_preview_environments": 10,
-		"preview_idle_ttl_hours":   168,
-		"deploy_timeout_seconds":   600,
-		"release_retention_count":  5,
-		"runtime_class":            "RUNTIME_CLASS_GVISOR",
+		"name":              app.Name,
+		"slug":              app.Slug,
+		"hostname_label":    app.HostnameLabel,
+		"container_port":    app.ContainerPort,
+		"health_check_path": app.HealthCheckPath,
 	}
 	path := "/v1/projects/" + projectID + "/applications?" + url.Values{"idempotency_key": {idemKey}}.Encode()
 	err := c.postJSON(ctx, token, path, body, &resp)

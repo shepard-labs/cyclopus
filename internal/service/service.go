@@ -400,11 +400,68 @@ func normalizeAppInput(input AppInput) AppInput {
 	return input
 }
 
+// applyAppCreateDefaults fills unset fields on a create with the platform
+// defaults (§5). It runs only on create: an update must leave zero-valued
+// fields untouched so it never clobbers an intentional value. Fields the caller
+// set (non-zero / non-empty) are preserved.
+func applyAppCreateDefaults(input AppInput) AppInput {
+	d := DefaultAppInput()
+	if input.ContainerPort == 0 {
+		input.ContainerPort = d.ContainerPort
+	}
+	if strings.TrimSpace(input.HealthCheckPath) == "" {
+		input.HealthCheckPath = d.HealthCheckPath
+	}
+	if strings.TrimSpace(input.ScalingMode) == "" {
+		input.ScalingMode = d.ScalingMode
+	}
+	if input.MaxReplicas == 0 {
+		input.MaxReplicas = d.MaxReplicas
+	}
+	// MinReplicas: 0 is a legal value only for KEDA scale-to-zero. Default to 1
+	// unless the caller opted into a KEDA mode with an explicit zero floor.
+	if input.MinReplicas == 0 && input.ScalingMode == "hpa" {
+		input.MinReplicas = d.MinReplicas
+	}
+	if input.HPATargetCPUPercent == 0 {
+		input.HPATargetCPUPercent = d.HPATargetCPUPercent
+	}
+	if input.CPURequestMillicores == 0 {
+		input.CPURequestMillicores = d.CPURequestMillicores
+	}
+	if input.CPULimitMillicores == 0 {
+		input.CPULimitMillicores = d.CPULimitMillicores
+	}
+	if input.MemoryRequestMiB == 0 {
+		input.MemoryRequestMiB = d.MemoryRequestMiB
+	}
+	if input.MemoryLimitMiB == 0 {
+		input.MemoryLimitMiB = d.MemoryLimitMiB
+	}
+	if input.MaxPreviewEnvironments == 0 {
+		input.MaxPreviewEnvironments = d.MaxPreviewEnvironments
+	}
+	if input.PreviewIdleTTLHours == 0 {
+		input.PreviewIdleTTLHours = d.PreviewIdleTTLHours
+	}
+	if input.DeployTimeoutSeconds == 0 {
+		input.DeployTimeoutSeconds = d.DeployTimeoutSeconds
+	}
+	if input.ReleaseRetentionCount == 0 {
+		input.ReleaseRetentionCount = d.ReleaseRetentionCount
+	}
+	// PreviewsEnabled has no CHECK constraint; its platform default is true.
+	// On the minimal create path callers don't express a bool, so adopt the
+	// default. The settings form always sends the field explicitly afterwards.
+	input.PreviewsEnabled = d.PreviewsEnabled
+	return input
+}
+
 func (s *Service) CreateApp(ctx context.Context, actor ActorContext, key string, input AppInput) (store.App, error) {
 	if err := validateActor(actor); err != nil {
 		return store.App{}, err
 	}
-	input = normalizeAppInput(input)
+	input = applyAppCreateDefaults(normalizeAppInput(input))
 	runtimeClass := "gvisor"
 	if input.RuntimeClass != nil {
 		if !actor.Operator && *input.RuntimeClass != runtimeClass {
