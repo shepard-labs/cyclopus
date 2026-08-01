@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 env:
   REGISTRY: ghcr.io
@@ -14,12 +13,29 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create GitHub release
+      contents: write   # create GitHub release + push tag
       packages: write   # push to ghcr.io
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full tag history to compute next version
+
+      - name: Determine version
+        id: version
+        run: |
+          LATEST_TAG=$(git tag | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          if [ -z "$LATEST_TAG" ]; then
+            VERSION="v0.1.0"
+          else
+            MAJOR=$(echo "$LATEST_TAG" | cut -d. -f1 | tr -d 'v')
+            MINOR=$(echo "$LATEST_TAG" | cut -d. -f2)
+            PATCH=$(echo "$LATEST_TAG" | cut -d. -f3)
+            PATCH=$((PATCH + 1))
+            VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -40,8 +56,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.version.outputs.version }}
             type=raw,value=latest
 
       - name: Build and push image
@@ -62,9 +77,11 @@ jobs:
           version: v3.18.3
 
       - name: Push Helm chart to ghcr.io
+        env:
+          TAG: ${{ steps.version.outputs.version }}
         run: |
           # Strip leading 'v' to get a semver chart version (e.g. v0.2.0 → 0.2.0).
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
 
           # Stamp Chart.yaml with the release version so the chart and image
           # version stay in sync. The chart version and appVersion are always equal.
@@ -78,8 +95,16 @@ jobs:
 
           helm push "cyclopus-${VERSION}.tgz" "oci://${{ env.CHART_REGISTRY }}"
 
+      - name: Create and push tag
+        env:
+          TAG: ${{ steps.version.outputs.version }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.version }}
           files: cyclopus-*.tgz
           generate_release_notes: true
