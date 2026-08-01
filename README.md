@@ -191,7 +191,12 @@ flowchart TB
 - SSH access
 - Nested virtualization enabled (`/dev/kvm` present)
 
-**Install:**
+**One-line install (similar to Coolify):**
+```bash
+curl -fsSL https://get.cyclopus.dev | bash
+```
+
+**Manual install:**
 ```bash
 # Bootstrap k3s + gVisor + platform dependencies
 ./scripts/install.sh
@@ -203,6 +208,11 @@ helm install cyclopus ./charts/cyclopus \
 # First user creation auto-creates the organization
 # Visit the UI and create your account
 ```
+
+**TLS Certificates:**
+- Production Let's Encrypt certificates are issued automatically by default
+- Each unique hostname (e.g., `203-0-113-7.sslip.io`) has its own Let's Encrypt rate limit (50 certs/week)
+- For development/testing, you can switch to staging certificates with `--set config.kubernetes.certManagerClusterIssuer="letsencrypt-staging"`
 
 ## 💻 Development
 

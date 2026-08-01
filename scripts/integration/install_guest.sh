@@ -6,8 +6,14 @@ set -eu
 
 ROOT=${CYCLOPUS_INSTALL_ROOT:?CYCLOPUS_INSTALL_ROOT is required}
 EXPECTED_DISTRO=${CYCLOPUS_INSTALL_DISTRO:?CYCLOPUS_INSTALL_DISTRO is required}
-K3S_VERSION='v1.33.13+k3s1'
-HELM_VERSION=v3.18.3
+K3S_VERSION='v1.36.2+k3s1'
+HELM_VERSION='v3.21.3'
+KYVERNO_VERSION='v1.18.2'
+KYVERNO_CHART_VERSION='3.8.2'
+CERT_MANAGER_VERSION='v1.21.1'
+TRAEFIK_VERSION='41.1.0'
+KEDA_VERSION='2.20.2'
+KEDA_HTTP_ADDON_VERSION='0.15.0'
 PG_MAJOR=18
 DB_USER=cyclopus
 DB_NAME=cyclopus_install
@@ -19,6 +25,18 @@ step() { printf '\n==> install: %s\n' "$1"; }
 fail() { printf 'install: FAILED: %s\n' "$*" >&2; exit 1; }
 retry() { attempts=$1; shift; count=1; until "$@"; do [ "$count" -ge "$attempts" ] && return 1; count=$((count + 1)); sleep 3; done; }
 encryption_enabled() { sudo k3s secrets-encrypt status 2>&1 | grep -q '^Encryption Status: Enabled$'; }
+# helm_deployed: true only when the release exists AND is in 'deployed' state.
+# A 'failed'/'pending' release must NOT be skipped — uninstall it so a clean
+# install can proceed (helm status returns success even for failed releases).
+helm_deployed() {
+  _st=$(helm status "$1" -n "$2" -o json 2>/dev/null | grep -o '"status":"[^"]*"' | head -n1 | cut -d'"' -f4)
+  if [ "$_st" = "deployed" ]; then return 0; fi
+  if [ -n "$_st" ]; then
+    printf 'install: %s release is %s (not deployed) — uninstalling for clean retry\n' "$1" "$_st"
+    helm uninstall "$1" -n "$2" >/dev/null 2>&1 || true
+  fi
+  return 1
+}
 
 . /etc/os-release
 [ "$ID" = "$EXPECTED_DISTRO" ] || fail "expected $EXPECTED_DISTRO, observed $ID"
@@ -120,17 +138,54 @@ if ! command -v helm >/dev/null 2>&1; then
   sudo install -m 0755 "$tmp_dir/linux-${go_arch}/helm" /usr/local/bin/helm
 fi
 
-KYVERNO_VERSION=v1.14.2
-KYVERNO_CHART_VERSION=3.4.2
-
 export KUBECONFIG="$tmp_dir/kubeconfig"
 sudo install -m 0600 /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"
 sudo chown "$(id -u):$(id -g)" "$KUBECONFIG"
 
+step "enabling unprivileged low-port binding (net.ipv4.ip_unprivileged_port_start=0)"
+echo 'net.ipv4.ip_unprivileged_port_start=0' | sudo tee /etc/sysctl.d/99-cyclopus-lowports.conf >/dev/null
+sudo sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
+
+step "installing Traefik ingress controller v$TRAEFIK_VERSION (hostNetwork :80/:443)"
+helm repo add traefik https://traefik.github.io/charts >/dev/null 2>&1 || true
+helm repo update traefik >/dev/null 2>&1 || true
+if helm_deployed traefik kube-system; then
+  printf 'install: Traefik already installed, skipping\n'
+else
+  # hostNetwork binds host :80/:443 — required so Let's Encrypt HTTP-01 can reach
+  # the challenge (a NodePort is not reachable by the ACME server). No --wait: cold
+  # VM image pulls can exceed helm's timeout; the explicit poll below is truth.
+  helm install traefik traefik/traefik \
+    --version "$TRAEFIK_VERSION" \
+    --namespace kube-system \
+    --set deployment.kind=DaemonSet \
+    --set hostNetwork=true \
+    --set service.enabled=false \
+    --set updateStrategy.rollingUpdate.maxUnavailable=1 \
+    --set updateStrategy.rollingUpdate.maxSurge=0 \
+    --set ports.web.port=80 \
+    --set ports.web.hostPort=80 \
+    --set ports.websecure.port=443 \
+    --set ports.websecure.hostPort=443 \
+    --set resources.requests.cpu=50m \
+    --set resources.requests.memory=64Mi \
+    --set resources.limits.memory=128Mi \
+    --timeout 10m || fail "Traefik install failed"
+fi
+
+step "waiting for Traefik DaemonSet ready + host :80 (ACME HTTP-01 reachability)"
+_traefik_ready() {
+  nready=$(sudo k3s kubectl -n kube-system get ds traefik -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)
+  [ "${nready:-0}" -ge 1 ] 2>/dev/null || return 1
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:80/ 2>/dev/null || echo 000)
+  [ "$code" != "000" ]
+}
+retry 80 _traefik_ready || fail "Traefik DaemonSet not ready / not listening on host :80"
+
 step "installing Kyverno $KYVERNO_VERSION (required before Cyclopus — §7.1 fail-closed sequencing)"
 helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null 2>&1 || true
 helm repo update kyverno >/dev/null 2>&1 || true
-if helm status kyverno -n kyverno >/dev/null 2>&1; then
+if helm_deployed kyverno kyverno; then
   printf 'install: Kyverno already installed, skipping\n'
 else
   helm install kyverno kyverno/kyverno \
@@ -144,27 +199,144 @@ _kyverno_ready() {
     -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q '.'
 }
 retry 40 _kyverno_ready || fail "Kyverno webhook endpoint not ready"
-# Point the pod at the host's Postgres via the node IP.
+
+step "installing cert-manager $CERT_MANAGER_VERSION"
+helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
+helm repo update jetstack
+if ! helm_deployed cert-manager cert-manager; then
+  helm install cert-manager jetstack/cert-manager \
+    --version "$CERT_MANAGER_VERSION" \
+    --namespace cert-manager --create-namespace \
+    --set crds.enabled=true \
+    --wait --timeout 5m || fail "cert-manager install failed"
+else
+  printf 'install: cert-manager already installed, skipping\n'
+fi
+
+step "waiting for cert-manager webhook"
+_certmanager_ready() {
+  sudo k3s kubectl -n cert-manager get deployment cert-manager-webhook \
+    -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null | grep -q '^True$'
+}
+retry 40 _certmanager_ready || fail "cert-manager webhook did not become ready"
+
+step "creating Let's Encrypt production ClusterIssuer (matches Coolify behavior)"
+sudo k3s kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: test@cyclopus.local
+    privateKeySecretRef:
+      name: letsencrypt-production-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: test@cyclopus.local
+    privateKeySecretRef:
+      name: letsencrypt-staging-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+EOF
+
+step "installing KEDA v$KEDA_VERSION"
+helm repo add kedacore https://kedacore.github.io/charts 2>/dev/null || true
+helm repo update kedacore
+if ! helm_deployed keda keda; then
+  helm install keda kedacore/keda \
+    --version "$KEDA_VERSION" \
+    --namespace keda --create-namespace \
+    --wait --timeout 5m || fail "KEDA install failed"
+else
+  printf 'install: KEDA already installed, skipping\n'
+fi
+
+step "installing KEDA HTTP Add-on v$KEDA_HTTP_ADDON_VERSION"
+if ! helm_deployed keda-add-ons-http keda; then
+  helm install keda-add-ons-http kedacore/keda-add-ons-http \
+    --version "$KEDA_HTTP_ADDON_VERSION" \
+    --namespace keda \
+    --set operator.resources.requests.cpu=50m \
+    --set operator.resources.requests.memory=64Mi \
+    --set operator.resources.limits.memory=128Mi \
+    --set interceptor.resources.requests.cpu=50m \
+    --set interceptor.resources.requests.memory=64Mi \
+    --set interceptor.resources.limits.memory=128Mi \
+    --set scaler.resources.requests.cpu=50m \
+    --set scaler.resources.requests.memory=64Mi \
+    --set scaler.resources.limits.memory=128Mi \
+    --wait --timeout 10m || fail "KEDA HTTP Add-on install failed"
+else
+  printf 'install: KEDA HTTP Add-on already installed, skipping\n'
+fi
+
+# Point the pod at the host's Postgres via the node IP, over SSL (#5: sslmode=require).
 node_ip=$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)
-db_url="postgres://$DB_USER:$DB_PASSWORD@$node_ip:5432/$DB_NAME?sslmode=disable"
-sudo sed -i "s/^#\?listen_addresses.*/listen_addresses = '*'/" "/etc/postgresql/$PG_MAJOR/main/postgresql.conf" || true
-printf 'host %s %s %s/0 md5\n' "$DB_NAME" "$DB_USER" "$node_ip" | sudo tee -a "/etc/postgresql/$PG_MAJOR/main/pg_hba.conf" >/dev/null
+db_url="postgres://$DB_USER:$DB_PASSWORD@$node_ip:5432/$DB_NAME?sslmode=require"
+sudo sed -i "s/^#\?listen_addresses.*/listen_addresses = 'localhost,$node_ip'/" "/etc/postgresql/$PG_MAJOR/main/postgresql.conf" || true
+if ! sudo grep -q "^ssl = on" "/etc/postgresql/$PG_MAJOR/main/postgresql.conf"; then
+  printf "ssl = on\nssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'\nssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'\n" \
+    | sudo tee -a "/etc/postgresql/$PG_MAJOR/main/postgresql.conf" >/dev/null
+fi
+sudo usermod -aG ssl-cert postgres 2>/dev/null || true
+# Pods connect FROM the pod network (k3s default 10.42.0.0/16), not the node IP,
+# so the hba entry must allow the pod CIDR — over SSL with scram-sha-256.
+pod_cidr=$(sudo k3s kubectl cluster-info dump 2>/dev/null | grep -m1 -oE 'cluster-cidr=[0-9./]+' | cut -d= -f2)
+[ -n "$pod_cidr" ] || pod_cidr='10.42.0.0/16'
+if ! sudo grep -q "hostssl $DB_NAME $DB_USER $pod_cidr scram-sha-256" "/etc/postgresql/$PG_MAJOR/main/pg_hba.conf"; then
+  printf 'hostssl %s %s %s scram-sha-256\n' "$DB_NAME" "$DB_USER" "$pod_cidr" | sudo tee -a "/etc/postgresql/$PG_MAJOR/main/pg_hba.conf" >/dev/null
+fi
 sudo systemctl restart postgresql
 retry 20 sudo -u postgres pg_isready -q || fail "Postgres not ready after reconfigure"
 
+# #2/#6: secrets via a 0600 values file (umask), never in argv.
+values_file=$( (umask 0077; mktemp) )
+trap 'rm -f "$values_file"' EXIT HUP INT TERM
+cat > "$values_file" <<EOF
+image:
+  pullPolicy: Never
+controlPlane:
+  nodeSelector:
+    cyclopus.app/role: control-plane
+secrets:
+  databaseUrl: "${db_url}"
+  authTokenPepper: "install-test-pepper-value-32bytes!!"
+  authBootstrapSecret: "install-test-bootstrap-secret-32b!"
+config:
+  insecurePublicListeners: true
+  kubernetes:
+    previewHostnameSuffix: "test.cyclopus.local"
+    customDomainCnameTarget: "test.cyclopus.local"
+    certManagerClusterIssuer: "letsencrypt-production"
+  observability:
+    openobserveBaseUrl: "https://openobserve.test.local"
+    beszelBaseUrl: "https://beszel.test.local"
+ingress:
+  enabled: true
+  className: traefik
+  host: "cyclopus.test.local"
+  clusterIssuer: "letsencrypt-production"
+EOF
+
 helm upgrade --install "$RELEASE" "$ROOT/charts/cyclopus" \
   --namespace "$NAMESPACE" --create-namespace \
-  --set image.pullPolicy=Never \
-  --set "controlPlane.nodeSelector.cyclopus\.app/role=control-plane" \
-  --set secrets.databaseUrl="$db_url" \
-  --set secrets.authTokenPepper="install-test-pepper-value-32bytes!!" \
-  --set secrets.authBootstrapSecret="install-test-bootstrap-secret-32b!" \
-  --set config.insecurePublicListeners=true \
-  --set config.kubernetes.previewHostnameSuffix="test.cyclopus.local" \
-  --set config.kubernetes.customDomainCnameTarget="test.cyclopus.local" \
-  --set config.observability.openobserveBaseUrl="https://openobserve.test.local" \
-  --set config.observability.beszelBaseUrl="https://beszel.test.local" \
+  -f "$values_file" \
   --wait --timeout 5m || fail "helm install failed"
+rm -f "$values_file"
 
 step "asserting the API becomes ready"
 retry 30 sudo k3s kubectl -n "$NAMESPACE" rollout status "deploy/$RELEASE" --timeout=30s || fail "Cyclopus API did not become ready"
@@ -173,6 +345,11 @@ pod=$(sudo k3s kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=cyclop
 sudo k3s kubectl -n "$NAMESPACE" exec "$pod" -- wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 \
   || sudo k3s kubectl -n "$NAMESPACE" get "$pod" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' | grep -q True \
   || fail "API readiness probe not satisfied"
+
+step "asserting the control-plane console Ingress exists"
+sudo k3s kubectl -n "$NAMESPACE" get ingress "$RELEASE-console" >/dev/null 2>&1 || fail "console Ingress missing"
+issuer=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$RELEASE-console" -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}')
+[ "$issuer" = "letsencrypt-production" ] || fail "console Ingress cluster-issuer is '$issuer', expected letsencrypt-production"
 
 step "final invariants: gvisor RuntimeClass + secrets encryption"
 sudo k3s kubectl get runtimeclass gvisor >/dev/null 2>&1 || fail "gvisor RuntimeClass missing"
