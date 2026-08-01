@@ -1,6 +1,3 @@
-.bmad-loop/runs/
-.bmad-loop/cache/
-.bmad-loop/policy.toml
 .workflow/
 /.agents
 /.claude
@@ -12,3 +9,4 @@
 /_bmad-output
 cyclopus
 cyclopus-demo
+/.codegraph
