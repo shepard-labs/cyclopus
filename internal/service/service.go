@@ -390,7 +390,7 @@ type AppInput struct {
 }
 
 func DefaultAppInput() AppInput {
-	return AppInput{ContainerPort: 8080, HealthCheckPath: "/", ScalingMode: "hpa", MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70, KEDAHTTPTargetPendingRequests: 100, CPURequestMillicores: 100, CPULimitMillicores: 1000, MemoryRequestMiB: 128, MemoryLimitMiB: 512, PreviewsEnabled: true, MaxPreviewEnvironments: 10, PreviewIdleTTLHours: 168, DeployTimeoutSeconds: 600, ReleaseRetentionCount: 5}
+	return AppInput{ContainerPort: 8080, HealthCheckPath: "/", ScalingMode: "hpa", MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70, KEDAHTTPTargetPendingRequests: 100, CPURequestMillicores: 100, CPULimitMillicores: 1000, MemoryRequestMiB: 128, MemoryLimitMiB: 512, PreviewsEnabled: false, MaxPreviewEnvironments: 10, PreviewIdleTTLHours: 168, DeployTimeoutSeconds: 600, ReleaseRetentionCount: 5}
 }
 
 func normalizeAppInput(input AppInput) AppInput {
@@ -450,9 +450,10 @@ func applyAppCreateDefaults(input AppInput) AppInput {
 	if input.ReleaseRetentionCount == 0 {
 		input.ReleaseRetentionCount = d.ReleaseRetentionCount
 	}
-	// PreviewsEnabled has no CHECK constraint; its platform default is true.
+	// PreviewsEnabled has no CHECK constraint; its platform default is off.
 	// On the minimal create path callers don't express a bool, so adopt the
-	// default. The settings form always sends the field explicitly afterwards.
+	// default. Previews are turned on later via the settings form, which always
+	// sends the field explicitly.
 	input.PreviewsEnabled = d.PreviewsEnabled
 	return input
 }

@@ -308,7 +308,7 @@ CREATE TABLE apps (
     cpu_limit_millicores integer NOT NULL DEFAULT 1000 CHECK (cpu_limit_millicores > 0),
     memory_request_mib integer NOT NULL DEFAULT 128 CHECK (memory_request_mib > 0),
     memory_limit_mib integer NOT NULL DEFAULT 512 CHECK (memory_limit_mib > 0),
-    previews_enabled boolean NOT NULL DEFAULT true,
+    previews_enabled boolean NOT NULL DEFAULT false,
     max_preview_environments integer NOT NULL DEFAULT 10 CHECK (max_preview_environments >= 0),
     preview_idle_ttl_hours integer NOT NULL DEFAULT 168 CHECK (preview_idle_ttl_hours > 0),
     deploy_timeout_seconds integer NOT NULL DEFAULT 600 CHECK (deploy_timeout_seconds > 0),
