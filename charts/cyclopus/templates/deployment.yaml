@@ -96,6 +96,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: HTTP_ADDRESS } }
             - name: CYCLOPUS_GRPC_ADDRESS
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: GRPC_ADDRESS } }
+            - name: CYCLOPUS_INSECURE_PUBLIC_LISTENERS
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: INSECURE_PUBLIC_LISTENERS } }
             - name: CYCLOPUS_DATABASE_MIGRATION_LOCK_TIMEOUT
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: DATABASE_MIGRATION_LOCK_TIMEOUT } }
             - name: CYCLOPUS_WORKER_SCAN_INTERVAL

@@ -48,7 +48,7 @@ type NetworkPolicyProvisioner struct {
 }
 
 // defaultEgressExceptCIDRs are the baseline private/link-local/loopback ranges
-// carved out of the default-deny-egress 0.0.0.0/0 rule. Per spec §7.2 these are
+// carved out of the default-deny-egress 0.0.0.0/0 rule. These are
 // load-bearing (169.254.0.0/16 covers cloud metadata; 127.0.0.0/8 loopback) and
 // must never be dropped. Operator-supplied node public IP CIDRs are appended to
 // this baseline via mergeEgressExceptCIDRs.

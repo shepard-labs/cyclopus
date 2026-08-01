@@ -1,7 +1,7 @@
 // Package observability holds the bounded, server-side proxy clients Cyclopus
 // uses to read telemetry backends. OpenObserve (logs/traces) is queried with a
 // mandatory tenant filter that Cyclopus constructs from validated IDs, so the
-// caller can never inject or widen scope (spec 8, 8.1). Beszel exposes only a
+// caller can never inject or widen scope. Beszel exposes only a
 // fixed allowlist of operator/install-level system metrics with no tenant
 // parameters (Phase 4 design note: Beszel is operator-level, not a per-tenant
 // proxy).

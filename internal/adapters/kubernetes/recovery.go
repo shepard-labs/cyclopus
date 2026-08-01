@@ -55,7 +55,7 @@ type Config struct {
 	// populated by cert-manager.
 	CertManagerClusterIssuer string
 	// NetworkEgressExcludedCIDRs are operator-supplied CIDRs (e.g. node public
-	// IPs) appended to the default-deny-egress policy Except list (spec §7.2).
+	// IPs) appended to the default-deny-egress policy Except list.
 	NetworkEgressExcludedCIDRs []string
 	// H2: KEDA HTTP add-on interceptor routing. The Ingress for keda_http apps
 	// must route traffic to the interceptor proxy so scale-from-zero works.

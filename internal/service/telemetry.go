@@ -175,7 +175,7 @@ func (s *Service) GetApplicationTrace(ctx context.Context, actor ActorContext, i
 }
 
 // GetOperatorMetrics returns install-level system metrics. Any authenticated
-// org member may read them (no RBAC in v1, per spec 9.2), and they carry no
+// org member may read them (no RBAC in v1), and they carry no
 // tenant scope by construction.
 func (s *Service) GetOperatorMetrics(ctx context.Context, actor ActorContext) ([]observability.OperatorMetric, error) {
 	if err := validateActor(actor); err != nil {
