@@ -104,12 +104,11 @@ func (c *Client) CreateProject(ctx context.Context, token, orgID, idemKey, name,
 	var resp struct {
 		Project Project `json:"project"`
 	}
-	body := map[string]any{
-		"name":            name,
-		"slug":            slug,
-		"idempotency_key": idemKey,
-	}
-	err := c.postJSON(ctx, token, "/v1/organizations/"+orgID+"/projects", body, &resp)
+	// HTTP mapping is `body: "project"` — the JSON body is the Project object
+	// only; idempotency_key travels as a query parameter (§ cyclopus.proto).
+	body := map[string]any{"name": name, "slug": slug}
+	path := "/v1/organizations/" + orgID + "/projects?" + url.Values{"idempotency_key": {idemKey}}.Encode()
+	err := c.postJSON(ctx, token, path, body, &resp)
 	return &resp.Project, err
 }
 
@@ -125,14 +124,11 @@ func (c *Client) UpdateProject(ctx context.Context, token, idemKey, projectID, n
 	var resp struct {
 		Project Project `json:"project"`
 	}
-	body := map[string]any{
-		"id":              projectID,
-		"name":            name,
-		"slug":            slug,
-		"idempotency_key": idemKey,
-		"update_mask":     map[string]any{"paths": []string{"name", "slug"}},
-	}
-	err := c.patchJSON(ctx, token, "/v1/projects/"+projectID, body, &resp)
+	// `body: "project"` — body is the Project; id, idempotency_key and
+	// update_mask are query parameters.
+	body := map[string]any{"id": projectID, "name": name, "slug": slug}
+	q := url.Values{"idempotency_key": {idemKey}, "update_mask": {"name,slug"}}
+	err := c.patchJSON(ctx, token, "/v1/projects/"+projectID+"?"+q.Encode(), body, &resp)
 	return &resp.Project, err
 }
 
@@ -164,15 +160,40 @@ func (c *Client) CreateApplication(ctx context.Context, token, projectID, idemKe
 	var resp struct {
 		Application Application `json:"application"`
 	}
-	body := map[string]any{
-		"name":              app.Name,
-		"slug":              app.Slug,
-		"hostname_label":    app.HostnameLabel,
-		"container_port":    app.ContainerPort,
-		"health_check_path": app.HealthCheckPath,
-		"idempotency_key":   idemKey,
+	// `body: "application"` — body is the Application object only. The service
+	// writes every field verbatim (no server-side defaults), so the create must
+	// carry spec defaults (§5) or the DB CHECK constraints reject zero values.
+	hp := app.HealthCheckPath
+	if hp == "" {
+		hp = "/"
 	}
-	err := c.postJSON(ctx, token, "/v1/projects/"+projectID+"/applications", body, &resp)
+	cp := app.ContainerPort
+	if cp == 0 {
+		cp = 8080
+	}
+	body := map[string]any{
+		"name":                     app.Name,
+		"slug":                     app.Slug,
+		"hostname_label":           app.HostnameLabel,
+		"container_port":           cp,
+		"health_check_path":        hp,
+		"scaling_mode":             "SCALING_MODE_HPA",
+		"min_replicas":             1,
+		"max_replicas":             3,
+		"hpa_target_cpu_percent":   70,
+		"cpu_request_millicores":   100,
+		"cpu_limit_millicores":     1000,
+		"memory_request_mib":       128,
+		"memory_limit_mib":         512,
+		"previews_enabled":         true,
+		"max_preview_environments": 10,
+		"preview_idle_ttl_hours":   168,
+		"deploy_timeout_seconds":   600,
+		"release_retention_count":  5,
+		"runtime_class":            "RUNTIME_CLASS_GVISOR",
+	}
+	path := "/v1/projects/" + projectID + "/applications?" + url.Values{"idempotency_key": {idemKey}}.Encode()
+	err := c.postJSON(ctx, token, path, body, &resp)
 	return &resp.Application, err
 }
 
@@ -188,10 +209,11 @@ func (c *Client) UpdateApplication(ctx context.Context, token, idemKey, appID st
 	var resp struct {
 		Application Application `json:"application"`
 	}
+	// `body: "application"` — body is the Application object; id, idempotency_key
+	// and update_mask are query parameters.
 	fields["id"] = appID
-	fields["idempotency_key"] = idemKey
-	fields["update_mask"] = map[string]any{"paths": paths}
-	err := c.patchJSON(ctx, token, "/v1/applications/"+appID, fields, &resp)
+	q := url.Values{"idempotency_key": {idemKey}, "update_mask": {strings.Join(paths, ",")}}
+	err := c.patchJSON(ctx, token, "/v1/applications/"+appID+"?"+q.Encode(), fields, &resp)
 	return &resp.Application, err
 }
 
@@ -316,10 +338,11 @@ func (c *Client) CreateDomain(ctx context.Context, token, idemKey, appID, hostna
 	var resp struct {
 		Domain Domain `json:"domain"`
 	}
-	err := c.postJSON(ctx, token, "/v1/applications/"+appID+"/domains", map[string]any{
+	// `body: "domain"` — body is the Domain object only.
+	path := "/v1/applications/" + appID + "/domains?" + url.Values{"idempotency_key": {idemKey}}.Encode()
+	err := c.postJSON(ctx, token, path, map[string]any{
 		"hostname":            hostname,
 		"verification_method": method,
-		"idempotency_key":     idemKey,
 	}, &resp)
 	return &resp.Domain, err
 }
@@ -353,12 +376,13 @@ func (c *Client) CreateGitConnection(ctx context.Context, token, idemKey, orgID 
 	var resp struct {
 		GitConnection GitConnection `json:"gitConnection"`
 	}
-	err := c.postJSON(ctx, token, "/v1/organizations/"+orgID+"/git-connections", map[string]any{
+	// `body: "git_connection"` — body is the GitConnection object only.
+	path := "/v1/organizations/" + orgID + "/git-connections?" + url.Values{"idempotency_key": {idemKey}}.Encode()
+	err := c.postJSON(ctx, token, path, map[string]any{
 		"repo_full_name":     gc.RepoFullName,
 		"default_branch":     gc.DefaultBranch,
 		"installation_id":    gc.InstallationID,
 		"webhook_secret_ref": gc.WebhookSecretRef,
-		"idempotency_key":    idemKey,
 	}, &resp)
 	return &resp.GitConnection, err
 }
@@ -382,11 +406,12 @@ func (c *Client) CreateRegistry(ctx context.Context, token, idemKey, orgID strin
 	var resp struct {
 		Registry Registry `json:"registry"`
 	}
-	err := c.postJSON(ctx, token, "/v1/organizations/"+orgID+"/registries", map[string]any{
+	// `body: "registry"` — body is the Registry object only.
+	path := "/v1/organizations/" + orgID + "/registries?" + url.Values{"idempotency_key": {idemKey}}.Encode()
+	err := c.postJSON(ctx, token, path, map[string]any{
 		"provider":              reg.Provider,
 		"registry_url":          reg.RegistryURL,
 		"credential_secret_ref": reg.CredentialSecretRef,
-		"idempotency_key":       idemKey,
 	}, &resp)
 	return &resp.Registry, err
 }
@@ -410,11 +435,12 @@ func (c *Client) CreateWebhook(ctx context.Context, token, idemKey, orgID string
 	var resp struct {
 		Webhook Webhook `json:"webhook"`
 	}
-	err := c.postJSON(ctx, token, "/v1/organizations/"+orgID+"/webhooks", map[string]any{
-		"target_url":      wh.TargetURL,
-		"events":          wh.Events,
-		"secret_ref":      wh.SecretRef,
-		"idempotency_key": idemKey,
+	// `body: "webhook"` — body is the WebhookEndpoint object only.
+	path := "/v1/organizations/" + orgID + "/webhooks?" + url.Values{"idempotency_key": {idemKey}}.Encode()
+	err := c.postJSON(ctx, token, path, map[string]any{
+		"target_url": wh.TargetURL,
+		"events":     wh.Events,
+		"secret_ref": wh.SecretRef,
 	}, &resp)
 	return &resp.Webhook, err
 }
