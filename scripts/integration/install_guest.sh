@@ -59,11 +59,19 @@ retry 40 sudo k3s kubectl get --raw=/readyz >/dev/null || fail "k3s API not read
 sudo k3s kubectl -n kube-system get helmchart traefik >/dev/null 2>&1 && fail "bundled Traefik exists"
 retry 10 encryption_enabled || fail "secrets encryption is not enabled"
 
+# Single-node install: remove the control-plane taint so Kyverno and other
+# platform components can schedule on this node (same node runs everything).
+sudo k3s kubectl taint nodes --all "cyclopus.app/role-" 2>/dev/null || true
+
 step "installing gVisor + registering RuntimeClasses"
 sudo -E sh "$ROOT/infra/bootstrap/install_gvisor.sh" || fail "gVisor install failed"
 retry 20 sudo k3s kubectl get --raw=/readyz >/dev/null || fail "k3s API not ready after gVisor"
 sudo -E env KUBECTL='sudo k3s kubectl' sh "$ROOT/infra/bootstrap/register_runtimeclass.sh" || fail "RuntimeClass registration failed"
 sudo k3s kubectl get runtimeclass gvisor >/dev/null 2>&1 || fail "gvisor RuntimeClass missing"
+
+step "installing docker (test-only build dependency)"
+retry 3 sudo apt-get install -y docker.io || fail "docker.io install failed"
+sudo systemctl enable --now docker
 
 step "installing checksum-verified latest Go 1.26 stable and building the Cyclopus image"
 case "$(uname -m)" in aarch64 | arm64) go_arch=arm64 ;; x86_64 | amd64) go_arch=amd64 ;; *) fail "unsupported arch" ;; esac
@@ -92,8 +100,8 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/cyclopus"]
 DOCKER
 if command -v docker >/dev/null 2>&1; then
-  ( cd "$tmp_dir" && docker build -t ghcr.io/cyclopus/cyclopus:0.1.0 . ) || fail "image build failed"
-  docker save ghcr.io/cyclopus/cyclopus:0.1.0 | sudo k3s ctr images import - || fail "image import failed"
+  ( cd "$tmp_dir" && sudo docker build -t ghcr.io/cyclopus/cyclopus:0.1.0 . ) || fail "image build failed"
+  sudo docker save ghcr.io/cyclopus/cyclopus:0.1.0 | sudo k3s ctr images import - || fail "image import failed"
 else
   # No docker: import the distroless base then it is not trivially layerable via
   # ctr alone. Fall back to a nerdctl build if present, else skip image build and
@@ -112,11 +120,30 @@ if ! command -v helm >/dev/null 2>&1; then
   sudo install -m 0755 "$tmp_dir/linux-${go_arch}/helm" /usr/local/bin/helm
 fi
 
+KYVERNO_VERSION=v1.14.2
+KYVERNO_CHART_VERSION=3.4.2
+
 export KUBECONFIG="$tmp_dir/kubeconfig"
 sudo install -m 0600 /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"
 sudo chown "$(id -u):$(id -g)" "$KUBECONFIG"
 
-db_url="postgres://$DB_USER:$DB_PASSWORD@10.0.2.2:5432/$DB_NAME?sslmode=disable"
+step "installing Kyverno $KYVERNO_VERSION (required before Cyclopus — §7.1 fail-closed sequencing)"
+helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null 2>&1 || true
+helm repo update kyverno >/dev/null 2>&1 || true
+if helm status kyverno -n kyverno >/dev/null 2>&1; then
+  printf 'install: Kyverno already installed, skipping\n'
+else
+  helm install kyverno kyverno/kyverno \
+    --version "$KYVERNO_CHART_VERSION" \
+    --namespace kyverno --create-namespace \
+    --wait --timeout 5m || fail "Kyverno install failed"
+fi
+# Wait for Kyverno admission webhook to have endpoints before installing Cyclopus.
+_kyverno_ready() {
+  sudo k3s kubectl -n kyverno get endpoints kyverno-svc \
+    -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q '.'
+}
+retry 40 _kyverno_ready || fail "Kyverno webhook endpoint not ready"
 # Point the pod at the host's Postgres via the node IP.
 node_ip=$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)
 db_url="postgres://$DB_USER:$DB_PASSWORD@$node_ip:5432/$DB_NAME?sslmode=disable"
@@ -125,12 +152,18 @@ printf 'host %s %s %s/0 md5\n' "$DB_NAME" "$DB_USER" "$node_ip" | sudo tee -a "/
 sudo systemctl restart postgresql
 retry 20 sudo -u postgres pg_isready -q || fail "Postgres not ready after reconfigure"
 
-helm install "$RELEASE" "$ROOT/charts/cyclopus" \
+helm upgrade --install "$RELEASE" "$ROOT/charts/cyclopus" \
   --namespace "$NAMESPACE" --create-namespace \
   --set image.pullPolicy=Never \
   --set "controlPlane.nodeSelector.cyclopus\.app/role=control-plane" \
   --set secrets.databaseUrl="$db_url" \
   --set secrets.authTokenPepper="install-test-pepper-value-32bytes!!" \
+  --set secrets.authBootstrapSecret="install-test-bootstrap-secret-32b!" \
+  --set config.insecurePublicListeners=true \
+  --set config.kubernetes.previewHostnameSuffix="test.cyclopus.local" \
+  --set config.kubernetes.customDomainCnameTarget="test.cyclopus.local" \
+  --set config.observability.openobserveBaseUrl="https://openobserve.test.local" \
+  --set config.observability.beszelBaseUrl="https://beszel.test.local" \
   --wait --timeout 5m || fail "helm install failed"
 
 step "asserting the API becomes ready"

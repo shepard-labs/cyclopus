@@ -74,8 +74,8 @@ observed=$(k3s --version | sed -n '1s/^k3s version \([^ ]*\).*/\1/p')
 
 log "asserting hardening invariants"
 $SUDO k3s kubectl -n kube-system get helmchart traefik >/dev/null 2>&1 && fail "bundled Traefik exists despite --disable=traefik"
-retry 10 sh -c '"$0" k3s secrets-encrypt status 2>&1 | grep -q "^Encryption Status: Enabled$"' "$SUDO" \
-  || fail "k3s secrets encryption is not enabled"
+_enc_ok() { $SUDO k3s secrets-encrypt status 2>&1 | grep -q '^Encryption Status: Enabled$'; }
+retry 40 _enc_ok || fail "k3s secrets encryption is not enabled"
 
 log "exporting node token and kubeconfig hint"
 $SUDO cat /var/lib/rancher/k3s/server/node-token > "$tmp_dir/node-token" 2>/dev/null || true
