@@ -1,8 +1,15 @@
 package server
 
-import cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
+import (
+	"net/http"
+
+	cyclopusv1 "github.com/cyclopus-dev/cyclopus/gen/go/cyclopus/v1"
+)
 
 type Services struct {
+	// UIHandler, when non-nil, is mounted at / while the grpc-gateway is
+	// restricted to /v1/*. When nil the gateway handles all paths (old behaviour).
+	UIHandler        http.Handler
 	Authentication   cyclopusv1.AuthenticationServiceServer
 	Organization     cyclopusv1.OrganizationServiceServer
 	Project          cyclopusv1.ProjectServiceServer

@@ -21,6 +21,8 @@ import (
 	"github.com/cyclopus-dev/cyclopus/internal/server"
 	"github.com/cyclopus-dev/cyclopus/internal/service"
 	"github.com/cyclopus-dev/cyclopus/internal/store"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/uihandler"
 	webhookdelivery "github.com/cyclopus-dev/cyclopus/internal/webhook"
 	"github.com/cyclopus-dev/cyclopus/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -86,6 +88,8 @@ func run(args, environ []string) error {
 	services.Authenticator = authenticator
 	services.RateLimiter = server.NewAuthRateLimiter(cfg.Auth.RateLimitPerMinute)
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
+	uiClient := ui.NewClient(cfg.HTTP.Address)
+	services.UIHandler = uihandler.New(uiClient)
 	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger))
 	if err != nil {
 		return err

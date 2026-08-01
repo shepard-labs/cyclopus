@@ -1,0 +1,72 @@
+package settings
+
+import (
+	"fmt"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ Webhooks(webhooks []ui.Webhook, user ui.User, org ui.Organization, flash *ui.FlashMessage, errMsg string) {
+	@components.Page("Webhooks", user, org, flash, "/settings/webhooks", webhooksContent(webhooks, errMsg))
+}
+
+templ webhooksContent(webhooks []ui.Webhook, errMsg string) {
+	<div class="space-y-6 max-w-3xl">
+		<h1 class="text-xl font-semibold">Webhooks</h1>
+		<div class="card space-y-4">
+			<h2 class="text-sm font-semibold text-zinc-300">Add endpoint</h2>
+			if errMsg != "" {
+				<div class="p-3 bg-red-500/20 border border-red-500/50 rounded text-sm text-red-400">{ errMsg }</div>
+			}
+			<form method="POST" action="/settings/webhooks" class="space-y-4">
+				<div class="input-group">
+					<label for="wh-url">Target URL</label>
+					<input type="url" id="wh-url" name="target_url" required placeholder="https://example.com/hooks/cyclopus"/>
+				</div>
+				<div class="input-group">
+					<label for="wh-secret">Signing secret ref <span class="text-zinc-500 font-normal">(k8s-secret://…)</span></label>
+					<input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value"/>
+				</div>
+				<div class="input-group">
+					<label for="wh-events">Events <span class="text-zinc-500 font-normal">(comma-separated, empty = all)</span></label>
+					<input type="text" id="wh-events" name="events" placeholder="deploy.succeeded,deploy.failed"/>
+				</div>
+				<button type="submit" class="btn btn-primary">Add webhook</button>
+			</form>
+		</div>
+		if len(webhooks) > 0 {
+			<div class="card">
+				<table class="table-auto w-full text-sm">
+					<thead>
+						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<th class="text-left py-2">URL</th>
+							<th class="text-left py-2">Status</th>
+							<th class="text-left py-2">Failures</th>
+							<th class="text-right py-2">Actions</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-zinc-800">
+						for _, w := range webhooks {
+							<tr class="text-zinc-300">
+								<td class="py-2 text-xs font-mono text-zinc-400 truncate max-w-xs">{ w.TargetURL }</td>
+								<td class="py-2">
+									if w.Enabled {
+										<span class="badge badge-green">Enabled</span>
+									} else {
+										<span class="badge badge-red">Disabled</span>
+									}
+								</td>
+								<td class="py-2 text-xs text-zinc-400">{ fmt.Sprintf("%d", w.ConsecutiveFailures) }</td>
+								<td class="py-2 text-right">
+									<form method="POST" action={ templ.SafeURL("/settings/webhooks/" + w.ID + "/delete") } onsubmit="return confirm('Delete this webhook?')">
+										<button type="submit" class="btn btn-danger btn-sm">Delete</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
+}

@@ -202,7 +202,13 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 	api = requestBodyLimitHTTPMiddleware(maxBodyBytes, services.RequestBodyBytes, api)
 	api = readinessHTTPMiddleware(readiness, api)
 	api = clientContextHTTPMiddleware(api)
-	router.Mount("/", api)
+	if services.UIHandler != nil {
+		// UI is mounted at / ; API gateway only handles /v1/* paths.
+		router.Handle("/v1/*", api)
+		router.Mount("/", services.UIHandler)
+	} else {
+		router.Mount("/", api)
+	}
 	return router, nil
 }
 

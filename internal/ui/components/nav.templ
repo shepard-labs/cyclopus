@@ -1,0 +1,125 @@
+package components
+
+import "github.com/cyclopus-dev/cyclopus/internal/ui"
+
+templ Sidebar(org ui.Organization, user ui.User, currentPath string) {
+	<nav class="sidebar">
+		<div class="p-4 border-b border-zinc-800">
+			<div class="flex items-center gap-2 mb-1">
+				<svg class="w-6 h-6 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<circle cx="12" cy="12" r="10"></circle>
+					<line x1="12" y1="8" x2="12" y2="12"></line>
+					<line x1="12" y1="16" x2="12.01" y2="16"></line>
+				</svg>
+				<span class="font-semibold text-zinc-100">Cyclopus</span>
+			</div>
+			<div class="text-xs text-zinc-500 truncate pl-8">{ org.Name }</div>
+		</div>
+		<div class="flex-1 overflow-y-auto p-2 space-y-1">
+			<a
+				href="/projects"
+				class={ sidebarItemClass(currentPath, "/projects") }
+			>
+				@iconGrid()
+				Projects
+			</a>
+			<div class="pt-4 pb-1 px-3">
+				<span class="text-xs font-medium text-zinc-600 uppercase tracking-wide">Settings</span>
+			</div>
+			<a href="/settings/git-connections" class={ sidebarItemClass(currentPath, "/settings/git-connections") }>
+				@iconGit()
+				Git Connections
+			</a>
+			<a href="/settings/registries" class={ sidebarItemClass(currentPath, "/settings/registries") }>
+				@iconBox()
+				Registries
+			</a>
+			<a href="/settings/webhooks" class={ sidebarItemClass(currentPath, "/settings/webhooks") }>
+				@iconWebhook()
+				Webhooks
+			</a>
+			<a href="/settings/tokens" class={ sidebarItemClass(currentPath, "/settings/tokens") }>
+				@iconKey()
+				API Tokens
+			</a>
+			<a href="/settings/audit" class={ sidebarItemClass(currentPath, "/settings/audit") }>
+				@iconList()
+				Audit Log
+			</a>
+			<div class="pt-4 pb-1 px-3">
+				<span class="text-xs font-medium text-zinc-600 uppercase tracking-wide">Admin</span>
+			</div>
+			<a href="/admin/reconcile" class={ sidebarItemClass(currentPath, "/admin/reconcile") }>
+				@iconRefresh()
+				Reconcile
+			</a>
+		</div>
+		<div class="p-2 border-t border-zinc-800">
+			<div class="sidebar-item text-zinc-500 cursor-default">
+				@iconUser()
+				<span class="truncate text-xs">{ user.Email }</span>
+			</div>
+		</div>
+	</nav>
+}
+
+func sidebarItemClass(currentPath, prefix string) string {
+	base := "sidebar-item"
+	if len(currentPath) >= len(prefix) && currentPath[:len(prefix)] == prefix {
+		return base + " active"
+	}
+	return base
+}
+
+templ iconGrid() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect>
+		<rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect>
+	</svg>
+}
+
+templ iconGit() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle>
+		<path d="M6 9v6"></path><path d="M18 9a9 9 0 0 0-9 9"></path>
+	</svg>
+}
+
+templ iconBox() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+	</svg>
+}
+
+templ iconWebhook() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<path d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+	</svg>
+}
+
+templ iconKey() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<path d="M15 7a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"></path>
+		<path d="M2 17l4-4 2 2 3-3 2 2a10 10 0 0 0 7-10"></path>
+	</svg>
+}
+
+templ iconList() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line>
+		<line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>
+	</svg>
+}
+
+templ iconRefresh() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline>
+		<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+	</svg>
+}
+
+templ iconUser() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>
+	</svg>
+}

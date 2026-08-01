@@ -1,0 +1,749 @@
+package uihandler
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/a-h/templ"
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/pages"
+	adminpages "github.com/cyclopus-dev/cyclopus/internal/ui/pages/admin"
+	settingspages "github.com/cyclopus-dev/cyclopus/internal/ui/pages/settings"
+)
+
+// Handler is the chi router serving all Cyclopus UI routes.
+type Handler struct {
+	client *ui.Client
+}
+
+// New constructs the UI http.Handler. The client must point at the same
+// process's grpc-gateway listener (loopback) so every UI action is rooted
+// in the defined REST API.
+func New(client *ui.Client) http.Handler {
+	h := &Handler{client: client}
+	r := chi.NewRouter()
+	r.Use(chimiddleware.Recoverer)
+
+	// Static assets (htmx, app.css) — embed.FS served at /static/*
+	r.Handle("/static/*", ui.StaticHandler())
+
+	// Public routes — no session required
+	r.Get("/login", h.getLogin)
+	r.Post("/login", h.postLogin)
+	r.Get("/bootstrap", h.getBootstrap)
+	r.Post("/bootstrap", h.postBootstrap)
+	r.Post("/logout", h.postLogout)
+
+	// Protected routes — authMiddleware redirects to /login if no session
+	r.Group(func(r chi.Router) {
+		r.Use(ui.AuthMiddleware)
+		r.Get("/", h.getRoot)
+
+		// Projects
+		r.Get("/projects", h.getProjects)
+		r.Post("/projects", h.postProject)
+		r.Get("/projects/{projectID}", h.getProject)
+		r.Post("/projects/{projectID}/apps", h.postApp)
+
+		// Apps
+		r.Get("/apps/{appID}", h.getApp)
+		r.Get("/apps/{appID}/settings", h.getAppSettings)
+		r.Post("/apps/{appID}/settings", h.postAppSettings)
+		r.Get("/apps/{appID}/logs", h.getLogs)
+
+		// Environments
+		r.Get("/environments/{envID}", h.getEnvironment)
+		r.Post("/environments/{envID}/rollback", h.postRollback)
+		r.Get("/environments/{envID}/status-fragment", h.getEnvStatusFragment)
+
+		// Settings
+		r.Get("/settings/git-connections", h.getGitConnections)
+		r.Post("/settings/git-connections", h.postGitConnection)
+		r.Post("/settings/git-connections/{id}/delete", h.deleteGitConnection)
+
+		r.Get("/settings/registries", h.getRegistries)
+		r.Post("/settings/registries", h.postRegistry)
+		r.Post("/settings/registries/{id}/delete", h.deleteRegistry)
+
+		r.Get("/settings/webhooks", h.getWebhooks)
+		r.Post("/settings/webhooks", h.postWebhook)
+		r.Post("/settings/webhooks/{id}/delete", h.deleteWebhook)
+
+		r.Get("/settings/tokens", h.getTokens)
+		r.Post("/settings/tokens", h.postToken)
+		r.Post("/settings/tokens/{id}/revoke", h.revokeToken)
+
+		r.Get("/settings/audit", h.getAudit)
+
+		// Admin
+		r.Get("/admin/reconcile", h.getReconcile)
+		r.Post("/admin/reconcile", h.postReconcile)
+	})
+
+	return r
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+// pageCtx fetches the current user and their organization from the API.
+// Every protected page calls this to populate the layout.
+func (h *Handler) pageCtx(ctx context.Context, token string) (ui.User, ui.Organization, error) {
+	user, err := h.client.GetCurrentUser(ctx, token)
+	if err != nil {
+		return ui.User{}, ui.Organization{}, err
+	}
+	org, err := h.client.GetOrganization(ctx, token, user.OrganizationID)
+	if err != nil {
+		return ui.User{}, ui.Organization{}, err
+	}
+	return *user, *org, nil
+}
+
+// handleErr handles API errors: 401 clears the cookie and redirects to /login,
+// everything else returns a plain 500.
+func (h *Handler) handleErr(w http.ResponseWriter, r *http.Request, err error) {
+	if ui.IsUnauthorized(err) {
+		ui.ClearSession(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	http.Error(w, "Error: "+err.Error(), http.StatusInternalServerError)
+}
+
+// newIdemKey generates a random idempotency key for each mutating request.
+func newIdemKey() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// flashFromQuery reads ?flash=<kind>&msg=<text> from the request URL.
+func flashFromQuery(r *http.Request) *ui.FlashMessage {
+	kind := r.URL.Query().Get("flash")
+	msg := r.URL.Query().Get("msg")
+	if kind == "" || msg == "" {
+		return nil
+	}
+	return &ui.FlashMessage{Kind: kind, Message: msg}
+}
+
+// redirectWithFlash appends flash query params and redirects.
+func redirectWithFlash(w http.ResponseWriter, r *http.Request, path, kind, msg string) {
+	v := url.Values{}
+	v.Set("flash", kind)
+	v.Set("msg", msg)
+	http.Redirect(w, r, path+"?"+v.Encode(), http.StatusSeeOther)
+}
+
+// render writes Content-Type and renders a templ component.
+// http.ResponseWriter satisfies io.Writer so component.Render accepts it.
+func render(w http.ResponseWriter, r *http.Request, component templ.Component) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := component.Render(r.Context(), w); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// ── Auth handlers ─────────────────────────────────────────────────────────────
+
+func (h *Handler) getLogin(w http.ResponseWriter, r *http.Request) {
+	if _, ok := ui.GetSession(r); ok {
+		http.Redirect(w, r, "/projects", http.StatusSeeOther)
+		return
+	}
+	render(w, r, pages.Login(""))
+}
+
+func (h *Handler) postLogin(w http.ResponseWriter, r *http.Request) {
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+	sess, err := h.client.Login(r.Context(), email, password)
+	if err != nil {
+		render(w, r, pages.Login("Invalid email or password."))
+		return
+	}
+	ui.SetSession(w, sess.AccessToken, sess.ExpiresAt)
+	http.Redirect(w, r, "/projects", http.StatusSeeOther)
+}
+
+func (h *Handler) getBootstrap(w http.ResponseWriter, r *http.Request) {
+	if _, ok := ui.GetSession(r); ok {
+		http.Redirect(w, r, "/projects", http.StatusSeeOther)
+		return
+	}
+	render(w, r, pages.Bootstrap(""))
+}
+
+func (h *Handler) postBootstrap(w http.ResponseWriter, r *http.Request) {
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+	bootstrapToken := r.FormValue("bootstrap_token")
+	sess, err := h.client.Bootstrap(r.Context(), email, password, bootstrapToken)
+	if err != nil {
+		render(w, r, pages.Bootstrap("Setup failed: "+err.Error()))
+		return
+	}
+	ui.SetSession(w, sess.AccessToken, sess.ExpiresAt)
+	http.Redirect(w, r, "/projects", http.StatusSeeOther)
+}
+
+func (h *Handler) postLogout(w http.ResponseWriter, r *http.Request) {
+	if token, ok := ui.GetSession(r); ok {
+		_ = h.client.Logout(r.Context(), token)
+	}
+	ui.ClearSession(w)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func (h *Handler) getRoot(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/projects", http.StatusSeeOther)
+}
+
+// ── Projects & Apps ───────────────────────────────────────────────────────────
+
+func (h *Handler) getProjects(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	projects, _, err := h.client.ListProjects(r.Context(), token, org.ID, "")
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	render(w, r, pages.Projects(projects, org, user, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postProject(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	name := r.FormValue("name")
+	slug := r.FormValue("slug")
+	proj, err := h.client.CreateProject(r.Context(), token, org.ID, newIdemKey(), name, slug)
+	if err != nil {
+		projects, _, _ := h.client.ListProjects(r.Context(), token, org.ID, "")
+		render(w, r, pages.Projects(projects, org, user, nil, err.Error()))
+		return
+	}
+	redirectWithFlash(w, r, "/projects/"+proj.ID, "success", "Project created.")
+}
+
+func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	projectID := chi.URLParam(r, "projectID")
+	proj, err := h.client.GetProject(r.Context(), token, projectID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	apps, _, err := h.client.ListApplications(r.Context(), token, projectID, "")
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	render(w, r, pages.ProjectDetail(*proj, apps, user, org, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postApp(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	projectID := chi.URLParam(r, "projectID")
+	name := r.FormValue("name")
+	slug := r.FormValue("slug")
+	hostnameLabel := r.FormValue("hostname_label")
+	port := 8080
+	if v := r.FormValue("container_port"); v != "" {
+		if p, e := fmt.Sscanf(v, "%d", &port); e != nil || p != 1 {
+			port = 8080
+		}
+	}
+	app := ui.Application{Name: name, Slug: slug, HostnameLabel: hostnameLabel, ContainerPort: port, HealthCheckPath: "/"}
+	created, err := h.client.CreateApplication(r.Context(), token, projectID, newIdemKey(), app)
+	if err != nil {
+		proj, _ := h.client.GetProject(r.Context(), token, projectID)
+		apps, _, _ := h.client.ListApplications(r.Context(), token, projectID, "")
+		if proj == nil {
+			proj = &ui.Project{ID: projectID}
+		}
+		render(w, r, pages.ProjectDetail(*proj, apps, user, org, nil, err.Error()))
+		return
+	}
+	redirectWithFlash(w, r, "/apps/"+created.ID, "success", "Application created.")
+}
+
+func (h *Handler) getApp(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	appID := chi.URLParam(r, "appID")
+	app, err := h.client.GetApplication(r.Context(), token, appID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
+	if proj == nil {
+		proj = &ui.Project{ID: app.ProjectID}
+	}
+	envs, err := h.client.ListEnvironments(r.Context(), token, appID, false)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	var prodEnv *ui.Environment
+	var previews []ui.Environment
+	for i := range envs {
+		if envs[i].Kind == "ENVIRONMENT_KIND_PRODUCTION" {
+			e := envs[i]
+			prodEnv = &e
+		} else {
+			previews = append(previews, envs[i])
+		}
+	}
+	var prodAlias *ui.Alias
+	var prodRelease *ui.Release
+	if prodEnv != nil {
+		if aliases, e := h.client.ListAliases(r.Context(), token, prodEnv.ID); e == nil && len(aliases) > 0 {
+			prodAlias = &aliases[0]
+		}
+		if prodEnv.CurrentReleaseID != "" {
+			prodRelease, _ = h.client.GetRelease(r.Context(), token, prodEnv.CurrentReleaseID)
+		}
+	}
+	render(w, r, pages.AppOverview(*app, *proj, prodEnv, prodAlias, prodRelease, previews, user, org, flashFromQuery(r)))
+}
+
+func (h *Handler) getAppSettings(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	appID := chi.URLParam(r, "appID")
+	app, err := h.client.GetApplication(r.Context(), token, appID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
+	if proj == nil {
+		proj = &ui.Project{ID: app.ProjectID}
+	}
+	render(w, r, pages.AppSettings(*app, *proj, user, org, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postAppSettings(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	appID := chi.URLParam(r, "appID")
+	app, err := h.client.GetApplication(r.Context(), token, appID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
+	if proj == nil {
+		proj = &ui.Project{ID: app.ProjectID}
+	}
+
+	fields := map[string]any{}
+	paths := []string{}
+	setField := func(key, val string) {
+		if val != "" {
+			fields[key] = val
+			paths = append(paths, key)
+		}
+	}
+	setField("name", r.FormValue("name"))
+	setField("hostname_label", r.FormValue("hostname_label"))
+	setField("health_check_path", r.FormValue("health_check_path"))
+	setField("ci_workflow_id", r.FormValue("ci_workflow_id"))
+	setField("image_repository", r.FormValue("image_repository"))
+	setField("scaling_mode", r.FormValue("scaling_mode"))
+	for _, key := range []string{"container_port", "min_replicas", "max_replicas", "hpa_target_cpu_percent",
+		"cpu_request_millicores", "cpu_limit_millicores", "memory_request_mib", "memory_limit_mib",
+		"max_preview_environments", "preview_idle_ttl_hours", "deploy_timeout_seconds", "release_retention_count"} {
+		if v := r.FormValue(key); v != "" {
+			var n int
+			scanned, _ := fmt.Sscanf(v, "%d", &n)
+			if scanned == 1 {
+				fields[key] = n
+				paths = append(paths, key)
+			}
+		}
+	}
+	// checkbox
+	fields["previews_enabled"] = r.FormValue("previews_enabled") == "true" || r.FormValue("previews_enabled") == "on"
+	paths = append(paths, "previews_enabled")
+
+	updated, err := h.client.UpdateApplication(r.Context(), token, newIdemKey(), appID, fields, paths)
+	if err != nil {
+		render(w, r, pages.AppSettings(*app, *proj, user, org, nil, err.Error()))
+		return
+	}
+	_ = updated
+	redirectWithFlash(w, r, "/apps/"+appID+"/settings", "success", "Settings saved.")
+}
+
+func (h *Handler) getLogs(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	appID := chi.URLParam(r, "appID")
+	app, err := h.client.GetApplication(r.Context(), token, appID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
+	if proj == nil {
+		proj = &ui.Project{ID: app.ProjectID}
+	}
+	envID := r.URL.Query().Get("env")
+	cursor := r.URL.Query().Get("cursor")
+	query := r.URL.Query().Get("q")
+	entries, nextCursor, err := h.client.QueryLogs(r.Context(), token, appID, envID, cursor, query, 100)
+	if err != nil {
+		entries = nil
+		nextCursor = ""
+	}
+	render(w, r, pages.Logs(*app, *proj, entries, nextCursor, envID, user, org, flashFromQuery(r)))
+}
+
+// ── Environments ──────────────────────────────────────────────────────────────
+
+func (h *Handler) getEnvironment(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	envID := chi.URLParam(r, "envID")
+	env, err := h.client.GetEnvironment(r.Context(), token, envID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	app, err := h.client.GetApplication(r.Context(), token, env.ApplicationID)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
+	if proj == nil {
+		proj = &ui.Project{ID: app.ProjectID}
+	}
+	releases, _, _ := h.client.ListReleases(r.Context(), token, envID, "")
+	aliases, _ := h.client.ListAliases(r.Context(), token, envID)
+	certs, _ := h.client.ListCertificates(r.Context(), token, envID)
+	domains, _ := h.client.ListDomains(r.Context(), token, app.ID)
+	envVars, _ := h.client.GetEnvVars(r.Context(), token, envID)
+	var alias *ui.Alias
+	if len(aliases) > 0 {
+		a := aliases[0]
+		alias = &a
+	}
+	var evr ui.EnvVarRevision
+	if envVars != nil {
+		evr = *envVars
+	}
+	render(w, r, pages.EnvironmentDetail(*env, *app, *proj, releases, alias, certs, domains, evr, user, org, flashFromQuery(r)))
+}
+
+func (h *Handler) postRollback(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	envID := chi.URLParam(r, "envID")
+	releaseID := r.FormValue("release_id")
+	_, err := h.client.Rollback(r.Context(), token, newIdemKey(), envID, releaseID)
+	if err != nil {
+		redirectWithFlash(w, r, "/environments/"+envID, "error", "Rollback failed: "+err.Error())
+		return
+	}
+	redirectWithFlash(w, r, "/environments/"+envID, "success", "Rollback initiated.")
+}
+
+func (h *Handler) getEnvStatusFragment(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	envID := chi.URLParam(r, "envID")
+	env, err := h.client.GetEnvironment(r.Context(), token, envID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	aliases, _ := h.client.ListAliases(r.Context(), token, envID)
+	var alias *ui.Alias
+	if len(aliases) > 0 {
+		a := aliases[0]
+		alias = &a
+	}
+	var release *ui.Release
+	if env.CurrentReleaseID != "" {
+		release, _ = h.client.GetRelease(r.Context(), token, env.CurrentReleaseID)
+	}
+	render(w, r, pages.EnvStatusFragment(*env, alias, release))
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+func (h *Handler) getGitConnections(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	conns, _ := h.client.ListGitConnections(r.Context(), token, org.ID)
+	render(w, r, settingspages.GitConnections(conns, user, org, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postGitConnection(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	var installID int64
+	fmt.Sscanf(r.FormValue("installation_id"), "%d", &installID)
+	gc := ui.GitConnection{
+		RepoFullName:     r.FormValue("repo_full_name"),
+		DefaultBranch:    r.FormValue("default_branch"),
+		InstallationID:   installID,
+		WebhookSecretRef: r.FormValue("webhook_secret_ref"),
+	}
+	if gc.DefaultBranch == "" {
+		gc.DefaultBranch = "main"
+	}
+	_, err = h.client.CreateGitConnection(r.Context(), token, newIdemKey(), org.ID, gc)
+	if err != nil {
+		conns, _ := h.client.ListGitConnections(r.Context(), token, org.ID)
+		render(w, r, settingspages.GitConnections(conns, user, org, nil, err.Error()))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/git-connections", "success", "Git connection added.")
+}
+
+func (h *Handler) deleteGitConnection(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	err := h.client.DeleteGitConnection(r.Context(), token, newIdemKey(), id)
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/git-connections", "error", "Delete failed: "+err.Error())
+		return
+	}
+	redirectWithFlash(w, r, "/settings/git-connections", "success", "Connection deleted.")
+}
+
+func (h *Handler) getRegistries(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	regs, _ := h.client.ListRegistries(r.Context(), token, org.ID)
+	render(w, r, settingspages.Registries(regs, user, org, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postRegistry(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	reg := ui.Registry{
+		Provider:            r.FormValue("provider"),
+		RegistryURL:         r.FormValue("registry_url"),
+		CredentialSecretRef: r.FormValue("credential_secret_ref"),
+	}
+	_, err = h.client.CreateRegistry(r.Context(), token, newIdemKey(), org.ID, reg)
+	if err != nil {
+		regs, _ := h.client.ListRegistries(r.Context(), token, org.ID)
+		render(w, r, settingspages.Registries(regs, user, org, nil, err.Error()))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/registries", "success", "Registry added.")
+}
+
+func (h *Handler) deleteRegistry(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	err := h.client.DeleteRegistry(r.Context(), token, newIdemKey(), id)
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/registries", "error", "Delete failed: "+err.Error())
+		return
+	}
+	redirectWithFlash(w, r, "/settings/registries", "success", "Registry deleted.")
+}
+
+func (h *Handler) getWebhooks(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	hooks, _ := h.client.ListWebhooks(r.Context(), token, org.ID)
+	render(w, r, settingspages.Webhooks(hooks, user, org, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postWebhook(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	var events []string
+	if ev := r.FormValue("events"); ev != "" {
+		for _, e := range strings.Split(ev, ",") {
+			if t := strings.TrimSpace(e); t != "" {
+				events = append(events, t)
+			}
+		}
+	}
+	wh := ui.Webhook{TargetURL: r.FormValue("target_url"), Events: events, SecretRef: r.FormValue("secret_ref")}
+	_, err = h.client.CreateWebhook(r.Context(), token, newIdemKey(), org.ID, wh)
+	if err != nil {
+		hooks, _ := h.client.ListWebhooks(r.Context(), token, org.ID)
+		render(w, r, settingspages.Webhooks(hooks, user, org, nil, err.Error()))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/webhooks", "success", "Webhook added.")
+}
+
+func (h *Handler) deleteWebhook(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	err := h.client.DeleteWebhook(r.Context(), token, newIdemKey(), id)
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/webhooks", "error", "Delete failed: "+err.Error())
+		return
+	}
+	redirectWithFlash(w, r, "/settings/webhooks", "success", "Webhook deleted.")
+}
+
+func (h *Handler) getTokens(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	tokens, _ := h.client.ListAPITokens(r.Context(), token)
+	render(w, r, settingspages.Tokens(tokens, "", user, org, flashFromQuery(r), ""))
+}
+
+func (h *Handler) postToken(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	name := r.FormValue("name")
+	var scopes []string
+	if sv := r.FormValue("scopes"); sv != "" {
+		for _, s := range strings.Split(sv, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				scopes = append(scopes, t)
+			}
+		}
+	}
+	secret, _, err := h.client.CreateAPIToken(r.Context(), token, newIdemKey(), name, scopes)
+	if err != nil {
+		tokens, _ := h.client.ListAPITokens(r.Context(), token)
+		render(w, r, settingspages.Tokens(tokens, "", user, org, nil, err.Error()))
+		return
+	}
+	tokens, _ := h.client.ListAPITokens(r.Context(), token)
+	render(w, r, settingspages.Tokens(tokens, secret, user, org, nil, ""))
+}
+
+func (h *Handler) revokeToken(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	err := h.client.RevokeAPIToken(r.Context(), token, newIdemKey(), id)
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/tokens", "error", "Revoke failed: "+err.Error())
+		return
+	}
+	redirectWithFlash(w, r, "/settings/tokens", "success", "Token revoked.")
+}
+
+func (h *Handler) getAudit(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	pageToken := r.URL.Query().Get("page_token")
+	events, nextPageToken, _ := h.client.ListAuditEvents(r.Context(), token, org.ID, pageToken)
+	render(w, r, settingspages.AuditLog(events, nextPageToken, user, org, flashFromQuery(r)))
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+func (h *Handler) getReconcile(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	runs, _ := h.client.ListReconciliations(r.Context(), token, org.ID)
+	render(w, r, adminpages.Reconcile(runs, user, org, flashFromQuery(r)))
+}
+
+func (h *Handler) postReconcile(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	_, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	dryRun := r.FormValue("dry_run") == "true" || r.FormValue("dry_run") == "on"
+	_, err = h.client.StartReconciliation(r.Context(), token, newIdemKey(), org.ID, dryRun)
+	if err != nil {
+		redirectWithFlash(w, r, "/admin/reconcile", "error", "Reconciliation failed: "+err.Error())
+		return
+	}
+	redirectWithFlash(w, r, "/admin/reconcile", "success", "Reconciliation started.")
+}

@@ -1,0 +1,266 @@
+package pages
+
+import (
+	"fmt"
+	"time"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ EnvironmentDetail(
+	env ui.Environment,
+	app ui.Application,
+	project ui.Project,
+	releases []ui.Release,
+	alias *ui.Alias,
+	certs []ui.Certificate,
+	domains []ui.Domain,
+	envVars ui.EnvVarRevision,
+	user ui.User,
+	org ui.Organization,
+	flash *ui.FlashMessage,
+) {
+	@components.Page("Environment — "+env.Branch, user, org, flash, "/projects", envDetailContent(env, app, project, releases, alias, certs, domains, envVars))
+}
+
+templ envDetailContent(
+	env ui.Environment,
+	app ui.Application,
+	project ui.Project,
+	releases []ui.Release,
+	alias *ui.Alias,
+	certs []ui.Certificate,
+	domains []ui.Domain,
+	envVars ui.EnvVarRevision,
+) {
+	<div class="space-y-6">
+		<div class="flex items-center gap-2 text-sm text-zinc-400">
+			<a href="/projects" class="hover:text-violet-300">Projects</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-violet-300">{ app.Name }</a>
+			<span>/</span>
+			<span class="text-zinc-100">{ env.Branch }</span>
+		</div>
+		<div class="flex items-center gap-3">
+			<h1 class="text-xl font-semibold text-zinc-100 font-mono">{ env.Branch }</h1>
+			@components.EnvLifecycleBadge(env.LifecycleStatus)
+			if env.TornDownAt != nil {
+				<span class="text-xs text-zinc-500">torn down { relTime(*env.TornDownAt) }</span>
+			}
+		</div>
+		if alias != nil && alias.Hostname != "" {
+			<div class="card flex items-center justify-between">
+				<div>
+					<span class="text-xs text-zinc-500 block mb-1">Live URL</span>
+					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="font-mono text-violet-400 hover:text-violet-300">
+						https://{ alias.Hostname } ↗
+					</a>
+				</div>
+			</div>
+		} else if env.PlannedHostname != "" {
+			<div class="card">
+				<span class="text-xs text-zinc-500 block mb-1">Planned hostname (cert pending)</span>
+				<span class="font-mono text-zinc-300">{ env.PlannedHostname }</span>
+			</div>
+		}
+		<div class="card">
+			<h2 class="text-sm font-semibold text-zinc-300 mb-4">Releases</h2>
+			if len(releases) == 0 {
+				<p class="text-sm text-zinc-400">No releases yet.</p>
+			} else {
+				<table class="table-auto w-full text-sm">
+					<thead>
+						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<th class="text-left py-2 pr-4">ID</th>
+							<th class="text-left py-2 pr-4">Status</th>
+							<th class="text-left py-2 pr-4">Kind</th>
+							<th class="text-left py-2 pr-4">Image</th>
+							<th class="text-left py-2 pr-4">Commit</th>
+							<th class="text-left py-2 pr-4">Time</th>
+							<th class="text-right py-2">Actions</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-zinc-800">
+						for _, r := range releases {
+							<tr class="text-zinc-300">
+								<td class="py-2 pr-4 font-mono text-xs text-zinc-400">{ shortID(r.ID) }</td>
+								<td class="py-2 pr-4">@components.ReleaseStatusBadge(r.Status)</td>
+								<td class="py-2 pr-4 text-xs text-zinc-500">{ releaseKindLabel(r.Kind) }</td>
+								<td class="py-2 pr-4 font-mono text-xs text-zinc-400 max-w-xs truncate">{ shortImageRef(r.ImageRef) }</td>
+								<td class="py-2 pr-4 font-mono text-xs text-zinc-400">
+									if r.GitCommitSHA != "" {
+										{ r.GitCommitSHA[:min(7, len(r.GitCommitSHA))] }
+									} else {
+										<span class="text-zinc-600">—</span>
+									}
+								</td>
+								<td class="py-2 pr-4 text-xs text-zinc-500">{ relTime(r.CreatedAt) }</td>
+								<td class="py-2 text-right">
+									if r.Status != "RELEASE_STATUS_LIVE" && r.Status != "RELEASE_STATUS_DEPLOYING" && r.Status != "RELEASE_STATUS_PENDING" {
+										<form method="POST" action={ templ.SafeURL("/environments/" + env.ID + "/rollback") }>
+											<input type="hidden" name="release_id" value={ r.ID }/>
+											<button
+												type="submit"
+												class="btn btn-ghost btn-sm"
+												onclick="return confirm('Roll back to release '+ this.form.release_id.value.substring(0,8) + '?')"
+											>
+												Rollback
+											</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+		<div class="grid grid-cols-1 gap-4">
+			<div class="card">
+				<h2 class="text-sm font-semibold text-zinc-300 mb-3">Environment variables</h2>
+				if len(envVars.Variables) == 0 {
+					<p class="text-sm text-zinc-400">No environment variables set.</p>
+				} else {
+					<div class="text-xs text-zinc-500 mb-2">Revision { fmt.Sprintf("%d", envVars.Revision) } · { len(envVars.Variables) } variables</div>
+					<div class="space-y-1">
+						for _, v := range envVars.Variables {
+							<div class="flex items-center justify-between py-1 border-b border-zinc-800 last:border-0">
+								<span class="font-mono text-sm text-zinc-300">{ v.Key }</span>
+								<span class="text-xs text-zinc-600">••••••••</span>
+							</div>
+						}
+					</div>
+				}
+			</div>
+			<div class="card">
+				<h2 class="text-sm font-semibold text-zinc-300 mb-3">Certificates</h2>
+				if len(certs) == 0 {
+					<p class="text-sm text-zinc-400">No certificates found.</p>
+				} else {
+					<table class="table-auto w-full text-sm">
+						<thead>
+							<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+								<th class="text-left py-2">Hostname</th>
+								<th class="text-left py-2">Status</th>
+								<th class="text-left py-2">Expires</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-zinc-800">
+							for _, cert := range certs {
+								<tr class="text-zinc-300">
+									<td class="py-2 font-mono text-xs">{ cert.Hostname }</td>
+									<td class="py-2">
+										if cert.Ready {
+											<span class="badge badge-green">Ready</span>
+										} else {
+											<span class="badge badge-yellow animate-pulse">{ cert.Reason }</span>
+										}
+									</td>
+									<td class="py-2 text-xs text-zinc-400">
+										if cert.NotAfter != nil {
+											{ cert.NotAfter.Format("2006-01-02") }
+										} else {
+											<span class="text-zinc-600">—</span>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+			<div class="card">
+				<h2 class="text-sm font-semibold text-zinc-300 mb-3">Custom domains</h2>
+				if len(domains) == 0 {
+					<p class="text-sm text-zinc-400 mb-4">No custom domains configured.</p>
+				} else {
+					<table class="table-auto w-full text-sm mb-4">
+						<thead>
+							<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+								<th class="text-left py-2">Hostname</th>
+								<th class="text-left py-2">Method</th>
+								<th class="text-left py-2">Verified</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-zinc-800">
+							for _, d := range domains {
+								<tr class="text-zinc-300">
+									<td class="py-2 font-mono text-xs">{ d.Hostname }</td>
+									<td class="py-2 text-xs text-zinc-400">{ d.VerificationMethod }</td>
+									<td class="py-2">
+										if d.VerifiedAt != nil {
+											<span class="badge badge-green">Verified</span>
+										} else {
+											<span class="badge badge-yellow">Pending</span>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		</div>
+	</div>
+}
+
+func relTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+func releaseKindLabel(kind string) string {
+	switch kind {
+	case "RELEASE_KIND_DEPLOY":
+		return "deploy"
+	case "RELEASE_KIND_ROLLBACK":
+		return "rollback"
+	case "RELEASE_KIND_ENV_CHANGE":
+		return "env change"
+	case "RELEASE_KIND_RECONCILE":
+		return "reconcile"
+	default:
+		return kind
+	}
+}
+
+func shortImageRef(ref string) string {
+	if idx := len(ref) - 1; idx > 32 {
+		// show last 32 chars of digest
+		if at := lastIndex(ref, "@"); at >= 0 {
+			digest := ref[at+1:]
+			if len(digest) > 20 {
+				return "…" + digest[len(digest)-20:]
+			}
+		}
+		return ref[len(ref)-32:]
+	}
+	return ref
+}
+
+func lastIndex(s, sub string) int {
+	for i := len(s) - len(sub); i >= 0; i-- {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

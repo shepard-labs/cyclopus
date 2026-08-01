@@ -1,0 +1,155 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ AppOverview(app ui.Application, project ui.Project, prodEnv *ui.Environment, prodAlias *ui.Alias, prodRelease *ui.Release, previews []ui.Environment, user ui.User, org ui.Organization, flash *ui.FlashMessage) {
+	@components.Page(app.Name, user, org, flash, "/projects", appOverviewContent(app, project, prodEnv, prodAlias, prodRelease, previews))
+}
+
+templ appOverviewContent(app ui.Application, project ui.Project, prodEnv *ui.Environment, prodAlias *ui.Alias, prodRelease *ui.Release, previews []ui.Environment) {
+	<div class="space-y-6">
+		<div class="flex items-center gap-2 text-sm text-zinc-400">
+			<a href="/projects" class="hover:text-violet-300">Projects</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<span>/</span>
+			<span class="text-zinc-100">{ app.Name }</span>
+		</div>
+		<div class="flex items-center justify-between">
+			<div class="flex items-center gap-3">
+				<h1 class="text-xl font-semibold text-zinc-100">{ app.Name }</h1>
+				@components.RuntimeClassBadge(app.RuntimeClass)
+			</div>
+			<a href={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="btn btn-secondary btn-sm">Settings</a>
+		</div>
+		<div class="card" id="prod-status">
+			<div class="flex items-center justify-between mb-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Production</h2>
+				if prodEnv != nil {
+					@components.EnvLifecycleBadge(prodEnv.LifecycleStatus)
+				}
+			</div>
+			if prodEnv == nil {
+				<p class="text-sm text-zinc-400">No production environment yet. Push to the default branch to create one.</p>
+			} else {
+				<div class="space-y-3">
+					if prodAlias != nil && prodAlias.Hostname != "" {
+						<div class="flex items-center justify-between">
+							<span class="text-xs text-zinc-500">Hostname</span>
+							<a href={ templ.SafeURL("https://" + prodAlias.Hostname) } target="_blank" rel="noopener" class="text-sm font-mono text-violet-400 hover:text-violet-300">{ prodAlias.Hostname } ↗</a>
+						</div>
+					} else if prodEnv.PlannedHostname != "" {
+						<div class="flex items-center justify-between">
+							<span class="text-xs text-zinc-500">Planned hostname</span>
+							<span class="text-sm font-mono text-zinc-400">{ prodEnv.PlannedHostname }</span>
+						</div>
+					}
+					if prodRelease != nil {
+						<div class="flex items-center justify-between">
+							<span class="text-xs text-zinc-500">Current release</span>
+							<div class="flex items-center gap-2">
+								@components.ReleaseStatusBadge(prodRelease.Status)
+								<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="text-xs text-zinc-400 font-mono hover:text-zinc-200">{ shortID(prodRelease.ID) }</a>
+							</div>
+						</div>
+					}
+					if prodEnv.InProgressReleaseID != "" {
+						<div
+							class="flex items-center gap-2 p-3 bg-blue-500/20 rounded text-sm text-blue-400 animate-pulse"
+							hx-get={ "/environments/" + prodEnv.ID + "/status-fragment" }
+							hx-trigger="every 3s"
+							hx-swap="outerHTML"
+							hx-target="#prod-status"
+						>
+							<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"></path></svg>
+							Deploy in progress…
+						</div>
+					}
+					<div class="flex items-center gap-2 pt-2">
+						<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="btn btn-secondary btn-sm">View releases</a>
+					</div>
+				</div>
+			}
+		</div>
+		<div class="card">
+			<div class="flex items-center justify-between mb-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Preview environments</h2>
+				<span class="text-xs text-zinc-500">{ fmt.Sprintf("%d / %d", len(previews), app.MaxPreviewEnvironments) }</span>
+			</div>
+			if len(previews) == 0 {
+				<p class="text-sm text-zinc-400">No preview environments. Push a non-default branch to create one.</p>
+			} else {
+				<table class="table-auto w-full text-sm">
+					<thead>
+						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<th class="text-left py-2">Branch</th>
+							<th class="text-left py-2">Hostname</th>
+							<th class="text-left py-2">Status</th>
+							<th class="text-right py-2">Actions</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-zinc-800">
+						for _, env := range previews {
+							<tr class="text-zinc-300">
+								<td class="py-2 font-mono text-xs">{ env.Branch }</td>
+								<td class="py-2">
+									if env.PlannedHostname != "" {
+										<a href={ templ.SafeURL("https://" + env.PlannedHostname) } target="_blank" rel="noopener" class="text-xs font-mono text-violet-400 hover:text-violet-300 truncate max-w-xs inline-block">{ env.PlannedHostname } ↗</a>
+									} else {
+										<span class="text-xs text-zinc-500">—</span>
+									}
+								</td>
+								<td class="py-2">@components.EnvLifecycleBadge(env.LifecycleStatus)</td>
+								<td class="py-2 text-right">
+									<a href={ templ.SafeURL("/environments/" + env.ID) } class="btn btn-ghost btn-sm">View</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+		<div class="card">
+			<h2 class="text-sm font-semibold text-zinc-300 mb-3">App configuration</h2>
+			<div class="grid grid-cols-2 gap-4 text-sm">
+				<div class="space-y-2">
+					<div class="flex justify-between"><span class="text-zinc-500">Container port</span><span class="font-mono">{ fmt.Sprintf("%d", app.ContainerPort) }</span></div>
+					<div class="flex justify-between"><span class="text-zinc-500">Health check</span><span class="font-mono">{ app.HealthCheckPath }</span></div>
+					<div class="flex justify-between"><span class="text-zinc-500">Scaling</span><span>{ scalingModeLabel(app.ScalingMode) }</span></div>
+					<div class="flex justify-between"><span class="text-zinc-500">Replicas</span><span>{ fmt.Sprintf("%d – %d", app.MinReplicas, app.MaxReplicas) }</span></div>
+				</div>
+				<div class="space-y-2">
+					<div class="flex justify-between"><span class="text-zinc-500">CPU request</span><span class="font-mono">{ fmt.Sprintf("%dm", app.CPURequestMillicores) }</span></div>
+					<div class="flex justify-between"><span class="text-zinc-500">CPU limit</span><span class="font-mono">{ fmt.Sprintf("%dm", app.CPULimitMillicores) }</span></div>
+					<div class="flex justify-between"><span class="text-zinc-500">Memory request</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryRequestMiB) }</span></div>
+					<div class="flex justify-between"><span class="text-zinc-500">Memory limit</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryLimitMiB) }</span></div>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+func scalingModeLabel(mode string) string {
+	switch mode {
+	case "SCALING_MODE_HPA":
+		return "HPA"
+	case "SCALING_MODE_KEDA_CRON":
+		return "KEDA cron"
+	case "SCALING_MODE_KEDA_HTTP":
+		return "KEDA HTTP"
+	default:
+		return strings.TrimPrefix(mode, "SCALING_MODE_")
+	}
+}

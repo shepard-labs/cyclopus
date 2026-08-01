@@ -1,0 +1,76 @@
+package settings
+
+import (
+	"strings"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ Tokens(tokens []ui.APIToken, createdToken string, user ui.User, org ui.Organization, flash *ui.FlashMessage, errMsg string) {
+	@components.Page("API Tokens", user, org, flash, "/settings/tokens", tokensContent(tokens, createdToken, errMsg))
+}
+
+templ tokensContent(tokens []ui.APIToken, createdToken string, errMsg string) {
+	<div class="space-y-6 max-w-3xl">
+		<h1 class="text-xl font-semibold">API Tokens</h1>
+		if createdToken != "" {
+			<div class="p-4 bg-emerald-500/20 border border-green-500/50 rounded-lg space-y-2">
+				<p class="text-sm text-emerald-400 font-semibold">Token created — save it now. It will not be shown again.</p>
+				<code class="block font-mono text-xs text-emerald-300 bg-zinc-900 p-3 rounded break-all">{ createdToken }</code>
+			</div>
+		}
+		<div class="card space-y-4">
+			<h2 class="text-sm font-semibold text-zinc-300">Create token</h2>
+			if errMsg != "" {
+				<div class="p-3 bg-red-500/20 border border-red-500/50 rounded text-sm text-red-400">{ errMsg }</div>
+			}
+			<form method="POST" action="/settings/tokens" class="space-y-4">
+				<div class="grid grid-cols-2 gap-4">
+					<div class="input-group">
+						<label for="tok-name">Name</label>
+						<input type="text" id="tok-name" name="name" required placeholder="CI deploy token"/>
+					</div>
+					<div class="input-group">
+						<label for="tok-scopes">Scopes <span class="text-zinc-500 font-normal">(comma-separated)</span></label>
+						<input type="text" id="tok-scopes" name="scopes" placeholder="deploy:app-id"/>
+					</div>
+				</div>
+				<button type="submit" class="btn btn-primary">Create token</button>
+			</form>
+		</div>
+		if len(tokens) > 0 {
+			<div class="card">
+				<table class="table-auto w-full text-sm">
+					<thead>
+						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<th class="text-left py-2">Name</th>
+							<th class="text-left py-2">Scopes</th>
+							<th class="text-left py-2">Last used</th>
+							<th class="text-right py-2">Actions</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-zinc-800">
+						for _, t := range tokens {
+							<tr class="text-zinc-300">
+								<td class="py-2 text-sm">{ t.Name }</td>
+								<td class="py-2 text-xs font-mono text-zinc-400">{ strings.Join(t.Scopes, ", ") }</td>
+								<td class="py-2 text-xs text-zinc-500">
+									if t.LastUsedAt != nil {
+										{ relTimeSettings(*t.LastUsedAt) }
+									} else {
+										<span class="text-zinc-600">Never</span>
+									}
+								</td>
+								<td class="py-2 text-right">
+									<form method="POST" action={ templ.SafeURL("/settings/tokens/" + t.ID + "/revoke") } onsubmit="return confirm('Revoke this token?')">
+										<button type="submit" class="btn btn-danger btn-sm">Revoke</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</div>
+}

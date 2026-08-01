@@ -1,0 +1,98 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ Logs(app ui.Application, project ui.Project, entries []ui.LogEntry, nextCursor string, envID string, user ui.User, org ui.Organization, flash *ui.FlashMessage) {
+	@components.Page("Logs — "+app.Name, user, org, flash, "/projects", logsContent(app, project, entries, nextCursor, envID))
+}
+
+templ logsContent(app ui.Application, project ui.Project, entries []ui.LogEntry, nextCursor string, envID string) {
+	<div class="space-y-4 h-full flex flex-col">
+		<div class="flex items-center gap-2 text-sm text-zinc-400">
+			<a href="/projects" class="hover:text-violet-300">Projects</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-violet-300">{ app.Name }</a>
+			<span>/</span>
+			<span class="text-zinc-100">Logs</span>
+		</div>
+		<div class="flex items-center gap-3">
+			<h1 class="text-xl font-semibold">Logs</h1>
+			<form method="GET" action={ templ.SafeURL("/apps/" + app.ID + "/logs") } class="flex items-center gap-2 ml-auto">
+				if envID != "" {
+					<input type="hidden" name="env" value={ envID }/>
+				}
+				<input type="text" name="q" placeholder="Filter logs…" class="text-sm w-64"/>
+				<button type="submit" class="btn btn-secondary btn-sm">Search</button>
+			</form>
+		</div>
+		<div class="flex-1 card overflow-hidden flex flex-col">
+			<div id="log-entries" class="log-viewer flex-1 overflow-y-auto">
+				if len(entries) == 0 {
+					<div class="text-zinc-500 text-center py-8">No log entries found.</div>
+				} else {
+					for _, e := range entries {
+						<div class="log-entry flex gap-3">
+							<span class="text-zinc-600 flex-shrink-0">{ e.Timestamp.Format("15:04:05.000") }</span>
+							<span class={ logSeverityClass(e.Severity) + " flex-shrink-0 w-12 text-right uppercase text-xs font-mono" }>{ shortSeverity(e.Severity) }</span>
+							<span class="text-zinc-300 break-all">{ e.Body }</span>
+						</div>
+					}
+				}
+			</div>
+			if nextCursor != "" {
+				<div class="p-3 border-t border-zinc-800">
+					<button
+						class="btn btn-secondary btn-sm w-full"
+						hx-get={ fmt.Sprintf("/apps/%s/logs?cursor=%s&env=%s", app.ID, nextCursor, envID) }
+						hx-target="#log-entries"
+						hx-swap="beforeend"
+						hx-indicator="#load-more-spinner"
+					>
+						Load older entries
+					</button>
+				</div>
+			}
+		</div>
+	</div>
+}
+
+func logSeverityClass(sev string) string {
+	switch sev {
+	case "LOG_SEVERITY_ERROR", "LOG_SEVERITY_FATAL":
+		return "text-red-400"
+	case "LOG_SEVERITY_WARN":
+		return "text-amber-400"
+	case "LOG_SEVERITY_INFO":
+		return "text-blue-400"
+	case "LOG_SEVERITY_DEBUG", "LOG_SEVERITY_TRACE":
+		return "text-zinc-500"
+	default:
+		return "text-zinc-400"
+	}
+}
+
+func shortSeverity(sev string) string {
+	switch sev {
+	case "LOG_SEVERITY_FATAL":
+		return "FATAL"
+	case "LOG_SEVERITY_ERROR":
+		return "ERROR"
+	case "LOG_SEVERITY_WARN":
+		return "WARN"
+	case "LOG_SEVERITY_INFO":
+		return "INFO"
+	case "LOG_SEVERITY_DEBUG":
+		return "DEBUG"
+	case "LOG_SEVERITY_TRACE":
+		return "TRACE"
+	default:
+		return strings.TrimPrefix(sev, "LOG_SEVERITY_")
+	}
+}

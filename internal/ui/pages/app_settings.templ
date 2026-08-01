@@ -1,0 +1,142 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ AppSettings(app ui.Application, project ui.Project, user ui.User, org ui.Organization, flash *ui.FlashMessage, errMsg string) {
+	@components.Page("Settings — "+app.Name, user, org, flash, "/projects", appSettingsContent(app, project, errMsg))
+}
+
+templ appSettingsContent(app ui.Application, project ui.Project, errMsg string) {
+	<div class="space-y-6 max-w-2xl">
+		<div class="flex items-center gap-2 text-sm text-zinc-400">
+			<a href="/projects" class="hover:text-violet-300">Projects</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-violet-300">{ project.Name }</a>
+			<span>/</span>
+			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-violet-300">{ app.Name }</a>
+			<span>/</span>
+			<span class="text-zinc-100">Settings</span>
+		</div>
+		<h1 class="text-xl font-semibold">{ app.Name } — Settings</h1>
+		if errMsg != "" {
+			<div class="flex items-center gap-2 p-3 bg-red-500/20 border border-red-500/50 rounded text-sm text-red-400">{ errMsg }</div>
+		}
+		<form method="POST" action={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="space-y-6">
+			<div class="card space-y-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Identity</h2>
+				<div class="grid grid-cols-2 gap-4">
+					<div class="input-group">
+						<label for="s-name">Name</label>
+						<input type="text" id="s-name" name="name" value={ app.Name } required/>
+					</div>
+					<div class="input-group">
+						<label for="s-hostname">Hostname label</label>
+						<input type="text" id="s-hostname" name="hostname_label" value={ app.HostnameLabel } required pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"/>
+					</div>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<div class="input-group">
+						<label for="s-port">Container port</label>
+						<input type="number" id="s-port" name="container_port" value={ fmt.Sprintf("%d", app.ContainerPort) } min="1" max="65535" required/>
+					</div>
+					<div class="input-group">
+						<label for="s-health">Health check path</label>
+						<input type="text" id="s-health" name="health_check_path" value={ app.HealthCheckPath } required/>
+					</div>
+				</div>
+				<div class="input-group">
+					<label for="s-ci">CI workflow ID <span class="text-zinc-500 font-normal">(GitHub Actions)</span></label>
+					<input type="text" id="s-ci" name="ci_workflow_id" value={ app.CIWorkflowID } placeholder="deploy.yml"/>
+				</div>
+				<div class="input-group">
+					<label for="s-image-repo">Image repository</label>
+					<input type="text" id="s-image-repo" name="image_repository" value={ app.ImageRepository } placeholder="ghcr.io/org/repo"/>
+				</div>
+			</div>
+			<div class="card space-y-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Scaling <span class="text-zinc-500 font-normal">(production only)</span></h2>
+				<div class="input-group">
+					<label for="s-scaling">Scaling mode</label>
+					<select id="s-scaling" name="scaling_mode">
+						<option value="SCALING_MODE_HPA" selected?={ app.ScalingMode == "SCALING_MODE_HPA" }>HPA (default)</option>
+						<option value="SCALING_MODE_KEDA_CRON" selected?={ app.ScalingMode == "SCALING_MODE_KEDA_CRON" }>KEDA cron (opt-in)</option>
+						<option value="SCALING_MODE_KEDA_HTTP" selected?={ app.ScalingMode == "SCALING_MODE_KEDA_HTTP" }>KEDA HTTP (beta, opt-in)</option>
+					</select>
+				</div>
+				<div class="grid grid-cols-3 gap-4">
+					<div class="input-group">
+						<label for="s-min">Min replicas</label>
+						<input type="number" id="s-min" name="min_replicas" value={ fmt.Sprintf("%d", app.MinReplicas) } min="0"/>
+					</div>
+					<div class="input-group">
+						<label for="s-max">Max replicas</label>
+						<input type="number" id="s-max" name="max_replicas" value={ fmt.Sprintf("%d", app.MaxReplicas) } min="1"/>
+					</div>
+					<div class="input-group">
+						<label for="s-cpu-target">HPA CPU target %</label>
+						<input type="number" id="s-cpu-target" name="hpa_target_cpu_percent" value={ fmt.Sprintf("%d", app.HPATargetCPUPercent) } min="1" max="100"/>
+					</div>
+				</div>
+			</div>
+			<div class="card space-y-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Resources</h2>
+				<div class="grid grid-cols-2 gap-4">
+					<div class="input-group">
+						<label for="s-cpureq">CPU request (millicores)</label>
+						<input type="number" id="s-cpureq" name="cpu_request_millicores" value={ fmt.Sprintf("%d", app.CPURequestMillicores) } min="1"/>
+					</div>
+					<div class="input-group">
+						<label for="s-cpulim">CPU limit (millicores)</label>
+						<input type="number" id="s-cpulim" name="cpu_limit_millicores" value={ fmt.Sprintf("%d", app.CPULimitMillicores) } min="1"/>
+					</div>
+					<div class="input-group">
+						<label for="s-memreq">Memory request (MiB)</label>
+						<input type="number" id="s-memreq" name="memory_request_mib" value={ fmt.Sprintf("%d", app.MemoryRequestMiB) } min="1"/>
+					</div>
+					<div class="input-group">
+						<label for="s-memlim">Memory limit (MiB)</label>
+						<input type="number" id="s-memlim" name="memory_limit_mib" value={ fmt.Sprintf("%d", app.MemoryLimitMiB) } min="1"/>
+					</div>
+				</div>
+			</div>
+			<div class="card space-y-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Preview environments</h2>
+				<div class="flex items-center gap-3">
+					<input type="checkbox" id="s-previews" name="previews_enabled" checked?={ app.PreviewsEnabled }/>
+					<label for="s-previews" class="text-sm font-normal text-zinc-300">Enable preview environments</label>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<div class="input-group">
+						<label for="s-maxprev">Max previews</label>
+						<input type="number" id="s-maxprev" name="max_preview_environments" value={ fmt.Sprintf("%d", app.MaxPreviewEnvironments) } min="0"/>
+					</div>
+					<div class="input-group">
+						<label for="s-previdlettl">Idle TTL (hours)</label>
+						<input type="number" id="s-previdlettl" name="preview_idle_ttl_hours" value={ fmt.Sprintf("%d", app.PreviewIdleTTLHours) } min="1"/>
+					</div>
+				</div>
+			</div>
+			<div class="card space-y-4">
+				<h2 class="text-sm font-semibold text-zinc-300">Deploy behavior</h2>
+				<div class="grid grid-cols-2 gap-4">
+					<div class="input-group">
+						<label for="s-timeout">Deploy timeout (seconds)</label>
+						<input type="number" id="s-timeout" name="deploy_timeout_seconds" value={ fmt.Sprintf("%d", app.DeployTimeoutSeconds) } min="1"/>
+					</div>
+					<div class="input-group">
+						<label for="s-retention">Release retention count</label>
+						<input type="number" id="s-retention" name="release_retention_count" value={ fmt.Sprintf("%d", app.ReleaseRetentionCount) } min="1"/>
+					</div>
+				</div>
+			</div>
+			<div class="flex gap-3">
+				<button type="submit" class="btn btn-primary">Save settings</button>
+				<a href={ templ.SafeURL("/apps/" + app.ID) } class="btn btn-secondary">Cancel</a>
+			</div>
+		</form>
+	</div>
+}

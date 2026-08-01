@@ -1,0 +1,71 @@
+package admin
+
+import (
+	"fmt"
+	"github.com/cyclopus-dev/cyclopus/internal/ui"
+	"github.com/cyclopus-dev/cyclopus/internal/ui/components"
+)
+
+templ Reconcile(runs []ui.ReconciliationRun, user ui.User, org ui.Organization, flash *ui.FlashMessage) {
+	@components.Page("Reconcile", user, org, flash, "/admin/reconcile", reconcileContent(runs, org))
+}
+
+templ reconcileContent(runs []ui.ReconciliationRun, org ui.Organization) {
+	<div class="space-y-6 max-w-4xl">
+		<div>
+			<h1 class="text-xl font-semibold">Reconciliation</h1>
+			<p class="text-sm text-zinc-400 mt-1">Regenerate Kubernetes objects from Postgres state. Dry-run is the default.</p>
+		</div>
+		<div class="card space-y-4">
+			<h2 class="text-sm font-semibold text-zinc-300">Start reconciliation</h2>
+			<form method="POST" action="/admin/reconcile" class="flex items-center gap-4">
+				<div class="flex items-center gap-2">
+					<input type="checkbox" id="dry-run" name="dry_run" value="true" checked/>
+					<label for="dry-run" class="text-sm font-normal text-zinc-300">Dry run <span class="text-zinc-500">(report changes without applying)</span></label>
+				</div>
+				<div class="flex items-center gap-2">
+					<input type="checkbox" id="prune" name="prune" value="true"/>
+					<label for="prune" class="text-sm font-normal text-zinc-300">Prune orphaned objects</label>
+				</div>
+				<button type="submit" class="btn btn-primary">Run reconciliation</button>
+			</form>
+		</div>
+		<div class="card">
+			<h2 class="text-sm font-semibold text-zinc-300 mb-4">Recent runs</h2>
+			if len(runs) == 0 {
+				<p class="text-sm text-zinc-400">No reconciliation runs yet.</p>
+			} else {
+				<table class="table-auto w-full text-sm">
+					<thead>
+						<tr class="text-xs text-zinc-500 border-b border-zinc-800">
+							<th class="text-left py-2 pr-4">ID</th>
+							<th class="text-left py-2 pr-4">Status</th>
+							<th class="text-left py-2 pr-4">Scope</th>
+							<th class="text-left py-2 pr-4">Dry run</th>
+							<th class="text-left py-2 pr-4">Findings</th>
+							<th class="text-left py-2">Started</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-zinc-800">
+						for _, r := range runs {
+							<tr class="text-zinc-300">
+								<td class="py-2 pr-4 font-mono text-xs text-zinc-400">{ r.ID[:8] }</td>
+								<td class="py-2 pr-4">@components.OperationStatusBadge(r.Status)</td>
+								<td class="py-2 pr-4 text-xs text-zinc-400">{ r.Scope.Kind }</td>
+								<td class="py-2 pr-4 text-xs">
+									if r.DryRun {
+										<span class="badge badge-yellow">Dry run</span>
+									} else {
+										<span class="badge badge-violet">Applied</span>
+									}
+								</td>
+								<td class="py-2 pr-4 text-xs text-zinc-400">{ fmt.Sprintf("%d", len(r.Findings)) }</td>
+								<td class="py-2 text-xs text-zinc-500">{ relTimeAdmin(r.CreatedAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	</div>
+}
