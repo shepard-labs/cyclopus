@@ -99,6 +99,7 @@ KUBECTL="k3s kubectl"
 
 # ---- global cleanup / failure handling (#16) -------------------------------
 SECRETS_FILE="/root/.cyclopus-install-secrets"
+STATE_FILE="/root/.cyclopus-install.env"
 INSTALL_OK=0
 TMP_FILES=""
 cleanup() {
@@ -106,8 +107,8 @@ cleanup() {
   for f in $TMP_FILES; do rm -f "$f" 2>/dev/null || true; done
   # Best-effort delete of the Kyverno readiness probe pod (#12).
   $KUBECTL delete pod cyclopus-webhook-probe -n default --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
-  if [ "$INSTALL_OK" -ne 1 ] && [ -f "$SECRETS_FILE" ]; then
-    warn "install did not complete; generated secrets left at $SECRETS_FILE (delete if unused)"
+  if [ "$INSTALL_OK" -ne 1 ] && [ -f "$STATE_FILE" ]; then
+    warn "install did not complete; secrets state kept at $STATE_FILE for idempotent rerun (delete to start over — regeneration changes the OpenObserve admin password and invalidates enrolled Beszel agents)"
   fi
 }
 trap cleanup EXIT HUP INT TERM
@@ -195,11 +196,69 @@ if [ -z "$LETSENCRYPT_EMAIL" ]; then
   warn "LETSENCRYPT_EMAIL not set; using $LETSENCRYPT_EMAIL (you will NOT receive cert expiry notices)"
 fi
 
-# Generate secrets
-log "Generating secrets..."
-AUTH_BOOTSTRAP_SECRET=$(openssl rand -base64 32 | tr -d '\n')
-AUTH_TOKEN_PEPPER=$(openssl rand -base64 32 | tr -d '\n')
-DB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
+# Load-or-generate secrets. All six values persist in STATE_FILE so a rerun
+# reuses the secrets already baked into the Postgres role, the OpenObserve
+# admin account, and the cluster secrets (regenerating them would desync).
+# BESZEL_* keys are base64-encoded in STATE_FILE (the private key is multiline).
+if [ -f "$STATE_FILE" ]; then
+  # Sourcing hardening: every line must be a comment or a KEY="base64" pair
+  # (both BESZEL_* keys are base64-encoded, so one charset whitelist covers
+  # everything). Anything else — including $( )/` ` injection that would run
+  # at source time — aborts before sourcing. Also turns a set -u abort on
+  # garbage content into a clear message.
+  if grep -vqE '^(#.*|(AUTH_BOOTSTRAP_SECRET|AUTH_TOKEN_PEPPER|DB_PASSWORD|OO_PASSWORD|BESZEL_PUBLIC_KEY|BESZEL_PRIVATE_KEY)="[A-Za-z0-9+/=]*")$' "$STATE_FILE"; then
+    fail "STATE_FILE $STATE_FILE contains unexpected content (possible tampering); not sourcing"
+  fi
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  _missing=""
+  for _v in AUTH_BOOTSTRAP_SECRET AUTH_TOKEN_PEPPER DB_PASSWORD OO_PASSWORD BESZEL_PUBLIC_KEY BESZEL_PRIVATE_KEY; do
+    [ -n "${!_v:-}" ] || _missing="$_missing $_v"
+  done
+  [ -z "$_missing" ] || fail "STATE_FILE $STATE_FILE is incomplete (missing${_missing}); fix it, or delete it to regenerate (WARNING: regenerating changes the OpenObserve admin password and invalidates enrolled Beszel agents)"
+  # Decode the base64-serialized Beszel keys after sourcing, and validate the
+  # decodes (a corrupt-but-valid-base64 value must not silently propagate).
+  BESZEL_PUBLIC_KEY=$(printf '%s' "$BESZEL_PUBLIC_KEY" | base64 -d) || fail "STATE_FILE $STATE_FILE: BESZEL_PUBLIC_KEY is not valid base64"
+  BESZEL_PRIVATE_KEY=$(printf '%s' "$BESZEL_PRIVATE_KEY" | base64 -d) || fail "STATE_FILE $STATE_FILE: BESZEL_PRIVATE_KEY is not valid base64"
+  case "$BESZEL_PRIVATE_KEY" in
+    "-----BEGIN OPENSSH PRIVATE KEY-----"*) ;;
+    *) fail "STATE_FILE $STATE_FILE: BESZEL_PRIVATE_KEY does not decode to an OpenSSH private key" ;;
+  esac
+  case "$BESZEL_PUBLIC_KEY" in
+    "ssh-ed25519 "*) ;;
+    *) fail "STATE_FILE $STATE_FILE: BESZEL_PUBLIC_KEY does not decode to an ssh-ed25519 public key; fix it or delete it to regenerate" ;;
+  esac
+  log "Loaded existing secrets from $STATE_FILE"
+else
+  log "Generating secrets..."
+  AUTH_BOOTSTRAP_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+  AUTH_TOKEN_PEPPER=$(openssl rand -base64 32 | tr -d '\n')
+  DB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
+  OO_PASSWORD=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+  # Beszel hub<->agent SSH keypair. Only the PUBLIC key enters the cluster
+  # (agents); the private key stays on the operator side in $SECRETS_FILE.
+  # ssh-keygen comes from openssh-client (present on the supported base
+  # images; ensure it here since this block runs before the PostgreSQL
+  # prerequisite install).
+  command -v ssh-keygen >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq openssh-client; }
+  BESZEL_KEY_TMP=$(mktemp)
+  rm -f "$BESZEL_KEY_TMP"
+  TMP_FILES="$TMP_FILES $BESZEL_KEY_TMP $BESZEL_KEY_TMP.pub"
+  ssh-keygen -t ed25519 -f "$BESZEL_KEY_TMP" -N '' -C cyclopus-beszel >/dev/null
+  BESZEL_PUBLIC_KEY=$(cat "$BESZEL_KEY_TMP.pub")
+  BESZEL_PRIVATE_KEY=$(cat "$BESZEL_KEY_TMP")
+  ( umask 0077; cat > "$STATE_FILE" <<EOF
+# Cyclopus install state (idempotent reruns). BESZEL_* keys are base64-encoded.
+AUTH_BOOTSTRAP_SECRET="${AUTH_BOOTSTRAP_SECRET}"
+AUTH_TOKEN_PEPPER="${AUTH_TOKEN_PEPPER}"
+DB_PASSWORD="${DB_PASSWORD}"
+OO_PASSWORD="${OO_PASSWORD}"
+BESZEL_PUBLIC_KEY="$(printf '%s' "$BESZEL_PUBLIC_KEY" | base64 | tr -d '\n')"
+BESZEL_PRIVATE_KEY="$(printf '%s' "$BESZEL_PRIVATE_KEY" | base64 | tr -d '\n')"
+EOF
+  )
+  log "Generated new secrets (saved to $STATE_FILE)"
+fi
 
 # Install PostgreSQL
 log "Installing PostgreSQL $PG_MAJOR..."
@@ -218,12 +277,19 @@ fi
 # Create database and user.
 # #1/#4: pass password via PGPASSWORD to the SINGLE psql process (not a shell-wide
 # export), and use a here-doc without psql :vars so nothing lands in ~/.psql_history.
+# The password reconciliation below is INTENTIONAL: pre-Phase-B installs have a
+# cyclopus role whose password exists nowhere on disk, so a fresh STATE_FILE
+# would desync helm values from the role. The unconditional ALTER ROLE converges
+# the role password to STATE_FILE's DB_PASSWORD on every run (this also covers
+# the partial-first-run case: CREATE is IF NOT EXISTS, ALTER heals the rest).
 log "Creating Cyclopus database and user..."
 CREATE_ROLE_SQL=$(cat <<SQL
 DO \$do\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cyclopus') THEN
     EXECUTE format('CREATE ROLE cyclopus LOGIN PASSWORD %L', '${DB_PASSWORD}');
+  ELSE
+    EXECUTE format('ALTER ROLE cyclopus PASSWORD %L', '${DB_PASSWORD}');
   END IF;
 END
 \$do\$;
@@ -542,28 +608,32 @@ assert_chart_version keda-add-ons-http keda "$KEDA_HTTP_ADDON_VERSION"
 # missing secret would crash-loop the pod and fail the --atomic helm install.
 log "Creating observability secrets..."
 $KUBECTL create namespace "$CYCLOPUS_NAMESPACE" --dry-run=client -o yaml | $KUBECTL apply -f -
-OO_PASSWORD=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+# OO_PASSWORD and the Beszel keypair are loaded/generated in the secrets block
+# above (STATE_FILE persistence); only the derived values are computed here.
 # credential: raw "user:password" the API base64-encodes itself
 # (internal/adapters/observability/openobserve.go OpenObserveConfig.Credential).
 # basic-auth: pre-encoded "Basic <base64>" header value for the OTel Collector
 # exporter (OpenObserve requires auth on its ingestion endpoints too).
 OO_CREDENTIAL="admin@cyclopus.local:${OO_PASSWORD}"
 OO_BASIC_AUTH=$(printf '%s' "$OO_CREDENTIAL" | base64 | tr -d '\n')
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic openobserve-auth \
-  --from-literal=password="$OO_PASSWORD" \
-  --from-literal=credential="$OO_CREDENTIAL" \
-  --from-literal=basic-auth="$OO_BASIC_AUTH" \
-  --dry-run=client -o yaml | $KUBECTL apply -f -
-# Beszel hub<->agent SSH keypair. Only the PUBLIC key enters the cluster
-# (agents); the private key stays on the operator side in $SECRETS_FILE.
-# ssh-keygen comes from openssh-client (present on the supported base
-# images; also installed above with the PostgreSQL prerequisites).
-BESZEL_KEY_TMP=$(mktemp)
-rm -f "$BESZEL_KEY_TMP"
-TMP_FILES="$TMP_FILES $BESZEL_KEY_TMP $BESZEL_KEY_TMP.pub"
-ssh-keygen -t ed25519 -f "$BESZEL_KEY_TMP" -N '' -C cyclopus-beszel >/dev/null
-BESZEL_PUBLIC_KEY=$(cat "$BESZEL_KEY_TMP.pub")
-BESZEL_PRIVATE_KEY=$(cat "$BESZEL_KEY_TMP")
+# Write the Secret as a 0600 manifest instead of --from-literal so the password
+# never appears in process argv (same pattern as VALUES_FILE below).
+OO_SECRET_FILE=$( (umask 0077; mktemp) )
+TMP_FILES="$TMP_FILES $OO_SECRET_FILE"
+cat > "$OO_SECRET_FILE" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openobserve-auth
+  namespace: ${CYCLOPUS_NAMESPACE}
+type: Opaque
+stringData:
+  password: "${OO_PASSWORD}"
+  credential: "${OO_CREDENTIAL}"
+  basic-auth: "${OO_BASIC_AUTH}"
+EOF
+$KUBECTL apply -f "$OO_SECRET_FILE"
+rm -f "$OO_SECRET_FILE"
 $KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic beszel-agent-key \
   --from-literal=public="$BESZEL_PUBLIC_KEY" \
   --dry-run=client -o yaml | $KUBECTL apply -f -
