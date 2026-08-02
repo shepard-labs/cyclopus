@@ -204,6 +204,12 @@ Only Ubuntu 24.04 and Debian 12 are supported: the installer is built around the
 curl -fsSL https://get.cyclopus.dev | bash
 ```
 
+The installer resolves `latest` to the newest GitHub release and downloads a
+single offline bundle (all charts, images, and binaries, ~2.5GB) instead of
+~30 serialized fetches — a fresh-VPS install takes roughly 3-5 minutes. The
+bundle is amd64-only; on arm64 hosts (or with `CYCLOPUS_ONLINE=1`) the
+installer falls back to the per-artifact online path automatically.
+
 **Manual install:**
 ```bash
 # Bootstrap k3s + gVisor + platform dependencies

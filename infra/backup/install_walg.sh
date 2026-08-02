@@ -3,6 +3,11 @@
 #
 # Wires Postgres archive_command to WAL-G streaming into the storage_destinations
 # S3 target, with archive_timeout=60s for the 60-second RPO target. Idempotent.
+#
+# Optional env:
+#   WALG_LOCAL_DIR   directory containing the pre-downloaded wal-g tarball
+#                    (offline bundle). The checksum is still verified against
+#                    the pinned constant below.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -33,7 +38,12 @@ else
   tmp_dir=$(mktemp -d)
   trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 
-  retry 3 curl -fsSLo "$tmp_dir/$TARBALL" "$BASE/$TARBALL" || fail "WAL-G download failed"
+  if [ -n "${WALG_LOCAL_DIR:-}" ]; then
+    [ -f "$WALG_LOCAL_DIR/$TARBALL" ] || fail "WALG_LOCAL_DIR missing $TARBALL: $WALG_LOCAL_DIR/$TARBALL"
+    cp "$WALG_LOCAL_DIR/$TARBALL" "$tmp_dir/$TARBALL"
+  else
+    retry 3 curl -fsSLo "$tmp_dir/$TARBALL" "$BASE/$TARBALL" || fail "WAL-G download failed"
+  fi
   actual=$(sha256sum "$tmp_dir/$TARBALL" | cut -d ' ' -f 1)
   [ "$actual" = "$WALG_SHA256" ] || fail "WAL-G checksum mismatch: expected $WALG_SHA256, observed $actual"
 

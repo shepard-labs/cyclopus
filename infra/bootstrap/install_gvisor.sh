@@ -8,6 +8,12 @@
 # pods that run unsandboxed — loud, which is the intent.
 #
 # Idempotent: re-running with runsc already at the pinned release is a no-op.
+#
+# Optional env:
+#   GVISOR_LOCAL_DIR   directory containing pre-downloaded runsc +
+#                      containerd-shim-runsc-v1 binaries (offline bundle).
+#                      Checksums are still verified against the pinned
+#                      constants below — a local file is never trusted blindly.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -47,11 +53,17 @@ else
   tmp_dir=$(mktemp -d)
   trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 
-  # Verify each artifact against the PINNED sha512 constant above, not against a
-  # sidecar downloaded from the same origin (which an attacker who controls the
-  # binary could also forge).
+  # Source the artifacts either from GVISOR_LOCAL_DIR (offline bundle) or by
+  # downloading from the gVisor release bucket. Either way, verify each against
+  # the PINNED sha512 constant above, not against a same-origin sidecar (which
+  # an attacker who controls the binary could also forge).
   for artifact in runsc containerd-shim-runsc-v1; do
-    retry 3 curl -fsSLo "$tmp_dir/$artifact" "$BASE_URL/$artifact" || fail "download failed: $artifact"
+    if [ -n "${GVISOR_LOCAL_DIR:-}" ]; then
+      [ -f "$GVISOR_LOCAL_DIR/$artifact" ] || fail "GVISOR_LOCAL_DIR missing $artifact: $GVISOR_LOCAL_DIR/$artifact"
+      cp "$GVISOR_LOCAL_DIR/$artifact" "$tmp_dir/$artifact"
+    else
+      retry 3 curl -fsSLo "$tmp_dir/$artifact" "$BASE_URL/$artifact" || fail "download failed: $artifact"
+    fi
     case "$artifact" in
       runsc) _expected=$GVISOR_SHA512_runsc ;;
       containerd-shim-runsc-v1) _expected=$GVISOR_SHA512_shim ;;

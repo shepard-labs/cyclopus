@@ -8,13 +8,26 @@
 # Detects public IP, configures sslip.io hostnames, generates secrets,
 # installs PostgreSQL + k3s + gVisor + Kyverno + Traefik + cert-manager + KEDA + Cyclopus.
 #
+# Speed: by default the installer downloads ONE offline bundle (built per
+# release by scripts/build_bundle.sh, attached to the GitHub release) — all
+# helm charts, all container images (k3s airgap set + platform workloads), the
+# k3s/helm binaries, checksum-verified gVisor/WAL-G artifacts, and the
+# observability/backup files — and installs everything from local artifacts.
+# Independent chart installs (Traefik/Kyverno, then cert-manager/KEDA) run in
+# parallel. If the bundle is unavailable (arm64, pre-bundle releases, network),
+# the installer falls back to the online path; CYCLOPUS_ONLINE=1 forces it.
+#
 # TLS: cert-manager issues Let's Encrypt PRODUCTION certificates automatically for
 # every app/preview/custom-domain Ingress and the control-plane console. Traefik is
 # the ingress controller; TLS terminates at Traefik (the pod stays plaintext inside
 # the cluster). No hand-rolled ACME.
 #
 # Optional env vars:
-#   CYCLOPUS_VERSION     image/chart version (default: latest)
+#   CYCLOPUS_VERSION     image/chart version (default: latest — resolved to the
+#                        newest GitHub release tag at install time)
+#   CYCLOPUS_ONLINE      "1" forces the legacy online install path (per-artifact
+#                        downloads + registry pulls) instead of the offline
+#                        bundle fast path
 #   CYCLOPUS_RELEASE     helm release name (default: cyclopus)
 #   CYCLOPUS_NAMESPACE   namespace (default: cyclopus)
 #   NODE_IP              override auto-detected node IP (pod-reachable interface)
@@ -64,6 +77,9 @@ log "Install log: $LOG_FILE"
 
 # Hardened curl: bounded time + retries (#8).
 dl() { curl -fsSL --connect-timeout 10 --max-time 120 --retry 3 --retry-delay 2 "$@"; }
+# Long-window download for the multi-GB offline bundle (the 120s cap above
+# would abort a slow link partway through a 2+GB transfer).
+dl_big() { curl -fsSL --connect-timeout 10 --max-time 3600 --retry 3 --retry-delay 5 "$@"; }
 
 # helm_deployed REL NS: true only when the release is in 'deployed' state. A
 # 'failed'/'pending' release is uninstalled so a clean install can retry (helm
@@ -80,9 +96,9 @@ helm_deployed() {
 
 # Install configuration
 CYCLOPUS_VERSION=${CYCLOPUS_VERSION:-latest}
+CYCLOPUS_ONLINE=${CYCLOPUS_ONLINE:-}
 CYCLOPUS_RELEASE=${CYCLOPUS_RELEASE:-cyclopus}
 CYCLOPUS_NAMESPACE=${CYCLOPUS_NAMESPACE:-cyclopus}
-CYCLOPUS_IMAGE=${CYCLOPUS_IMAGE:-ghcr.io/shepard-labs/cyclopus:${CYCLOPUS_VERSION}}
 LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-}
 CYCLOPUS_CONTROL_PLANE_TAINT=${CYCLOPUS_CONTROL_PLANE_TAINT:-false}
 # Optional WAL-G backup wiring (see header docs; all four must be set to wire).
@@ -92,9 +108,22 @@ WALG_S3_REGION=${WALG_S3_REGION:-}
 AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
 AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
 
+# Resolve "latest" to the newest GitHub release tag. Everything below (bundle
+# URL, OCI chart version, raw bootstrap files) then pins to that one tag, so a
+# "latest" install deploys a single coherent release instead of mixing main-
+# branch scripts with the newest image.
+if [ "$CYCLOPUS_VERSION" = "latest" ]; then
+  log "Resolving latest release tag..."
+  CYCLOPUS_VERSION=$(dl https://api.github.com/repos/shepard-labs/cyclopus/releases/latest \
+    | grep -o '"tag_name": *"[^"]*"' | head -n1 | cut -d'"' -f4 || true)
+  [ -n "$CYCLOPUS_VERSION" ] || fail "could not resolve latest release tag; set CYCLOPUS_VERSION=vX.Y.Z explicitly"
+fi
+log "Cyclopus version: $CYCLOPUS_VERSION"
+CHART_VER=${CYCLOPUS_VERSION#v}
+CYCLOPUS_IMAGE=${CYCLOPUS_IMAGE:-ghcr.io/shepard-labs/cyclopus:${CYCLOPUS_VERSION}}
+
 # Canonical raw base for bootstrap scripts (single source of truth for gVisor, #7).
 RAW_BASE="https://raw.githubusercontent.com/shepard-labs/cyclopus/${CYCLOPUS_VERSION}"
-[ "$CYCLOPUS_VERSION" = "latest" ] && RAW_BASE="https://raw.githubusercontent.com/shepard-labs/cyclopus/main"
 
 KUBECTL="k3s kubectl"
 
@@ -106,6 +135,11 @@ TMP_FILES=""
 cleanup() {
   # Remove any temp values files regardless of outcome.
   for f in $TMP_FILES; do rm -f "$f" 2>/dev/null || true; done
+  # Stop an orphaned background bundle download (e.g. install failed before the
+  # wait point) and drop its partial artifacts. ${BUNDLE_PID:-} guards: the
+  # trap can fire before the download variables are assigned.
+  [ -z "${BUNDLE_PID:-}" ] || kill "$BUNDLE_PID" 2>/dev/null || true
+  [ -z "${BUNDLE_PID:-}" ] || rm -f "${BUNDLE_TARBALL:-}" "${BUNDLE_TARBALL:-}.sha256" 2>/dev/null || true
   # Best-effort delete of the Kyverno readiness probe pod (#12).
   $KUBECTL delete pod cyclopus-webhook-probe -n default --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
   if [ "$INSTALL_OK" -ne 1 ] && [ -f "$STATE_FILE" ]; then
@@ -159,6 +193,26 @@ case "$ARCH" in
 esac
 log "OS: $OS $VERSION_ID, Arch: $ARCH"
 
+# Start the offline-bundle download in the BACKGROUND so it overlaps secrets
+# generation, apt, PostgreSQL, and firewall setup (several minutes on a fresh
+# image). The bundle is amd64-only today (the cyclopus image is built
+# linux/amd64-only); arm64 and CYCLOPUS_ONLINE=1 use the online path.
+BUNDLE_DIR=/opt/cyclopus-bundle
+BUNDLE_MODE=0
+BUNDLE_PID=""
+BUNDLE_TARBALL=/tmp/cyclopus-bundle.tar.zst
+if [ "$CYCLOPUS_ONLINE" != "1" ] && [ "$GO_ARCH" = "amd64" ]; then
+  BUNDLE_URL="https://github.com/shepard-labs/cyclopus/releases/download/${CYCLOPUS_VERSION}/cyclopus-bundle-${CYCLOPUS_VERSION}-linux-${GO_ARCH}.tar.zst"
+  log "Starting background bundle download: $BUNDLE_URL"
+  (
+    dl_big "$BUNDLE_URL" -o "$BUNDLE_TARBALL" &&
+    dl "$BUNDLE_URL.sha256" -o "$BUNDLE_TARBALL.sha256" &&
+    # The sidecar names the release filename; verify against our local path.
+    echo "$(awk '{print $1}' "$BUNDLE_TARBALL.sha256")  $BUNDLE_TARBALL" | sha256sum -c -
+  ) > /tmp/cyclopus-bundle-dl.log 2>&1 &
+  BUNDLE_PID=$!
+fi
+
 # Disk space pre-check: fail under 10G free; warn under 20G free or 30G total.
 # -P (POSIX output) keeps long device names (e.g. LVM /dev/mapper/...) on one line.
 DISK_LINE=$(df -PBG / 2>/dev/null | awk 'NR==2' || true)
@@ -170,6 +224,11 @@ elif [ "$DISK_AVAIL" -lt 10 ]; then
   fail "Insufficient disk space: ${DISK_AVAIL}G available on / (need at least 10G free)"
 elif [ "$DISK_AVAIL" -lt 20 ] || [ "$DISK_TOTAL" -lt 30 ]; then
   warn "Low disk space: ${DISK_AVAIL}G available / ${DISK_TOTAL}G total on / (recommend 20G+ free, 30G+ total)"
+fi
+# The offline bundle adds ~7G peak usage (tarball + extraction + image import)
+# beyond the base install.
+if [ -n "$BUNDLE_PID" ] && [[ "$DISK_AVAIL" =~ ^[0-9]+$ ]] && [ "$DISK_AVAIL" -lt 15 ]; then
+  fail "Insufficient disk space for the offline bundle: ${DISK_AVAIL}G available (need 15G+, or run with CYCLOPUS_ONLINE=1)"
 fi
 
 # Detect public IP (bounded, #8)
@@ -261,11 +320,12 @@ EOF
   log "Generated new secrets (saved to $STATE_FILE)"
 fi
 
-# Install PostgreSQL
+# Install PostgreSQL. One apt transaction for ALL prerequisites (zstd extracts
+# the offline bundle; ufw avoids a second update+install in the firewall step).
 log "Installing PostgreSQL $PG_MAJOR..."
 if ! command -v psql >/dev/null 2>&1; then
   apt-get update -qq
-  apt-get install -y curl ca-certificates gnupg lsb-release openssh-client
+  apt-get install -y curl ca-certificates gnupg lsb-release openssh-client zstd ufw
   install -d /usr/share/postgresql-common/pgdg
   dl https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
   echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
@@ -343,10 +403,45 @@ ufw --force enable
 systemctl enable ufw                               # #9: persist across reboot
 log "Firewall configured (SSH, 80, 443; k3s API localhost-only; port 8080 NOT exposed)"
 
+# Collect the background bundle download. On any failure (missing artifact,
+# network, checksum mismatch) fall back to the online path — every online
+# artifact is independently checksum-verified, so the fallback is not a
+# security downgrade.
+if [ -n "$BUNDLE_PID" ]; then
+  log "Waiting for bundle download..."
+  if wait "$BUNDLE_PID"; then
+    command -v zstd >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq zstd; }
+    rm -rf "$BUNDLE_DIR"
+    install -d -m 0755 "$BUNDLE_DIR"
+    if tar --zstd -C "$BUNDLE_DIR" --strip-components=1 -xf "$BUNDLE_TARBALL"; then
+      BUNDLE_MODE=1
+      rm -f "$BUNDLE_TARBALL" "$BUNDLE_TARBALL.sha256"
+      log "Offline bundle ready at $BUNDLE_DIR (single-download fast path)"
+    else
+      warn "bundle extraction failed — falling back to online install path"
+    fi
+  else
+    warn "bundle download/verify failed (see /tmp/cyclopus-bundle-dl.log) — falling back to online install path"
+  fi
+fi
+[ "$BUNDLE_MODE" = 1 ] || log "Install mode: online (per-artifact downloads + registry pulls)"
+
 # Install k3s with hardening. #10: download installer, then execute (no curl|sh).
+# Bundle mode: use the bundled k3s binary + installer and pre-stage ALL images
+# (k3s airgap set + platform/workload images) in the k3s auto-import directory
+# so containerd never hits a registry.
 log "Installing k3s $K3S_VERSION with hardening..."
-K3S_INSTALLER=/tmp/k3s-install.sh
-dl https://get.k3s.io -o "$K3S_INSTALLER"
+if [ "$BUNDLE_MODE" = 1 ]; then
+  install -m 0755 "$BUNDLE_DIR/bin/k3s" /usr/local/bin/k3s
+  install -d -m 0755 /var/lib/rancher/k3s/agent/images
+  cp "$BUNDLE_DIR"/images/*.tar* /var/lib/rancher/k3s/agent/images/
+  K3S_INSTALLER="$BUNDLE_DIR/bin/k3s-install.sh"
+  INSTALL_K3S_SKIP_DOWNLOAD=true
+  export INSTALL_K3S_SKIP_DOWNLOAD
+else
+  K3S_INSTALLER=/tmp/k3s-install.sh
+  dl https://get.k3s.io -o "$K3S_INSTALLER"
+fi
 chmod +x "$K3S_INSTALLER"
 INSTALL_K3S_VERSION=$K3S_VERSION \
 INSTALL_K3S_EXEC="server \
@@ -358,14 +453,21 @@ INSTALL_K3S_EXEC="server \
   --kube-apiserver-arg=audit-log-maxsize=100 \
   --node-label=cyclopus.app/role=control-plane" \
 sh "$K3S_INSTALLER"
-rm -f "$K3S_INSTALLER"
+[ "$BUNDLE_MODE" = 1 ] || rm -f "$K3S_INSTALLER"
 systemctl enable --now k3s
 
 log "Waiting for k3s API..."
-i=0; while [ $i -lt 60 ]; do
+# Bundle mode: k3s imports the staged image tarballs (several GB) during
+# startup, which delays the API — allow up to 5 minutes there, 2 otherwise.
+K3S_WAIT=60; [ "$BUNDLE_MODE" = 1 ] && K3S_WAIT=150
+i=0; while [ $i -lt "$K3S_WAIT" ]; do
   $KUBECTL get --raw=/readyz >/dev/null 2>&1 && break
-  i=$((i+1)); [ $i -lt 60 ] || fail "k3s API did not become ready"; sleep 2
+  i=$((i+1)); [ $i -lt "$K3S_WAIT" ] || fail "k3s API did not become ready"; sleep 2
 done
+# Image import completes before the API serves; the staged tarballs are now
+# duplicated inside the containerd content store, so reclaim the disk (both
+# the k3s staging dir and the bundle copies).
+[ "$BUNDLE_MODE" = 1 ] && rm -f /var/lib/rancher/k3s/agent/images/*.tar* "$BUNDLE_DIR"/images/*.tar*
 log "k3s ready"
 
 # §2.2 opt-in: repel ordinary app pods from the control-plane node. Off by
@@ -391,14 +493,23 @@ log "Pod CIDR: ${POD_CIDR:-unknown}"
 
 # Install gVisor via the CANONICAL bootstrap script (#7: no duplicated checksums).
 log "Installing gVisor (canonical bootstrap script)..."
-GVISOR_SH=/tmp/install_gvisor.sh
-dl "$RAW_BASE/infra/bootstrap/install_gvisor.sh" -o "$GVISOR_SH"
-dl "$RAW_BASE/infra/bootstrap/common.sh" -o /tmp/common.sh
-# Reuse the versions.env resolved above so local-checkout pins are honored.
-cp "$RESOLVED_VERSIONS_ENV" /tmp/versions.env
-TMP_FILES="$TMP_FILES /tmp/versions.env"
-( cd /tmp && CYCLOPUS_VERSIONS_ENV=/tmp/versions.env sh "$GVISOR_SH" ) || fail "gVisor bootstrap failed"
-rm -f "$GVISOR_SH" /tmp/common.sh /tmp/versions.env
+if [ "$BUNDLE_MODE" = 1 ]; then
+  # Bundled scripts + binaries; checksum verification happens inside
+  # install_gvisor.sh regardless of the local source (GVISOR_LOCAL_DIR).
+  cp "$RESOLVED_VERSIONS_ENV" "$BUNDLE_DIR/bootstrap/versions.env"
+  ( cd "$BUNDLE_DIR/bootstrap" && CYCLOPUS_VERSIONS_ENV="$BUNDLE_DIR/bootstrap/versions.env" \
+    GVISOR_LOCAL_DIR="$BUNDLE_DIR/gvisor" sh ./install_gvisor.sh ) || fail "gVisor bootstrap failed"
+  rm -f "$BUNDLE_DIR/bootstrap/versions.env"
+else
+  GVISOR_SH=/tmp/install_gvisor.sh
+  dl "$RAW_BASE/infra/bootstrap/install_gvisor.sh" -o "$GVISOR_SH"
+  dl "$RAW_BASE/infra/bootstrap/common.sh" -o /tmp/common.sh
+  # Reuse the versions.env resolved above so local-checkout pins are honored.
+  cp "$RESOLVED_VERSIONS_ENV" /tmp/versions.env
+  TMP_FILES="$TMP_FILES /tmp/versions.env"
+  ( cd /tmp && CYCLOPUS_VERSIONS_ENV=/tmp/versions.env sh "$GVISOR_SH" ) || fail "gVisor bootstrap failed"
+  rm -f "$GVISOR_SH" /tmp/common.sh /tmp/versions.env
+fi
 systemctl restart k3s
 i=0; while [ $i -lt 60 ]; do
   $KUBECTL get --raw=/readyz >/dev/null 2>&1 && break
@@ -418,13 +529,17 @@ $KUBECTL get runtimeclass gvisor >/dev/null 2>&1 || fail "gvisor RuntimeClass mi
 # Install Helm (#8 bounded downloads)
 log "Installing Helm $HELM_VERSION..."
 if ! command -v helm >/dev/null 2>&1; then
-  HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
-  dl "https://get.helm.sh/$HELM_TAR" -o /tmp/helm.tar.gz
-  dl "https://get.helm.sh/${HELM_TAR}.sha256sum" -o /tmp/helm.sha256
-  echo "$(awk '{print $1}' /tmp/helm.sha256)  /tmp/helm.tar.gz" | sha256sum -c - || fail "Helm checksum mismatch"
-  tar -C /tmp -xzf /tmp/helm.tar.gz
-  install -m 0755 /tmp/linux-${GO_ARCH}/helm /usr/local/bin/helm
-  rm -rf /tmp/helm.tar.gz /tmp/helm.sha256 /tmp/linux-${GO_ARCH}
+  if [ "$BUNDLE_MODE" = 1 ]; then
+    install -m 0755 "$BUNDLE_DIR/bin/helm" /usr/local/bin/helm
+  else
+    HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
+    dl "https://get.helm.sh/$HELM_TAR" -o /tmp/helm.tar.gz
+    dl "https://get.helm.sh/${HELM_TAR}.sha256sum" -o /tmp/helm.sha256
+    echo "$(awk '{print $1}' /tmp/helm.sha256)  /tmp/helm.tar.gz" | sha256sum -c - || fail "Helm checksum mismatch"
+    tar -C /tmp -xzf /tmp/helm.tar.gz
+    install -m 0755 /tmp/linux-${GO_ARCH}/helm /usr/local/bin/helm
+    rm -rf /tmp/helm.tar.gz /tmp/helm.sha256 /tmp/linux-${GO_ARCH}
+  fi
 else
   log "Helm already installed"
 fi
@@ -480,51 +595,188 @@ log "Enabling unprivileged low-port binding (net.ipv4.ip_unprivileged_port_start
 echo 'net.ipv4.ip_unprivileged_port_start=0' > /etc/sysctl.d/99-cyclopus-lowports.conf
 sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
 
+# chart_ref NAME VERSION REPO: the chart source to install from — the bundled
+# tgz in bundle mode, or <repo>/<name> from the remote repos in online mode.
+chart_ref() {
+  if [ "$BUNDLE_MODE" = 1 ]; then
+    [ -f "$BUNDLE_DIR/charts/$1-$2.tgz" ] || fail "bundle is missing charts/$1-$2.tgz"
+    printf '%s\n' "$BUNDLE_DIR/charts/$1-$2.tgz"
+  else
+    printf '%s\n' "$3/$1"
+  fi
+}
+
+# Online mode only: add + update all repos ONCE up front. helm's repo config
+# is a shared file — doing this serially before the parallel installs below
+# avoids write races between background helm processes. Bundle mode needs no
+# repos at all (local tgzs).
+if [ "$BUNDLE_MODE" != 1 ]; then
+  log "Adding helm repos..."
+  helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
+  helm repo add kyverno https://kyverno.github.io/kyverno/ 2>/dev/null || true
+  helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
+  helm repo add kedacore https://kedacore.github.io/charts 2>/dev/null || true
+  helm repo update
+fi
+
+# Parallel chart-install driver. Each install function runs in the background
+# with its own log; wait_charts collects exit codes and dumps failing logs.
+# (fail() inside a backgrounded function only kills that subshell — the
+# nonzero exit is what wait_charts reports.)
+declare -A CHART_PID_NAME CHART_PID_LOG
+CHART_PIDS=""
+start_chart() {
+  _log=/tmp/cyclopus-chart-$1.log
+  TMP_FILES="$TMP_FILES $_log"
+  "$2" >"$_log" 2>&1 &
+  CHART_PIDS="$CHART_PIDS $!"
+  CHART_PID_NAME[$!]=$1
+  CHART_PID_LOG[$!]=$_log
+}
+wait_charts() {
+  _failed=0
+  for _p in $CHART_PIDS; do
+    if ! wait "$_p"; then
+      _failed=1
+      warn "chart install failed: ${CHART_PID_NAME[$_p]} — full log follows"
+      cat "${CHART_PID_LOG[$_p]}" >&2
+    fi
+  done
+  CHART_PIDS=""
+  [ "$_failed" = 0 ] || fail "parallel chart install failed (see logs above)"
+}
+
 # Install Traefik as a host-network DaemonSet binding ports 80/443 directly on the
 # node. This is REQUIRED for Let's Encrypt HTTP-01: the ACME server connects to
 # http://<host>:80/.well-known/acme-challenge/... — a NodePort (30080) is not
 # reachable by Let's Encrypt, so certs would never issue. hostNetwork puts Traefik
 # on the node's :80/:443 so both ACME and normal traffic work.
-log "Installing Traefik ingress controller v$TRAEFIK_CHART_VERSION (hostNetwork :80/:443)..."
-helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
-helm repo update traefik
-# Traefik's config lives entirely in --set flags (no values file), so the same
-# array is applied on install AND upgrade (deliberately NOT --reuse-values: the
-# flags are the config, and an upgrade must converge them).
-TRAEFIK_SET_ARGS=(
-  --set deployment.kind=DaemonSet
-  --set hostNetwork=true
-  --set service.enabled=false
-  --set updateStrategy.rollingUpdate.maxUnavailable=1
-  --set updateStrategy.rollingUpdate.maxSurge=0
-  --set ports.web.port=80
-  --set ports.web.hostPort=80
-  --set ports.websecure.port=443
-  --set ports.websecure.hostPort=443
-  --set resources.requests.cpu=50m
-  --set resources.requests.memory=64Mi
-  --set resources.limits.memory=128Mi
-)
-_rc=0
-converge_chart traefik kube-system "$TRAEFIK_CHART_VERSION" || _rc=$?
-case "$_rc" in
-  1)
-    helm install traefik traefik/traefik \
-      --version "$TRAEFIK_CHART_VERSION" \
-      --namespace kube-system \
-      "${TRAEFIK_SET_ARGS[@]}" \
-      --timeout 10m
-    ;;
-  2)
-    log "Traefik chart not at pin — upgrading to $TRAEFIK_CHART_VERSION"
-    helm upgrade traefik traefik/traefik \
-      --version "$TRAEFIK_CHART_VERSION" \
-      --namespace kube-system \
-      "${TRAEFIK_SET_ARGS[@]}" \
-      --cleanup-on-fail --timeout 10m
-    ;;
-esac
-assert_chart_version traefik kube-system "$TRAEFIK_CHART_VERSION"
+install_traefik() {
+  # Traefik's config lives entirely in --set flags (no values file), so the same
+  # array is applied on install AND upgrade (deliberately NOT --reuse-values: the
+  # flags are the config, and an upgrade must converge them).
+  TRAEFIK_SET_ARGS=(
+    --set deployment.kind=DaemonSet
+    --set hostNetwork=true
+    --set service.enabled=false
+    --set updateStrategy.rollingUpdate.maxUnavailable=1
+    --set updateStrategy.rollingUpdate.maxSurge=0
+    --set ports.web.port=80
+    --set ports.web.hostPort=80
+    --set ports.websecure.port=443
+    --set ports.websecure.hostPort=443
+    --set resources.requests.cpu=50m
+    --set resources.requests.memory=64Mi
+    --set resources.limits.memory=128Mi
+  )
+  _chart=$(chart_ref traefik "$TRAEFIK_CHART_VERSION" traefik)
+  _ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$TRAEFIK_CHART_VERSION")
+  _rc=0
+  converge_chart traefik kube-system "$TRAEFIK_CHART_VERSION" || _rc=$?
+  case "$_rc" in
+    1)
+      helm install traefik "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace kube-system \
+        "${TRAEFIK_SET_ARGS[@]}" \
+        --timeout 10m
+      ;;
+    2)
+      log "Traefik chart not at pin — upgrading to $TRAEFIK_CHART_VERSION"
+      helm upgrade traefik "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace kube-system \
+        "${TRAEFIK_SET_ARGS[@]}" \
+        --cleanup-on-fail --timeout 10m
+      ;;
+  esac
+  assert_chart_version traefik kube-system "$TRAEFIK_CHART_VERSION"
+}
+
+install_kyverno() {
+  _chart=$(chart_ref kyverno "$KYVERNO_CHART_VERSION" kyverno)
+  _ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$KYVERNO_CHART_VERSION")
+  _rc=0
+  converge_chart kyverno kyverno "$KYVERNO_CHART_VERSION" || _rc=$?
+  case "$_rc" in
+    1)
+      helm install kyverno "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace kyverno --create-namespace \
+        --wait --timeout 5m
+      ;;
+    2)
+      log "Kyverno chart not at pin — upgrading to $KYVERNO_CHART_VERSION"
+      # Upgrade passes identical value flags as install by design (no --reuse-values).
+      # Note: helm never upgrades the chart's crds/ directory — a pin bump with CRD
+      # schema changes needs a manual CRD apply (out of scope).
+      helm upgrade kyverno "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace kyverno \
+        --cleanup-on-fail --wait --timeout 5m
+      ;;
+  esac
+  assert_chart_version kyverno kyverno "$KYVERNO_CHART_VERSION"
+}
+
+install_cert_manager() {
+  _chart=$(chart_ref cert-manager "$CERT_MANAGER_VERSION" jetstack)
+  _ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$CERT_MANAGER_VERSION")
+  _rc=0
+  converge_chart cert-manager cert-manager "$CERT_MANAGER_VERSION" || _rc=$?
+  case "$_rc" in
+    1)
+      helm install cert-manager "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace cert-manager --create-namespace \
+        --set crds.enabled=true \
+        --wait --timeout 5m
+      ;;
+    2)
+      log "cert-manager chart not at pin — upgrading to $CERT_MANAGER_VERSION"
+      # Upgrade passes identical value flags as install by design (no --reuse-values).
+      helm upgrade cert-manager "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace cert-manager \
+        --set crds.enabled=true \
+        --cleanup-on-fail --wait --timeout 5m
+      ;;
+  esac
+  assert_chart_version cert-manager cert-manager "$CERT_MANAGER_VERSION"
+}
+
+install_keda() {
+  _chart=$(chart_ref keda "$KEDA_VERSION" kedacore)
+  _ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$KEDA_VERSION")
+  _rc=0
+  converge_chart keda keda "$KEDA_VERSION" || _rc=$?
+  case "$_rc" in
+    1)
+      helm install keda "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace keda --create-namespace \
+        --wait --timeout 5m
+      ;;
+    2)
+      log "KEDA chart not at pin — upgrading to $KEDA_VERSION"
+      # Upgrade passes identical value flags as install by design (no --reuse-values).
+      helm upgrade keda "$_chart" \
+        "${_ver_args[@]}" \
+        --namespace keda \
+        --cleanup-on-fail --wait --timeout 5m
+      ;;
+  esac
+  assert_chart_version keda keda "$KEDA_VERSION"
+}
+
+# Stage 1: Traefik ∥ Kyverno. Traefik runs in kube-system, which Kyverno's
+# fail-closed admission webhooks exclude by default — so it is safe for these
+# two to race. Namespaced workloads (cert-manager, keda, cyclopus) must wait
+# for the Kyverno webhook to be verified ready (stage 2 below).
+log "Installing Traefik v$TRAEFIK_CHART_VERSION + Kyverno $KYVERNO_VERSION in parallel..."
+start_chart traefik install_traefik
+start_chart kyverno install_kyverno
+wait_charts
 
 # #13: verify Traefik is actually reachable on host :80 (ACME HTTP-01 depends on it).
 i=0; while [ $i -lt 60 ]; do
@@ -534,32 +786,6 @@ i=0; while [ $i -lt 60 ]; do
   i=$((i+1)); [ $i -lt 60 ] || fail "Traefik is not listening on host :80 (ACME HTTP-01 would fail)"; sleep 2
 done
 log "Traefik listening on host :80/:443 (ACME HTTP-01 reachable)"
-
-# Install Kyverno
-log "Installing Kyverno $KYVERNO_VERSION..."
-helm repo add kyverno https://kyverno.github.io/kyverno/ 2>/dev/null || true
-helm repo update kyverno
-_rc=0
-converge_chart kyverno kyverno "$KYVERNO_CHART_VERSION" || _rc=$?
-case "$_rc" in
-  1)
-    helm install kyverno kyverno/kyverno \
-      --version "$KYVERNO_CHART_VERSION" \
-      --namespace kyverno --create-namespace \
-      --wait --timeout 5m
-    ;;
-  2)
-    log "Kyverno chart not at pin — upgrading to $KYVERNO_CHART_VERSION"
-    # Upgrade passes identical value flags as install by design (no --reuse-values).
-    # Note: helm never upgrades the chart's crds/ directory — a pin bump with CRD
-    # schema changes needs a manual CRD apply (out of scope).
-    helm upgrade kyverno kyverno/kyverno \
-      --version "$KYVERNO_CHART_VERSION" \
-      --namespace kyverno \
-      --cleanup-on-fail --wait --timeout 5m
-    ;;
-esac
-assert_chart_version kyverno kyverno "$KYVERNO_CHART_VERSION"
 
 # Wait for Kyverno webhook. #12: probe pod is cleaned up here AND in the EXIT trap.
 log "Waiting for Kyverno webhook..."
@@ -575,31 +801,11 @@ i=0; while [ $i -lt 120 ]; do
 done
 log "Kyverno webhook ready"
 
-# Install cert-manager
-log "Installing cert-manager $CERT_MANAGER_VERSION..."
-helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
-helm repo update jetstack
-_rc=0
-converge_chart cert-manager cert-manager "$CERT_MANAGER_VERSION" || _rc=$?
-case "$_rc" in
-  1)
-    helm install cert-manager jetstack/cert-manager \
-      --version "$CERT_MANAGER_VERSION" \
-      --namespace cert-manager --create-namespace \
-      --set crds.enabled=true \
-      --wait --timeout 5m
-    ;;
-  2)
-    log "cert-manager chart not at pin — upgrading to $CERT_MANAGER_VERSION"
-    # Upgrade passes identical value flags as install by design (no --reuse-values).
-    helm upgrade cert-manager jetstack/cert-manager \
-      --version "$CERT_MANAGER_VERSION" \
-      --namespace cert-manager \
-      --set crds.enabled=true \
-      --cleanup-on-fail --wait --timeout 5m
-    ;;
-esac
-assert_chart_version cert-manager cert-manager "$CERT_MANAGER_VERSION"
+# Stage 2: cert-manager ∥ KEDA — safe now that the Kyverno webhook is ready.
+log "Installing cert-manager $CERT_MANAGER_VERSION + KEDA v$KEDA_VERSION in parallel..."
+start_chart cert-manager install_cert_manager
+start_chart keda install_keda
+wait_charts
 
 log "Waiting for cert-manager webhook..."
 i=0; while [ $i -lt 60 ]; do
@@ -641,30 +847,8 @@ spec:
           class: traefik
 EOF
 
-# Install KEDA
-log "Installing KEDA v$KEDA_VERSION..."
-helm repo add kedacore https://kedacore.github.io/charts 2>/dev/null || true
-helm repo update kedacore
-_rc=0
-converge_chart keda keda "$KEDA_VERSION" || _rc=$?
-case "$_rc" in
-  1)
-    helm install keda kedacore/keda \
-      --version "$KEDA_VERSION" \
-      --namespace keda --create-namespace \
-      --wait --timeout 5m
-    ;;
-  2)
-    log "KEDA chart not at pin — upgrading to $KEDA_VERSION"
-    # Upgrade passes identical value flags as install by design (no --reuse-values).
-    helm upgrade keda kedacore/keda \
-      --version "$KEDA_VERSION" \
-      --namespace keda \
-      --cleanup-on-fail --wait --timeout 5m
-    ;;
-esac
-assert_chart_version keda keda "$KEDA_VERSION"
-
+# KEDA core was installed in stage 2 above; the HTTP add-on must follow it
+# (it extends KEDA's CRDs).
 log "Installing KEDA HTTP Add-on v$KEDA_HTTP_ADDON_VERSION..."
 # Like Traefik, the resources --sets ARE the config here, so they are re-applied
 # on upgrade (deliberately NOT --reuse-values) via a shared array.
@@ -679,20 +863,22 @@ KEDA_HTTP_SET_ARGS=(
   --set scaler.resources.requests.memory=64Mi
   --set scaler.resources.limits.memory=128Mi
 )
+_chart=$(chart_ref keda-add-ons-http "$KEDA_HTTP_ADDON_VERSION" kedacore)
+_ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$KEDA_HTTP_ADDON_VERSION")
 _rc=0
 converge_chart keda-add-ons-http keda "$KEDA_HTTP_ADDON_VERSION" || _rc=$?
 case "$_rc" in
   1)
-    helm install keda-add-ons-http kedacore/keda-add-ons-http \
-      --version "$KEDA_HTTP_ADDON_VERSION" \
+    helm install keda-add-ons-http "$_chart" \
+      "${_ver_args[@]}" \
       --namespace keda \
       "${KEDA_HTTP_SET_ARGS[@]}" \
       --wait --timeout 10m
     ;;
   2)
     log "KEDA HTTP Add-on chart not at pin — upgrading to $KEDA_HTTP_ADDON_VERSION"
-    helm upgrade keda-add-ons-http kedacore/keda-add-ons-http \
-      --version "$KEDA_HTTP_ADDON_VERSION" \
+    helm upgrade keda-add-ons-http "$_chart" \
+      "${_ver_args[@]}" \
       --namespace keda \
       "${KEDA_HTTP_SET_ARGS[@]}" \
       --cleanup-on-fail --wait --timeout 10m
@@ -736,12 +922,83 @@ $KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic beszel-agent-key \
   --from-literal=public="$BESZEL_PUBLIC_KEY" \
   --dry-run=client -o yaml | $KUBECTL apply -f -
 
+# write_tls_ingress NAME HOST PORT: emit a Traefik Ingress (with cert-manager
+# Let's Encrypt production TLS) routing HOST to service NAME:PORT.
+write_tls_ingress() {
+  cat <<EOF
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: $1
+  namespace: ${CYCLOPUS_NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  ingressClassName: traefik
+  tls:
+  - secretName: $1-tls
+    hosts:
+    - $2
+  rules:
+  - host: $2
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: $1
+            port:
+              number: $3
+EOF
+}
+
+# Install the observability stack (OpenObserve + Beszel + OTel Collector +
+# Beszel agents) into the Cyclopus namespace (§8). Applied BEFORE the Cyclopus
+# helm install below so its pods schedule and start while the control plane
+# rolls out — readiness is only verified (non-fatally) at the end. Raw
+# manifests so the one-line install works without a repo checkout; ingress
+# hosts derive from the same sslip.io suffix as the console. The manifests
+# hardcode `namespace: cyclopus`; rewrite when CYCLOPUS_NAMESPACE differs —
+# including the collector exporter DNS name and the filelog self-exclusion
+# prefix, otherwise the collector tails its own logs (self-ingest loop).
+log "Installing observability stack (OpenObserve + Beszel + OTel Collector + agents)..."
+for OBS_NAME in openobserve beszel otel-collector beszel-agent; do
+  if [ "$BUNDLE_MODE" = 1 ]; then
+    OBS_MANIFEST="$BUNDLE_DIR/observability/$OBS_NAME.yaml"
+    [ -f "$OBS_MANIFEST" ] || fail "bundle is missing observability/$OBS_NAME.yaml"
+  else
+    OBS_MANIFEST=$(mktemp)
+    TMP_FILES="$TMP_FILES $OBS_MANIFEST"
+    dl "$RAW_BASE/infra/observability/$OBS_NAME.yaml" -o "$OBS_MANIFEST"
+  fi
+  if [ "$CYCLOPUS_NAMESPACE" != "cyclopus" ]; then
+    [ "$BUNDLE_MODE" = 1 ] && { cp "$OBS_MANIFEST" /tmp/obs-edit.yaml; OBS_MANIFEST=/tmp/obs-edit.yaml; TMP_FILES="$TMP_FILES $OBS_MANIFEST"; }
+    sed -i "s/namespace: cyclopus/namespace: ${CYCLOPUS_NAMESPACE}/g; s/openobserve\.cyclopus\.svc/openobserve.${CYCLOPUS_NAMESPACE}.svc/g; s|/var/log/pods/cyclopus_|/var/log/pods/${CYCLOPUS_NAMESPACE}_|g" "$OBS_MANIFEST"
+  fi
+  $KUBECTL apply -f "$OBS_MANIFEST"
+done
+{
+  write_tls_ingress openobserve "oo.${HOSTNAME_SUFFIX}" 5080
+  write_tls_ingress beszel "beszel.${HOSTNAME_SUFFIX}" 8090
+} | $KUBECTL apply -f -
+
 # Install Cyclopus. #2: secrets go in a 0600 values file (umask), never in argv.
 log "Installing Cyclopus..."
 DB_URL="postgres://cyclopus:${DB_PASSWORD}@${NODE_IP}:5432/cyclopus?sslmode=require"
 
-helm repo add cyclopus https://shepard-labs.github.io/charts 2>/dev/null || true
-helm repo update cyclopus 2>/dev/null || true
+# Chart source: bundled tgz, else the OCI registry the release workflow
+# publishes to (oci://ghcr.io/shepard-labs/charts/cyclopus; the chart version
+# always equals the release tag minus the leading v).
+if [ "$BUNDLE_MODE" = 1 ]; then
+  CYCLOPUS_CHART="$BUNDLE_DIR/charts/cyclopus-${CHART_VER}.tgz"
+  [ -f "$CYCLOPUS_CHART" ] || fail "bundle is missing charts/cyclopus-${CHART_VER}.tgz"
+  CYCLOPUS_CHART_VER_ARGS=()
+else
+  CYCLOPUS_CHART="oci://ghcr.io/shepard-labs/charts/cyclopus"
+  CYCLOPUS_CHART_VER_ARGS=(--version "$CHART_VER")
+fi
 
 VALUES_FILE=$( (umask 0077; mktemp) )
 TMP_FILES="$TMP_FILES $VALUES_FILE"
@@ -784,12 +1041,14 @@ ingress:
 EOF
 
 if ! helm_deployed "$CYCLOPUS_RELEASE" "$CYCLOPUS_NAMESPACE"; then
-  helm install "$CYCLOPUS_RELEASE" cyclopus/cyclopus \
+  helm install "$CYCLOPUS_RELEASE" "$CYCLOPUS_CHART" \
+    "${CYCLOPUS_CHART_VER_ARGS[@]}" \
     --namespace "$CYCLOPUS_NAMESPACE" --create-namespace \
     -f "$VALUES_FILE" \
     --atomic --wait --timeout 5m
 else
-  helm upgrade "$CYCLOPUS_RELEASE" cyclopus/cyclopus \
+  helm upgrade "$CYCLOPUS_RELEASE" "$CYCLOPUS_CHART" \
+    "${CYCLOPUS_CHART_VER_ARGS[@]}" \
     --namespace "$CYCLOPUS_NAMESPACE" \
     -f "$VALUES_FILE" \
     --atomic --wait --timeout 5m
@@ -802,65 +1061,18 @@ i=0; while [ $i -lt 60 ]; do
   i=$((i+1)); [ $i -lt 60 ] || fail "Cyclopus did not become ready"; sleep 2
 done
 
-# write_tls_ingress NAME HOST PORT: emit a Traefik Ingress (with cert-manager
-# Let's Encrypt production TLS) routing HOST to service NAME:PORT.
-write_tls_ingress() {
-  cat <<EOF
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: $1
-  namespace: ${CYCLOPUS_NAMESPACE}
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
-spec:
-  ingressClassName: traefik
-  tls:
-  - secretName: $1-tls
-    hosts:
-    - $2
-  rules:
-  - host: $2
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: $1
-            port:
-              number: $3
-EOF
-}
-
-# Install the observability stack (OpenObserve + Beszel + OTel Collector +
-# Beszel agents) into the Cyclopus namespace (§8). Raw manifests so the
-# one-line install works without a repo checkout; ingress hosts derive from
-# the same sslip.io suffix as the console. The manifests hardcode
-# `namespace: cyclopus`; rewrite when CYCLOPUS_NAMESPACE differs — including
-# the collector exporter DNS name and the filelog self-exclusion prefix,
-# otherwise the collector tails its own logs (self-ingest loop).
-log "Installing observability stack (OpenObserve + Beszel + OTel Collector + agents)..."
-for OBS_NAME in openobserve beszel otel-collector beszel-agent; do
-  OBS_MANIFEST=$(mktemp)
-  TMP_FILES="$TMP_FILES $OBS_MANIFEST"
-  dl "$RAW_BASE/infra/observability/$OBS_NAME.yaml" -o "$OBS_MANIFEST"
-  if [ "$CYCLOPUS_NAMESPACE" != "cyclopus" ]; then
-    sed -i "s/namespace: cyclopus/namespace: ${CYCLOPUS_NAMESPACE}/g; s/openobserve\.cyclopus\.svc/openobserve.${CYCLOPUS_NAMESPACE}.svc/g; s|/var/log/pods/cyclopus_|/var/log/pods/${CYCLOPUS_NAMESPACE}_|g" "$OBS_MANIFEST"
-  fi
-  $KUBECTL apply -f "$OBS_MANIFEST"
-done
-{
-  write_tls_ingress openobserve "oo.${HOSTNAME_SUFFIX}" 5080
-  write_tls_ingress beszel "beszel.${HOSTNAME_SUFFIX}" 8090
-} | $KUBECTL apply -f -
+# Observability was applied before the Cyclopus install; verify readiness here.
 # Non-fatal: an observability add-on that is slow to start must not abort the
-# install now that the platform itself is up.
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/openobserve --timeout=3m || warn "observability component openobserve not ready yet (non-fatal)"
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/beszel --timeout=3m || warn "observability component beszel not ready yet (non-fatal)"
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status daemonset/opentelemetry-collector --timeout=3m || warn "observability component opentelemetry-collector not ready yet (non-fatal)"
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status daemonset/beszel-agent --timeout=3m || warn "observability component beszel-agent not ready yet (non-fatal)"
+# install now that the platform itself is up. The four rollouts run in
+# parallel with one shared deadline instead of 4 sequential 3-minute waits.
+log "Checking observability stack readiness (parallel, non-fatal)..."
+OBS_PIDS=""
+for OBS_TARGET in deploy/openobserve deploy/beszel daemonset/opentelemetry-collector daemonset/beszel-agent; do
+  ( $KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status "$OBS_TARGET" --timeout=3m >/dev/null 2>&1 || \
+    warn "observability component ${OBS_TARGET#*/} not ready yet (non-fatal)" ) &
+  OBS_PIDS="$OBS_PIDS $!"
+done
+for _p in $OBS_PIDS; do wait "$_p" || true; done
 
 # --- WAL-G Postgres backups (§9.1) -------------------------------------------
 # Stage the backup toolkit UNCONDITIONALLY (even without S3 creds) so the
@@ -872,12 +1084,18 @@ BACKUP_DIR=/opt/cyclopus/backup
 WALG_WIRED=0
 if (
   install -d -m 0755 "$BACKUP_DIR" &&
-  for f in common.sh install_walg.sh backup.sh restore.sh configure_from_db.sh; do
-    dl "$RAW_BASE/infra/backup/$f" -o "$BACKUP_DIR/$f" && chmod 0755 "$BACKUP_DIR/$f" || exit 1
-  done &&
-  for f in cyclopus-walg-backup.service cyclopus-walg-backup.timer; do
-    dl "$RAW_BASE/infra/backup/$f" -o "$BACKUP_DIR/$f" && chmod 0644 "$BACKUP_DIR/$f" || exit 1
-  done &&
+  if [ "$BUNDLE_MODE" = 1 ]; then
+    cp "$BUNDLE_DIR"/backup/*.sh "$BACKUP_DIR/" && chmod 0755 "$BACKUP_DIR"/*.sh &&
+    cp "$BUNDLE_DIR"/backup/cyclopus-walg-backup.service "$BUNDLE_DIR"/backup/cyclopus-walg-backup.timer "$BACKUP_DIR/" &&
+    chmod 0644 "$BACKUP_DIR"/cyclopus-walg-backup.service "$BACKUP_DIR"/cyclopus-walg-backup.timer
+  else
+    for f in common.sh install_walg.sh backup.sh restore.sh configure_from_db.sh; do
+      dl "$RAW_BASE/infra/backup/$f" -o "$BACKUP_DIR/$f" && chmod 0755 "$BACKUP_DIR/$f" || exit 1
+    done &&
+    for f in cyclopus-walg-backup.service cyclopus-walg-backup.timer; do
+      dl "$RAW_BASE/infra/backup/$f" -o "$BACKUP_DIR/$f" && chmod 0644 "$BACKUP_DIR/$f" || exit 1
+    done
+  fi &&
   # common.sh's sibling fallback lets the staged scripts resolve their pins.
   cp "$RESOLVED_VERSIONS_ENV" "$BACKUP_DIR/versions.env" && chmod 0644 "$BACKUP_DIR/versions.env"
 ); then
@@ -902,7 +1120,13 @@ if [ -n "$WALG_S3_ENDPOINT" ] && [ -n "$WALG_S3_BUCKET" ] && [ -n "$AWS_ACCESS_K
     require_root &&
     walg_env &&
     write_walg_env /etc/cyclopus/walg.env &&
-    sh "$BACKUP_DIR/install_walg.sh" &&
+    if [ "$BUNDLE_MODE" = 1 ]; then
+      # Bundled wal-g tarball; checksum verification happens inside
+      # install_walg.sh regardless of the local source (WALG_LOCAL_DIR).
+      WALG_LOCAL_DIR="$BUNDLE_DIR/walg" sh "$BACKUP_DIR/install_walg.sh"
+    else
+      sh "$BACKUP_DIR/install_walg.sh"
+    fi &&
     # archive_mode/wal_level are postmaster-start settings: full restart only
     # when archiving is not already active, otherwise a reload suffices
     # (idempotent installer re-runs do not bounce the DB).

@@ -11,7 +11,7 @@ pattern from `scripts/integration/deploy_guest.sh`. Every version is pinned to
 | `base_packages.sh` | Base packages on Ubuntu 24.04 / Debian 12. |
 | `k3s_server.sh` | Control-plane (VPS1): hardened k3s server, `--disable=traefik`, secrets encryption on, single-stack IPv4, control-plane taint, hardened kubelet/API flags (§2.2, §7, §9). |
 | `k3s_agent.sh` | Data-plane (VPS2-4): hardened k3s agent joining via `K3S_URL`/`K3S_TOKEN`. |
-| `install_gvisor.sh` | Checksum-verified `runsc` + containerd runtime-handler registration for the `gvisor` RuntimeClass (§7.1). |
+| `install_gvisor.sh` | Checksum-verified `runsc` + containerd runtime-handler registration for the `gvisor` RuntimeClass (§7.1). `GVISOR_LOCAL_DIR=<dir>` uses pre-downloaded binaries from `<dir>` (offline install bundle) instead of downloading — checksums are still verified. |
 | `register_runtimeclass.sh` | Registers the `gvisor` and `runc` RuntimeClasses in the cluster. |
 | `floating_ip.sh` | Node-local attach/detach of the ingress floating IP (§9.1). |
 

@@ -11,7 +11,7 @@ because the deploy model is imperative with Postgres as source of truth (§3.2).
 |---|---|
 | `common.sh` | Shared helpers + WAL-G / storage_destinations env (sourced). |
 | `configure_from_db.sh` | Wire everything from the `storage_destinations` row: reads the `postgres_backup` destination + resolves its `credential_secret_ref`, writes `/etc/cyclopus/walg.env`, runs `install_walg.sh`, converges archiving, installs/enables the daily timer. Runs on the Postgres host. |
-| `install_walg.sh` | Checksum-verified WAL-G `v3.0.8` install; wires Postgres `archive_command`/`restore_command` and `archive_timeout=60` for the 60s RPO. |
+| `install_walg.sh` | Checksum-verified WAL-G `v3.0.8` install; wires Postgres `archive_command`/`restore_command` and `archive_timeout=60` for the 60s RPO. `WALG_LOCAL_DIR=<dir>` uses a pre-downloaded tarball from `<dir>` (offline install bundle) instead of downloading — the checksum is still verified. |
 | `backup.sh` | On-demand WAL-G base backup (also run daily by `cyclopus-walg-backup.timer`). |
 | `restore.sh` | Restore latest base backup + WAL replay (optional PITR via `PITR_TARGET_TIME`). |
 | `dr_runbook.sh` | Full DR: reattach floating IP → helm-install → restore → org-scoped reconcile loop (§9.1). |
