@@ -125,7 +125,7 @@ phases:
           command: ./scripts/integration.sh security
           evidence: orbstack-debian.json
         - id: psl-launch-block
-          command: "# V3 RESOLVED: sslip.io confirmed absent from PSL; sslip.io is default with documented limitation and startup warning"
+          command: ./scripts/probe_psl.sh sslip.io absent
           evidence: psl-launch-block.json
       adversarial_review:
         agent: tenant-escape-adversary

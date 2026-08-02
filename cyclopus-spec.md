@@ -132,13 +132,13 @@ flowchart TB
 | Scale-to-zero | KEDA core (cron) + KEDA HTTP Add-on (beta) | **Opt-in per production app** via `scaling_mode` — apps on plain `hpa` never touch this | Once, via Helm |
 | Control-plane API | Go + client-go + grpc-go + grpc-gateway | Typed gRPC internally, REST/JSON externally, from one .proto | Cyclopus's own binary, packaged as a Helm chart |
 | Control-plane UI | templ + htmx + hand-rolled daisyUI-token CSS (no build step), served via chi | Server-rendered admin dashboard, same Go binary | Same binary |
-| Control-plane state | Postgres 18 | Resource records, releases, audit log | Once, via Helm (or external) |
+| Control-plane state | Postgres 18 | Resource records, releases, audit log | Once, via the install script (host package; Helm-external) |
 | Config | Viper | Env vars / files / flags, unified | Compiled into the binary |
 | Postgres driver | jackc/pgx/v5 | | Compiled into the binary |
-| Telemetry ingest | OpenTelemetry Collector (DaemonSet) | Sole telemetry path out of app namespaces: receives OTLP, tails container stdout on-node, stamps tenant identity, scrubs, batches, exports to OpenObserve (§8.1) | Once, via Helm |
-| Logs/traces | OpenObserve | Backed by S3-compatible storage, written only by the Collector, read only via Cyclopus | Once, via Helm |
-| Resource metrics | Beszel | PocketBase-based, proxied through Cyclopus | Once, via Helm |
-| Postgres backup | WAL-G (primary), pgBackRest (heavier alternative) | Streams WAL to `storage_destinations` (S3-compatible); RPO target in §9.1 | Once, via Helm |
+| Telemetry ingest | OpenTelemetry Collector (DaemonSet) | Sole telemetry path out of app namespaces: receives OTLP, tails container stdout on-node, stamps tenant identity, scrubs, batches, exports to OpenObserve (§8.1) | Once, via the install script (raw manifests, infra/observability/, pinned in versions.yaml) |
+| Logs/traces | OpenObserve | Backed by S3-compatible storage, written only by the Collector, read only via Cyclopus | Once, via the install script (raw manifests, infra/observability/, pinned in versions.yaml) |
+| Resource metrics | Beszel | PocketBase-based, proxied through Cyclopus | Once, via the install script (raw manifests, infra/observability/, pinned in versions.yaml) |
+| Postgres backup | WAL-G (primary), pgBackRest (heavier alternative) | Streams WAL to `storage_destinations` (S3-compatible); RPO target in §9.1 | Wired by infra/backup/configure_from_db.sh + daily systemd timer (cyclopus-walg-backup.timer) |
 | Cluster resource backup | Velero | Kubernetes objects + PVs, secondary to Postgres backup, not a substitute for it | Once, via Helm, optional |
 | Default hostnames | sslip.io (default) or operator-owned domain | External, DNS-only. Configured via `kubernetes.preview_hostname_suffix`; both preview and production hostnames use this suffix. sslip.io is not PSL-listed — cert quota is shared globally; configure your own domain for production isolation (§7.5). | Not installed, just used |
 | Custom domain DNS | Customer's own DNS provider | Customer-configured; Cyclopus never holds DNS credentials | Not installed by Cyclopus |
@@ -148,6 +148,8 @@ flowchart TB
 Both directions are standard Kubernetes patterns, not something Cyclopus has to build:
 
 **Pinning the control plane to its own VPS.** VPS1 joins as a k3s server node; VPS2-4 join as agent (worker) nodes. A taint on VPS1 (`cyclopus.app/role=control-plane:NoSchedule`) repels ordinary app pods automatically; only the Cyclopus API and Postgres pods carry the matching toleration plus a `nodeSelector` targeting VPS1's label, so they're the only things that land there. Customer app pods are scheduled onto VPS2-4 by default, since nothing tolerates VPS1's taint.
+
+**Single-node installs are the exception.** The taint applies when worker nodes exist; a single-node install keeps the `cyclopus.app/role=control-plane` label only, because tainting the only node would leave app pods unschedulable. Operators joining workers immediately can pass `CYCLOPUS_CONTROL_PLANE_TAINT=true` to the install script, which taints every control-plane-labeled node and refuses to run on a single-node cluster; otherwise the installer's next-steps output provides the manual command (`k3s kubectl taint nodes <node> cyclopus.app/role=control-plane:NoSchedule`). The multi-node bootstrap path (`infra/bootstrap/k3s_server.sh`) always taints.
 
 **Spreading one app's replicas across VPS2-4.** Also standard, and mostly automatic: once HPA scales an app past one replica, the Kubernetes scheduler distributes those pods across whichever nodes have capacity. For a *guarantee* rather than best-effort spreading (e.g., "this app should survive VPS3 going down"), add a `topologySpreadConstraints` entry to the app's Deployment with `whenUnsatisfiable: DoNotSchedule` — a per-app opt-in field Cyclopus exposes, not a cluster-wide default.
 
@@ -736,7 +738,7 @@ spec:
     - to:                    # the single deliberate exception to the
         - namespaceSelector: # in-cluster block below: OTLP to the
             matchLabels:     # telemetry collector, and nothing else
-              kubernetes.io/metadata.name: cyclopus-observability
+              kubernetes.io/metadata.name: cyclopus
           podSelector:
             matchLabels:
               app.kubernetes.io/name: opentelemetry-collector
@@ -764,7 +766,7 @@ Three exclusions here are load-bearing and easy to omit:
 - **Node public IPs.** RFC1918 covers pod and Service CIDRs but *not* the nodes themselves, which on most cloud providers have public IPv4 addresses. Without this, a pod reaches `<node-public-ip>:6443` (the k3s API) and `:10250` (kubelet) by public address, entirely outside the private-range exclusions.
 - **IPv6.** An `ipBlock` of `0.0.0.0/0` says nothing about IPv6; on a dual-stack cluster every rule above is bypassable over v6. **v1 clusters are provisioned single-stack IPv4**, enforced by the install script / node-join checklist rather than assumed. Enabling dual-stack requires a mirrored `::/0` policy with equivalent exclusions and is not supported until that exists.
 
-**The collector exception is the only route from an app namespace into a platform namespace, and it is one-way and narrow:** two ports on one workload, no reply path granted, no access to OpenObserve itself. Apps cannot write to the log store directly — they hand telemetry to the Collector, which owns what lands there (§8.1). Adjust the namespace label to match wherever the Helm chart installs the collector; the policy generator reads it from platform config rather than hardcoding it.
+**The collector exception is the only route from an app namespace into a platform namespace, and it is one-way and narrow:** two ports on one workload, no reply path granted, no access to OpenObserve itself. Apps cannot write to the log store directly — they hand telemetry to the Collector, which owns what lands there (§8.1). The collector runs in the `cyclopus` namespace; the policy generator takes the selector from `CYCLOPUS_OBSERVABILITY_NAMESPACE` (default `cyclopus`) rather than hardcoding it.
 
 Enforced by k3s's bundled kube-router NetworkPolicy controller by default (present without installing anything extra). Calico is the documented upgrade path if `GlobalNetworkPolicy` (cluster-wide enforcement without per-namespace object management) becomes worth the added component.
 
@@ -843,7 +845,7 @@ For most small teams this is already true of their CI and is the correct boundar
 
 ### 8.1 OpenTelemetry Collector
 
-Runs as a DaemonSet in the platform's observability namespace — one instance per node, no separate gateway tier in v1. A gateway Deployment is the documented scaling step if fan-in to OpenObserve becomes the bottleneck; at target scale it's premature.
+Runs as a DaemonSet in the `cyclopus` namespace, deployed by the install script from the raw manifest `infra/observability/otel-collector.yaml` (image pinned in `versions.yaml`) rather than via Helm — one instance per node, no separate gateway tier in v1. A gateway Deployment is the documented scaling step if fan-in to OpenObserve becomes the bottleneck; at target scale it's premature.
 
 It sits between app pods and OpenObserve for four reasons, in rough order of how much they matter:
 
@@ -879,11 +881,12 @@ The gap being accepted: with logs alone, nobody is *told* when these happen — 
 The bootstrap install script and Helm exist for exactly one purpose: getting Cyclopus itself installed. Neither is ever in the live request path.
 
 - **Bootstrap install path**: the operator brings any SSH-accessible 64-bit Linux VPS (app-workload nodes must have nested virtualization enabled for gVisor `runsc`); the bootstrap scripts in `infra/bootstrap/` install base packages, k3s (server and agents), gVisor, and single-stack IPv4 networking (§7.2). There is no cloud-API provisioning — the operator provisions and networks the nodes with their provider of choice. **The ingress address SHOULD be a movable IP** — a cloud floating IP, a keepalived VIP, or a BGP-advertised address — if the operator wants default hostnames and their certificates to survive a node rebuild or DR (§9.1); otherwise DR may change default hostnames. State/inventory of node addresses is supplied by the operator at install — not prescribed.
-- **k3s flags set at install, both load-bearing:** `--disable=traefik`, so Traefik's version is managed by Cyclopus's Helm chart rather than moving with k3s upgrades; and secrets encryption at rest enabled, per §7.3.
-- **Helm chart**: installs Cyclopus's own binary plus every dependency in §2.1.
+- **k3s flags set at install, all load-bearing:** `--disable=traefik`, so Traefik's version is managed by Cyclopus's Helm chart rather than moving with k3s upgrades; secrets encryption at rest enabled, per §7.3; and apiserver audit logging (`--kube-apiserver-arg=audit-log-path=/var/log/k3s-audit.log` with bounded maxage/maxbackup/maxsize), so cluster-level mutations land in a durable audit log.
+- **Host platform, set up by the install script:** ufw allows 22, 80, and 443, and restricts the k3s API (6443) to localhost. Postgres 18 is installed as a host package (Helm-external, §2.1) with snakeoil TLS enabled and a pg_hba.conf rule requiring `hostssl` + `scram-sha-256` for connections from the k3s pod CIDR. All downloads (k3s, Helm, gVisor, chart and manifest artifacts) are checksum-verified. Component pins resolve from `versions.env`, generated from `versions.yaml` — the single source of truth — by `scripts/generate_versions_env.sh` and drift-checked by `scripts/validate_workflow.sh`. Every secret the install generates is written to `/root/.cyclopus-install-secrets` (mode 0600), never to stdout.
+- **Helm chart**: installs Cyclopus's own binary plus the Helm-managed dependencies in §2.1 (Traefik, cert-manager, Kyverno, KEDA); the observability stack is applied from raw manifests under `infra/observability/` instead (§8).
 - **First run**: an installed-but-empty Cyclopus has no users. The only reachable UI route is account creation (name, email, password, or GitHub OAuth). Creating that first user auto-creates an `orgs` row named "My Organization" with that user as its first member. Once a user exists, the signup route stops being reachable.
 
-  Claiming the install is the operator's responsibility and is not gated by a bootstrap token: whoever reaches the endpoint first owns it. Installs that are internet-reachable between Helm completing and first login are claimable by anyone scanning. The documented expectation is that the control plane sits behind a private network or a VPN — under which this is a non-issue — and operators exposing it publicly should claim it immediately.
+  Claiming the install is gated by a one-time bootstrap secret. The installer generates `AUTH_BOOTSTRAP_SECRET`, injects it into the chart, and records it in the 0600 secrets file; the first admin claim requires it, and a successful claim permanently disables it. This closes the internet-scan race between Helm completing and first login: an unclaimed public install is unusable to anyone who cannot read `/root/.cyclopus-install-secrets` on the host.
 
 ### 9.1 Backup and DR
 
@@ -892,7 +895,9 @@ Three distinct concerns:
 - **Customer app deployments** — no dedicated backup needed. Every Kubernetes object is regenerable from `releases`/`environments`/`env_vars` plus the independently-persistent registry image, because the deploy model is imperative with Postgres as source of truth (§3.2).
 - **Postgres (Cyclopus's own state)** — WAL-G streaming to a `storage_destinations` entry as the primary mechanism; pgBackRest as the heavier alternative if point-in-time recovery needs outgrow WAL-G. Velero is explicitly not a substitute here — it captures Kubernetes resources and volumes but has no native Postgres consistency guarantee without hooks.
 
-  **RPO target: 60 seconds.** Postgres runs with `archive_timeout = 60s`, so a WAL segment is closed and shipped at least once a minute even when write volume wouldn't otherwise fill one. Worst-case loss on total node failure is therefore up to 60 seconds of control-plane state — a deploy record, an audit event, an env-var change. This matters because Postgres sits on VPS1 on `local-path-provisioner` storage, which §2.2 correctly warns does not survive node loss: there is no replica, and WAL-G restore *is* the recovery path, not a fallback to one. Base backups run daily; the restore window is bounded by base backup retention in the storage destination.
+  **RPO target: 60 seconds.** Postgres runs with `archive_timeout = 60s`, so a WAL segment is closed and shipped at least once a minute even when write volume wouldn't otherwise fill one. Worst-case loss on total node failure is therefore up to 60 seconds of control-plane state — a deploy record, an audit event, an env-var change. This matters because Postgres is a host package on the node (§2.1), and a host disk does not survive node loss: there is no replica, and WAL-G restore *is* the recovery path, not a fallback to one. Base backups run daily; the restore window is bounded by base backup retention in the storage destination.
+
+  **Wiring is host-side and convergent.** The operator creates a `storage_destinations` row (`purpose = postgres_backup`, via UI or API) whose `credential_secret_ref` points at a Kubernetes Secret holding `access_key_id` + `secret_access_key`; then `infra/backup/configure_from_db.sh` runs on the Postgres host — it queries the row, resolves the secret reference, writes `/etc/cyclopus/walg.env`, runs `install_walg.sh` to converge archiving, and installs the `cyclopus-walg-backup.timer` daily base-backup timer. v1 invariant: **exactly one** `postgres_backup` destination per host — a second row fails the script rather than silently retargeting the WAL chain (`ORG_ID` is the escape hatch to select one explicitly). Fully automatic API→host triggering is deferred to v2: it needs a host agent to run the wiring on destination creation, which v1 does not have. **Zero-touch path:** when `WALG_S3_ENDPOINT` + `WALG_S3_BUCKET` and both `AWS_*` credential env vars are set before install, `scripts/install.sh` writes `walg.env` and installs the timer itself, no destination row required.
 - **Full DR** (total VPS loss) — new VPS (operator-provisioned), **reattach the movable ingress IP if held**, Helm-install Cyclopus, restore Postgres from WAL-G, then reconstruct cluster state via `POST /admin/reconcile` (§9.2). Velero snapshots of cluster resources are an optional, faster secondary path when a recent one happens to exist.
 
 #### Hostname survival across DR
