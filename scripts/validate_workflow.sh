@@ -20,6 +20,12 @@ required = %w[
   workflow/gate.schema.json
   workflow/checkpoint.schema.json
   workflow/orchestration-job.sql
+  infra/observability/otel-collector.yaml
+  infra/observability/beszel-agent.yaml
+  infra/backup/configure_from_db.sh
+  infra/backup/cyclopus-walg-backup.service
+  infra/backup/cyclopus-walg-backup.timer
+  tests/backup/configure_from_db_test.sh
   scripts/integration.sh
   scripts/test_infrastructure.sh
   scripts/generate_versions_env.sh
@@ -314,7 +320,7 @@ errors << "pending SHA fixture must assert old and cleared values" unless pendin
 errors << "canonical spec must establish Phase 0 errata precedence" unless spec.include?("Phase 0 Errata Precedence") && spec.index("workflow/orchestration-job.sql").to_i < spec.index("docs/decisions/phase-0-decisions.md").to_i
 errors << "canonical spec pending SHA SQL must return OLD and NEW values" unless spec.match?(/RETURNING WITH \(OLD AS old_row, NEW AS new_row\).*?old_row\.pending_commit_sha AS taken_sha.*?new_row\.pending_commit_sha AS remaining_sha/m)
 
-executable_scripts = %w[scripts/integration.sh scripts/test_infrastructure.sh scripts/probe_psl.sh scripts/validate_postgres_contract.sh scripts/validate_gate_evidence.sh tests/workflow/validate_gate_evidence_test.sh tests/schema/production_schema_test.sh]
+executable_scripts = %w[scripts/integration.sh scripts/test_infrastructure.sh scripts/probe_psl.sh scripts/validate_postgres_contract.sh scripts/validate_gate_evidence.sh tests/workflow/validate_gate_evidence_test.sh tests/schema/production_schema_test.sh tests/backup/configure_from_db_test.sh infra/backup/configure_from_db.sh]
 executable_scripts.each do |path|
   errors << "#{path} must be executable" unless File.executable?(File.join(root, path))
 end

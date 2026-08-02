@@ -1,7 +1,12 @@
 #!/bin/sh
 # In-VM install scenario: run the Phase 5 node bootstrap + helm install end to
-# end and assert the API becomes ready, the gvisor RuntimeClass exists, and
-# secrets encryption is enabled (workflow phase-5 install contract).
+# end and assert the API becomes ready, the gvisor RuntimeClass exists, secrets
+# encryption is enabled, and the install-time additions scripts/install.sh now
+# ships are in place: observability secrets (openobserve-auth/beszel-agent-key,
+# created BEFORE the API boots), the 4 raw observability manifests (openobserve,
+# beszel, otel-collector, beszel-agent), the oo./beszel. TLS Ingresses, and the
+# staged WAL-G backup toolkit at /opt/cyclopus/backup (workflow phase-5 install
+# contract).
 set -eu
 
 ROOT=${CYCLOPUS_INSTALL_ROOT:?CYCLOPUS_INSTALL_ROOT is required}
@@ -297,6 +302,33 @@ fi
 sudo systemctl restart postgresql
 retry 20 sudo -u postgres pg_isready -q || fail "Postgres not ready after reconfigure"
 
+step "creating observability secrets (openobserve-auth, beszel-agent-key) before the API boots"
+# Mirrors install.sh: the API resolves OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
+# (a k8s-secret:// reference, see the values file below) at startup, so a missing
+# secret would crash-loop the pod — secrets go in BEFORE helm install.
+sudo k3s kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | sudo k3s kubectl apply -f - >/dev/null
+oo_password=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+oo_credential="admin@cyclopus.local:${oo_password}"
+# credential: raw "user:password" the API base64-encodes itself; basic-auth: the
+# pre-encoded "Basic <base64>" header value for the OTel Collector's otlphttp
+# exporter (OpenObserve requires auth on its ingestion endpoints too).
+oo_basic_auth=$(printf '%s' "$oo_credential" | base64 | tr -d '\n')
+sudo k3s kubectl -n "$NAMESPACE" create secret generic openobserve-auth \
+  --from-literal=password="$oo_password" \
+  --from-literal=credential="$oo_credential" \
+  --from-literal=basic-auth="$oo_basic_auth" \
+  --dry-run=client -o yaml | sudo k3s kubectl apply -f - >/dev/null
+# Beszel hub<->agent SSH keypair: only the PUBLIC key enters the cluster.
+command -v ssh-keygen >/dev/null 2>&1 || retry 3 sudo apt-get install -y openssh-client || fail "openssh-client (ssh-keygen) install failed"
+beszel_key=$(mktemp)
+rm -f "$beszel_key"
+ssh-keygen -t ed25519 -f "$beszel_key" -N '' -C cyclopus-beszel >/dev/null 2>&1 || fail "beszel ssh-keygen failed"
+sudo k3s kubectl -n "$NAMESPACE" create secret generic beszel-agent-key \
+  --from-literal=public="$(cat "$beszel_key.pub")" \
+  --dry-run=client -o yaml | sudo k3s kubectl apply -f - >/dev/null
+# Test-only scenario: the private half is never needed beyond seeding the public key.
+rm -f "$beszel_key" "$beszel_key.pub"
+
 # #2/#6: secrets via a 0600 values file (umask), never in argv.
 values_file=$( (umask 0077; mktemp) )
 trap 'rm -f "$values_file"' EXIT HUP INT TERM
@@ -310,6 +342,11 @@ secrets:
   databaseUrl: "${db_url}"
   authTokenPepper: "install-test-pepper-value-32bytes!!"
   authBootstrapSecret: "install-test-bootstrap-secret-32b!"
+  # Mirrors install.sh: the API expects a k8s-secret reference (resolved at boot
+  # via internal/secretref); the referenced key holds the raw "user:password".
+  openobserveCredential: "k8s-secret://${NAMESPACE}/openobserve-auth#credential"
+  # Hub admin is created interactively post-install; token is added via the UI.
+  beszelToken: ""
 config:
   insecurePublicListeners: true
   kubernetes:
@@ -317,8 +354,14 @@ config:
     customDomainCnameTarget: "test.cyclopus.local"
     certManagerClusterIssuer: "letsencrypt-production"
   observability:
-    openobserveBaseUrl: "https://openobserve.test.local"
-    beszelBaseUrl: "https://beszel.test.local"
+    # Mirrors install.sh: HTTPS URLs pointing at the Traefik-terminated TLS
+    # ingresses created below; org/stream "default" matches the Collector's
+    # otlphttp exporter target (infra/observability/otel-collector.yaml).
+    openobserveBaseUrl: "https://oo.test.cyclopus.local"
+    openobserveOrganization: "default"
+    openobserveLogStream: "default"
+    openobserveTraceStream: "default"
+    beszelBaseUrl: "https://beszel.test.cyclopus.local"
 ingress:
   enabled: true
   className: traefik
@@ -344,6 +387,114 @@ step "asserting the control-plane console Ingress exists"
 sudo k3s kubectl -n "$NAMESPACE" get ingress "$RELEASE-console" >/dev/null 2>&1 || fail "console Ingress missing"
 issuer=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$RELEASE-console" -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}')
 [ "$issuer" = "letsencrypt-production" ] || fail "console Ingress cluster-issuer is '$issuer', expected letsencrypt-production"
+
+step "installing observability stack (mirrors install.sh: raw manifests + TLS ingresses)"
+# install.sh downloads infra/observability/*.yaml from the raw base so the
+# one-line install works without a checkout; the guest applies the same files
+# from the staged repo. The manifests hardcode `namespace: cyclopus`; rewrite
+# when NAMESPACE differs — the same substitutions install.sh makes: the
+# collector exporter DNS name and the filelog self-exclusion prefix (otherwise
+# the collector tails its own logs — a self-ingest loop).
+for obs_name in openobserve beszel otel-collector beszel-agent; do
+  obs_manifest="$tmp_dir/$obs_name.yaml"
+  cp "$ROOT/infra/observability/$obs_name.yaml" "$obs_manifest"
+  if [ "$NAMESPACE" != cyclopus ]; then
+    sed -i "s/namespace: cyclopus/namespace: ${NAMESPACE}/g; s/openobserve\.cyclopus\.svc/openobserve.${NAMESPACE}.svc/g; s|/var/log/pods/cyclopus_|/var/log/pods/${NAMESPACE}_|g" "$obs_manifest"
+  fi
+  sudo k3s kubectl apply -f "$obs_manifest" >/dev/null || fail "observability manifest $obs_name failed to apply"
+done
+
+# write_tls_ingress NAME HOST PORT: same Traefik Ingress shape install.sh emits
+# (cert-manager Let's Encrypt production TLS routing HOST to service NAME:PORT).
+write_tls_ingress() {
+  cat <<EOF
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: $1
+  namespace: ${NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  ingressClassName: traefik
+  tls:
+  - secretName: $1-tls
+    hosts:
+    - $2
+  rules:
+  - host: $2
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: $1
+            port:
+              number: $3
+EOF
+}
+{
+  write_tls_ingress openobserve "oo.test.cyclopus.local" 5080
+  write_tls_ingress beszel "beszel.test.cyclopus.local" 8090
+} | sudo k3s kubectl apply -f - >/dev/null || fail "observability TLS ingresses failed to apply"
+# Same posture as install.sh: a slow observability add-on must not abort the
+# install now that the platform itself is up (assertions below check existence,
+# not readiness).
+sudo k3s kubectl -n "$NAMESPACE" rollout status deploy/openobserve --timeout=3m >/dev/null 2>&1 || printf '%s\n' "install: observability component openobserve not ready yet (non-fatal)" >&2
+sudo k3s kubectl -n "$NAMESPACE" rollout status deploy/beszel --timeout=3m >/dev/null 2>&1 || printf '%s\n' "install: observability component beszel not ready yet (non-fatal)" >&2
+sudo k3s kubectl -n "$NAMESPACE" rollout status daemonset/opentelemetry-collector --timeout=3m >/dev/null 2>&1 || printf '%s\n' "install: observability component opentelemetry-collector not ready yet (non-fatal)" >&2
+sudo k3s kubectl -n "$NAMESPACE" rollout status daemonset/beszel-agent --timeout=3m >/dev/null 2>&1 || printf '%s\n' "install: observability component beszel-agent not ready yet (non-fatal)" >&2
+
+step "asserting observability contract (secrets, workloads, labels, TLS ingresses)"
+sudo k3s kubectl -n "$NAMESPACE" get secret openobserve-auth >/dev/null 2>&1 || fail "openobserve-auth secret missing"
+for key in password credential basic-auth; do
+  sudo k3s kubectl -n "$NAMESPACE" get secret openobserve-auth -o jsonpath="{.data.$key}" | grep -q . || fail "openobserve-auth secret lacks key $key"
+done
+sudo k3s kubectl -n "$NAMESPACE" get secret beszel-agent-key >/dev/null 2>&1 || fail "beszel-agent-key secret missing"
+sudo k3s kubectl -n "$NAMESPACE" get secret beszel-agent-key -o jsonpath='{.data.public}' | grep -q . || fail "beszel-agent-key secret lacks key public"
+sudo k3s kubectl -n "$NAMESPACE" get deployment openobserve >/dev/null 2>&1 || fail "openobserve deployment missing"
+sudo k3s kubectl -n "$NAMESPACE" get deployment beszel >/dev/null 2>&1 || fail "beszel deployment missing"
+sudo k3s kubectl -n "$NAMESPACE" get daemonset opentelemetry-collector >/dev/null 2>&1 || fail "opentelemetry-collector DaemonSet missing"
+sudo k3s kubectl -n "$NAMESPACE" get daemonset beszel-agent >/dev/null 2>&1 || fail "beszel-agent DaemonSet missing"
+# §8.1: both DaemonSets must carry the control-plane toleration so the
+# platform's own node is never the one node without telemetry collection.
+for ds in opentelemetry-collector beszel-agent; do
+  tolerance=$(sudo k3s kubectl -n "$NAMESPACE" get daemonset "$ds" -o jsonpath='{.spec.template.spec.tolerations[?(@.key=="cyclopus.app/role")].value}')
+  [ "$tolerance" = control-plane ] || fail "$ds lacks the cyclopus.app/role=control-plane toleration (got '${tolerance:-none}')"
+done
+_collector_pods() {
+  sudo k3s kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=opentelemetry-collector --no-headers 2>/dev/null | grep -q .
+}
+retry 40 _collector_pods || fail "no pods carry label app.kubernetes.io/name: opentelemetry-collector"
+for ing in openobserve beszel; do
+  sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" >/dev/null 2>&1 || fail "$ing Ingress missing"
+  issuer=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}')
+  [ "$issuer" = "letsencrypt-production" ] || fail "$ing Ingress cluster-issuer is '$issuer', expected letsencrypt-production"
+  tls=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" -o jsonpath='{.spec.tls}')
+  [ -n "$tls" ] || fail "$ing Ingress has no tls section"
+done
+
+step "staging WAL-G backup toolkit at /opt/cyclopus/backup (mirrors install.sh staging)"
+# install.sh stages the toolkit unconditionally (even without S3 creds) so the
+# post-install wiring path (configure_from_db.sh) needs no network; the guest
+# mirrors the staging from the staged repo checkout. Actual WAL-G archiving
+# wiring is install-time S3 env input and out of scope for this scenario.
+backup_dir=/opt/cyclopus/backup
+sudo install -d -m 0755 "$backup_dir" || fail "cannot create $backup_dir"
+for f in common.sh install_walg.sh backup.sh restore.sh configure_from_db.sh; do
+  sudo install -m 0755 "$ROOT/infra/backup/$f" "$backup_dir/$f" || fail "backup toolkit staging failed for $f"
+done
+for f in cyclopus-walg-backup.service cyclopus-walg-backup.timer; do
+  sudo install -m 0644 "$ROOT/infra/backup/$f" "$backup_dir/$f" || fail "backup toolkit staging failed for $f"
+done
+# Sibling versions.env lets the staged scripts resolve their pins (common.sh).
+sudo install -m 0644 "$ROOT/versions.env" "$backup_dir/versions.env" || fail "backup toolkit staging failed for versions.env"
+for f in configure_from_db.sh backup.sh common.sh versions.env cyclopus-walg-backup.service cyclopus-walg-backup.timer; do
+  [ -f "$backup_dir/$f" ] || fail "$backup_dir/$f was not staged"
+done
+[ -x "$backup_dir/configure_from_db.sh" ] || fail "$backup_dir/configure_from_db.sh is not executable"
 
 step "final invariants: gvisor RuntimeClass + secrets encryption"
 sudo k3s kubectl get runtimeclass gvisor >/dev/null 2>&1 || fail "gvisor RuntimeClass missing"

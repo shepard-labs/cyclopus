@@ -67,7 +67,14 @@ INSERT INTO releases (
 ) VALUES (
     :'org_id', :'active_environment_id',
     'ghcr.io/acme/schema@sha256:' || repeat('a', 64), 'env_change', :'env_var_revision_id',
-    '{"env_revision":1}', repeat('b', 64), 'pending'
+    jsonb_build_object(
+        'version', 2,
+        'desired_state', jsonb_build_object(
+            'version', 1,
+            'deployment', jsonb '{}', 'service', jsonb '{}', 'ingress', jsonb '{}', 'scaling', jsonb '{}'
+        ),
+        'env_var_revision', jsonb_build_object('id', :'env_var_revision_id')
+    ), repeat('b', 64), 'pending'
 );
 COMMIT;
 
@@ -159,6 +166,10 @@ INSERT INTO reconciliation_runs (
     :'org_id', 'environment', :'active_environment_id', :'app_id', :'active_environment_id'
 ) RETURNING id AS reconciliation_run_id \gset
 SELECT set_config('cyclopus.reconciliation_run_id', :'reconciliation_run_id', false);
+-- Single-flight (enforce_reconciliation_scope_single_flight) allows only one
+-- active run per overlapping scope: close the prior run out before the next
+-- environment-scoped run is created below.
+UPDATE reconciliation_runs SET status = 'completed', completed_at = now() WHERE id = :'reconciliation_run_id';
 
 DO $$
 DECLARE
