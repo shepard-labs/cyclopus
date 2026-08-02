@@ -67,15 +67,15 @@ components:
       evidence: ["https://github.com/grpc-ecosystem/grpc-gateway/releases/tag/v2.29.0", "buf.gen.yaml", "go.mod"]
       rationale: Current stable v2 gateway release with pinned code generation.
   protobuf_go:
-    pin: "v1.36.11"
+    pin: "v1.36.12-0.20260120151049-f2248ac996af"
     observed_latest: "v1.36.11"
     probe: "curl -fsSL https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest"
     review:
-      status: approved
-      reviewer: api-contract-transport
-      reviewed_at: "2026-07-29"
-      evidence: ["https://github.com/protocolbuffers/protobuf-go/releases/tag/v1.36.11", "buf.gen.yaml", "go.mod"]
-      rationale: Current stable Go protobuf runtime and generator release.
+      status: intentional_pin
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
+      evidence: ["go.mod", "https://raw.githubusercontent.com/k3s-io/k3s/v1.36.2%2Bk3s1/go.mod"]
+      rationale: Resolution floor imposed by k8s.io/kube-openapi via client-go v0.36.2; pseudo-version ahead of the v1.36.11 release and forward-compatible with code generated against v1.36.11.
   protoc_gen_go_grpc:
     pin: "v1.6.2"
     observed_latest: "v1.6.2"
