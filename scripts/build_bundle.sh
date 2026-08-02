@@ -109,8 +109,33 @@ sort -u "$WORKDIR/images.txt" -o "$WORKDIR/images.txt"
 log "images to bundle:"; sed 's/^/    /' "$WORKDIR/images.txt"
 
 log "pulling images"
+# Registries (esp. public.ecr.aws and docker.io) rate-limit anonymous pulls
+# from shared CI egress IPs — retry with backoff before giving up.
+pull_with_retry() {
+  _img=$1
+  _attempt=1
+  until docker pull --platform linux/amd64 --quiet "$_img" >/dev/null; do
+    [ "$_attempt" -ge 4 ] && return 1
+    log "pull failed for $_img (attempt $_attempt/4); backing off"
+    sleep $((20 * _attempt))
+    _attempt=$((_attempt + 1))
+  done
+}
 while IFS= read -r img; do
-  docker pull --platform linux/amd64 --quiet "$img" >/dev/null || fail "docker pull failed: $img"
+  if ! pull_with_retry "$img"; then
+    # openobserve is mirrored to Docker Hub by the same publisher; pull the
+    # mirror and retag to the ECR name the manifests reference (containerd
+    # matches pre-imported images by exact name at pod time).
+    case "$img" in
+      public.ecr.aws/zinclabs/openobserve:*)
+        _mirror="docker.io/openobserve/openobserve:${img##*:}"
+        log "ECR rate-limited; pulling mirror $_mirror and retagging to $img"
+        pull_with_retry "$_mirror" || fail "docker pull failed (both ECR and Hub mirror): $img"
+        docker tag "$_mirror" "$img" || fail "docker tag failed: $_mirror -> $img"
+        ;;
+      *) fail "docker pull failed: $img" ;;
+    esac
+  fi
 done < "$WORKDIR/images.txt"
 
 log "saving images to platform-images.tar"
