@@ -191,9 +191,13 @@ flowchart TB
 ## 🚀 Getting Started
 
 **Prerequisites:**
-- 64-bit Linux VPS (app-workload nodes require nested virtualization for gVisor)
+- 64-bit Linux VPS running **Ubuntu 24.04** or **Debian 12** (app-workload nodes require nested virtualization for gVisor)
 - SSH access
 - Nested virtualization enabled (`/dev/kvm` present)
+- Public **IPv4** address — IPv6-only hosts are not supported (platform is single-stack IPv4); dual-stack hosts work over v4
+- 20GB+ free disk space (installer fails below 10GB free)
+
+Only Ubuntu 24.04 and Debian 12 are supported: the installer is built around the PGDG apt PostgreSQL layout, and the gVisor/WAL-G binaries + k3s hardening are validated per-OS and covered by CI install tests on exactly these two profiles.
 
 **One-line install:**
 ```bash

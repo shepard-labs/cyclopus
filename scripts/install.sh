@@ -4,6 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/shepard-labs/cyclopus/main/scripts/install.sh | bash
 #
 # Zero-config install for Ubuntu 24.04 / Debian 12 on a fresh VPS.
+# Requires a public IPv4 address (IPv6-only hosts unsupported; platform is single-stack IPv4).
 # Detects public IP, configures sslip.io hostnames, generates secrets,
 # installs PostgreSQL + k3s + gVisor + Kyverno + Traefik + cert-manager + KEDA + Cyclopus.
 #
