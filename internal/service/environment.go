@@ -19,10 +19,13 @@ type CreateProductionEnvironmentInput struct {
 }
 
 // CreateProductionEnvironment creates a production environment for the given
-// app. The environment is inserted as lifecycle_status='ready' with its
-// planned_hostname already set, bypassing the async lifecycle provisioner
-// used for preview environments. This is the first-class API path for
-// production environment creation (§4.1, §7.5).
+// app. The environment is inserted as lifecycle_status='reserved' with its
+// planned_hostname already set, and a provision job is enqueued so the async
+// lifecycle provisioner creates the namespace and network policies before
+// flipping the environment to 'ready' (same flow as preview environments,
+// minus the preview-only resource bounds of §4.3). This is the first-class
+// API path for production environment creation (§4.1, §7.5); teardown goes
+// through RequestEnvironmentTeardown for both kinds.
 func (s *Service) CreateProductionEnvironment(ctx context.Context, actor ActorContext, key string, input CreateProductionEnvironmentInput) (store.Environment, error) {
 	if err := validateActor(actor); err != nil {
 		return store.Environment{}, err

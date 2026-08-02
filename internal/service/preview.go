@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/google/uuid"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 var previewAdjectives = []string{"amber", "brisk", "calm", "clear", "coral", "eager", "frost", "gentle", "lunar", "quiet", "rapid", "solar"}
@@ -72,11 +72,18 @@ func (s *Service) AcceptPreviewPush(ctx context.Context, actor ActorContext, key
 	return result, mapError(err)
 }
 
+// RequestPreviewBranchDelete tears down the preview environment for a branch.
+// Branch-delete teardown is preview-only (§4.4); production environments are
+// reclaimed by ID via RequestEnvironmentTeardown.
 func (s *Service) RequestPreviewBranchDelete(ctx context.Context, actor ActorContext, key, appID, branch string) (store.Environment, error) {
 	return s.requestPreviewTeardown(ctx, actor, key, store.PreviewTeardownParams{OrgID: actor.OrgID,
 		AppID: appID, Branch: branch, IdempotencyKey: key, EventKind: "delete", Reason: "branch_deleted", Audit: audit(actor)})
 }
 
+// RequestEnvironmentTeardown tears down a preview or production environment by
+// ID. Production namespaces are platform-managed, so this endpoint is their
+// reclamation path — and a precondition for tombstoning an app, project, or
+// org with live descendant environments (§4.6).
 func (s *Service) RequestEnvironmentTeardown(ctx context.Context, actor ActorContext, key, environmentID, reason string) (store.Environment, error) {
 	if err := validateActor(actor); err != nil {
 		return store.Environment{}, err

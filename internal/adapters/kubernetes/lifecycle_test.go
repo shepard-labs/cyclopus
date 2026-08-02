@@ -55,6 +55,13 @@ func TestPreviewProvisionVerifiedPolicyRemovesPendingLabelAndMarksReady(t *testi
 	if _, exists := namespace.Labels[PoliciesPendingLabel]; exists || persisted.completedProvision != 1 || persisted.hostname != "preview.example.test" {
 		t.Fatalf("labels=%v completed=%d hostname=%q", namespace.Labels, persisted.completedProvision, persisted.hostname)
 	}
+	found := false
+	for _, checkpoint := range persisted.checkpoints {
+		found = found || checkpoint == "resource_bounds_applied"
+	}
+	if !found {
+		t.Fatalf("preview checkpoints = %v, want resource_bounds_applied recorded", persisted.checkpoints)
+	}
 }
 
 func TestNetworkPolicyProvisionerCreatesAndVerifiesRequiredPolicies(t *testing.T) {
@@ -193,7 +200,71 @@ func TestPreviewTeardownRejectsUnownedNamespace(t *testing.T) {
 }
 
 func previewLifecycleJob() store.EnvironmentLifecycleJob {
-	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", Namespace: "preview-calm-otter-0001", App: store.App{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
+	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", EnvironmentKind: "preview", Namespace: "preview-calm-otter-0001", App: store.App{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
+}
+
+func productionLifecycleJob() store.EnvironmentLifecycleJob {
+	hostname := "whoami.example.test"
+	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", EnvironmentKind: "production", Namespace: "whoami-production", PlannedHostname: &hostname, App: store.App{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
+}
+
+func TestProductionProvisionUsesPlannedHostnameWithoutHostnameProvider(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	persisted := &fakeLifecycleStore{}
+	adapter, err := NewLifecycleAdapter(client, persisted, successfulPolicy{}, nil, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := productionLifecycleJob()
+	if err := adapter.ExecuteEnvironmentLifecycle(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	namespace, err := client.CoreV1().Namespaces().Get(context.Background(), job.Namespace, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := namespace.Labels[PoliciesPendingLabel]; exists || persisted.completedProvision != 1 || persisted.hostname != *job.PlannedHostname {
+		t.Fatalf("labels=%v completed=%d hostname=%q", namespace.Labels, persisted.completedProvision, persisted.hostname)
+	}
+	// Spec §4.3: ResourceQuota/LimitRange are preview-only; a production
+	// namespace must not be capped (HPA/ScaledObject would be defeated).
+	if quota, err := client.CoreV1().ResourceQuotas(job.Namespace).Get(context.Background(), "cyclopus-preview", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("production quota should not exist: quota=%+v err=%v", quota.Spec.Hard, err)
+	}
+	if limits, err := client.CoreV1().LimitRanges(job.Namespace).Get(context.Background(), "cyclopus-preview", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("production limit range should not exist: limits=%+v err=%v", limits.Spec, err)
+	}
+	// Checkpoint honesty: bounds were skipped, so production checkpoints must
+	// not claim resource_bounds_applied.
+	for _, checkpoint := range persisted.checkpoints {
+		if checkpoint == "resource_bounds_applied" {
+			t.Fatalf("production provision recorded resource_bounds_applied without applying bounds: checkpoints=%v", persisted.checkpoints)
+		}
+	}
+	if len(persisted.checkpoints) == 0 || persisted.checkpoints[0] != "namespace_pending" {
+		t.Fatalf("checkpoints = %v, want first checkpoint namespace_pending", persisted.checkpoints)
+	}
+}
+
+func TestProductionProvisionMissingPlannedHostnameBlocksFailClosed(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	persisted := &fakeLifecycleStore{}
+	adapter, err := NewLifecycleAdapter(client, persisted, successfulPolicy{}, nil, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := productionLifecycleJob()
+	job.PlannedHostname = nil
+	if err := adapter.ExecuteEnvironmentLifecycle(context.Background(), job); err != nil {
+		t.Fatalf("blocking should not surface as a job error: %v", err)
+	}
+	if persisted.blockCode != "planned_hostname_missing" || persisted.completedProvision != 0 {
+		t.Fatalf("nil planned_hostname must block fail-closed: block=%q completed=%d", persisted.blockCode, persisted.completedProvision)
+	}
+	namespace, err := client.CoreV1().Namespaces().Get(context.Background(), job.Namespace, metav1.GetOptions{})
+	if err != nil || namespace.Labels[PoliciesPendingLabel] != "true" {
+		t.Fatalf("blocked namespace should keep the pending label: labels=%v err=%v", namespace.Labels, err)
+	}
 }
 
 type fakeLifecycleStore struct {
@@ -201,10 +272,12 @@ type fakeLifecycleStore struct {
 	completedProvision   int
 	completedTeardown    int
 	hostname             string
+	checkpoints          []string
 	completeProvisionErr error
 }
 
-func (*fakeLifecycleStore) CheckpointEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, string) error {
+func (s *fakeLifecycleStore) CheckpointEnvironmentLifecycle(_ context.Context, _ store.EnvironmentLifecycleJob, checkpoint string) error {
+	s.checkpoints = append(s.checkpoints, checkpoint)
 	return nil
 }
 func (s *fakeLifecycleStore) BlockEnvironmentLifecycle(_ context.Context, _ store.EnvironmentLifecycleJob, _, code, _ string) error {

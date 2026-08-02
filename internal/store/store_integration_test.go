@@ -2003,6 +2003,128 @@ func TestProjectAndAppCreateUpdateAreTenantScopedIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateProductionEnvironmentReservesAndQueuesProvisionIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+	environmentID := "00000000-0000-0000-0000-000000000041"
+	environment, err := dataStore.CreateProductionEnvironment(ctx, CreateProductionEnvironmentParams{
+		ID: environmentID, OrgID: orgOneID, AppID: appOneID, Branch: "release",
+		Namespace: "app-one-release-production", Hostname: "release-one.example.test",
+		Audit: testAudit("00000000-0000-0000-0000-000000000042", "ignored", environmentID),
+	})
+	if err != nil {
+		t.Fatalf("CreateProductionEnvironment() error = %v", err)
+	}
+	if environment.LifecycleStatus != "reserved" || environment.Kind != "production" ||
+		environment.PlannedHostname == nil || *environment.PlannedHostname != "release-one.example.test" {
+		t.Fatalf("CreateProductionEnvironment() = %+v", environment)
+	}
+	var jobs int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM environment_lifecycle_jobs
+		WHERE org_id=$1 AND environment_id=$2`, orgOneID, environmentID).Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 1 {
+		t.Fatalf("lifecycle job count = %d, want exactly 1", jobs)
+	}
+	var kind, status, reason string
+	if err := pool.QueryRow(ctx, `SELECT kind,status,reason FROM environment_lifecycle_jobs
+		WHERE org_id=$1 AND environment_id=$2`, orgOneID, environmentID).Scan(&kind, &status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "provision" || status != "queued" || reason != "production_create" {
+		t.Fatalf("lifecycle job kind=%q status=%q reason=%q, want provision/queued/production_create", kind, status, reason)
+	}
+}
+
+func TestClaimEnvironmentLifecycleJobReturnsProductionKindAndPlannedHostnameIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+	environmentID := "00000000-0000-0000-0000-000000000041"
+	if _, err := dataStore.CreateProductionEnvironment(ctx, CreateProductionEnvironmentParams{
+		ID: environmentID, OrgID: orgOneID, AppID: appOneID, Branch: "release",
+		Namespace: "app-one-release-production", Hostname: "release-one.example.test",
+		Audit: testAudit("00000000-0000-0000-0000-000000000042", "ignored", environmentID),
+	}); err != nil {
+		t.Fatalf("CreateProductionEnvironment() error = %v", err)
+	}
+	job, err := dataStore.ClaimEnvironmentLifecycleJob(ctx, orgOneID, "worker", time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimEnvironmentLifecycleJob() error = %v", err)
+	}
+	if job.EnvironmentID != environmentID || job.Kind != "provision" || job.Status != "leased" {
+		t.Fatalf("claimed job = %+v", job)
+	}
+	if job.EnvironmentKind != "production" {
+		t.Fatalf("claimed job EnvironmentKind = %q, want production", job.EnvironmentKind)
+	}
+	if job.PlannedHostname == nil || *job.PlannedHostname != "release-one.example.test" {
+		t.Fatalf("claimed job PlannedHostname = %v, want %q", job.PlannedHostname, "release-one.example.test")
+	}
+}
+
+func TestRequestPreviewTeardownByIDCoversProductionIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+	environment, err := dataStore.RequestPreviewTeardown(ctx, PreviewTeardownParams{
+		OrgID: orgOneID, AppID: appOneID, Branch: "main", EnvironmentID: environmentOneID,
+		IdempotencyKey: "production-teardown", EventKind: "teardown", Reason: "app_decommission",
+		Audit: testAudit("00000000-0000-0000-0000-000000000043", "ignored", environmentOneID),
+	})
+	if err != nil {
+		t.Fatalf("RequestPreviewTeardown() production environment error = %v", err)
+	}
+	if environment.ID != environmentOneID || environment.LifecycleStatus != "teardown_requested" {
+		t.Fatalf("RequestPreviewTeardown() = %+v", environment)
+	}
+	var kind, status, reason string
+	if err := pool.QueryRow(ctx, `SELECT kind,status,reason FROM environment_lifecycle_jobs
+		WHERE org_id=$1 AND environment_id=$2 AND kind='teardown'`, orgOneID, environmentOneID).Scan(&kind, &status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "queued" || reason != "app_decommission" {
+		t.Fatalf("teardown job status=%q reason=%q, want queued/app_decommission", status, reason)
+	}
+}
+
+func TestRequestPreviewTeardownByBranchStaysPreviewOnlyIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := context.Background()
+	// Branch-delete against a branch whose only environment is production is
+	// rejected: branch teardown semantics are preview-only (§4.4).
+	if _, err := dataStore.RequestPreviewTeardown(ctx, PreviewTeardownParams{
+		OrgID: orgOneID, AppID: appOneID, Branch: "main",
+		IdempotencyKey: "production-branch-delete", EventKind: "delete", Reason: "branch_deleted",
+		Audit: testAudit("00000000-0000-0000-0000-000000000044", "ignored", appOneID),
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("production branch-delete error = %v, want ErrNotFound", err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT lifecycle_status FROM environments WHERE org_id=$1 AND id=$2`,
+		orgOneID, environmentOneID).Scan(&status); err != nil || status != "ready" {
+		t.Fatalf("production environment lifecycle_status = %q, %v; want untouched ready", status, err)
+	}
+	// Branch-delete against a preview environment is unchanged.
+	previewID := "00000000-0000-0000-0000-000000000045"
+	if _, err := pool.Exec(ctx, `INSERT INTO environments (id,org_id,app_id,branch,kind,preview_slug,namespace,planned_hostname,lifecycle_status)
+		VALUES ($1,$2,$3,'feature/x','preview','calm-otter-0001','preview-calm-otter-0001','calm-otter-0001.previews.example.test','ready')`,
+		previewID, orgOneID, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	environment, err := dataStore.RequestPreviewTeardown(ctx, PreviewTeardownParams{
+		OrgID: orgOneID, AppID: appOneID, Branch: "feature/x",
+		IdempotencyKey: "preview-branch-delete", EventKind: "delete", Reason: "branch_deleted",
+		Audit: testAudit("00000000-0000-0000-0000-000000000046", "ignored", previewID),
+	})
+	if err != nil || environment.ID != previewID || environment.LifecycleStatus != "teardown_requested" {
+		t.Fatalf("preview branch-delete = %+v, %v", environment, err)
+	}
+}
+
 func newIntegrationStore(t *testing.T) (*Store, *pgxpool.Pool) {
 	t.Helper()
 	databaseURL := os.Getenv("CYCLOPUS_TEST_DATABASE_URL")

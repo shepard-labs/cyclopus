@@ -12,7 +12,7 @@ metadata:
     {{- include "cyclopus.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: [namespaces, services, configmaps, secrets, serviceaccounts, pods]
+    resources: [namespaces, services, configmaps, secrets, serviceaccounts, pods, resourcequotas, limitranges]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: ["apps"]
     resources: [deployments, replicasets]

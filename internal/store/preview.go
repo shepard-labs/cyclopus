@@ -162,6 +162,12 @@ type PreviewTeardownParams struct {
 	Audit                                                                  *AuditEvent
 }
 
+// RequestPreviewTeardown marks an environment teardown_requested and enqueues
+// its teardown lifecycle job. When EnvironmentID is set it locates the
+// environment by ID across both preview and production kinds — production
+// namespaces are platform-owned, so this is their only reclamation path.
+// Without EnvironmentID the lookup is by branch and stays preview-only:
+// branch-delete teardown is a preview concept (§4.4).
 func (s *Store) RequestPreviewTeardown(ctx context.Context, params PreviewTeardownParams) (Environment, error) {
 	var environment Environment
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
@@ -173,13 +179,17 @@ func (s *Store) RequestPreviewTeardown(ctx context.Context, params PreviewTeardo
 			environment = result.Environment
 			return nil
 		}
-		query := `SELECT id::text FROM environments WHERE org_id=$1 AND app_id=$2 AND kind='preview' AND torn_down_at IS NULL`
+		query := `SELECT id::text FROM environments WHERE org_id=$1 AND app_id=$2 AND torn_down_at IS NULL`
 		args := []any{params.OrgID, params.AppID}
 		if params.EnvironmentID != "" {
-			query += ` AND id=$3`
+			// Environment-ID teardown covers both kinds: production
+			// namespaces are platform-managed, so this endpoint is their only
+			// reclamation path (and the precondition for §4.6 tombstones).
+			query += ` AND kind IN ('preview','production') AND id=$3`
 			args = append(args, params.EnvironmentID)
 		} else {
-			query += ` AND branch=$3`
+			// Branch-delete semantics stay preview-only (§4.4).
+			query += ` AND kind='preview' AND branch=$3`
 			args = append(args, params.Branch)
 		}
 		query += ` FOR UPDATE`

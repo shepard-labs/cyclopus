@@ -228,11 +228,18 @@ func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentL
 	if err := a.store.CheckpointEnvironmentLifecycle(ctx, job, "namespace_pending"); err != nil {
 		return err
 	}
-	if err := a.applyPreviewBounds(ctx, job, labels); err != nil {
-		return err
-	}
-	if err := a.store.CheckpointEnvironmentLifecycle(ctx, job, "resource_bounds_applied"); err != nil {
-		return err
+	// Spec §4.3: ResourceQuota + LimitRange are preview-only bounds ("a preview
+	// cannot outgrow one pod's worth of resources"). Production environments
+	// scale via HPA/ScaledObject (§3.4/§4.2) and rolling updates transiently
+	// exceed replica counts, so production namespaces get no quota — and the
+	// diagnostic checkpoint is only recorded when bounds were really applied.
+	if job.EnvironmentKind == "preview" {
+		if err := a.applyPreviewBounds(ctx, job, labels); err != nil {
+			return err
+		}
+		if err := a.store.CheckpointEnvironmentLifecycle(ctx, job, "resource_bounds_applied"); err != nil {
+			return err
+		}
 	}
 	if a.policy == nil {
 		return a.store.BlockEnvironmentLifecycle(ctx, job, "policy_capability_unavailable", "policy_provisioner_unavailable", ErrPolicyProvisionerUnavailable.Error())
@@ -240,12 +247,27 @@ func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentL
 	if err := a.policy.ProvisionAndVerify(ctx, job); err != nil {
 		return fmt.Errorf("%w: %v", ErrPolicyVerificationFailed, err)
 	}
-	if a.hostnames == nil {
-		return a.store.BlockEnvironmentLifecycle(ctx, job, "hostname_capability_unavailable", "hostname_provider_unavailable", ErrHostnameProviderUnavailable.Error())
-	}
-	hostname, err := a.hostnames.PreviewHostname(ctx, job)
-	if err != nil || hostname == "" {
-		return fmt.Errorf("provide preview hostname: %w", err)
+	// Preview hostnames are derived from the preview- namespace slug by the
+	// hostname provider; production hostnames were already computed at
+	// environment creation and stored as planned_hostname, so the provider is
+	// only required for previews. A production job without one fails closed
+	// (blocked, not completed): finishing with planned_hostname=NULL would
+	// silently exclude the environment from every deploy gate forever.
+	var hostname *string
+	if job.EnvironmentKind == "production" {
+		if job.PlannedHostname == nil {
+			return a.store.BlockEnvironmentLifecycle(ctx, job, "hostname_missing", "planned_hostname_missing", "production environment is missing a planned hostname")
+		}
+		hostname = job.PlannedHostname
+	} else {
+		if a.hostnames == nil {
+			return a.store.BlockEnvironmentLifecycle(ctx, job, "hostname_capability_unavailable", "hostname_provider_unavailable", ErrHostnameProviderUnavailable.Error())
+		}
+		value, err := a.hostnames.PreviewHostname(ctx, job)
+		if err != nil || value == "" {
+			return fmt.Errorf("provide preview hostname: %w", err)
+		}
+		hostname = &value
 	}
 	current, err = a.client.CoreV1().Namespaces().Get(ctx, job.Namespace, metav1.GetOptions{})
 	if err != nil {
@@ -256,7 +278,7 @@ func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentL
 	if _, err := a.client.CoreV1().Namespaces().Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
 		return err
 	}
-	if err := a.store.CompleteEnvironmentProvision(ctx, job, &hostname); err != nil {
+	if err := a.store.CompleteEnvironmentProvision(ctx, job, hostname); err != nil {
 		current, getErr := a.client.CoreV1().Namespaces().Get(ctx, job.Namespace, metav1.GetOptions{})
 		if getErr == nil {
 			rollback := current.DeepCopy()

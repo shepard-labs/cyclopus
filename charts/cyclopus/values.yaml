@@ -46,7 +46,7 @@ service:
 # Control-plane console Ingress (§7.5). When enabled, the UI + REST API (same
 # process, mounted at / and /v1/*) are exposed via Traefik at https://{host} with
 # a cert-manager-issued Let's Encrypt certificate. TLS terminates at Traefik; the
-# pod itself stays plaintext inside the cluster (no insecure_public_listeners).
+# pod itself stays plaintext inside the cluster (insecure_public_listeners: true).
 ingress:
   enabled: false
   className: traefik
@@ -64,8 +64,12 @@ config:
   logLevel: info
   httpAddress: "0.0.0.0:8080"
   grpcAddress: "0.0.0.0:9090"
-  # Set to true only for dev/test — bypasses the loopback-only listener check.
-  insecurePublicListeners: false
+  # Required for the stock chart: TLS terminates at the Traefik ingress (see
+  # the ingress section above) and the pod serves plaintext on 0.0.0.0 inside
+  # the cluster. Without this flag, config validation rejects non-loopback
+  # plaintext listeners and the pod crash-loops. Set to false only if you
+  # reconfigure the listeners to loopback (e.g. behind an in-pod TLS sidecar).
+  insecurePublicListeners: true
   database:
     # Non-secret DB connection settings. The full URL (with password) is a
     # secret; see secrets.databaseUrl below.
@@ -93,11 +97,15 @@ config:
     # (real certs, green padlock); use letsencrypt-staging for unlimited testing with fake certs.
     certManagerClusterIssuer: "letsencrypt-production"
   observability:
-    openobserveBaseUrl: "http://openobserve.cyclopus-observability.svc:5080"
+    # Empty means the feature is disabled (see LogsEnabled()/MetricsEnabled() in
+    # internal/config). When set, these must be absolute HTTPS URLs — config
+    # validation rejects plaintext http:// endpoints, so the stock chart ships
+    # disabled rather than pointing at in-cluster http services.
+    openobserveBaseUrl: ""
     openobserveOrganization: "cyclopus"
     openobserveLogStream: "app_logs"
     openobserveTraceStream: "app_traces"
-    beszelBaseUrl: "http://beszel.cyclopus-observability.svc:8090"
+    beszelBaseUrl: ""
 
 # Secret wiring. In real installs these reference an existing Secret created out
 # of band (never committed). Inline values are for local `helm template` only.

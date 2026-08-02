@@ -18,6 +18,8 @@ type EnvironmentLifecycleJob struct {
 	Fence                                             int64
 	Attempt, MaxAttempts                              int
 	NotBefore                                         time.Time
+	EnvironmentKind                                   string
+	PlannedHostname                                   *string
 	App                                               App
 }
 
@@ -76,7 +78,7 @@ func (s *Store) ClaimEnvironmentLifecycleJob(ctx context.Context, orgID, owner s
 		SELECT claimed.id::text,claimed.org_id::text,claimed.environment_id::text,claimed.kind,claimed.status,
 			claimed.checkpoint,claimed.reason,claimed.error_code,claimed.error_message,claimed.lease_owner,
 			claimed.lease_expires_at,claimed.fence,claimed.attempt,claimed.max_attempts,claimed.not_before,
-			environment.namespace,`+appSelectColumns("app")+`
+			environment.namespace,environment.kind,environment.planned_hostname,`+appSelectColumns("app")+`
 		FROM claimed JOIN environments environment ON environment.org_id=claimed.org_id AND environment.id=claimed.environment_id
 		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
 		LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id`, orgID, owner, leaseDuration.Seconds())
@@ -102,6 +104,7 @@ func scanLifecycleJob(row rowScanner, job *EnvironmentLifecycleJob) error {
 	err := row.Scan(&job.ID, &job.OrgID, &job.EnvironmentID, &job.Kind, &job.Status, &job.Checkpoint,
 		&job.Reason, &job.ErrorCode, &job.ErrorMessage, &job.LeaseOwner, &job.LeaseExpiresAt,
 		&job.Fence, &job.Attempt, &job.MaxAttempts, &job.NotBefore, &job.Namespace,
+		&job.EnvironmentKind, &job.PlannedHostname,
 		&job.App.ID, &job.App.OrgID, &job.App.ProjectID, &job.App.Name, &job.App.Slug, &job.App.HostnameLabel,
 		&job.App.RegistryID, &job.App.RegistryURL, &job.App.ImageRepository, &job.App.ContainerPort,
 		&job.App.HealthCheckPath, &job.App.ScalingMode, &job.App.MinReplicas, &job.App.MaxReplicas,
