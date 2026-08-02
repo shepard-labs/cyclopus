@@ -3,9 +3,9 @@ set -eu
 
 ROOT=${CYCLOPUS_RECOVERY_ROOT:?CYCLOPUS_RECOVERY_ROOT is required}
 EXPECTED_DISTRO=${CYCLOPUS_RECOVERY_DISTRO:?CYCLOPUS_RECOVERY_DISTRO is required}
-GO_VERSION=1.26.5
-K3S_VERSION='v1.33.13+k3s1'
-PG_MAJOR=18
+# Pinned component versions come from versions.env (generated from versions.yaml).
+# shellcheck disable=SC1091
+. "$ROOT/versions.env"
 DB_USER=cyclopus
 DB_NAME=cyclopus_test
 DB_PASSWORD=cyclopus-recovery-test

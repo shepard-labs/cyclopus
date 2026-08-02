@@ -5,6 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 ruby - "$ROOT" <<'RUBY'
 require "json"
+require "tmpdir"
 require "yaml"
 
 root = ARGV.fetch(0)
@@ -13,6 +14,7 @@ required = %w[
   docs/implementation-workflow.md
   docs/decisions/phase-0-decisions.md
   versions.yaml
+  versions.env
   workflow/run.yaml
   workflow/phases.yaml
   workflow/gate.schema.json
@@ -20,6 +22,7 @@ required = %w[
   workflow/orchestration-job.sql
   scripts/integration.sh
   scripts/test_infrastructure.sh
+  scripts/generate_versions_env.sh
   scripts/probe_psl.sh
   scripts/validate_postgres_contract.sh
   scripts/validate_gate_evidence.sh
@@ -198,6 +201,40 @@ errors << "versions manifest lacks observation date" if versions.dig("policy", "
     errors << "#{name} intentional pin must differ from observed latest" if component["pin"] == component["observed_latest"]
     errors << "#{name} intentional pin rationale is too short" if rationale.length < 30
   end
+end
+
+# versions.env must be byte-identical to fresh generator output.
+Dir.mktmpdir do |dir|
+  generated = File.join(dir, "versions.env")
+  if system("sh", File.join(root, "scripts/generate_versions_env.sh"), generated)
+    committed = File.read(File.join(root, "versions.env"))
+    errors << "versions.env is stale; run scripts/generate_versions_env.sh" if File.read(generated) != committed
+  else
+    errors << "scripts/generate_versions_env.sh failed"
+  end
+end
+
+# Chart.yaml dependency annotations must match versions.yaml pins.
+chart_annotations = YAML.safe_load(File.read(File.join(root, "charts/cyclopus/Chart.yaml")), aliases: false)["annotations"] || {}
+{
+  "opentelemetry_collector" => "cyclopus.app/dependency-opentelemetry-collector",
+  "openobserve" => "cyclopus.app/dependency-openobserve",
+  "beszel" => "cyclopus.app/dependency-beszel",
+}.each do |component, key|
+  want = versions.dig("components", component, "pin").to_s
+  got = chart_annotations[key].to_s
+  errors << "Chart.yaml annotation #{key}=#{got} does not match versions.yaml #{component} pin #{want}" unless got == want
+end
+
+# Observability manifest image tags must match versions.yaml pins.
+{
+  "openobserve" => "infra/observability/openobserve.yaml",
+  "beszel" => "infra/observability/beszel.yaml",
+}.each do |component, path|
+  text = File.read(File.join(root, path))
+  tag = text[/^\s*image:\s*\S+:(\S+)\s*$/, 1].to_s
+  want = versions.dig("components", component, "pin").to_s.sub(/\Av/, "")
+  errors << "#{path} image tag #{tag} does not match versions.yaml #{component} pin #{want}" unless tag.sub(/\Av/, "") == want
 end
 
 phases = ledger["phases"]

@@ -6,12 +6,25 @@
 # scripts; live use requires the env below.
 set -eu
 
-WAL_G_VERSION='v3.0.8'
-PG_MAJOR="${PG_MAJOR:-18}"
-
 log() { printf '\n==> backup: %s\n' "$1"; }
 warn() { printf 'backup: WARN: %s\n' "$*" >&2; }
 fail() { printf 'backup: FAILED: %s\n' "$*" >&2; exit 1; }
+
+# Pinned versions come from versions.env (generated from versions.yaml) — the
+# single source of truth. Resolution: caller-provided vars (standalone use /
+# operator override), explicit override file, else the repo root relative to
+# this file's location.
+if [ -n "${WAL_G_VERSION:-}" ] && [ -n "${PG_MAJOR:-}" ]; then
+  :
+elif [ -n "${CYCLOPUS_VERSIONS_ENV:-}" ]; then
+  # shellcheck disable=SC1090
+  . "$CYCLOPUS_VERSIONS_ENV"
+else
+  _versions_env=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/versions.env
+  [ -f "$_versions_env" ] || fail "versions.env not found; set CYCLOPUS_VERSIONS_ENV"
+  # shellcheck disable=SC1090
+  . "$_versions_env"
+fi
 
 retry() {
   _attempts=$1

@@ -47,17 +47,6 @@ helm_deployed() {
   return 1
 }
 
-# Component versions
-K3S_VERSION='v1.36.2+k3s1'
-HELM_VERSION='v3.21.3'
-KYVERNO_VERSION='v1.18.2'
-KYVERNO_CHART_VERSION='3.8.2'
-CERT_MANAGER_VERSION='v1.21.1'
-TRAEFIK_VERSION='41.1.0'
-KEDA_VERSION='2.20.2'
-KEDA_HTTP_ADDON_VERSION='0.15.0'
-PG_MAJOR=18
-
 # Install configuration
 CYCLOPUS_VERSION=${CYCLOPUS_VERSION:-latest}
 CYCLOPUS_RELEASE=${CYCLOPUS_RELEASE:-cyclopus}
@@ -85,6 +74,27 @@ cleanup() {
   fi
 }
 trap cleanup EXIT HUP INT TERM
+
+# Component versions: single source of truth is versions.env (generated from
+# versions.yaml by scripts/generate_versions_env.sh). Resolution order:
+# explicit override, repo checkout (cwd), download from the canonical raw base.
+if [ -n "${CYCLOPUS_VERSIONS_ENV:-}" ]; then
+  [ -f "$CYCLOPUS_VERSIONS_ENV" ] || fail "CYCLOPUS_VERSIONS_ENV is set but not a file: $CYCLOPUS_VERSIONS_ENV"
+  # shellcheck disable=SC1090
+  . "$CYCLOPUS_VERSIONS_ENV"
+  RESOLVED_VERSIONS_ENV=$CYCLOPUS_VERSIONS_ENV
+elif [ -f ./versions.env ]; then
+  # shellcheck disable=SC1091
+  . ./versions.env
+  RESOLVED_VERSIONS_ENV=./versions.env
+else
+  VERSIONS_ENV_TMP=$(mktemp)
+  TMP_FILES="$TMP_FILES $VERSIONS_ENV_TMP"
+  dl "$RAW_BASE/versions.env" -o "$VERSIONS_ENV_TMP" || fail "versions.env not found locally and download failed; set CYCLOPUS_VERSIONS_ENV"
+  # shellcheck disable=SC1090
+  . "$VERSIONS_ENV_TMP"
+  RESOLVED_VERSIONS_ENV=$VERSIONS_ENV_TMP
+fi
 
 # Check prerequisites
 log "Checking prerequisites..."
@@ -247,8 +257,11 @@ log "Installing gVisor (canonical bootstrap script)..."
 GVISOR_SH=/tmp/install_gvisor.sh
 dl "$RAW_BASE/infra/bootstrap/install_gvisor.sh" -o "$GVISOR_SH"
 dl "$RAW_BASE/infra/bootstrap/common.sh" -o /tmp/common.sh
-( cd /tmp && sh "$GVISOR_SH" ) || fail "gVisor bootstrap failed"
-rm -f "$GVISOR_SH" /tmp/common.sh
+# Reuse the versions.env resolved above so local-checkout pins are honored.
+cp "$RESOLVED_VERSIONS_ENV" /tmp/versions.env
+TMP_FILES="$TMP_FILES /tmp/versions.env"
+( cd /tmp && CYCLOPUS_VERSIONS_ENV=/tmp/versions.env sh "$GVISOR_SH" ) || fail "gVisor bootstrap failed"
+rm -f "$GVISOR_SH" /tmp/common.sh /tmp/versions.env
 systemctl restart k3s
 i=0; while [ $i -lt 60 ]; do
   $KUBECTL get --raw=/readyz >/dev/null 2>&1 && break
@@ -302,12 +315,12 @@ sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
 # http://<host>:80/.well-known/acme-challenge/... — a NodePort (30080) is not
 # reachable by Let's Encrypt, so certs would never issue. hostNetwork puts Traefik
 # on the node's :80/:443 so both ACME and normal traffic work.
-log "Installing Traefik ingress controller v$TRAEFIK_VERSION (hostNetwork :80/:443)..."
+log "Installing Traefik ingress controller v$TRAEFIK_CHART_VERSION (hostNetwork :80/:443)..."
 helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
 helm repo update traefik
 if ! helm_deployed traefik kube-system; then
   helm install traefik traefik/traefik \
-    --version "$TRAEFIK_VERSION" \
+    --version "$TRAEFIK_CHART_VERSION" \
     --namespace kube-system \
     --set deployment.kind=DaemonSet \
     --set hostNetwork=true \
@@ -325,7 +338,7 @@ if ! helm_deployed traefik kube-system; then
 else
   log "Traefik already installed"
 fi
-assert_chart_version traefik kube-system "$TRAEFIK_VERSION"
+assert_chart_version traefik kube-system "$TRAEFIK_CHART_VERSION"
 
 # #13: verify Traefik is actually reachable on host :80 (ACME HTTP-01 depends on it).
 i=0; while [ $i -lt 60 ]; do
@@ -501,6 +514,63 @@ i=0; while [ $i -lt 60 ]; do
   $KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status "deploy/$CYCLOPUS_RELEASE" --timeout=10s >/dev/null 2>&1 && break
   i=$((i+1)); [ $i -lt 60 ] || fail "Cyclopus did not become ready"; sleep 2
 done
+
+# Install the observability stack (OpenObserve + Beszel) into the Cyclopus
+# namespace (§8). Raw manifests so the one-line install works without a repo
+# checkout; ingress hosts derive from the same sslip.io suffix as the console.
+log "Installing observability stack (OpenObserve + Beszel)..."
+OO_PASSWORD=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+OO_MANIFEST=/tmp/openobserve.yaml
+BZ_MANIFEST=/tmp/beszel.yaml
+dl "$RAW_BASE/infra/observability/openobserve.yaml" -o "$OO_MANIFEST"
+dl "$RAW_BASE/infra/observability/beszel.yaml" -o "$BZ_MANIFEST"
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic openobserve-auth \
+  --from-literal=password="$OO_PASSWORD" \
+  --dry-run=client -o yaml | $KUBECTL apply -f -
+$KUBECTL apply -f "$OO_MANIFEST"
+$KUBECTL apply -f "$BZ_MANIFEST"
+rm -f "$OO_MANIFEST" "$BZ_MANIFEST"
+$KUBECTL apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openobserve
+  namespace: ${CYCLOPUS_NAMESPACE}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: oo.${HOSTNAME_SUFFIX}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: openobserve
+            port:
+              number: 5080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: beszel
+  namespace: ${CYCLOPUS_NAMESPACE}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: beszel.${HOSTNAME_SUFFIX}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: beszel
+            port:
+              number: 8090
+EOF
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/openobserve --timeout=3m
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/beszel --timeout=3m
 
 # Write secrets to a 0600 file created with a tight umask (#6) — no stdout leak (#2).
 ( umask 0077; cat > "$SECRETS_FILE" <<EOF

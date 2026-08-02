@@ -6,13 +6,25 @@
 # scripts/integration/deploy_guest.sh.
 set -eu
 
-# Pinned versions — keep in lockstep with versions.yaml.
-K3S_VERSION='v1.33.13+k3s1'
-GVISOR_RELEASE='release-20260727.0'
-
 log() { printf '\n==> bootstrap: %s\n' "$1"; }
 warn() { printf 'bootstrap: WARN: %s\n' "$*" >&2; }
 fail() { printf 'bootstrap: FAILED: %s\n' "$*" >&2; exit 1; }
+
+# Pinned versions come from versions.env (generated from versions.yaml) — the
+# single source of truth. Resolution: caller-provided vars (standalone use /
+# operator override), explicit override file, else the repo root relative to
+# this file's location.
+if [ -n "${K3S_VERSION:-}" ] && [ -n "${GVISOR_RELEASE:-}" ]; then
+  :
+elif [ -n "${CYCLOPUS_VERSIONS_ENV:-}" ]; then
+  # shellcheck disable=SC1090
+  . "$CYCLOPUS_VERSIONS_ENV"
+else
+  _versions_env=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/versions.env
+  [ -f "$_versions_env" ] || fail "versions.env not found; set CYCLOPUS_VERSIONS_ENV"
+  # shellcheck disable=SC1090
+  . "$_versions_env"
+fi
 
 retry() {
   _attempts=$1

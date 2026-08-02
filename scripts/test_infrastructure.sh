@@ -22,12 +22,14 @@ COMMAND='./scripts/test_infrastructure.sh'
 EVIDENCE_DIR="${CYCLOPUS_EVIDENCE_DIR:-$ROOT/.workflow/evidence/$PHASE}"
 EVIDENCE="${CYCLOPUS_UNIT_EVIDENCE:-$EVIDENCE_DIR/unit.json}"
 
-# Pinned tool versions (versions.yaml). Used for checksum-verified installs and
-# for the version assertions in the pure-logic checks.
-HELM_VERSION=v3.18.3
-K3S_VERSION='v1.33.13+k3s1'
-GVISOR_RELEASE='release-20260727.0'
-WAL_G_VERSION='v3.0.8'
+# Pinned tool versions come from versions.env (generated from versions.yaml) —
+# the single source of truth. Used for checksum-verified installs and for the
+# version assertions in the pure-logic checks.
+[ -f "$ROOT/versions.env" ] || { printf 'unit: FAIL: versions.env missing at %s/versions.env\n' "$ROOT" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$ROOT/versions.env"
+# kube-version for helm template: strip leading 'v' and trailing '+k3sN'.
+KUBE_VERSION=$(printf '%s' "$K3S_VERSION" | sed 's/^v//; s/+k3s[0-9]*$//')
 
 started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 tmp_root=$(mktemp -d)
@@ -100,12 +102,12 @@ check_helm() {
   "$HELM" lint "$ROOT/charts/cyclopus" >"$tmp_root/helm_lint.log" 2>&1 \
     || { mark_failed "helm lint failed"; return 0; }
   log "helm template default + constrained overlay"
-  "$HELM" template cyclopus "$ROOT/charts/cyclopus" --kube-version 1.33.13 \
+  "$HELM" template cyclopus "$ROOT/charts/cyclopus" --kube-version "$KUBE_VERSION" \
     --set secrets.databaseUrl='postgres://u:p@h/db' \
     --set secrets.authTokenPepper='unit-gate-pepper' \
     >"$tmp_root/helm_template.log" 2>&1 \
     || { mark_failed "helm template (default) failed"; return 0; }
-  "$HELM" template cyclopus "$ROOT/charts/cyclopus" --kube-version 1.33.13 \
+  "$HELM" template cyclopus "$ROOT/charts/cyclopus" --kube-version "$KUBE_VERSION" \
     -f "$ROOT/charts/cyclopus/values-constrained.yaml" \
     --set secrets.databaseUrl='postgres://u:p@h/db' \
     --set secrets.authTokenPepper='unit-gate-pepper' \
@@ -163,10 +165,10 @@ check_logic() {
   grep -q 'vcpu: 2' "$_run" || { mark_failed "byo_vps vcpu floor missing from run.yaml"; return 0; }
   grep -q 'memory_mib: 2048' "$_run" || { mark_failed "byo_vps memory floor missing from run.yaml"; return 0; }
   grep -q 'disk_gib: 20' "$_run" || { mark_failed "byo_vps disk floor missing from run.yaml"; return 0; }
-  # Pinned versions consistent with versions.yaml.
-  grep -q "$K3S_VERSION" "$ROOT/infra/bootstrap/common.sh" || { mark_failed "k3s pin drift in bootstrap"; return 0; }
-  grep -q "$GVISOR_RELEASE" "$ROOT/infra/bootstrap/common.sh" || { mark_failed "gVisor pin drift in bootstrap"; return 0; }
-  grep -q "$WAL_G_VERSION" "$ROOT/infra/backup/common.sh" || { mark_failed "WAL-G pin drift in backup"; return 0; }
+  # Pins live in versions.env (single source of truth); bootstrap/backup must
+  # source it, which makes pin equality structural rather than grepped.
+  grep -q 'versions.env' "$ROOT/infra/bootstrap/common.sh" || { mark_failed "infra/bootstrap/common.sh does not source versions.env"; return 0; }
+  grep -q 'versions.env' "$ROOT/infra/backup/common.sh" || { mark_failed "infra/backup/common.sh does not source versions.env"; return 0; }
   note "capacity-gate + version-pin logic checks passed"
 }
 
@@ -193,6 +195,7 @@ input_digest=$(
       sha256sum "$p" 2>/dev/null
     done
     sha256sum "$ROOT/scripts/test_infrastructure.sh" 2>/dev/null
+    sha256sum "$ROOT/versions.env" "$ROOT/versions.yaml" 2>/dev/null
   } | sha256sum | cut -d ' ' -f 1
 )
 case "$input_digest" in

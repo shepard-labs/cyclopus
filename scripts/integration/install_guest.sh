@@ -6,15 +6,9 @@ set -eu
 
 ROOT=${CYCLOPUS_INSTALL_ROOT:?CYCLOPUS_INSTALL_ROOT is required}
 EXPECTED_DISTRO=${CYCLOPUS_INSTALL_DISTRO:?CYCLOPUS_INSTALL_DISTRO is required}
-K3S_VERSION='v1.36.2+k3s1'
-HELM_VERSION='v3.21.3'
-KYVERNO_VERSION='v1.18.2'
-KYVERNO_CHART_VERSION='3.8.2'
-CERT_MANAGER_VERSION='v1.21.1'
-TRAEFIK_VERSION='41.1.0'
-KEDA_VERSION='2.20.2'
-KEDA_HTTP_ADDON_VERSION='0.15.0'
-PG_MAJOR=18
+# Pinned component versions come from versions.env (generated from versions.yaml).
+# shellcheck disable=SC1091
+. "$ROOT/versions.env"
 DB_USER=cyclopus
 DB_NAME=cyclopus_install
 DB_PASSWORD=cyclopus-install-test
@@ -146,7 +140,7 @@ step "enabling unprivileged low-port binding (net.ipv4.ip_unprivileged_port_star
 echo 'net.ipv4.ip_unprivileged_port_start=0' | sudo tee /etc/sysctl.d/99-cyclopus-lowports.conf >/dev/null
 sudo sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
 
-step "installing Traefik ingress controller v$TRAEFIK_VERSION (hostNetwork :80/:443)"
+step "installing Traefik ingress controller v$TRAEFIK_CHART_VERSION (hostNetwork :80/:443)"
 helm repo add traefik https://traefik.github.io/charts >/dev/null 2>&1 || true
 helm repo update traefik >/dev/null 2>&1 || true
 if helm_deployed traefik kube-system; then
@@ -156,7 +150,7 @@ else
   # the challenge (a NodePort is not reachable by the ACME server). No --wait: cold
   # VM image pulls can exceed helm's timeout; the explicit poll below is truth.
   helm install traefik traefik/traefik \
-    --version "$TRAEFIK_VERSION" \
+    --version "$TRAEFIK_CHART_VERSION" \
     --namespace kube-system \
     --set deployment.kind=DaemonSet \
     --set hostNetwork=true \

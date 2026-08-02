@@ -15,7 +15,10 @@ set -eu
 
 ROOT=${CYCLOPUS_DR_ROOT:?CYCLOPUS_DR_ROOT is required}
 EXPECTED_DISTRO=${CYCLOPUS_DR_DISTRO:?CYCLOPUS_DR_DISTRO is required}
-PG_MAJOR=18
+# Pinned versions come from versions.env (generated from versions.yaml).
+[ -f "$ROOT/versions.env" ] || { printf 'dr: FAILED: versions.env missing at %s/versions.env\n' "$ROOT" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$ROOT/versions.env"
 DB_USER=cyclopus
 DB_NAME=cyclopus_dr
 DB_PASSWORD=cyclopus-dr-test

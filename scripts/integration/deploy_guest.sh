@@ -3,8 +3,9 @@ set -eu
 
 ROOT=${CYCLOPUS_DEPLOY_ROOT:?CYCLOPUS_DEPLOY_ROOT is required}
 EXPECTED_DISTRO=${CYCLOPUS_DEPLOY_DISTRO:?CYCLOPUS_DEPLOY_DISTRO is required}
-K3S_VERSION='v1.33.13+k3s1'
-PG_MAJOR=18
+# Pinned component versions come from versions.env (generated from versions.yaml).
+# shellcheck disable=SC1091
+. "$ROOT/versions.env"
 DB_USER=cyclopus
 DB_NAME=cyclopus_test
 DB_PASSWORD=cyclopus-deploy-test

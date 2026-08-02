@@ -2,7 +2,10 @@
 set -eu
 
 ROOT=${CYCLOPUS_SECURITY_ROOT:?CYCLOPUS_SECURITY_ROOT is required}
-PG_MAJOR=18
+# Pinned versions come from versions.env (generated from versions.yaml).
+[ -f "$ROOT/versions.env" ] || { printf '%s\n' "security: FAILED: versions.env missing at $ROOT/versions.env" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$ROOT/versions.env"
 DB_USER=${CYCLOPUS_SECURITY_DB_USER:-cyclopus_security}
 DB_NAME=${CYCLOPUS_SECURITY_DB_NAME:-cyclopus_security_test}
 DB_PASSWORD=${CYCLOPUS_SECURITY_DB_PASSWORD:-cyclopus-security-test}

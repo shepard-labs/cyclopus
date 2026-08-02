@@ -7,6 +7,7 @@ policy:
 components:
   go:
     pin: "1.26"
+    toolchain_pin: "1.26.5"
     observed_latest: "1.26.5"
     probe: "curl -fsSL https://go.dev/VERSION?m=text"
     review:
@@ -14,7 +15,7 @@ components:
       reviewer: phase-0-workflow-fixer
       reviewed_at: "2026-07-29"
       evidence: ["https://go.dev/VERSION?m=text", "go.mod"]
-      rationale: Go 1.26 is the module language/toolchain line; patch selection remains deployment-managed.
+      rationale: Go 1.26 is the module language/toolchain line; patch selection remains deployment-managed, and toolchain_pin records the reviewed 1.26.5 patch used for installs.
   postgres:
     pin: "18"
     observed_latest: "18.4"
@@ -106,65 +107,67 @@ components:
       evidence: ["https://github.com/protocolbuffers/protobuf/releases/tag/v35.1"]
       rationale: Latest stable protoc was probed; generation uses Buf remote plugins and does not require a local protoc binary.
   k3s:
-    pin: "v1.33.13+k3s1"
+    pin: "v1.36.2+k3s1"
     observed_latest: "v1.36.2+k3s1"
     probe: "curl -fsSL https://api.github.com/repos/k3s-io/k3s/releases/latest"
     review:
-      status: intentional_pin
-      reviewer: kubernetes-client-go-recovery
-      reviewed_at: "2026-07-29"
-      evidence: ["https://github.com/k3s-io/k3s/releases/tag/v1.33.13%2Bk3s1", "https://raw.githubusercontent.com/k3s-io/k3s/v1.33.13%2Bk3s1/go.mod", "https://raw.githubusercontent.com/kubernetes/client-go/v0.33.13/go.mod", "go.mod"]
-      rationale: k3s v1.33.13+k3s1 embeds Kubernetes v1.33.13; the adapter uses matching upstream k8s.io api, apimachinery, and client-go v0.33.13 modules.
+      status: approved
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
+      evidence: ["https://github.com/k3s-io/k3s/releases/tag/v1.36.2%2Bk3s1", "https://raw.githubusercontent.com/k3s-io/k3s/v1.36.2%2Bk3s1/go.mod", "https://raw.githubusercontent.com/kubernetes/client-go/v0.36.2/go.mod", "go.mod"]
+      rationale: install.sh (the supported one-line install path) is canonical; client-go is bumped to v0.36.2 to match the v1.36.2 API server (supported skew is ±1 minor).
   client_go:
-    pin: "v0.33.13"
-    observed_latest: "v0.33.13"
-    probe: "curl -fsSL https://raw.githubusercontent.com/kubernetes/client-go/v0.33.13/go.mod"
+    pin: "v0.36.2"
+    observed_latest: "v0.36.2"
+    probe: "curl -fsSL https://raw.githubusercontent.com/kubernetes/client-go/v0.36.2/go.mod"
     review:
       status: approved
-      reviewer: kubernetes-client-go-recovery
-      reviewed_at: "2026-07-29"
-      evidence: ["https://raw.githubusercontent.com/kubernetes/client-go/v0.33.13/go.mod", "https://raw.githubusercontent.com/k3s-io/k3s/v1.33.13%2Bk3s1/go.mod", "go.mod"]
-      rationale: client-go v0.33.13 directly requires k8s.io/api and k8s.io/apimachinery v0.33.13 and matches the Kubernetes v1.33.13 API served by the selected k3s patch.
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
+      evidence: ["https://raw.githubusercontent.com/kubernetes/client-go/v0.36.2/go.mod", "https://raw.githubusercontent.com/k3s-io/k3s/v1.36.2%2Bk3s1/go.mod", "go.mod"]
+      rationale: client-go v0.36.2 matches the Kubernetes v1.36.2 API server embedded in the selected k3s v1.36.2+k3s1 (supported skew is ±1 minor).
   traefik:
-    pin: "v3.4.1"
-    observed_latest: "v3.7.9"
+    pin: "v3.7.6"
+    chart_pin: "41.1.0"
+    observed_latest: "v3.7.10"
     probe: "curl -fsSL https://api.github.com/repos/traefik/traefik/releases/latest"
     review:
       status: intentional_pin
-      reviewer: phase-0-workflow-fixer
-      reviewed_at: "2026-07-29"
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
       evidence: ["https://api.github.com/repos/traefik/traefik/releases/latest"]
-      rationale: Retain until ingress, CONNECT hardening, and the k3s embedded-chart compatibility matrix is exercised.
+      rationale: chart 41.1.0 ships appVersion v3.7.6; chart pin is what install.sh deploys
   cert_manager:
-    pin: "v1.17.2"
-    observed_latest: "v1.21.0"
+    pin: "v1.21.1"
+    observed_latest: "v1.21.1"
     probe: "curl -fsSL https://api.github.com/repos/cert-manager/cert-manager/releases/latest"
     review:
-      status: intentional_pin
-      reviewer: phase-0-workflow-fixer
-      reviewed_at: "2026-07-29"
+      status: approved
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
       evidence: ["https://api.github.com/repos/cert-manager/cert-manager/releases/latest"]
-      rationale: Latest has documented breaking Helm/RBAC changes and known issues; retain until certificate lifecycle integration review.
+      rationale: v1.21.1 equals the probed latest; the v1.17-era Helm/RBAC breaking changes are absorbed by the chart contract in Chart.yaml.
   kyverno:
-    pin: "v1.14.2"
+    pin: "v1.18.2"
+    chart_pin: "3.8.2"
     observed_latest: "v1.18.2"
     probe: "curl -fsSL https://api.github.com/repos/kyverno/kyverno/releases/latest"
     review:
-      status: intentional_pin
-      reviewer: phase-0-workflow-fixer
-      reviewed_at: "2026-07-29"
+      status: approved
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
       evidence: ["https://api.github.com/repos/kyverno/kyverno/releases/latest"]
-      rationale: Retain until fail-closed admission policies and CRD/chart changes pass Phase 3 integration gates.
+      rationale: v1.18.2 equals the probed latest; chart 3.8.2 is what install.sh deploys and the fail-closed admission policies render against it.
   keda:
-    pin: "v2.20.1"
-    observed_latest: "v2.20.1"
+    pin: "v2.20.2"
+    observed_latest: "v2.20.2"
     probe: "curl -fsSL https://api.github.com/repos/kedacore/keda/releases/latest"
     review:
       status: approved
-      reviewer: phase-4-scaling-implementer
-      reviewed_at: "2026-07-30"
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
       evidence: ["https://api.github.com/repos/kedacore/keda/releases/latest"]
-      rationale: v2.17.1 was outside its tested Kubernetes window on 1.33; v2.20.1 officially tests Kubernetes 1.33-1.35. RBAC must include events.k8s.io events create/patch and scaledRefKinds restricted to Deployments.
+      rationale: v2.17.1 was outside its tested Kubernetes window on 1.33; v2.20.2 officially tests Kubernetes 1.33-1.35. RBAC must include events.k8s.io events create/patch and scaledRefKinds restricted to Deployments.
   keda_http_add_on:
     pin: "v0.15.0"
     observed_latest: "v0.15.0"
@@ -176,15 +179,15 @@ components:
       evidence: ["https://api.github.com/repos/kedacore/http-add-on/releases/latest"]
       rationale: Beta accepted per spec 3.4 with hpa-mode fallback. HTTPScaledObject http.keda.sh/v1alpha1; uses scalingMetric concurrency/requestRate rather than deprecated targetPendingRequests.
   helm:
-    pin: "v3.18.3"
+    pin: "v3.21.3"
     observed_latest: "v4.2.3"
     probe: "curl -fsSL https://api.github.com/repos/helm/helm/releases/latest"
     review:
       status: intentional_pin
-      reviewer: phase-0-workflow-fixer
-      reviewed_at: "2026-07-29"
+      reviewer: version-ssot-consolidation
+      reviewed_at: "2026-08-02"
       evidence: ["https://api.github.com/repos/helm/helm/releases/latest"]
-      rationale: Helm 4 is a major-version change; retain Helm 3 until chart rendering and upgrade/rollback contracts pass Phase 5.
+      rationale: Helm 4 is a major-version change; Helm 3 retained until chart rendering/upgrade contracts are re-verified.
   robfig_cron:
     pin: "v3.0.1"
     observed_latest: "v3.0.1"
