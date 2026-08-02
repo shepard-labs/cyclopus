@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +25,18 @@ func intstrPointer(value int) *intstr.IntOrString {
 }
 
 func protocolPointer(value corev1.Protocol) *corev1.Protocol { return &value }
+
+// observabilityNamespace is the namespace of the OTel Collector the
+// app→collector OTLP egress rule must reach. scripts/install.sh allows the
+// platform namespace to differ from the default ("cyclopus") via
+// CYCLOPUS_NAMESPACE, so read the override from the environment (§7.2)
+// instead of hardcoding the default.
+func observabilityNamespace() string {
+	if ns := strings.TrimSpace(os.Getenv("CYCLOPUS_OBSERVABILITY_NAMESPACE")); ns != "" {
+		return ns
+	}
+	return "cyclopus"
+}
 
 const PoliciesPendingLabel = "cyclopus.app/policies-pending"
 
@@ -95,7 +108,7 @@ func (p *NetworkPolicyProvisioner) ProvisionAndVerify(ctx context.Context, job s
 				Egress: []networkingv1.NetworkPolicyEgressRule{
 					{To: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}}}}, Ports: []networkingv1.NetworkPolicyPort{{Port: intstrPointer(53), Protocol: protocolPointer(corev1.ProtocolUDP)}, {Port: intstrPointer(53), Protocol: protocolPointer(corev1.ProtocolTCP)}}},
 					{To: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}}},
-					{To: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "cyclopus-observability"}}, PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "opentelemetry-collector"}}}}, Ports: []networkingv1.NetworkPolicyPort{{Port: intstrPointer(4317), Protocol: protocolPointer(corev1.ProtocolTCP)}, {Port: intstrPointer(4318), Protocol: protocolPointer(corev1.ProtocolTCP)}}},
+					{To: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": observabilityNamespace()}}, PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "opentelemetry-collector"}}}}, Ports: []networkingv1.NetworkPolicyPort{{Port: intstrPointer(4317), Protocol: protocolPointer(corev1.ProtocolTCP)}, {Port: intstrPointer(4318), Protocol: protocolPointer(corev1.ProtocolTCP)}}},
 					{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0", Except: mergeEgressExceptCIDRs(p.egressExcludedCIDRs)}}}},
 				},
 			},

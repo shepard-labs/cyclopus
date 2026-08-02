@@ -226,15 +226,19 @@ chart_annotations = YAML.safe_load(File.read(File.join(root, "charts/cyclopus/Ch
   errors << "Chart.yaml annotation #{key}=#{got} does not match versions.yaml #{component} pin #{want}" unless got == want
 end
 
-# Observability manifest image tags must match versions.yaml pins.
+# Observability manifest image tags must match versions.yaml pins (leading "v"
+# normalized on both sides, e.g. openobserve v0.91.5 vs otel-collector 0.157.0).
 {
-  "openobserve" => "infra/observability/openobserve.yaml",
-  "beszel" => "infra/observability/beszel.yaml",
-}.each do |component, path|
-  text = File.read(File.join(root, path))
-  tag = text[/^\s*image:\s*\S+:(\S+)\s*$/, 1].to_s
+  "openobserve" => ["infra/observability/openobserve.yaml"],
+  "beszel" => ["infra/observability/beszel.yaml", "infra/observability/beszel-agent.yaml"],
+  "opentelemetry_collector" => ["infra/observability/otel-collector.yaml"],
+}.each do |component, paths|
   want = versions.dig("components", component, "pin").to_s.sub(/\Av/, "")
-  errors << "#{path} image tag #{tag} does not match versions.yaml #{component} pin #{want}" unless tag.sub(/\Av/, "") == want
+  paths.each do |path|
+    text = File.read(File.join(root, path))
+    tag = text[/^\s*image:\s*\S+:(\S+)\s*$/, 1].to_s
+    errors << "#{path} image tag #{tag} does not match versions.yaml #{component} pin #{want}" unless tag.sub(/\Av/, "") == want
+  end
 end
 
 phases = ledger["phases"]

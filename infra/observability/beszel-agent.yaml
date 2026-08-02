@@ -1,0 +1,48 @@
+# Beszel agent DaemonSet (§8): one agent per node reporting system stats to
+# the Beszel hub. hostNetwork is required because the hub connects TO the
+# agents by node IP:45876 — with pod networking the hub could not address each
+# node's agent directly. No docker.sock mount in v1: system stats only.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beszel-agent
+  namespace: cyclopus
+  labels:
+    app.kubernetes.io/name: beszel-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: beszel-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: beszel-agent
+    spec:
+      hostNetwork: true
+      # Metrics for every node, including the control-plane node (VPS1).
+      tolerations:
+        - key: cyclopus.app/role
+          operator: Equal
+          value: control-plane
+          effect: NoSchedule
+      containers:
+        - name: beszel-agent
+          image: henrygd/beszel-agent:0.18.7
+          env:
+            # Hub's public key; the installer-generated keypair's public half
+            # is seeded by scripts/install.sh into this secret.
+            - name: KEY
+              valueFrom:
+                secretKeyRef:
+                  name: beszel-agent-key
+                  key: public
+            - name: PORT
+              value: "45876"
+          ports:
+            - containerPort: 45876
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

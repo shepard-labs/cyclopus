@@ -18,6 +18,10 @@
 #   CYCLOPUS_NAMESPACE   namespace (default: cyclopus)
 #   NODE_IP              override auto-detected node IP (pod-reachable interface)
 #   LETSENCRYPT_EMAIL    ACME registration/expiry-notice email (default: warns)
+#   CYCLOPUS_CONTROL_PLANE_TAINT  "true" taints the node cyclopus.app/role=
+#                        control-plane:NoSchedule (§2.2). Do NOT enable on a
+#                        single-node install unless worker nodes will join —
+#                        app pods will not schedule on the tainted node.
 
 set -eu
 
@@ -53,6 +57,7 @@ CYCLOPUS_RELEASE=${CYCLOPUS_RELEASE:-cyclopus}
 CYCLOPUS_NAMESPACE=${CYCLOPUS_NAMESPACE:-cyclopus}
 CYCLOPUS_IMAGE=${CYCLOPUS_IMAGE:-ghcr.io/shepard-labs/cyclopus:${CYCLOPUS_VERSION}}
 LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-}
+CYCLOPUS_CONTROL_PLANE_TAINT=${CYCLOPUS_CONTROL_PLANE_TAINT:-false}
 
 # Canonical raw base for bootstrap scripts (single source of truth for gVisor, #7).
 RAW_BASE="https://raw.githubusercontent.com/shepard-labs/cyclopus/${CYCLOPUS_VERSION}"
@@ -152,7 +157,7 @@ DB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
 log "Installing PostgreSQL $PG_MAJOR..."
 if ! command -v psql >/dev/null 2>&1; then
   apt-get update -qq
-  apt-get install -y curl ca-certificates gnupg lsb-release
+  apt-get install -y curl ca-certificates gnupg lsb-release openssh-client
   install -d /usr/share/postgresql-common/pgdg
   dl https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
   echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
@@ -247,6 +252,22 @@ i=0; while [ $i -lt 60 ]; do
   i=$((i+1)); [ $i -lt 60 ] || fail "k3s API did not become ready"; sleep 2
 done
 log "k3s ready"
+
+# §2.2 opt-in: repel ordinary app pods from the control-plane node. Off by
+# default because a single-node install must keep the node schedulable.
+if [ "$CYCLOPUS_CONTROL_PLANE_TAINT" = "true" ]; then
+  NODE_COUNT=$($KUBECTL get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$NODE_COUNT" -eq 1 ]; then
+    fail "CYCLOPUS_CONTROL_PLANE_TAINT=true refused: single-node install — tainting the only node leaves app pods unschedulable. Join worker nodes first (then re-run), or unset CYCLOPUS_CONTROL_PLANE_TAINT."
+  fi
+  # k3s labels its server node(s) node-role.kubernetes.io/control-plane.
+  CP_NODES=$($KUBECTL get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[*].metadata.name}')
+  [ -n "$CP_NODES" ] || fail "no nodes carry the node-role.kubernetes.io/control-plane label"
+  for NODE_NAME in $CP_NODES; do
+    $KUBECTL taint node "$NODE_NAME" cyclopus.app/role=control-plane:NoSchedule --overwrite
+    log "Tainted node $NODE_NAME cyclopus.app/role=control-plane:NoSchedule"
+  done
+fi
 
 # #14: validate NODE_IP is the pod-reachable interface once the API is up.
 POD_CIDR=$($KUBECTL get node -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || echo "")
@@ -466,6 +487,38 @@ else
 fi
 assert_chart_version keda-add-ons-http keda "$KEDA_HTTP_ADDON_VERSION"
 
+# Observability secrets must exist BEFORE the Cyclopus API boots: the API
+# resolves its OpenObserve credential through a k8s-secret reference at startup
+# (cmd/cyclopus/main.go buildTelemetryProvider -> internal/secretref), so a
+# missing secret would crash-loop the pod and fail the --atomic helm install.
+log "Creating observability secrets..."
+$KUBECTL create namespace "$CYCLOPUS_NAMESPACE" --dry-run=client -o yaml | $KUBECTL apply -f -
+OO_PASSWORD=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+# credential: raw "user:password" the API base64-encodes itself
+# (internal/adapters/observability/openobserve.go OpenObserveConfig.Credential).
+# basic-auth: pre-encoded "Basic <base64>" header value for the OTel Collector
+# exporter (OpenObserve requires auth on its ingestion endpoints too).
+OO_CREDENTIAL="admin@cyclopus.local:${OO_PASSWORD}"
+OO_BASIC_AUTH=$(printf '%s' "$OO_CREDENTIAL" | base64 | tr -d '\n')
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic openobserve-auth \
+  --from-literal=password="$OO_PASSWORD" \
+  --from-literal=credential="$OO_CREDENTIAL" \
+  --from-literal=basic-auth="$OO_BASIC_AUTH" \
+  --dry-run=client -o yaml | $KUBECTL apply -f -
+# Beszel hub<->agent SSH keypair. Only the PUBLIC key enters the cluster
+# (agents); the private key stays on the operator side in $SECRETS_FILE.
+# ssh-keygen comes from openssh-client (present on the supported base
+# images; also installed above with the PostgreSQL prerequisites).
+BESZEL_KEY_TMP=$(mktemp)
+rm -f "$BESZEL_KEY_TMP"
+TMP_FILES="$TMP_FILES $BESZEL_KEY_TMP $BESZEL_KEY_TMP.pub"
+ssh-keygen -t ed25519 -f "$BESZEL_KEY_TMP" -N '' -C cyclopus-beszel >/dev/null
+BESZEL_PUBLIC_KEY=$(cat "$BESZEL_KEY_TMP.pub")
+BESZEL_PRIVATE_KEY=$(cat "$BESZEL_KEY_TMP")
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic beszel-agent-key \
+  --from-literal=public="$BESZEL_PUBLIC_KEY" \
+  --dry-run=client -o yaml | $KUBECTL apply -f -
+
 # Install Cyclopus. #2: secrets go in a 0600 values file (umask), never in argv.
 log "Installing Cyclopus..."
 DB_URL="postgres://cyclopus:${DB_PASSWORD}@${NODE_IP}:5432/cyclopus?sslmode=require"
@@ -484,11 +537,28 @@ secrets:
   databaseUrl: "${DB_URL}"
   authTokenPepper: "${AUTH_TOKEN_PEPPER}"
   authBootstrapSecret: "${AUTH_BOOTSTRAP_SECRET}"
+  # NOT the raw credential: the API expects a k8s-secret reference
+  # (internal/secretref, "k8s-secret://<namespace>/<name>#<key>") and resolves
+  # it at boot; the referenced key holds the raw "user:password" value.
+  openobserveCredential: "k8s-secret://${CYCLOPUS_NAMESPACE}/openobserve-auth#credential"
+  # Hub admin is created interactively post-install; token is added via the UI.
+  beszelToken: ""
 config:
   kubernetes:
     previewHostnameSuffix: "${HOSTNAME_SUFFIX}"
     customDomainCnameTarget: "${HOSTNAME_SUFFIX}"
     certManagerClusterIssuer: "letsencrypt-production"
+  observability:
+    # HTTPS is enforced by config validation (internal/config
+    # Observability.validate rejects plaintext http://), so these point at the
+    # Traefik-terminated ingresses, not the in-cluster http services.
+    openobserveBaseUrl: "https://oo.${HOSTNAME_SUFFIX}"
+    # Org/stream "default": where the Collector's otlphttp exporter lands
+    # telemetry (infra/observability/otel-collector.yaml).
+    openobserveOrganization: "default"
+    openobserveLogStream: "default"
+    openobserveTraceStream: "default"
+    beszelBaseUrl: "https://beszel.${HOSTNAME_SUFFIX}"
 ingress:
   enabled: true
   className: traefik
@@ -515,62 +585,65 @@ i=0; while [ $i -lt 60 ]; do
   i=$((i+1)); [ $i -lt 60 ] || fail "Cyclopus did not become ready"; sleep 2
 done
 
-# Install the observability stack (OpenObserve + Beszel) into the Cyclopus
-# namespace (§8). Raw manifests so the one-line install works without a repo
-# checkout; ingress hosts derive from the same sslip.io suffix as the console.
-log "Installing observability stack (OpenObserve + Beszel)..."
-OO_PASSWORD=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
-OO_MANIFEST=/tmp/openobserve.yaml
-BZ_MANIFEST=/tmp/beszel.yaml
-dl "$RAW_BASE/infra/observability/openobserve.yaml" -o "$OO_MANIFEST"
-dl "$RAW_BASE/infra/observability/beszel.yaml" -o "$BZ_MANIFEST"
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic openobserve-auth \
-  --from-literal=password="$OO_PASSWORD" \
-  --dry-run=client -o yaml | $KUBECTL apply -f -
-$KUBECTL apply -f "$OO_MANIFEST"
-$KUBECTL apply -f "$BZ_MANIFEST"
-rm -f "$OO_MANIFEST" "$BZ_MANIFEST"
-$KUBECTL apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: openobserve
-  namespace: ${CYCLOPUS_NAMESPACE}
-spec:
-  ingressClassName: traefik
-  rules:
-  - host: oo.${HOSTNAME_SUFFIX}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: openobserve
-            port:
-              number: 5080
+# write_tls_ingress NAME HOST PORT: emit a Traefik Ingress (with cert-manager
+# Let's Encrypt production TLS) routing HOST to service NAME:PORT.
+write_tls_ingress() {
+  cat <<EOF
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: beszel
+  name: $1
   namespace: ${CYCLOPUS_NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
 spec:
   ingressClassName: traefik
+  tls:
+  - secretName: $1-tls
+    hosts:
+    - $2
   rules:
-  - host: beszel.${HOSTNAME_SUFFIX}
+  - host: $2
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: beszel
+            name: $1
             port:
-              number: 8090
+              number: $3
 EOF
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/openobserve --timeout=3m
-$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/beszel --timeout=3m
+}
+
+# Install the observability stack (OpenObserve + Beszel + OTel Collector +
+# Beszel agents) into the Cyclopus namespace (§8). Raw manifests so the
+# one-line install works without a repo checkout; ingress hosts derive from
+# the same sslip.io suffix as the console. The manifests hardcode
+# `namespace: cyclopus`; rewrite when CYCLOPUS_NAMESPACE differs — including
+# the collector exporter DNS name and the filelog self-exclusion prefix,
+# otherwise the collector tails its own logs (self-ingest loop).
+log "Installing observability stack (OpenObserve + Beszel + OTel Collector + agents)..."
+for OBS_NAME in openobserve beszel otel-collector beszel-agent; do
+  OBS_MANIFEST=$(mktemp)
+  TMP_FILES="$TMP_FILES $OBS_MANIFEST"
+  dl "$RAW_BASE/infra/observability/$OBS_NAME.yaml" -o "$OBS_MANIFEST"
+  if [ "$CYCLOPUS_NAMESPACE" != "cyclopus" ]; then
+    sed -i "s/namespace: cyclopus/namespace: ${CYCLOPUS_NAMESPACE}/g; s/openobserve\.cyclopus\.svc/openobserve.${CYCLOPUS_NAMESPACE}.svc/g; s|/var/log/pods/cyclopus_|/var/log/pods/${CYCLOPUS_NAMESPACE}_|g" "$OBS_MANIFEST"
+  fi
+  $KUBECTL apply -f "$OBS_MANIFEST"
+done
+{
+  write_tls_ingress openobserve "oo.${HOSTNAME_SUFFIX}" 5080
+  write_tls_ingress beszel "beszel.${HOSTNAME_SUFFIX}" 8090
+} | $KUBECTL apply -f -
+# Non-fatal: an observability add-on that is slow to start must not abort the
+# install now that the platform itself is up.
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/openobserve --timeout=3m || warn "observability component openobserve not ready yet (non-fatal)"
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/beszel --timeout=3m || warn "observability component beszel not ready yet (non-fatal)"
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status daemonset/opentelemetry-collector --timeout=3m || warn "observability component opentelemetry-collector not ready yet (non-fatal)"
+$KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status daemonset/beszel-agent --timeout=3m || warn "observability component beszel-agent not ready yet (non-fatal)"
 
 # Write secrets to a 0600 file created with a tight umask (#6) — no stdout leak (#2).
 ( umask 0077; cat > "$SECRETS_FILE" <<EOF
@@ -588,6 +661,19 @@ ${AUTH_TOKEN_PEPPER}
 
 Database Password (PostgreSQL cyclopus user):
 ${DB_PASSWORD}
+
+OpenObserve (logs/traces UI): https://oo.${HOSTNAME_SUFFIX}
+  User: admin@cyclopus.local
+  Password: ${OO_PASSWORD}
+
+Beszel (metrics UI): https://beszel.${HOSTNAME_SUFFIX}
+  Create the admin account on first visit, then Add system for each node:
+    ${NODE_IP}:45876   (hub connects TO agents on the node IP)
+  Hub keypair (generated at install; private key is NOT in the cluster):
+    Public key (already given to the agents via the beszel-agent-key secret):
+    ${BESZEL_PUBLIC_KEY}
+    Private key (import into the hub as /beszel_data/id_ed25519 and restart it):
+${BESZEL_PRIVATE_KEY}
 
 ======================================
 IMPORTANT: Save these to your password manager, then delete this file.
@@ -612,5 +698,13 @@ log "Next steps:"
 log "  1. cat $SECRETS_FILE"
 log "  2. Open https://${CONSOLE_HOST} and claim the admin account with the bootstrap secret"
 log "  3. kubectl -n $CYCLOPUS_NAMESPACE get pods"
+log "  4. OpenObserve: https://oo.${HOSTNAME_SUFFIX} (credentials in $SECRETS_FILE)"
+log "  5. Beszel: https://beszel.${HOSTNAME_SUFFIX}"
+log "     - Create the hub admin account, then Add system for each node: ${NODE_IP}:45876"
+log "     - Hub public key + private key (hub import): $SECRETS_FILE"
+log "     - Beszel API token for Cyclopus: add via the hub UI once the admin account exists"
+if [ "$CYCLOPUS_CONTROL_PLANE_TAINT" != "true" ]; then
+  log "  6. Optional (multi-node only): k3s kubectl taint nodes <node> cyclopus.app/role=control-plane:NoSchedule"
+fi
 log ""
 log "=========================================="

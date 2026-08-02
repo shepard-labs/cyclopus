@@ -1,0 +1,180 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opentelemetry-collector
+  namespace: cyclopus
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+---
+# k8sattributes reads pod/namespace metadata to stamp tenant identity at
+# ingest (§8.1: identity is derived from the sending pod, not app-supplied).
+# k8s.node.name comes from pod.spec.nodeName, so Node objects are never
+# read: no nodes RBAC (least privilege).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opentelemetry-collector
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opentelemetry-collector
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opentelemetry-collector
+subjects:
+  - kind: ServiceAccount
+    name: opentelemetry-collector
+    namespace: cyclopus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opentelemetry-collector
+  namespace: cyclopus
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      filelog:
+        include:
+          - /var/log/pods/*/*/*.log
+        # Never tail our own pods: self-ingest loops.
+        exclude:
+          - /var/log/pods/cyclopus_opentelemetry-collector-*/*/*.log
+        start_at: end
+        # The container operator derives k8s resource attributes from
+        # log.file.path (/var/log/pods/<ns>_<pod>_<uid>/<container>/), which
+        # requires include_file_path (off by default).
+        include_file_path: true
+        operators:
+          # Parses CRI (containerd) log lines and stamps k8s.namespace.name,
+          # k8s.pod.name, k8s.pod.uid, k8s.container.name resource attributes
+          # from the file path, so k8sattributes can attach tenant identity
+          # to filelog-tailed logs too (§8.1).
+          - type: container
+    processors:
+      # First in every pipeline: bound memory and drop on sustained overload
+      # rather than stalling customer workloads (§8.1).
+      memory_limiter:
+        limit_mib: 256
+        spike_limit_mib: 64
+      k8sattributes:
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.name
+              - from: resource_attribute
+                name: k8s.namespace.name
+          - sources:
+              - from: connection
+      batch: {}
+    exporters:
+      # OpenObserve native OTLP ingestion (appends /v1/logs and /v1/traces).
+      # Org "default" and stream "default" match the API's install-time wiring
+      # (OBSERVABILITY_OPENOBSERVE_* values set by scripts/install.sh).
+      # OO_BASIC_AUTH comes from the openobserve-auth secret (key basic-auth);
+      # OpenObserve requires Basic auth on ingestion endpoints.
+      otlphttp/openobserve:
+        endpoint: http://openobserve.cyclopus.svc:5080/api/default
+        headers:
+          Authorization: Basic ${env:OO_BASIC_AUTH}
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp, filelog]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlphttp/openobserve]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlphttp/openobserve]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: opentelemetry-collector
+  namespace: cyclopus
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opentelemetry-collector
+    spec:
+      serviceAccountName: opentelemetry-collector
+      # Run on the control-plane node too (§8.1): without this toleration the
+      # platform's own node would be the one node with no telemetry collection.
+      tolerations:
+        - key: cyclopus.app/role
+          operator: Equal
+          value: control-plane
+          effect: NoSchedule
+      containers:
+        - name: opentelemetry-collector
+          image: otel/opentelemetry-collector-contrib:0.157.0
+          args:
+            - --config=/etc/otelcol/config.yaml
+          ports:
+            - containerPort: 4317
+            - containerPort: 4318
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: OO_BASIC_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: openobserve-auth
+                  key: basic-auth
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: varlogcontainers
+              mountPath: /var/log/containers
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: opentelemetry-collector
+        # k3s (containerd) writes pod logs under /var/log/pods with symlinks in
+        # /var/log/containers; both hostPaths are mounted read-only.
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+        - name: varlogcontainers
+          hostPath:
+            path: /var/log/containers
