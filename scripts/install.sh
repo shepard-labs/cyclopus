@@ -431,12 +431,45 @@ fi
 # Helm needs a kubeconfig; k3s writes one at a fixed path.
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
+# installed_chart_version REL NS: print the currently installed chart version for
+# release REL in namespace NS. The grep is anchored on the release name (helm
+# list json: {"name":"REL",...,"chart":"REL-VER",...}) so REL=keda in NS=keda
+# cannot collide with keda-add-ons-http, which shares the "keda-" chart prefix.
+# Returns 1 when the version cannot be read.
+installed_chart_version() {
+  _rel=$1; _ns=$2
+  _v=$(helm list -n "$_ns" -o json | grep -o "\"name\":\"${_rel}\"[^}]*\"chart\":\"${_rel}-[^\"]*\"" | head -n1 | sed "s/.*${_rel}-//; s/\"//" || true)
+  [ -n "$_v" ] || return 1
+  printf '%s\n' "$_v"
+}
+
 # #11: assert an installed release's chart version matches what we requested.
 assert_chart_version() {
   _rel=$1; _ns=$2; _want=$3
-  _got=$(helm list -n "$_ns" -o json | grep -o "\"chart\":\"${_rel}-[^\"]*\"" | head -n1 | sed "s/.*${_rel}-//; s/\"//" || true)
-  [ -n "$_got" ] || fail "$_rel: could not read installed chart version"
+  _got=$(installed_chart_version "$_rel" "$_ns") || fail "$_rel: could not read installed chart version"
   [ "$_got" = "$_want" ] || fail "$_rel chart version mismatch: installed $_got, expected $_want"
+}
+
+# converge_chart REL NS PIN: three-way decision for install-as-upgrade.
+#   0 = deployed and already at PIN (logged; caller does nothing)
+#   1 = not deployed (caller installs)
+#   2 = deployed at a different version (caller upgrades to PIN)
+# Fails hard when the release is deployed but its version is unreadable.
+converge_chart() {
+  _rel=$1; _ns=$2; _pin=$3
+  if ! helm_deployed "$_rel" "$_ns"; then return 1; fi
+  _cur=$(installed_chart_version "$_rel" "$_ns") || fail "$_rel: could not read installed chart version"
+  if [ "$_cur" = "$_pin" ]; then
+    log "$_rel already at pinned chart version $_pin"
+    return 0
+  fi
+  # Downgrade visibility: sort -V puts the lower version first; if the pin is
+  # the minimum, the installed version is NEWER than the pin.
+  _min=$(printf '%s\n%s\n' "$_pin" "$_cur" | sort -V | head -n1 || true)
+  if [ "$_min" = "$_pin" ]; then
+    warn "$_rel: installed chart version $_cur is NEWER than pinned $_pin — downgrading to pin"
+  fi
+  return 2
 }
 
 # Allow unprivileged processes to bind low ports so the non-root Traefik container
@@ -454,26 +487,42 @@ sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
 log "Installing Traefik ingress controller v$TRAEFIK_CHART_VERSION (hostNetwork :80/:443)..."
 helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
 helm repo update traefik
-if ! helm_deployed traefik kube-system; then
-  helm install traefik traefik/traefik \
-    --version "$TRAEFIK_CHART_VERSION" \
-    --namespace kube-system \
-    --set deployment.kind=DaemonSet \
-    --set hostNetwork=true \
-    --set service.enabled=false \
-    --set updateStrategy.rollingUpdate.maxUnavailable=1 \
-    --set updateStrategy.rollingUpdate.maxSurge=0 \
-    --set ports.web.port=80 \
-    --set ports.web.hostPort=80 \
-    --set ports.websecure.port=443 \
-    --set ports.websecure.hostPort=443 \
-    --set resources.requests.cpu=50m \
-    --set resources.requests.memory=64Mi \
-    --set resources.limits.memory=128Mi \
-    --timeout 10m
-else
-  log "Traefik already installed"
-fi
+# Traefik's config lives entirely in --set flags (no values file), so the same
+# array is applied on install AND upgrade (deliberately NOT --reuse-values: the
+# flags are the config, and an upgrade must converge them).
+TRAEFIK_SET_ARGS=(
+  --set deployment.kind=DaemonSet
+  --set hostNetwork=true
+  --set service.enabled=false
+  --set updateStrategy.rollingUpdate.maxUnavailable=1
+  --set updateStrategy.rollingUpdate.maxSurge=0
+  --set ports.web.port=80
+  --set ports.web.hostPort=80
+  --set ports.websecure.port=443
+  --set ports.websecure.hostPort=443
+  --set resources.requests.cpu=50m
+  --set resources.requests.memory=64Mi
+  --set resources.limits.memory=128Mi
+)
+_rc=0
+converge_chart traefik kube-system "$TRAEFIK_CHART_VERSION" || _rc=$?
+case "$_rc" in
+  1)
+    helm install traefik traefik/traefik \
+      --version "$TRAEFIK_CHART_VERSION" \
+      --namespace kube-system \
+      "${TRAEFIK_SET_ARGS[@]}" \
+      --timeout 10m
+    ;;
+  2)
+    log "Traefik chart not at pin — upgrading to $TRAEFIK_CHART_VERSION"
+    helm upgrade traefik traefik/traefik \
+      --version "$TRAEFIK_CHART_VERSION" \
+      --namespace kube-system \
+      "${TRAEFIK_SET_ARGS[@]}" \
+      --cleanup-on-fail --timeout 10m
+    ;;
+esac
 assert_chart_version traefik kube-system "$TRAEFIK_CHART_VERSION"
 
 # #13: verify Traefik is actually reachable on host :80 (ACME HTTP-01 depends on it).
@@ -489,14 +538,26 @@ log "Traefik listening on host :80/:443 (ACME HTTP-01 reachable)"
 log "Installing Kyverno $KYVERNO_VERSION..."
 helm repo add kyverno https://kyverno.github.io/kyverno/ 2>/dev/null || true
 helm repo update kyverno
-if ! helm_deployed kyverno kyverno; then
-  helm install kyverno kyverno/kyverno \
-    --version "$KYVERNO_CHART_VERSION" \
-    --namespace kyverno --create-namespace \
-    --wait --timeout 5m
-else
-  log "Kyverno already installed"
-fi
+_rc=0
+converge_chart kyverno kyverno "$KYVERNO_CHART_VERSION" || _rc=$?
+case "$_rc" in
+  1)
+    helm install kyverno kyverno/kyverno \
+      --version "$KYVERNO_CHART_VERSION" \
+      --namespace kyverno --create-namespace \
+      --wait --timeout 5m
+    ;;
+  2)
+    log "Kyverno chart not at pin — upgrading to $KYVERNO_CHART_VERSION"
+    # Upgrade passes identical value flags as install by design (no --reuse-values).
+    # Note: helm never upgrades the chart's crds/ directory — a pin bump with CRD
+    # schema changes needs a manual CRD apply (out of scope).
+    helm upgrade kyverno kyverno/kyverno \
+      --version "$KYVERNO_CHART_VERSION" \
+      --namespace kyverno \
+      --cleanup-on-fail --wait --timeout 5m
+    ;;
+esac
 assert_chart_version kyverno kyverno "$KYVERNO_CHART_VERSION"
 
 # Wait for Kyverno webhook. #12: probe pod is cleaned up here AND in the EXIT trap.
@@ -517,15 +578,26 @@ log "Kyverno webhook ready"
 log "Installing cert-manager $CERT_MANAGER_VERSION..."
 helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
 helm repo update jetstack
-if ! helm_deployed cert-manager cert-manager; then
-  helm install cert-manager jetstack/cert-manager \
-    --version "$CERT_MANAGER_VERSION" \
-    --namespace cert-manager --create-namespace \
-    --set crds.enabled=true \
-    --wait --timeout 5m
-else
-  log "cert-manager already installed"
-fi
+_rc=0
+converge_chart cert-manager cert-manager "$CERT_MANAGER_VERSION" || _rc=$?
+case "$_rc" in
+  1)
+    helm install cert-manager jetstack/cert-manager \
+      --version "$CERT_MANAGER_VERSION" \
+      --namespace cert-manager --create-namespace \
+      --set crds.enabled=true \
+      --wait --timeout 5m
+    ;;
+  2)
+    log "cert-manager chart not at pin — upgrading to $CERT_MANAGER_VERSION"
+    # Upgrade passes identical value flags as install by design (no --reuse-values).
+    helm upgrade cert-manager jetstack/cert-manager \
+      --version "$CERT_MANAGER_VERSION" \
+      --namespace cert-manager \
+      --set crds.enabled=true \
+      --cleanup-on-fail --wait --timeout 5m
+    ;;
+esac
 assert_chart_version cert-manager cert-manager "$CERT_MANAGER_VERSION"
 
 log "Waiting for cert-manager webhook..."
@@ -572,34 +644,59 @@ EOF
 log "Installing KEDA v$KEDA_VERSION..."
 helm repo add kedacore https://kedacore.github.io/charts 2>/dev/null || true
 helm repo update kedacore
-if ! helm_deployed keda keda; then
-  helm install keda kedacore/keda \
-    --version "$KEDA_VERSION" \
-    --namespace keda --create-namespace \
-    --wait --timeout 5m
-else
-  log "KEDA already installed"
-fi
+_rc=0
+converge_chart keda keda "$KEDA_VERSION" || _rc=$?
+case "$_rc" in
+  1)
+    helm install keda kedacore/keda \
+      --version "$KEDA_VERSION" \
+      --namespace keda --create-namespace \
+      --wait --timeout 5m
+    ;;
+  2)
+    log "KEDA chart not at pin — upgrading to $KEDA_VERSION"
+    # Upgrade passes identical value flags as install by design (no --reuse-values).
+    helm upgrade keda kedacore/keda \
+      --version "$KEDA_VERSION" \
+      --namespace keda \
+      --cleanup-on-fail --wait --timeout 5m
+    ;;
+esac
 assert_chart_version keda keda "$KEDA_VERSION"
 
 log "Installing KEDA HTTP Add-on v$KEDA_HTTP_ADDON_VERSION..."
-if ! helm_deployed keda-add-ons-http keda; then
-  helm install keda-add-ons-http kedacore/keda-add-ons-http \
-    --version "$KEDA_HTTP_ADDON_VERSION" \
-    --namespace keda \
-    --set operator.resources.requests.cpu=50m \
-    --set operator.resources.requests.memory=64Mi \
-    --set operator.resources.limits.memory=128Mi \
-    --set interceptor.resources.requests.cpu=50m \
-    --set interceptor.resources.requests.memory=64Mi \
-    --set interceptor.resources.limits.memory=128Mi \
-    --set scaler.resources.requests.cpu=50m \
-    --set scaler.resources.requests.memory=64Mi \
-    --set scaler.resources.limits.memory=128Mi \
-    --wait --timeout 10m
-else
-  log "KEDA HTTP Add-on already installed"
-fi
+# Like Traefik, the resources --sets ARE the config here, so they are re-applied
+# on upgrade (deliberately NOT --reuse-values) via a shared array.
+KEDA_HTTP_SET_ARGS=(
+  --set operator.resources.requests.cpu=50m
+  --set operator.resources.requests.memory=64Mi
+  --set operator.resources.limits.memory=128Mi
+  --set interceptor.resources.requests.cpu=50m
+  --set interceptor.resources.requests.memory=64Mi
+  --set interceptor.resources.limits.memory=128Mi
+  --set scaler.resources.requests.cpu=50m
+  --set scaler.resources.requests.memory=64Mi
+  --set scaler.resources.limits.memory=128Mi
+)
+_rc=0
+converge_chart keda-add-ons-http keda "$KEDA_HTTP_ADDON_VERSION" || _rc=$?
+case "$_rc" in
+  1)
+    helm install keda-add-ons-http kedacore/keda-add-ons-http \
+      --version "$KEDA_HTTP_ADDON_VERSION" \
+      --namespace keda \
+      "${KEDA_HTTP_SET_ARGS[@]}" \
+      --wait --timeout 10m
+    ;;
+  2)
+    log "KEDA HTTP Add-on chart not at pin — upgrading to $KEDA_HTTP_ADDON_VERSION"
+    helm upgrade keda-add-ons-http kedacore/keda-add-ons-http \
+      --version "$KEDA_HTTP_ADDON_VERSION" \
+      --namespace keda \
+      "${KEDA_HTTP_SET_ARGS[@]}" \
+      --cleanup-on-fail --wait --timeout 10m
+    ;;
+esac
 assert_chart_version keda-add-ons-http keda "$KEDA_HTTP_ADDON_VERSION"
 
 # Observability secrets must exist BEFORE the Cyclopus API boots: the API
