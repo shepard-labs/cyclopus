@@ -4,7 +4,9 @@
 # Executes, in order, entirely offline:
 #   1. helm lint + helm template on charts/cyclopus (default + constrained overlay)
 #   2. sh -n syntax + shellcheck on every bootstrap/backup/integration script
+#      (plus the backup wiring unit test itself)
 #   3. pure-logic checks (constrained-profile capacity floors, pinned versions)
+#   4. backup wiring unit tests (tests/backup/configure_from_db_test.sh, stubbed)
 #
 # Missing helm/shellcheck are installed via checksum-verified download when
 # possible, else the affected step is skipped with a clear status (the gate does
@@ -142,6 +144,7 @@ check_scripts() {
     "$ROOT"/scripts/integration/dr_guest.sh \
     "$ROOT"/scripts/integration/byo_vps_blocked.sh \
     "$ROOT"/scripts/integration/emit_blocked.sh \
+    "$ROOT"/tests/backup/configure_from_db_test.sh \
     "$ROOT"/scripts/test_infrastructure.sh; do
     [ -f "$f" ] || continue
     sh -n "$f" 2>>"$tmp_root/script_syntax.log" || { printf 'sh -n failed: %s\n' "$f" >>"$tmp_root/script_syntax.log"; _failed=1; }
@@ -172,12 +175,20 @@ check_logic() {
   note "capacity-gate + version-pin logic checks passed"
 }
 
+check_backup_tests() {
+  log "backup wiring unit tests (tests/backup/configure_from_db_test.sh)"
+  sh "$ROOT"/tests/backup/configure_from_db_test.sh >"$tmp_root/configure_from_db_test.log" 2>&1 \
+    || { mark_failed "configure_from_db unit tests failed"; return 0; }
+  note "configure_from_db unit tests passed"
+}
+
 # --- run ---------------------------------------------------------------------
 
 SKIP_HELM=0
 check_helm
 check_scripts
 check_logic
+check_backup_tests
 
 # If a required tool could not be provisioned at all, the gate is blocked rather
 # than a false pass.

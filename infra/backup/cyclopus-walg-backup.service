@@ -1,0 +1,33 @@
+# Daily WAL-G base backup of Cyclopus's Postgres to the configured
+# storage_destinations S3 target (§9.1). The ExecStart INSTALL_DIR placeholder
+# is templated in by infra/backup/configure_from_db.sh (or scripts/install.sh)
+# when installing this unit into /etc/systemd/system/ — do NOT install verbatim.
+[Unit]
+Description=Cyclopus WAL-G base backup to storage_destinations (§9.1)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# No EnvironmentFile= here: environment injected by systemd is visible to local
+# unit introspection (`systemctl show`), which would leak the S3 secret key.
+# backup.sh sources /etc/cyclopus/walg.env itself (WALG_ENV_FILE override)
+# before walg_env runs — a missing file still fails with the same clear
+# walg_env :? message, just from the script instead of the unit.
+ExecStart=@INSTALL_DIR@/backup.sh
+# Transient S3/network errors are common; without a retry a single failure
+# means a 24h backup gap until the next OnCalendar tick (oneshot + Restart is
+# valid: the unit re-runs ExecStart, it is not "always running").
+Restart=on-failure
+RestartSec=15m
+# Keep the control plane responsive while the backup streams.
+Nice=10
+# Hardening is deliberately light: backup.sh re-execs WAL-G as the unprivileged
+# postgres user and needs broad read access to PGDATA plus network egress to
+# the S3 endpoint, so deeper sandboxing (ProtectSystem=strict, filesystem
+# whitelists) would risk breaking wal-g for little gain. ProtectSystem=full
+# only remounts /usr, /etc and /boot read-only — PGDATA stays accessible.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true

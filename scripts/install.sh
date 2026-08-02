@@ -22,6 +22,15 @@
 #                        control-plane:NoSchedule (§2.2). Do NOT enable on a
 #                        single-node install unless worker nodes will join —
 #                        app pods will not schedule on the tainted node.
+#   WALG_S3_ENDPOINT     S3 endpoint for Postgres WAL-G backups (optional)
+#   WALG_S3_BUCKET       S3 bucket for WAL-G backups (optional)
+#   WALG_S3_REGION       S3 region (optional; default us-east-1)
+#   WALG_S3_PREFIX_SUBPATH  S3 prefix subpath (optional; default postgres_backup)
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+#                        S3 credential pair (optional). If WALG_S3_ENDPOINT +
+#                        WALG_S3_BUCKET + both AWS_* keys are all set, WAL-G
+#                        archiving + daily base backups are configured during
+#                        install (best-effort: failures warn, never fail).
 
 set -eu
 
@@ -58,6 +67,12 @@ CYCLOPUS_NAMESPACE=${CYCLOPUS_NAMESPACE:-cyclopus}
 CYCLOPUS_IMAGE=${CYCLOPUS_IMAGE:-ghcr.io/shepard-labs/cyclopus:${CYCLOPUS_VERSION}}
 LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-}
 CYCLOPUS_CONTROL_PLANE_TAINT=${CYCLOPUS_CONTROL_PLANE_TAINT:-false}
+# Optional WAL-G backup wiring (see header docs; all four must be set to wire).
+WALG_S3_ENDPOINT=${WALG_S3_ENDPOINT:-}
+WALG_S3_BUCKET=${WALG_S3_BUCKET:-}
+WALG_S3_REGION=${WALG_S3_REGION:-}
+AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
 
 # Canonical raw base for bootstrap scripts (single source of truth for gVisor, #7).
 RAW_BASE="https://raw.githubusercontent.com/shepard-labs/cyclopus/${CYCLOPUS_VERSION}"
@@ -645,6 +660,68 @@ $KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/beszel --timeout=3m || w
 $KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status daemonset/opentelemetry-collector --timeout=3m || warn "observability component opentelemetry-collector not ready yet (non-fatal)"
 $KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status daemonset/beszel-agent --timeout=3m || warn "observability component beszel-agent not ready yet (non-fatal)"
 
+# --- WAL-G Postgres backups (§9.1) -------------------------------------------
+# Stage the backup toolkit UNCONDITIONALLY (even without S3 creds) so the
+# post-install wiring path (/opt/cyclopus/backup/configure_from_db.sh) needs no
+# network. When all four WAL-G S3 inputs are set, additionally wire archiving +
+# the daily base-backup timer now. Best-effort: failures warn and never fail
+# the install — backups can always be wired post-install.
+BACKUP_DIR=/opt/cyclopus/backup
+WALG_WIRED=0
+if (
+  install -d -m 0755 "$BACKUP_DIR" &&
+  for f in common.sh install_walg.sh backup.sh restore.sh configure_from_db.sh; do
+    dl "$RAW_BASE/infra/backup/$f" -o "$BACKUP_DIR/$f" && chmod 0755 "$BACKUP_DIR/$f" || exit 1
+  done &&
+  for f in cyclopus-walg-backup.service cyclopus-walg-backup.timer; do
+    dl "$RAW_BASE/infra/backup/$f" -o "$BACKUP_DIR/$f" && chmod 0644 "$BACKUP_DIR/$f" || exit 1
+  done &&
+  # common.sh's sibling fallback lets the staged scripts resolve their pins.
+  cp "$RESOLVED_VERSIONS_ENV" "$BACKUP_DIR/versions.env" && chmod 0644 "$BACKUP_DIR/versions.env"
+); then
+  log "Backup toolkit staged at $BACKUP_DIR (scripts + systemd units + versions.env)"
+else
+  warn "backup toolkit staging incomplete (non-fatal); run infra/backup/configure_from_db.sh from a repo checkout instead"
+fi
+
+if [ -n "$WALG_S3_ENDPOINT" ] && [ -n "$WALG_S3_BUCKET" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+  log "WAL-G S3 env present: wiring Postgres archiving + daily base backups..."
+  WALG_S3_REGION=${WALG_S3_REGION:-us-east-1}
+  WALG_S3_PREFIX_SUBPATH=${WALG_S3_PREFIX_SUBPATH:-postgres_backup}
+  # walg.env is written by common.sh's write_walg_env (single source of truth:
+  # charset validation + layout + 0600/0700 perms). The staged common.sh
+  # resolves its pins via the sibling versions.env copied above; the four
+  # walg_env-required vars are exported so the sourced functions see them.
+  export WALG_S3_ENDPOINT WALG_S3_BUCKET WALG_S3_REGION WALG_S3_PREFIX_SUBPATH
+  export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+  if (
+    . "$BACKUP_DIR/common.sh" &&
+    require_root &&
+    walg_env &&
+    write_walg_env /etc/cyclopus/walg.env &&
+    sh "$BACKUP_DIR/install_walg.sh" &&
+    # archive_mode/wal_level are postmaster-start settings: full restart only
+    # when archiving is not already active, otherwise a reload suffices
+    # (idempotent installer re-runs do not bounce the DB).
+    if [ "$(sudo -u postgres psql -d cyclopus -XAtqc 'SHOW archive_mode;' 2>/dev/null || true)" = on ]; then
+      systemctl reload postgresql || true
+    else
+      systemctl restart postgresql || exit 1
+    fi &&
+    sed "s|@INSTALL_DIR@|$BACKUP_DIR|g" "$BACKUP_DIR/cyclopus-walg-backup.service" > /etc/systemd/system/cyclopus-walg-backup.service &&
+    sed "s|@INSTALL_DIR@|$BACKUP_DIR|g" "$BACKUP_DIR/cyclopus-walg-backup.timer" > /etc/systemd/system/cyclopus-walg-backup.timer &&
+    chmod 0644 /etc/systemd/system/cyclopus-walg-backup.service /etc/systemd/system/cyclopus-walg-backup.timer &&
+    systemctl daemon-reload &&
+    systemctl enable --now cyclopus-walg-backup.timer &&
+    systemctl is-enabled cyclopus-walg-backup.timer | grep -q enabled
+  ); then
+    WALG_WIRED=1
+    log "WAL-G archiving + daily base backups enabled (cyclopus-walg-backup.timer)"
+  else
+    warn "WAL-G backup wiring failed (non-fatal). Create a storage destination, then run: $BACKUP_DIR/configure_from_db.sh (see infra/backup/README.md)"
+  fi
+fi
+
 # Write secrets to a 0600 file created with a tight umask (#6) — no stdout leak (#2).
 ( umask 0077; cat > "$SECRETS_FILE" <<EOF
 Cyclopus Installation Secrets
@@ -705,6 +782,13 @@ log "     - Hub public key + private key (hub import): $SECRETS_FILE"
 log "     - Beszel API token for Cyclopus: add via the hub UI once the admin account exists"
 if [ "$CYCLOPUS_CONTROL_PLANE_TAINT" != "true" ]; then
   log "  6. Optional (multi-node only): k3s kubectl taint nodes <node> cyclopus.app/role=control-plane:NoSchedule"
+fi
+if [ "$WALG_WIRED" = 1 ]; then
+  log "  7. Backups: WAL-G archiving ACTIVE; daily base backups via cyclopus-walg-backup.timer"
+  log "     (systemctl list-timers cyclopus-walg-backup.timer; manual run: $BACKUP_DIR/backup.sh)"
+else
+  log "  7. Backups: create a storage destination (Settings/API → storage_destinations, purpose postgres_backup),"
+  log "     then on this host: $BACKUP_DIR/configure_from_db.sh (see docs/decisions + infra/backup/README.md)"
 fi
 log ""
 log "=========================================="

@@ -21,6 +21,9 @@ elif [ -n "${CYCLOPUS_VERSIONS_ENV:-}" ]; then
   . "$CYCLOPUS_VERSIONS_ENV"
 else
   _versions_env=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/versions.env
+  # Fallback: a sibling versions.env staged next to these scripts (the one-line
+  # installer stages them at /opt/cyclopus/backup/ with versions.env alongside).
+  [ -f "$_versions_env" ] || _versions_env=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/versions.env
   [ -f "$_versions_env" ] || fail "versions.env not found; set CYCLOPUS_VERSIONS_ENV"
   # shellcheck disable=SC1090
   . "$_versions_env"
@@ -57,6 +60,19 @@ arch_go() {
   esac
 }
 
+# Run a command as the Postgres superuser. Cannot be written as
+# `$SUDO -u "$PG_USER" ...`: when running AS root, require_root sets SUDO=''
+# and the bare `-u` becomes argv[0] ("-u: not found"). runuser (util-linux,
+# present on the supported Ubuntu 24.04 / Debian 12 images) is the root path.
+as_pg() {
+  _pg_u=${PG_USER:-postgres}
+  if [ -n "${SUDO:-}" ]; then
+    $SUDO -u "$_pg_u" "$@"
+  else
+    runuser -u "$_pg_u" -- "$@"
+  fi
+}
+
 # Export WAL-G's S3 configuration from storage_destinations env. Callers set:
 #   WALG_S3_ENDPOINT           e.g. https://s3.<region>.<provider>.example
 #   WALG_S3_BUCKET             storage_destinations bucket
@@ -84,18 +100,43 @@ walg_env() {
 # archive_command / restore_command (which source this file) do not depend on
 # ambient env. Callers must have run walg_env first. Single source of truth: the
 # WALG_S3_* + AWS_* scheme above. Written 0600, root-owned dir 0700.
+#
+# Plain `VAR=value` lines, NOT `export VAR=value`: sh-sourceable via `set -a; .
+# walg.env` (and parseable as a systemd EnvironmentFile should one be needed).
+# The daily-backup unit deliberately does NOT use EnvironmentFile= — systemd
+# unit introspection (`systemctl show`) would expose the S3 secret; backup.sh
+# sources this file itself instead. The WALG_S3_* input vars are included so
+# walg_env's required-var checks pass when the file is the ONLY env source
+# (e.g. the daily-backup service).
 write_walg_env() {
   _envfile=${1:-/etc/cyclopus/walg.env}
+  : "${WALG_S3_REGION:=us-east-1}" "${WALG_S3_PREFIX_SUBPATH:=postgres_backup}"
+  # Values are emitted UNQUOTED, so anything a shell would re-lex on sourcing
+  # (space, #, $, quotes, backticks, newline ...) would corrupt the file — a
+  # space alone splits into a command. Reject unsafe characters up front.
+  for _var in WALG_S3_ENDPOINT WALG_S3_BUCKET WALG_S3_REGION WALG_S3_PREFIX_SUBPATH \
+    WALG_S3_PREFIX WALE_S3_PREFIX AWS_ENDPOINT AWS_REGION \
+    AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
+    AWS_S3_FORCE_PATH_STYLE WALG_COMPRESSION_METHOD; do
+    _value=$(eval "printf '%s' \"\${$_var:-}\"")
+    case $_value in
+      *[!A-Za-z0-9/+=:._-]*) fail "unsafe character in $_var value (walg.env must be sh-sourceable)" ;;
+    esac
+  done
   $SUDO install -d -m 0700 "$(dirname -- "$_envfile")"
   {
-    printf 'export WALG_S3_PREFIX=%s\n' "$WALG_S3_PREFIX"
-    printf 'export WALE_S3_PREFIX=%s\n' "$WALE_S3_PREFIX"
-    printf 'export AWS_ENDPOINT=%s\n' "$AWS_ENDPOINT"
-    printf 'export AWS_REGION=%s\n' "$AWS_REGION"
-    printf 'export AWS_ACCESS_KEY_ID=%s\n' "$AWS_ACCESS_KEY_ID"
-    printf 'export AWS_SECRET_ACCESS_KEY=%s\n' "$AWS_SECRET_ACCESS_KEY"
-    printf 'export AWS_S3_FORCE_PATH_STYLE=%s\n' "$AWS_S3_FORCE_PATH_STYLE"
-    printf 'export WALG_COMPRESSION_METHOD=%s\n' "$WALG_COMPRESSION_METHOD"
+    printf 'WALG_S3_ENDPOINT=%s\n' "$WALG_S3_ENDPOINT"
+    printf 'WALG_S3_BUCKET=%s\n' "$WALG_S3_BUCKET"
+    printf 'WALG_S3_REGION=%s\n' "${WALG_S3_REGION:-us-east-1}"
+    printf 'WALG_S3_PREFIX_SUBPATH=%s\n' "${WALG_S3_PREFIX_SUBPATH:-postgres_backup}"
+    printf 'WALG_S3_PREFIX=%s\n' "$WALG_S3_PREFIX"
+    printf 'WALE_S3_PREFIX=%s\n' "$WALE_S3_PREFIX"
+    printf 'AWS_ENDPOINT=%s\n' "$AWS_ENDPOINT"
+    printf 'AWS_REGION=%s\n' "$AWS_REGION"
+    printf 'AWS_ACCESS_KEY_ID=%s\n' "$AWS_ACCESS_KEY_ID"
+    printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$AWS_SECRET_ACCESS_KEY"
+    printf 'AWS_S3_FORCE_PATH_STYLE=%s\n' "$AWS_S3_FORCE_PATH_STYLE"
+    printf 'WALG_COMPRESSION_METHOD=%s\n' "$WALG_COMPRESSION_METHOD"
   } | $SUDO tee "$_envfile" >/dev/null
   $SUDO chmod 0600 "$_envfile"
 }

@@ -15,6 +15,11 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/common.sh"
 
 require_root
+# Source the credential file here (operator-overridable), not via a systemd
+# EnvironmentFile, so unit introspection (`systemctl show`) cannot expose it.
+WALG_ENV_FILE=${WALG_ENV_FILE:-/etc/cyclopus/walg.env}
+# shellcheck disable=SC1090
+[ -f "$WALG_ENV_FILE" ] && { set -a; . "$WALG_ENV_FILE"; set +a; }
 walg_env
 
 BIN=/usr/local/bin/wal-g
@@ -24,10 +29,10 @@ BIN=/usr/local/bin/wal-g
 # must be (re)written here after the fetch — see below.
 PGDATA="${PGDATA:-/var/lib/postgresql/${PG_MAJOR}/main}"
 PG_USER="${PG_SUPERUSER:-postgres}"
-ENVFILE=/etc/cyclopus/walg.env
+ENVFILE=$WALG_ENV_FILE
 
 walg_run() {
-  $SUDO -u "$PG_USER" env \
+  as_pg env \
     WALE_S3_PREFIX="$WALE_S3_PREFIX" AWS_ENDPOINT="$AWS_ENDPOINT" AWS_REGION="$AWS_REGION" \
     AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
     AWS_S3_FORCE_PATH_STYLE="$AWS_S3_FORCE_PATH_STYLE" \
@@ -57,7 +62,7 @@ log "configuring WAL replay recovery in postgresql.auto.conf"
 AUTOCONF="$PGDATA/postgresql.auto.conf"
 # Preserve any auto.conf that came with the base backup, minus stale recovery
 # lines we are about to (re)write, then append our recovery parameters.
-$SUDO -u "$PG_USER" sh -c "
+as_pg sh -c "
   touch '$AUTOCONF'
   grep -v -E '^[[:space:]]*(restore_command|recovery_target_time|recovery_target_action|recovery_target_timeline)[[:space:]]*=' '$AUTOCONF' > '$AUTOCONF.cyclopus.tmp' || true
   mv '$AUTOCONF.cyclopus.tmp' '$AUTOCONF'
@@ -69,12 +74,12 @@ $SUDO -u "$PG_USER" sh -c "
   if [ -n "${PITR_TARGET_TIME:-}" ]; then
     printf "recovery_target_time = '%s'\n" "$PITR_TARGET_TIME"
   fi
-} | $SUDO -u "$PG_USER" tee -a "$AUTOCONF" >/dev/null
+} | as_pg tee -a "$AUTOCONF" >/dev/null
 [ -n "${PITR_TARGET_TIME:-}" ] && log "point-in-time recovery target: $PITR_TARGET_TIME"
 
 # recovery.signal (not standby.signal): archive recovery that promotes to a
 # normal read/write primary once the target is reached (§9.1: no replica).
-$SUDO -u "$PG_USER" touch "$PGDATA/recovery.signal"
+as_pg touch "$PGDATA/recovery.signal"
 
 log "starting Postgres to replay WAL"
 $SUDO systemctl start postgresql || fail "Postgres failed to start for recovery"
@@ -84,11 +89,11 @@ $SUDO systemctl start postgresql || fail "Postgres failed to start for recovery"
 # and promotes. pg_isready alone is insufficient — it returns true while still
 # replaying WAL, masking a non-functional restore.
 log "waiting for WAL replay + promotion to complete"
-retry 60 $SUDO -u "$PG_USER" pg_isready -q || fail "Postgres did not accept connections after restore"
+retry 60 as_pg pg_isready -q || fail "Postgres did not accept connections after restore"
 _recovered=false
 _i=0
 while [ "$_i" -lt 120 ]; do
-  _inrec=$($SUDO -u "$PG_USER" psql -XAtqc 'SELECT pg_is_in_recovery();' 2>/dev/null || printf 'error')
+  _inrec=$(as_pg psql -XAtqc 'SELECT pg_is_in_recovery();' 2>/dev/null || printf 'error')
   if [ "$_inrec" = "f" ]; then
     _recovered=true
     break
