@@ -147,7 +147,7 @@ jobs:
             -u "${{ github.actor }}" --password-stdin
 
       - name: Build offline bundle
-        run: ./scripts/build_bundle.sh "${{ needs.release.outputs.version }}"
+        run: bash ./scripts/build_bundle.sh "${{ needs.release.outputs.version }}"
 
       - name: Attach bundle to GitHub release
         uses: softprops/action-gh-release@v3
