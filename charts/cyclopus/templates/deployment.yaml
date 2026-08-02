@@ -118,6 +118,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_OPENOBSERVE_TRACE_STREAM } }
             - name: CYCLOPUS_OBSERVABILITY_BESZEL_BASE_URL
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: OBSERVABILITY_BESZEL_BASE_URL } }
+            - name: CYCLOPUS_OBSERVABILITY_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
