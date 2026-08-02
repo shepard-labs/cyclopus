@@ -1,7 +1,7 @@
-#!/bin/sh
+#!/bin/bash
 # Cyclopus VPS Installer
 # One-line install (like Coolify):
-#   curl -fsSL https://raw.githubusercontent.com/shepard-labs/cyclopus/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/shepard-labs/cyclopus/main/scripts/install.sh | bash
 #
 # Zero-config install for Ubuntu 24.04 / Debian 12 on a fresh VPS.
 # Detects public IP, configures sslip.io hostnames, generates secrets,
@@ -32,7 +32,7 @@
 #                        archiving + daily base backups are configured during
 #                        install (best-effort: failures warn, never fail).
 
-set -eu
+set -euo pipefail
 
 # Color output
 RED='\033[0;31m'
@@ -42,7 +42,24 @@ NC='\033[0m' # No Color
 
 log() { printf "${GREEN}[cyclopus]${NC} %s\n" "$*"; }
 warn() { printf "${YELLOW}[cyclopus]${NC} %s\n" "$*" >&2; }
-fail() { printf "${RED}[cyclopus]${NC} %s\n" "$*" >&2; exit 1; }
+fail() {
+  printf "${RED}[cyclopus]${NC} %s\n" "$*" >&2
+  [ -z "${LOG_FILE:-}" ] || printf "${RED}[cyclopus]${NC} %s\n" "Full log: $LOG_FILE" >&2
+  exit 1
+}
+
+# Check prerequisites (before the log redirect: a non-root run must not start tee
+# against /var/log; fail() guards LOG_FILE being unset at this point).
+log "Checking prerequisites..."
+[ "$(id -u)" -eq 0 ] || fail "This script must be run as root"
+
+# Mirror all output (stdout + stderr) to a timestamped install log. The process
+# substitution wires the pipe to tee's stdin, so tee cannot race bash for the
+# script's stdin under curl|bash (do NOT add </dev/null — it would override the
+# pipe and silently discard all output).
+LOG_FILE="/var/log/cyclopus-install-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+log "Install log: $LOG_FILE"
 
 # Hardened curl: bounded time + retries (#8).
 dl() { curl -fsSL --connect-timeout 10 --max-time 120 --retry 3 --retry-delay 2 "$@"; }
@@ -51,7 +68,7 @@ dl() { curl -fsSL --connect-timeout 10 --max-time 120 --retry 3 --retry-delay 2 
 # 'failed'/'pending' release is uninstalled so a clean install can retry (helm
 # status returns success even for a failed release, which would wrongly skip it).
 helm_deployed() {
-  _st=$(helm status "$1" -n "$2" -o json 2>/dev/null | grep -o '"status":"[^"]*"' | head -n1 | cut -d'"' -f4)
+  _st=$(helm status "$1" -n "$2" -o json 2>/dev/null | grep -o '"status":"[^"]*"' | head -n1 | cut -d'"' -f4 || true)
   if [ "$_st" = "deployed" ]; then return 0; fi
   if [ -n "$_st" ]; then
     warn "$1 release is $_st (not deployed) — uninstalling for clean retry"
@@ -116,15 +133,11 @@ else
   RESOLVED_VERSIONS_ENV=$VERSIONS_ENV_TMP
 fi
 
-# Check prerequisites
-log "Checking prerequisites..."
-[ "$(id -u)" -eq 0 ] || fail "This script must be run as root"
-
 # Detect OS
 if [ -f /etc/os-release ]; then
+  # shellcheck disable=SC1091
   . /etc/os-release
   OS=$ID
-  VERSION_ID=$VERSION_ID
 else
   fail "Cannot detect OS. /etc/os-release not found."
 fi
@@ -144,11 +157,31 @@ case "$ARCH" in
 esac
 log "OS: $OS $VERSION_ID, Arch: $ARCH"
 
+# Disk space pre-check: fail under 10G free; warn under 20G free or 30G total.
+# -P (POSIX output) keeps long device names (e.g. LVM /dev/mapper/...) on one line.
+DISK_LINE=$(df -PBG / 2>/dev/null | awk 'NR==2' || true)
+DISK_TOTAL=$(echo "$DISK_LINE" | awk '{print $2}' | tr -d 'G')
+DISK_AVAIL=$(echo "$DISK_LINE" | awk '{print $4}' | tr -d 'G')
+if ! [[ "$DISK_TOTAL" =~ ^[0-9]+$ ]] || ! [[ "$DISK_AVAIL" =~ ^[0-9]+$ ]]; then
+  warn "Could not parse disk space from 'df -PBG /' — continuing without disk pre-check"
+elif [ "$DISK_AVAIL" -lt 10 ]; then
+  fail "Insufficient disk space: ${DISK_AVAIL}G available on / (need at least 10G free)"
+elif [ "$DISK_AVAIL" -lt 20 ] || [ "$DISK_TOTAL" -lt 30 ]; then
+  warn "Low disk space: ${DISK_AVAIL}G available / ${DISK_TOTAL}G total on / (recommend 20G+ free, 30G+ total)"
+fi
+
 # Detect public IP (bounded, #8)
 log "Detecting public IP..."
 PUBLIC_IP=$(dl https://ifconfig.io 2>/dev/null || dl https://api.ipify.org 2>/dev/null || true)
 [ -n "$PUBLIC_IP" ] || fail "Cannot detect public IP (set NODE_IP and rerun, or check network)"
 log "Public IP: $PUBLIC_IP"
+
+# Platform is single-stack IPv4: the detected public IP must be dotted-quad IPv4
+# with each octet <= 255.
+NOT_IPV4_MSG="Detected public IP '$PUBLIC_IP' is not IPv4. IPv6-only hosts are not supported (platform is single-stack IPv4); use an IPv4 host or set NODE_IP on a dual-stack host."
+if ! [[ "$PUBLIC_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || [ "$(echo "$PUBLIC_IP" | awk -F. '{for(i=1;i<=NF;i++) if ($i>255) {print "bad"; exit}}')" = "bad" ]; then
+  fail "$NOT_IPV4_MSG"
+fi
 
 # Generate sslip.io hostname suffix + control-plane console host
 HOSTNAME_SUFFIX=$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io
@@ -177,7 +210,7 @@ if ! command -v psql >/dev/null 2>&1; then
   dl https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
   echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
   apt-get update -qq
-  apt-get install -y postgresql-$PG_MAJOR
+  apt-get install -y postgresql-"$PG_MAJOR"
 else
   log "PostgreSQL already installed, skipping"
 fi
@@ -202,7 +235,7 @@ sudo -u postgres env PGPASSWORD="$DB_PASSWORD" psql -v ON_ERROR_STOP=1 -tqc \
   sudo -u postgres createdb -O cyclopus cyclopus
 
 # Configure PostgreSQL for pod access
-NODE_IP=${NODE_IP:-$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)}
+NODE_IP=${NODE_IP:-$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)}
 [ -n "$NODE_IP" ] || fail "Could not detect node IP. Set NODE_IP env var manually."
 log "Node IP: $NODE_IP"
 
@@ -271,7 +304,8 @@ log "k3s ready"
 # §2.2 opt-in: repel ordinary app pods from the control-plane node. Off by
 # default because a single-node install must keep the node schedulable.
 if [ "$CYCLOPUS_CONTROL_PLANE_TAINT" = "true" ]; then
-  NODE_COUNT=$($KUBECTL get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  NODE_COUNT=$($KUBECTL get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ' || true)
+  [ -n "$NODE_COUNT" ] || fail "could not query nodes"
   if [ "$NODE_COUNT" -eq 1 ]; then
     fail "CYCLOPUS_CONTROL_PLANE_TAINT=true refused: single-node install — tainting the only node leaves app pods unschedulable. Join worker nodes first (then re-run), or unset CYCLOPUS_CONTROL_PLANE_TAINT."
   fi
@@ -334,7 +368,7 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 # #11: assert an installed release's chart version matches what we requested.
 assert_chart_version() {
   _rel=$1; _ns=$2; _want=$3
-  _got=$(helm list -n "$_ns" -o json | grep -o "\"chart\":\"${_rel}-[^\"]*\"" | head -n1 | sed "s/.*${_rel}-//; s/\"//")
+  _got=$(helm list -n "$_ns" -o json | grep -o "\"chart\":\"${_rel}-[^\"]*\"" | head -n1 | sed "s/.*${_rel}-//; s/\"//" || true)
   [ -n "$_got" ] || fail "$_rel: could not read installed chart version"
   [ "$_got" = "$_want" ] || fail "$_rel chart version mismatch: installed $_got, expected $_want"
 }
@@ -695,6 +729,7 @@ if [ -n "$WALG_S3_ENDPOINT" ] && [ -n "$WALG_S3_BUCKET" ] && [ -n "$AWS_ACCESS_K
   export WALG_S3_ENDPOINT WALG_S3_BUCKET WALG_S3_REGION WALG_S3_PREFIX_SUBPATH
   export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
   if (
+    # shellcheck disable=SC1091
     . "$BACKUP_DIR/common.sh" &&
     require_root &&
     walg_env &&
