@@ -52,7 +52,6 @@ type PolicyProvisioner interface {
 
 type HostnameProvider interface {
 	PreviewHostname(context.Context, store.EnvironmentLifecycleJob) (string, error)
-	ProductionHostname(hostnameLabel string) (string, error)
 }
 
 type NetworkPolicyProvisioner struct {
@@ -162,15 +161,6 @@ func (p *SuffixHostnameProvider) PreviewHostname(_ context.Context, job store.En
 		return "", ErrHostnameProviderUnavailable
 	}
 	return strings.TrimPrefix(job.Namespace, "preview-") + "." + p.suffix, nil
-}
-
-// ProductionHostname returns the default production hostname for an app,
-// assembled as hostnameLabel + "." + suffix.
-func (p *SuffixHostnameProvider) ProductionHostname(hostnameLabel string) (string, error) {
-	if hostnameLabel == "" {
-		return "", errors.New("hostname_label is required")
-	}
-	return hostnameLabel + "." + p.suffix, nil
 }
 
 type LifecycleStore interface {

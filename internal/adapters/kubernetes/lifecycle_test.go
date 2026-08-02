@@ -310,7 +310,3 @@ type staticHostname string
 func (value staticHostname) PreviewHostname(context.Context, store.EnvironmentLifecycleJob) (string, error) {
 	return string(value), nil
 }
-
-func (value staticHostname) ProductionHostname(string) (string, error) {
-	return string(value), nil
-}

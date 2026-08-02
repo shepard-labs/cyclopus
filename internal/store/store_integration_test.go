@@ -2213,8 +2213,8 @@ func seedTenant(t *testing.T, pool *pgxpool.Pool, fixture tenantFixture) {
 			VALUES ($1, $2, $3, $4, 'k8s-secret://cyclopus/github#webhook')`, []any{fixture.repositoryID, fixture.orgID, installationID(fixture.slug), fixture.repo}},
 		{`INSERT INTO projects (id, org_id, name, slug, git_connection_id)
 			VALUES ($1, $2, $3, $4, $5)`, []any{fixture.projectID, fixture.orgID, "Project " + fixture.slug, "project-" + fixture.slug, fixture.repositoryID}},
-		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, deploy_timeout_seconds)
-			VALUES ($1, $2, $3, $4, $5, $6, 1)`, []any{fixture.appID, fixture.orgID, fixture.projectID, "App " + fixture.slug, "app-" + fixture.slug, "host-" + fixture.slug}},
+		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, deploy_timeout_seconds, previews_enabled)
+			VALUES ($1, $2, $3, $4, $5, $6, 1, true)`, []any{fixture.appID, fixture.orgID, fixture.projectID, "App " + fixture.slug, "app-" + fixture.slug, "host-" + fixture.slug}},
 		{`INSERT INTO environments (id, org_id, app_id, branch, kind, namespace, planned_hostname)
 			VALUES ($1, $2, $3, 'main', 'production', $4, $5)`, []any{fixture.environmentID, fixture.orgID, fixture.appID, fixture.namespace, "planned-" + fixture.slug + ".example.test"}},
 	}
