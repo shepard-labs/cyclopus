@@ -307,7 +307,7 @@ step "creating observability secrets (openobserve-auth, beszel-agent-key) before
 # (a k8s-secret:// reference, see the values file below) at startup, so a missing
 # secret would crash-loop the pod — secrets go in BEFORE helm install.
 sudo k3s kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | sudo k3s kubectl apply -f - >/dev/null
-oo_password=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+oo_password="Cyclopus!0$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')"
 oo_credential="admin@cyclopus.local:${oo_password}"
 # credential: raw "user:password" the API base64-encodes itself; basic-auth: the
 # pre-encoded "Basic <base64>" header value for the OTel Collector's otlphttp

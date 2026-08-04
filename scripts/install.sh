@@ -294,7 +294,12 @@ else
   AUTH_BOOTSTRAP_SECRET=$(openssl rand -base64 32 | tr -d '\n')
   AUTH_TOKEN_PEPPER=$(openssl rand -base64 32 | tr -d '\n')
   DB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
-  OO_PASSWORD=$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')
+  # OpenObserve v0.91+ rejects weak root passwords: must be 8-128 chars with at
+  # least one lowercase, one uppercase, one digit, and one special character. A
+  # raw base64 blob satisfies none of those classes reliably (and tr '/+' 'xy'
+  # strips the only special chars base64 can produce), so build one that meets
+  # every class unconditionally: fixed class sentinel + random base64 body.
+  OO_PASSWORD="Cyclopus!0$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')"
   # Beszel hub<->agent SSH keypair. Only the PUBLIC key enters the cluster
   # (agents); the private key stays on the operator side in $SECRETS_FILE.
   # ssh-keygen comes from openssh-client (present on the supported base
