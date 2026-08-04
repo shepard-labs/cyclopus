@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 func TestValidateImageRef(t *testing.T) {
@@ -90,5 +92,42 @@ func TestValidateEnvironmentVariablesRequiresExactSameNamespaceSecretRefs(t *tes
 		if _, err := validateEnvironmentVariables("app-production", []EnvVarInput{input}); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("invalid input %+v error = %v", input, err)
 		}
+	}
+}
+
+// TestDeploymentSnapshotStampsTenantIdentity asserts the release snapshot carries
+// the full tenant identity on the pod so the Collector can stamp the canonical
+// org_id/app_id/environment_id/release_id at ingest (§8.1). Without app-id and
+// org-id here, the collected telemetry would be missing the two mandatory fields
+// the API query layer filters on and would be unqueryable.
+func TestDeploymentSnapshotStampsTenantIdentity(t *testing.T) {
+	hostname := "api.example.test"
+	environment := store.Environment{ID: "env-123", OrgID: "org-abc", AppID: "app-xyz", Kind: "production", Namespace: "ns-1", PlannedHostname: &hostname}
+	app := store.App{
+		ID: "app-xyz", OrgID: "org-abc", Slug: "api", ScalingMode: "hpa",
+		MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70,
+		ContainerPort: 8080, HealthCheckPath: "/healthz", RuntimeClass: "runc", DeployTimeoutSeconds: 120,
+		CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256,
+	}
+	encoded, err := deploymentSnapshot(environment, app, "ghcr.io/acme/api@sha256:"+strings.Repeat("a", 64), "rel-789")
+	if err != nil {
+		t.Fatalf("deploymentSnapshot: %v", err)
+	}
+	envelope, err := store.DecodeReleaseSnapshot(encoded)
+	if err != nil {
+		t.Fatalf("decode release snapshot: %v", err)
+	}
+	deployment := envelope.DesiredState.Deployment
+	if got := deployment.PodAnnotations["cyclopus.dev/app-id"]; got != app.ID {
+		t.Fatalf("app-id annotation = %q, want %q", got, app.ID)
+	}
+	if got := deployment.PodAnnotations["cyclopus.dev/org-id"]; got != app.OrgID {
+		t.Fatalf("org-id annotation = %q, want %q", got, app.OrgID)
+	}
+	if got := deployment.PodAnnotations["cyclopus.dev/release-id"]; got != "rel-789" {
+		t.Fatalf("release-id annotation = %q, want %q", got, "rel-789")
+	}
+	if got := deployment.PodLabels["cyclopus.dev/environment-id"]; got != environment.ID {
+		t.Fatalf("environment-id label = %q, want %q", got, environment.ID)
 	}
 }

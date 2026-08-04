@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	cronparser "github.com/robfig/cron/v3"
 	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/webhook"
-	"github.com/google/uuid"
-	cronparser "github.com/robfig/cron/v3"
 )
 
 var (
@@ -1037,6 +1037,13 @@ func deploymentSnapshot(environment store.Environment, app store.App, imageRef, 
 			PodLabels: labels, PodAnnotations: map[string]string{
 				"cyclopus.dev/release-id":  releaseID,
 				"cyclopus.dev/config-hash": store.ConfigHashAnnotationTemplate,
+				// Tenant identity stamped onto the pod so the Collector can derive
+				// the canonical org_id/app_id (with environment-id label and
+				// release-id above) at ingest — the fields the API's telemetry
+				// query layer filters on (§8.1). Baked into the immutable snapshot
+				// because both are fixed for the life of the release.
+				"cyclopus.dev/app-id": app.ID,
+				"cyclopus.dev/org-id": app.OrgID,
 			},
 			RuntimeClassName: app.RuntimeClass, ProgressDeadlineSeconds: int32(app.DeployTimeoutSeconds),
 			Container: store.ContainerIntent{Name: "app", Image: imageRef, Port: int32(app.ContainerPort),

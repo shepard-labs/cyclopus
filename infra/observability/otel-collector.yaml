@@ -73,10 +73,39 @@ data:
       # First in every pipeline: bound memory and drop on sustained overload
       # rather than stalling customer workloads (§8.1).
       memory_limiter:
+        check_interval: 1s
         limit_mib: 256
         spike_limit_mib: 64
+      # Runs BEFORE k8sattributes: delete any tenant-identity resource
+      # attributes an OTLP client may have supplied, so the only source of
+      # org_id/app_id/environment_id/release_id is the pod's Kubernetes
+      # identity below. This is what makes identity stamped, not claimed
+      # (§8.1): an app cannot label its telemetry as another tenant's.
+      transform/strip-tenant:
+        error_mode: ignore
+        log_statements:
+          - context: resource
+            statements:
+              - delete_key(attributes, "org_id")
+              - delete_key(attributes, "app_id")
+              - delete_key(attributes, "environment_id")
+              - delete_key(attributes, "release_id")
+        trace_statements:
+          - context: resource
+            statements:
+              - delete_key(attributes, "org_id")
+              - delete_key(attributes, "app_id")
+              - delete_key(attributes, "environment_id")
+              - delete_key(attributes, "release_id")
       k8sattributes:
         pod_association:
+          # connection (source IP -> pod) is the trusted association for OTLP
+          # push and MUST be first: an app cannot forge its own source IP, so
+          # it cannot steer attribution by supplying k8s.pod.* attributes. The
+          # resource_attribute rules below exist only for filelog, which has no
+          # connection and carries k8s.pod.uid derived from the on-disk path.
+          - sources:
+              - from: connection
           - sources:
               - from: resource_attribute
                 name: k8s.pod.uid
@@ -85,8 +114,50 @@ data:
                 name: k8s.pod.name
               - from: resource_attribute
                 name: k8s.namespace.name
-          - sources:
-              - from: connection
+        # Derive canonical tenant identity from the pod's Cyclopus-managed
+        # metadata (set by the platform in the release snapshot, never by the
+        # app) and expose it as the resource attributes the API query layer
+        # filters on: org_id, app_id, environment_id, release_id.
+        extract:
+          labels:
+            - tag_name: environment_id
+              key: cyclopus.dev/environment-id
+              from: pod
+          annotations:
+            - tag_name: org_id
+              key: cyclopus.dev/org-id
+              from: pod
+            - tag_name: app_id
+              key: cyclopus.dev/app-id
+              from: pod
+            - tag_name: release_id
+              key: cyclopus.dev/release-id
+              from: pod
+      # Scrubbing hook on the customer telemetry path (§8.1). Runs AFTER
+      # k8sattributes so the tenant attributes are already set (and are never
+      # matched by the sensitive-key patterns). Bounds payload size and drops
+      # obviously-sensitive attribute keys. It does NOT make §7.3's disclaimer
+      # obsolete — a secret written into a log body is still written — but it
+      # gives the platform one enforcement point on both ingest paths.
+      transform/scrub:
+        error_mode: ignore
+        log_statements:
+          - context: resource
+            statements:
+              - delete_matching_keys(attributes, "(?i)(authorization|api[-_]?key|secret|token|password|passwd|cookie)")
+          - context: log
+            statements:
+              - delete_matching_keys(attributes, "(?i)(authorization|api[-_]?key|secret|token|password|passwd|cookie)")
+              - truncate_all(attributes, 4096)
+              - set(body, Substring(body, 0, 16384)) where IsString(body) and Len(body) > 16384
+        trace_statements:
+          - context: resource
+            statements:
+              - delete_matching_keys(attributes, "(?i)(authorization|api[-_]?key|secret|token|password|passwd|cookie)")
+          - context: span
+            statements:
+              - delete_matching_keys(attributes, "(?i)(authorization|api[-_]?key|secret|token|password|passwd|cookie)")
+              - truncate_all(attributes, 4096)
       batch: {}
     exporters:
       # OpenObserve native OTLP ingestion (appends /v1/logs and /v1/traces).
@@ -102,11 +173,11 @@ data:
       pipelines:
         logs:
           receivers: [otlp, filelog]
-          processors: [memory_limiter, k8sattributes, batch]
+          processors: [memory_limiter, transform/strip-tenant, k8sattributes, transform/scrub, batch]
           exporters: [otlphttp/openobserve]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, k8sattributes, batch]
+          processors: [memory_limiter, transform/strip-tenant, k8sattributes, transform/scrub, batch]
           exporters: [otlphttp/openobserve]
 ---
 apiVersion: apps/v1
