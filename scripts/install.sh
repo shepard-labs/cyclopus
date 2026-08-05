@@ -261,12 +261,15 @@ fi
 # admin account, and the cluster secrets (regenerating them would desync).
 # BESZEL_* keys are base64-encoded in STATE_FILE (the private key is multiline).
 if [ -f "$STATE_FILE" ]; then
-  # Sourcing hardening: every line must be a comment or a KEY="base64" pair
-  # (both BESZEL_* keys are base64-encoded, so one charset whitelist covers
-  # everything). Anything else — including $( )/` ` injection that would run
-  # at source time — aborts before sourcing. Also turns a set -u abort on
-  # garbage content into a clear message.
-  if grep -vqE '^(#.*|(AUTH_BOOTSTRAP_SECRET|AUTH_TOKEN_PEPPER|DB_PASSWORD|OO_PASSWORD|BESZEL_ADMIN_PASSWORD|BESZEL_PUBLIC_KEY|BESZEL_PRIVATE_KEY)="[A-Za-z0-9+/=]*")$' "$STATE_FILE"; then
+  # Sourcing hardening: every line must be a comment or a KEY="value" pair whose
+  # value is drawn from a safe charset (base64 for the BESZEL_* keys, plus '!'
+  # which OO_PASSWORD's class sentinel "Cyclopus!0…" uses — see the generator
+  # below). None of these are shell-active inside the double quotes at source
+  # time, so $( )/` ` injection still aborts before sourcing. Also turns a set -u
+  # abort on garbage content into a clear message.
+  # NOTE: '!' MUST stay in this class or every idempotent rerun after secrets are
+  # generated would falsely trip "possible tampering" on its own OO_PASSWORD.
+  if grep -vqE '^(#.*|(AUTH_BOOTSTRAP_SECRET|AUTH_TOKEN_PEPPER|DB_PASSWORD|OO_PASSWORD|BESZEL_ADMIN_PASSWORD|BESZEL_PUBLIC_KEY|BESZEL_PRIVATE_KEY)="[A-Za-z0-9+/=!]*")$' "$STATE_FILE"; then
     fail "STATE_FILE $STATE_FILE contains unexpected content (possible tampering); not sourcing"
   fi
   # shellcheck disable=SC1090
@@ -293,7 +296,11 @@ else
   log "Generating secrets..."
   AUTH_BOOTSTRAP_SECRET=$(openssl rand -base64 32 | tr -d '\n')
   AUTH_TOKEN_PEPPER=$(openssl rand -base64 32 | tr -d '\n')
-  DB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
+  # Hex (not base64): this value is interpolated into the postgres:// URL at
+  # line ~1068, and base64's '+', '/', '=' are not URL-safe — the API's URL
+  # parser fails on them. Hex keeps the same entropy (32 bytes) with no
+  # URL-encoding needed anywhere it's consumed.
+  DB_PASSWORD=$(openssl rand -hex 32 | tr -d '\n')
   # OpenObserve v0.91+ rejects weak root passwords: must be 8-128 chars with at
   # least one lowercase, one uppercase, one digit, and one special character. A
   # raw base64 blob satisfies none of those classes reliably (and tr '/+' 'xy'
@@ -343,14 +350,39 @@ log "Installing PostgreSQL $PG_MAJOR..."
 if ! command -v psql >/dev/null 2>&1; then
   apt-get update -qq
   apt-get install -y curl ca-certificates gnupg lsb-release openssh-client zstd ufw
-  install -d /usr/share/postgresql-common/pgdg
-  dl https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+  # Write the key to a file first, then dearmor from the file — piping directly
+  # to gpg can wedge if the pipe doesn't close cleanly (gpg blocks in pselect
+  # waiting for stdin EOF). Also bound gpg with timeout so a hung download
+  # can't wedge the installer forever.
+  _pgdg_key_tmp=$(mktemp)
+  TMP_FILES="$TMP_FILES $_pgdg_key_tmp"
+  dl https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$_pgdg_key_tmp" || fail "PGDG key download failed"
+  timeout 30 gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg "$_pgdg_key_tmp" || fail "PGDG key dearmor failed"
+  rm -f "$_pgdg_key_tmp"
   echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
   apt-get update -qq
   apt-get install -y postgresql-"$PG_MAJOR"
 else
   log "PostgreSQL already installed, skipping"
 fi
+
+# Ensure the cluster is running and accepting connections before we use it. The
+# postgresql apt postinstall usually auto-starts it, but don't assume: on some
+# systemd environments (containers, slow first boot) the socket isn't up yet
+# when the role/database SQL below runs, which aborts the install with a "could
+# not connect to server" error. Only act if it isn't already up, and use
+# --no-block so a slow/queued systemd start job can never wedge the installer —
+# readiness is confirmed by polling pg_isready, not by systemctl returning.
+if ! sudo -u postgres pg_isready -q 2>/dev/null; then
+  systemctl enable postgresql >/dev/null 2>&1 || true
+  systemctl start --no-block postgresql >/dev/null 2>&1 || true
+fi
+PG_WAIT=0
+until sudo -u postgres pg_isready -q 2>/dev/null; do
+  PG_WAIT=$((PG_WAIT + 1))
+  [ "$PG_WAIT" -ge 30 ] && fail "PostgreSQL did not become ready (service failed to start)"
+  sleep 2
+done
 
 # Create database and user.
 # #1/#4: pass password via PGPASSWORD to the SINGLE psql process (not a shell-wide
@@ -403,7 +435,17 @@ POD_CIDR_HBA="10.42.0.0/16"
 if ! grep -q "hostssl cyclopus cyclopus $POD_CIDR_HBA scram-sha-256" "$PG_HBA"; then
   echo "hostssl cyclopus cyclopus $POD_CIDR_HBA scram-sha-256" >> "$PG_HBA"
 fi
-systemctl restart postgresql
+# --no-block + pg_isready poll: a forking postgresql unit can leave systemd's job
+# tracking in "activating" on some hosts, wedging a synchronous restart even
+# though the server comes back up. Don't block the installer on that; confirm
+# readiness by polling the socket instead.
+systemctl restart --no-block postgresql >/dev/null 2>&1 || fail "could not restart PostgreSQL"
+PG_WAIT=0
+until sudo -u postgres pg_isready -q 2>/dev/null; do
+  PG_WAIT=$((PG_WAIT + 1))
+  [ "$PG_WAIT" -ge 30 ] && fail "PostgreSQL did not become ready after config restart"
+  sleep 2
+done
 log "PostgreSQL configured (SSL on; listen node-IP+localhost; pod-CIDR auth)"
 
 # Configure firewall before installing k3s (#3/#9)
