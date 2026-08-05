@@ -1346,7 +1346,7 @@ if [ "$WALG_WIRED" = 1 ]; then
   log "     (systemctl list-timers cyclopus-walg-backup.timer; manual run: $BACKUP_DIR/backup.sh)"
 else
   log "  7. Backups: create a storage destination (Settings/API → storage_destinations, purpose postgres_backup),"
-  log "     then on this host: $BACKUP_DIR/configure_from_db.sh (see docs/decisions + infra/backup/README.md)"
+  log "     then on this host: $BACKUP_DIR/configure_from_db.sh (see infra/backup/README.md)"
 fi
 log ""
 log "=========================================="

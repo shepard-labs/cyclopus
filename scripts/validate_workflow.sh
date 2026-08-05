@@ -10,9 +10,7 @@ require "yaml"
 
 root = ARGV.fetch(0)
 required = %w[
-  cyclopus-spec.md
-  docs/implementation-workflow.md
-  docs/decisions/phase-0-decisions.md
+  docs/cyclopus-spec.md
   versions.yaml
   versions.env
   workflow/run.yaml
@@ -54,11 +52,9 @@ ledger = YAML.safe_load(File.read(File.join(root, "workflow/phases.yaml")), alia
 versions = YAML.safe_load(File.read(File.join(root, "versions.yaml")), aliases: false)
 schema = JSON.parse(File.read(File.join(root, "workflow/gate.schema.json")))
 checkpoint_schema = JSON.parse(File.read(File.join(root, "workflow/checkpoint.schema.json")))
-decisions = File.read(File.join(root, "docs/decisions/phase-0-decisions.md"))
-normalized_decisions = decisions.gsub(/\s+/, " ")
 orchestration_sql = File.read(File.join(root, "workflow/orchestration-job.sql"))
 pending_sha_sql = File.read(File.join(root, "tests/workflow/fixtures/pending_sha_pg18.sql"))
-spec = File.read(File.join(root, "cyclopus-spec.md"))
+spec = File.read(File.join(root, "docs/cyclopus-spec.md"))
 
 excluded = Array(run.dig("scope", "exclude")).map(&:downcase)
 %w[ui frontend browser templ htmx tailwind].each do |term|
@@ -241,10 +237,19 @@ end
   "opentelemetry_collector" => ["infra/observability/otel-collector.yaml"],
 }.each do |component, paths|
   want = versions.dig("components", component, "pin").to_s.sub(/\Av/, "")
+  # A manifest may carry unrelated utility images (e.g. an init container), so
+  # match the image whose repository identifies this component, not the first
+  # image line in the file.
+  hint = component.tr("_", "-")
   paths.each do |path|
     text = File.read(File.join(root, path))
-    tag = text[/^\s*image:\s*\S+:(\S+)\s*$/, 1].to_s
-    errors << "#{path} image tag #{tag} does not match versions.yaml #{component} pin #{want}" unless tag.sub(/\Av/, "") == want
+    match = text.scan(/^\s*image:\s*(\S+):(\S+)\s*$/).find { |repo, _tag| repo.include?(hint) }
+    if match.nil?
+      errors << "#{path} has no #{component} image (repository containing #{hint})"
+    else
+      tag = match[1]
+      errors << "#{path} image tag #{tag} does not match versions.yaml #{component} pin #{want}" unless tag.sub(/\Av/, "") == want
+    end
   end
 end
 
@@ -287,18 +292,6 @@ phase5_profiles = phase5_gates.map { |gate| gate["profile"] }.compact
 end
 errors << "phase-5 lacks BYO-VPS capability decision gate" unless phase5_gates.map { |gate| gate["id"] }.include?("byo-vps-capability-decision")
 
-decision_terms = [
-  "same Go binary", "Postgres is the authoritative saga", "No transaction spans Kubernetes and Postgres",
-  "atomic take-and-clear", "one user in one organization", "idempotent", "immutable release snapshots",
-  "maxUnavailable=0", "mixed traffic", "absent from the Public Suffix List", "configurable provider seam",
-  "RETURNING WITH (OLD AS old_row)", "durable orchestration job", "any VPS with nested virtualization",
-  "Correlation does not make a GitHub run live forever", "terminal failures", "atomically promotes the latest pending SHA",
-  "never automatically redispatches an ambiguous request", "Phase 0 deletion erratum", "audited tombstone lifecycle"
-]
-decision_terms.each do |term|
-  errors << "Phase 0 decision missing: #{term}" unless normalized_decisions.downcase.include?(term.downcase)
-end
-
 required_schema_fields = %w[phase gate gate_type status attempt source_revision input_digest implementer_agent command exit_code artifacts]
 schema_required = Array(schema["required"])
 required_schema_fields.each do |field|
@@ -318,7 +311,7 @@ errors << "checkpoint schema lacks digest invalidation reasons" unless required_
 
 errors << "pending SHA fixture must use PostgreSQL 18 OLD row RETURNING" unless pending_sha_sql.match?(/RETURNING\s+WITH\s*\(OLD\s+AS\s+old_row/i)
 errors << "pending SHA fixture must assert old and cleared values" unless pending_sha_sql.include?("taken_sha = repeat('a', 40)") && pending_sha_sql.include?("remaining_sha IS NULL")
-errors << "canonical spec must establish Phase 0 errata precedence" unless spec.include?("Phase 0 Errata Precedence") && spec.index("workflow/orchestration-job.sql").to_i < spec.index("docs/decisions/phase-0-decisions.md").to_i
+errors << "canonical spec must establish Phase 0 errata precedence" unless spec.include?("Phase 0 Errata Precedence") && spec.include?("workflow/orchestration-job.sql")
 errors << "canonical spec pending SHA SQL must return OLD and NEW values" unless spec.match?(/RETURNING WITH \(OLD AS old_row, NEW AS new_row\).*?old_row\.pending_commit_sha AS taken_sha.*?new_row\.pending_commit_sha AS remaining_sha/m)
 
 executable_scripts = %w[scripts/integration.sh scripts/test_infrastructure.sh scripts/probe_psl.sh scripts/validate_postgres_contract.sh scripts/validate_gate_evidence.sh tests/workflow/validate_gate_evidence_test.sh tests/schema/production_schema_test.sh tests/backup/configure_from_db_test.sh infra/backup/configure_from_db.sh]

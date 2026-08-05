@@ -19,9 +19,6 @@ phases:
         command: go test ./... -run 'Phase0|Idempotency|PendingSHA|HostnameProvider'
         evidence: unit.json
       evidence:
-        - id: phase-0-decisions
-          command: test -f docs/decisions/phase-0-decisions.md
-          evidence: decisions.json
         - id: api-only-scope
           command: ./scripts/validate_workflow.sh
           evidence: scope.json
