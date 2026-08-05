@@ -495,6 +495,25 @@ sudo install -m 0755 "$ROOT/infra/observability/register_beszel_node.sh" /opt/cy
 node_ip=$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)
 sudo /opt/cyclopus/beszel/register_node.sh "$(hostname)" "$node_ip" "$NAMESPACE" \
   || fail "beszel node registration failed"
+# Rerunning must be a no-op: the hub is polled from this record, and a duplicate
+# would double-count the node.
+sudo /opt/cyclopus/beszel/register_node.sh "$(hostname)" "$node_ip" "$NAMESPACE" \
+  || fail "beszel node registration is not idempotent"
+# Assert the record actually landed rather than trusting the exit code. The
+# systems.users relation is required, and `beszel superuser upsert` populates
+# `_superusers` rather than `users` — so a registration that omits it fails with
+# HTTP 400 and leaves the hub polling nothing.
+beszel_hub_ip=$(sudo k3s kubectl -n "$NAMESPACE" get svc beszel -o jsonpath='{.spec.clusterIP}')
+beszel_token=$(curl -fsS -X POST "http://${beszel_hub_ip}:8090/api/collections/_superusers/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d "{\"identity\":\"${beszel_admin_email}\",\"password\":\"${beszel_admin_password}\"}" \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+[ -n "$beszel_token" ] || fail "could not authenticate to Beszel to verify node registration"
+registered=$(curl -fsS -G "http://${beszel_hub_ip}:8090/api/collections/systems/records" \
+  -H "Authorization: $beszel_token" \
+  --data-urlencode "filter=(name='$(hostname)')" \
+  | sed -n 's/.*"totalItems":\([0-9]*\).*/\1/p')
+[ "$registered" = "1" ] || fail "expected exactly 1 Beszel systems record for $(hostname), got '${registered:-0}'"
 
 helm upgrade "$RELEASE" "$ROOT/charts/cyclopus" \
   --namespace "$NAMESPACE" \

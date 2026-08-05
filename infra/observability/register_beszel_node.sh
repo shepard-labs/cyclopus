@@ -37,7 +37,31 @@ if [ "${EXISTING:-0}" != "0" ]; then
   exit 0
 fi
 
+# `systems.users` is a REQUIRED relation to the `users` collection, and
+# `beszel superuser upsert` (run by scripts/install.sh) only writes to
+# `_superusers` — a different collection. On a fresh hub `users` is therefore
+# empty and creating a system without this relation fails with
+# {"data":{"users":{"code":"validation_required"}}}, HTTP 400. Resolve the
+# owning user first, creating it once if the hub has none, and reuse it for
+# every node registered afterwards.
+#
+# `fields=id` narrows the response to {"items":[{"id":"..."}],...} so the id is
+# the only quoted `id` key in the payload and can be read without a JSON parser
+# (this runs on a freshly bootstrapped VPS: curl and sed only).
+USER_ID=$(curl -fsS -G "$HUB/api/collections/users/records" \
+  -H "Authorization: $TOKEN" \
+  --data-urlencode "perPage=1" --data-urlencode "fields=id" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+if [ -z "$USER_ID" ]; then
+  USER_ID=$(curl -fsS -X POST "$HUB/api/collections/users/records" \
+    -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"${IDENTITY}\",\"password\":\"${PASSWORD}\",\"passwordConfirm\":\"${PASSWORD}\",\"role\":\"admin\",\"verified\":true}" \
+    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  [ -n "$USER_ID" ] || { echo "register_beszel_node.sh: could not create the Beszel hub user" >&2; exit 1; }
+  echo "register_beszel_node.sh: created Beszel hub user ${IDENTITY}"
+fi
+
 curl -fsS -X POST "$HUB/api/collections/systems/records" \
   -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"name\":\"${NODE_NAME}\",\"host\":\"${NODE_IP}\",\"port\":\"45876\"}" >/dev/null
+  -d "{\"name\":\"${NODE_NAME}\",\"host\":\"${NODE_IP}\",\"port\":\"45876\",\"users\":[\"${USER_ID}\"]}" >/dev/null
 echo "register_beszel_node.sh: registered ${NODE_NAME} (${NODE_IP}:45876) with Beszel"
