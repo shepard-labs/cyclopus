@@ -575,15 +575,24 @@ i=0; while [ $i -lt 60 ]; do
   i=$((i+1)); [ $i -lt 60 ] || fail "k3s API not ready after gVisor"; sleep 2
 done
 
-log "Registering gVisor RuntimeClass..."
+# Register both RuntimeClasses; keep in sync with the canonical
+# infra/bootstrap/register_runtimeclass.sh used by other install paths.
+log "Registering gVisor and runc RuntimeClasses..."
 $KUBECTL apply -f - <<'EOF'
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
   name: gvisor
 handler: runsc
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: runc
+handler: runc
 EOF
 $KUBECTL get runtimeclass gvisor >/dev/null 2>&1 || fail "gvisor RuntimeClass missing"
+$KUBECTL get runtimeclass runc >/dev/null 2>&1 || fail "runc RuntimeClass missing"
 
 # Install Helm (#8 bounded downloads)
 log "Installing Helm $HELM_VERSION..."

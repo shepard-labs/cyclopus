@@ -172,6 +172,22 @@ check_logic() {
   # source it, which makes pin equality structural rather than grepped.
   grep -q 'versions.env' "$ROOT/infra/bootstrap/common.sh" || { mark_failed "infra/bootstrap/common.sh does not source versions.env"; return 0; }
   grep -q 'versions.env' "$ROOT/infra/backup/common.sh" || { mark_failed "infra/backup/common.sh does not source versions.env"; return 0; }
+  # Kyverno fail-closed webhook scoping (§7.1): the webhook namespaceSelector
+  # hardcoded in the installers must match the managed-by label/value the chart
+  # policies select on, or the policies and the webhook scope silently diverge.
+  _values="$ROOT/charts/cyclopus/values.yaml"
+  _mlabel=$(grep 'managedByLabel:' "$_values" | head -n1 | sed -E 's/.*managedByLabel:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+  _mvalue=$(grep 'managedByValue:' "$_values" | head -n1 | sed -E 's/.*managedByValue:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+  [ -n "$_mlabel" ] && [ -n "$_mvalue" ] || { mark_failed "kyverno.policies.managedByLabel/Value missing from values.yaml"; return 0; }
+  _sel="{\"$_mlabel\":\"$_mvalue\"}"
+  grep -qF "$_sel" "$ROOT/scripts/install.sh" || { mark_failed "install.sh kyverno webhook namespaceSelector does not match values.yaml managedBy ($_sel)"; return 0; }
+  grep -qF "$_sel" "$ROOT/scripts/integration/install_guest.sh" || { mark_failed "install_guest.sh kyverno webhook namespaceSelector does not match values.yaml managedBy ($_sel)"; return 0; }
+  # Break-glass runtime: the inline RuntimeClass apply in install.sh must
+  # register both gvisor and runc, matching infra/bootstrap/register_runtimeclass.sh,
+  # or runtimeClassName: runc pods are rejected on prod installs.
+  _rcblock=$(awk '/apply -f - <<.EOF.$/{f=1} f{print} /^EOF$/{if(f) exit}' "$ROOT/scripts/install.sh")
+  echo "$_rcblock" | grep -q 'name: gvisor' || { mark_failed "install.sh RuntimeClass block missing gvisor class"; return 0; }
+  echo "$_rcblock" | grep -q 'name: runc' || { mark_failed "install.sh RuntimeClass block missing runc class (break-glass runtime)"; return 0; }
   note "capacity-gate + version-pin logic checks passed"
 }
 
