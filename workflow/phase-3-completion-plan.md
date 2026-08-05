@@ -55,7 +55,7 @@ Status values: `pending` -> `in-progress` -> `review` -> `committed`.
   domains are the durable path. Keep the existing node-local `floating_ip.sh`;
   document VIP options in the spec, do NOT add a keepalived helper this pass.
 - Integration profiles: replace the two OVH profiles with a single generic
-  `byo_vps` profile (constrained 2 vCPU / 2048 MiB / 20 GiB).
+  `byo_vps` profile (constrained 2 vCPU / 4096 MiB / 20 GiB).
 - Domain DNS verification uses the Go stdlib resolver, configurable for tests.
 - Node public IPs for the egress exclusion come from install-time config
   (operator-supplied), not live cluster discovery.

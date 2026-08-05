@@ -164,9 +164,9 @@ check_logic() {
   _run="$ROOT/workflow/run.yaml"
   [ -f "$_run" ] || { mark_failed "workflow/run.yaml missing"; return 0; }
   grep -q 'byo_vps:' "$_run" || { mark_failed "byo_vps integration profile missing from run.yaml"; return 0; }
-  # Floor (byo_vps limits): vcpu 2, memory_mib 2048, disk_gib 20 — assert present.
+  # Floor (byo_vps limits): vcpu 2, memory_mib 4096, disk_gib 20 — assert present.
   grep -q 'vcpu: 2' "$_run" || { mark_failed "byo_vps vcpu floor missing from run.yaml"; return 0; }
-  grep -q 'memory_mib: 2048' "$_run" || { mark_failed "byo_vps memory floor missing from run.yaml"; return 0; }
+  grep -q 'memory_mib: 4096' "$_run" || { mark_failed "byo_vps memory floor missing from run.yaml"; return 0; }
   grep -q 'disk_gib: 20' "$_run" || { mark_failed "byo_vps disk floor missing from run.yaml"; return 0; }
   # Pins live in versions.env (single source of truth); bootstrap/backup must
   # source it, which makes pin equality structural rather than grepped.
