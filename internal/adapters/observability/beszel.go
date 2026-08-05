@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -77,9 +76,8 @@ var metricAllowlist = []struct {
 // OpenObserve client. Credential must be an "identity:password" pair for a
 // Beszel superuser account.
 func NewBeszelClient(config BeszelConfig) (*BeszelClient, error) {
-	parsed, err := url.Parse(config.BaseURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return nil, fmt.Errorf("observability: invalid Beszel base URL")
+	if err := ValidateBackendBaseURL(config.BaseURL); err != nil {
+		return nil, fmt.Errorf("observability: invalid Beszel base URL: %w", err)
 	}
 	identity, password, ok := strings.Cut(config.Credential, ":")
 	if !ok || identity == "" || password == "" {

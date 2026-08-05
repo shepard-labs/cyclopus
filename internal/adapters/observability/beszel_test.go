@@ -85,6 +85,10 @@ func TestBeszelConstructorRequiresHTTPS(t *testing.T) {
 	if _, err := NewBeszelClient(BeszelConfig{BaseURL: "http://insecure.example", Credential: "admin:password123"}); err == nil {
 		t.Fatal("expected non-HTTPS Beszel URL to be rejected")
 	}
+	// §8 keeps Beszel in-cluster only; its ClusterIP Service is plaintext.
+	if _, err := NewBeszelClient(BeszelConfig{BaseURL: "http://beszel.cyclopus.svc:8090", Credential: "admin:password123"}); err != nil {
+		t.Fatalf("in-cluster .svc Beszel config rejected: %v", err)
+	}
 	if _, err := NewBeszelClient(BeszelConfig{BaseURL: "https://beszel.example", Credential: "admin:password123"}); err != nil {
 		t.Fatalf("valid HTTPS Beszel config rejected: %v", err)
 	}

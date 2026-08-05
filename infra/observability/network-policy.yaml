@@ -1,0 +1,54 @@
+# Ingress isolation for the log/trace store (§7.2, §8).
+#
+# §8 requires OpenObserve to be "written only by the Collector, queried
+# server-side through the Cyclopus API, never exposed directly", and §7.2 states
+# the Collector is "the only route from an app namespace into a platform
+# namespace ... no access to OpenObserve itself".
+#
+# The app-namespace default-deny-egress policy
+# (internal/adapters/kubernetes/lifecycle.go) already narrows the source side to
+# the Collector's 4317/4318. This policy enforces the same boundary on the
+# destination side, so OpenObserve stays unreachable from outside this namespace
+# even if an app namespace's egress policy is missing, drifts, or a future
+# Ingress is pointed at it by mistake.
+#
+# `from: [podSelector: {}]` selects every pod in this policy's own namespace,
+# which admits the two legitimate clients and nothing else:
+#   - the OTel Collector (write path) — a DaemonSet on the pod network, so it is
+#     matched by a podSelector peer;
+#   - the Cyclopus API (read path) — likewise pod-networked.
+# Both hold the same `openobserve-auth` credential, so this policy, not the
+# credential, is what bounds who can reach the store.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openobserve-allow-platform-only
+  namespace: cyclopus
+  labels:
+    app.kubernetes.io/part-of: cyclopus
+spec:
+  podSelector:
+    matchLabels:
+      app: openobserve
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 5080
+          protocol: TCP
+# Beszel deliberately has NO equivalent policy.
+#
+# Its documented control path runs from a node's host network namespace, not the
+# pod network: infra/observability/register_beszel_node.sh reaches the hub on its
+# ClusterIP via kube-proxy to register a node, and scripts/install.sh prints it
+# for registering nodes added later. Traffic from the host network arrives with
+# the node IP as its source, which no podSelector or namespaceSelector peer can
+# express, and pinning an ipBlock to the installing node's IP would break
+# exactly the multi-node case the script exists to serve.
+#
+# Accepting that is proportionate: removing its Ingress already took Beszel off
+# the public internet, app namespaces cannot reach it (their default-deny-egress
+# permits only the Collector's 4317/4318), and it stores operator host metrics —
+# CPU, memory, disk, bandwidth, temperature — not tenant logs or traces. The
+# asymmetry is the sensitivity of the data, not an oversight.

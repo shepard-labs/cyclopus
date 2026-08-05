@@ -22,6 +22,7 @@ required = %w[
   workflow/orchestration-job.sql
   infra/observability/otel-collector.yaml
   infra/observability/beszel-agent.yaml
+  infra/observability/network-policy.yaml
   infra/backup/configure_from_db.sh
   infra/backup/cyclopus-walg-backup.service
   infra/backup/cyclopus-walg-backup.timer

@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 )
 
 const envPrefix = "CYCLOPUS_"
@@ -669,16 +671,16 @@ func (o Observability) beszelConfigured() bool {
 func (o Observability) validate() []error {
 	var errs []error
 	if o.LogsEnabled() {
-		if u, err := url.ParseRequestURI(o.OpenObserveBaseURL); err != nil || u.Scheme != "https" || u.Host == "" {
-			errs = append(errs, fmt.Errorf("observability.openobserve_base_url must be an absolute HTTPS URL"))
+		if err := observability.ValidateBackendBaseURL(o.OpenObserveBaseURL); err != nil {
+			errs = append(errs, fmt.Errorf("observability.openobserve_base_url %w", err))
 		}
 		if strings.TrimSpace(o.OpenObserveOrganization) == "" {
 			errs = append(errs, fmt.Errorf("observability.openobserve_organization is required when OpenObserve is enabled"))
 		}
 	}
 	if o.beszelConfigured() {
-		if u, err := url.ParseRequestURI(o.BeszelBaseURL); err != nil || u.Scheme != "https" || u.Host == "" {
-			errs = append(errs, fmt.Errorf("observability.beszel_base_url must be an absolute HTTPS URL"))
+		if err := observability.ValidateBackendBaseURL(o.BeszelBaseURL); err != nil {
+			errs = append(errs, fmt.Errorf("observability.beszel_base_url %w", err))
 		}
 		if strings.TrimSpace(o.BeszelCredentialSecret) == "" {
 			slog.Warn("observability.beszel_base_url is set but observability.beszel_credential_secret is empty; "+

@@ -595,13 +595,23 @@ func TestMetricsEnabledRequiresURLAndCredential(t *testing.T) {
 			name:       "malformed URL with no credential is still rejected",
 			args:       []string{"--observability-beszel-base-url", "not-a-url"},
 			wantErr:    true,
-			wantErrSub: "observability.beszel_base_url must be an absolute HTTPS URL",
+			wantErrSub: "observability.beszel_base_url must be an absolute https:// URL",
 		},
 		{
-			name:       "plaintext URL with a credential is still rejected",
+			name:       "plaintext URL to an external host is still rejected",
 			args:       []string{"--observability-beszel-base-url", "http://beszel.example", "--observability-beszel-credential-secret", "k8s-secret://cyclopus/beszel-auth#credential"},
 			wantErr:    true,
-			wantErrSub: "observability.beszel_base_url must be an absolute HTTPS URL",
+			wantErrSub: "observability.beszel_base_url must be an absolute https:// URL",
+		},
+		{
+			// §8 keeps Beszel in-cluster only, so the installer points the API
+			// at its ClusterIP Service. That address is plaintext by design.
+			name: "plaintext in-cluster .svc URL with a credential is accepted",
+			args: []string{
+				"--observability-beszel-base-url", "http://beszel.cyclopus.svc:8090",
+				"--observability-beszel-credential-secret", "k8s-secret://cyclopus/beszel-auth#credential",
+			},
+			wantEnabled: true,
 		},
 	}
 	for _, tc := range cases {

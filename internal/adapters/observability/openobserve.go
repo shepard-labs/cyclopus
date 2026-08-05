@@ -62,9 +62,8 @@ func NewOpenObserveClient(config OpenObserveConfig) (*OpenObserveClient, error) 
 	if config.TraceStream == "" {
 		config.TraceStream = defaultTraceStream
 	}
-	parsed, err := url.Parse(config.BaseURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return nil, fmt.Errorf("observability: invalid OpenObserve base URL")
+	if err := ValidateBackendBaseURL(config.BaseURL); err != nil {
+		return nil, fmt.Errorf("observability: invalid OpenObserve base URL: %w", err)
 	}
 	return &OpenObserveClient{config: config, client: boundedHTTPClient()}, nil
 }

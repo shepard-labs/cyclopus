@@ -3,10 +3,10 @@
 # end and assert the API becomes ready, the gvisor RuntimeClass exists, secrets
 # encryption is enabled, and the install-time additions scripts/install.sh now
 # ships are in place: observability secrets (openobserve-auth/beszel-agent-key,
-# created BEFORE the API boots), the 4 raw observability manifests (openobserve,
-# beszel, otel-collector, beszel-agent), the oo./beszel. TLS Ingresses, and the
-# staged WAL-G backup toolkit at /opt/cyclopus/backup (workflow phase-5 install
-# contract).
+# created BEFORE the API boots), the 5 raw observability manifests (openobserve,
+# beszel, otel-collector, beszel-agent, network-policy), the ABSENCE of any
+# oo./beszel. Ingress (§8: never exposed directly), and the staged WAL-G backup
+# toolkit at /opt/cyclopus/backup (workflow phase-5 install contract).
 set -eu
 
 ROOT=${CYCLOPUS_INSTALL_ROOT:?CYCLOPUS_INSTALL_ROOT is required}
@@ -357,14 +357,16 @@ config:
     customDomainCnameTarget: "test.cyclopus.local"
     certManagerClusterIssuer: "letsencrypt-production"
   observability:
-    # Mirrors install.sh: HTTPS URLs pointing at the Traefik-terminated TLS
-    # ingresses created below; org/stream "default" matches the Collector's
-    # otlphttp exporter target (infra/observability/otel-collector.yaml).
-    openobserveBaseUrl: "https://oo.test.cyclopus.local"
+    # Mirrors install.sh: in-cluster ClusterIP Services, never public ingresses
+    # (§8 "never exposed directly"). Plaintext http:// is accepted here because
+    # the host is a Kubernetes .svc address
+    # (internal/adapters/observability/url.go). Org/stream "default" matches the
+    # Collector's otlphttp exporter target (infra/observability/otel-collector.yaml).
+    openobserveBaseUrl: "http://openobserve.${NAMESPACE}.svc:5080"
     openobserveOrganization: "default"
     openobserveLogStream: "default"
     openobserveTraceStream: "default"
-    beszelBaseUrl: "https://beszel.test.cyclopus.local"
+    beszelBaseUrl: "http://beszel.${NAMESPACE}.svc:8090"
 ingress:
   enabled: true
   className: traefik
@@ -391,14 +393,18 @@ sudo k3s kubectl -n "$NAMESPACE" get ingress "$RELEASE-console" >/dev/null 2>&1 
 issuer=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$RELEASE-console" -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}')
 [ "$issuer" = "letsencrypt-production" ] || fail "console Ingress cluster-issuer is '$issuer', expected letsencrypt-production"
 
-step "installing observability stack (mirrors install.sh: raw manifests + TLS ingresses)"
+step "installing observability stack (mirrors install.sh: raw manifests, no ingresses)"
 # install.sh downloads infra/observability/*.yaml from the raw base so the
 # one-line install works without a checkout; the guest applies the same files
 # from the staged repo. The manifests hardcode `namespace: cyclopus`; rewrite
 # when NAMESPACE differs — the same substitutions install.sh makes: the
 # collector exporter DNS name and the filelog self-exclusion prefix (otherwise
 # the collector tails its own logs — a self-ingest loop).
-for obs_name in openobserve beszel otel-collector beszel-agent; do
+#
+# No Ingress is created for either backend: §8 keeps OpenObserve and Beszel
+# in-cluster only, reached over their ClusterIP Services. network-policy.yaml
+# additionally confines OpenObserve to this namespace.
+for obs_name in openobserve beszel otel-collector beszel-agent network-policy; do
   obs_manifest="$tmp_dir/$obs_name.yaml"
   cp "$ROOT/infra/observability/$obs_name.yaml" "$obs_manifest"
   if [ "$NAMESPACE" != cyclopus ]; then
@@ -407,41 +413,6 @@ for obs_name in openobserve beszel otel-collector beszel-agent; do
   sudo k3s kubectl apply -f "$obs_manifest" >/dev/null || fail "observability manifest $obs_name failed to apply"
 done
 
-# write_tls_ingress NAME HOST PORT: same Traefik Ingress shape install.sh emits
-# (cert-manager Let's Encrypt production TLS routing HOST to service NAME:PORT).
-write_tls_ingress() {
-  cat <<EOF
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: $1
-  namespace: ${NAMESPACE}
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
-spec:
-  ingressClassName: traefik
-  tls:
-  - secretName: $1-tls
-    hosts:
-    - $2
-  rules:
-  - host: $2
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: $1
-            port:
-              number: $3
-EOF
-}
-{
-  write_tls_ingress openobserve "oo.test.cyclopus.local" 5080
-  write_tls_ingress beszel "beszel.test.cyclopus.local" 8090
-} | sudo k3s kubectl apply -f - >/dev/null || fail "observability TLS ingresses failed to apply"
 # Same posture as install.sh: a slow observability add-on must not abort the
 # install now that the platform itself is up (assertions below check existence,
 # not readiness).
@@ -450,7 +421,7 @@ sudo k3s kubectl -n "$NAMESPACE" rollout status deploy/beszel --timeout=3m >/dev
 sudo k3s kubectl -n "$NAMESPACE" rollout status daemonset/opentelemetry-collector --timeout=3m >/dev/null 2>&1 || printf '%s\n' "install: observability component opentelemetry-collector not ready yet (non-fatal)" >&2
 sudo k3s kubectl -n "$NAMESPACE" rollout status daemonset/beszel-agent --timeout=3m >/dev/null 2>&1 || printf '%s\n' "install: observability component beszel-agent not ready yet (non-fatal)" >&2
 
-step "asserting observability contract (secrets, workloads, labels, TLS ingresses)"
+step "asserting observability contract (secrets, workloads, labels, no public exposure)"
 sudo k3s kubectl -n "$NAMESPACE" get secret openobserve-auth >/dev/null 2>&1 || fail "openobserve-auth secret missing"
 for key in password credential basic-auth; do
   sudo k3s kubectl -n "$NAMESPACE" get secret openobserve-auth -o jsonpath="{.data.$key}" | grep -q . || fail "openobserve-auth secret lacks key $key"
@@ -471,13 +442,23 @@ _collector_pods() {
   sudo k3s kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=opentelemetry-collector --no-headers 2>/dev/null | grep -q .
 }
 retry 40 _collector_pods || fail "no pods carry label app.kubernetes.io/name: opentelemetry-collector"
+# §8: OpenObserve is "never exposed directly" and Beszel is "proxied the same
+# way", so NEITHER may have an Ingress — the API reads both over their ClusterIP
+# Services. Assert the absence, since a reintroduced Ingress is exactly the
+# regression this contract exists to catch.
 for ing in openobserve beszel; do
-  sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" >/dev/null 2>&1 || fail "$ing Ingress missing"
-  issuer=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" -o jsonpath='{.metadata.annotations.cert-manager\.io/cluster-issuer}')
-  [ "$issuer" = "letsencrypt-production" ] || fail "$ing Ingress cluster-issuer is '$issuer', expected letsencrypt-production"
-  tls=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" -o jsonpath='{.spec.tls}')
-  [ -n "$tls" ] || fail "$ing Ingress has no tls section"
+  ! sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" >/dev/null 2>&1 \
+    || fail "$ing must NOT have an Ingress (§8: never exposed directly)"
 done
+# The API must be pointed at the in-cluster Services, not a public hostname.
+for pair in "OPENOBSERVE_BASE_URL=http://openobserve.${NAMESPACE}.svc:5080" "BESZEL_BASE_URL=http://beszel.${NAMESPACE}.svc:8090"; do
+  key=${pair%%=*}; want=${pair#*=}
+  got=$(sudo k3s kubectl -n "$NAMESPACE" get configmap "$RELEASE-config" -o jsonpath="{.data.OBSERVABILITY_$key}")
+  [ "$got" = "$want" ] || fail "OBSERVABILITY_$key is '$got', expected '$want'"
+done
+# §7.2/§8: the log/trace store accepts ingress only from inside this namespace.
+sudo k3s kubectl -n "$NAMESPACE" get networkpolicy openobserve-allow-platform-only >/dev/null 2>&1 \
+  || fail "openobserve-allow-platform-only NetworkPolicy missing"
 
 step "provisioning Beszel superuser and re-wiring the credential (mirrors install.sh automation)"
 # Mirrors install.sh's Beszel automation (§8): create the PocketBase superuser

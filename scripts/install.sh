@@ -939,49 +939,25 @@ $KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic beszel-agent-key \
   --from-literal=public="$BESZEL_PUBLIC_KEY" \
   --dry-run=client -o yaml | $KUBECTL apply -f -
 
-# write_tls_ingress NAME HOST PORT: emit a Traefik Ingress (with cert-manager
-# Let's Encrypt production TLS) routing HOST to service NAME:PORT.
-write_tls_ingress() {
-  cat <<EOF
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: $1
-  namespace: ${CYCLOPUS_NAMESPACE}
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
-spec:
-  ingressClassName: traefik
-  tls:
-  - secretName: $1-tls
-    hosts:
-    - $2
-  rules:
-  - host: $2
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: $1
-            port:
-              number: $3
-EOF
-}
-
 # Install the observability stack (OpenObserve + Beszel + OTel Collector +
 # Beszel agents) into the Cyclopus namespace (§8). Applied BEFORE the Cyclopus
 # helm install below so its pods schedule and start while the control plane
 # rolls out — readiness is only verified (non-fatally) at the end. Raw
-# manifests so the one-line install works without a repo checkout; ingress
-# hosts derive from the same sslip.io suffix as the console. The manifests
-# hardcode `namespace: cyclopus`; rewrite when CYCLOPUS_NAMESPACE differs —
-# including the collector exporter DNS name and the filelog self-exclusion
-# prefix, otherwise the collector tails its own logs (self-ingest loop).
+# manifests so the one-line install works without a repo checkout.
+#
+# Neither backend gets an Ingress: §8 requires OpenObserve to be "queried
+# server-side through the Cyclopus API, never exposed directly" and Beszel to be
+# "proxied the same way", so both are reached only in-cluster over their
+# ClusterIP Services (see the observability block in the values file below), and
+# network-policy.yaml restricts even that to this namespace. Operators read
+# logs, traces, and metrics through the Cyclopus console.
+#
+# The manifests hardcode `namespace: cyclopus`; rewrite when CYCLOPUS_NAMESPACE
+# differs — including the collector exporter DNS name and the filelog
+# self-exclusion prefix, otherwise the collector tails its own logs
+# (self-ingest loop).
 log "Installing observability stack (OpenObserve + Beszel + OTel Collector + agents)..."
-for OBS_NAME in openobserve beszel otel-collector beszel-agent; do
+for OBS_NAME in openobserve beszel otel-collector beszel-agent network-policy; do
   if [ "$BUNDLE_MODE" = 1 ]; then
     OBS_MANIFEST="$BUNDLE_DIR/observability/$OBS_NAME.yaml"
     [ -f "$OBS_MANIFEST" ] || fail "bundle is missing observability/$OBS_NAME.yaml"
@@ -996,10 +972,6 @@ for OBS_NAME in openobserve beszel otel-collector beszel-agent; do
   fi
   $KUBECTL apply -f "$OBS_MANIFEST"
 done
-{
-  write_tls_ingress openobserve "oo.${HOSTNAME_SUFFIX}" 5080
-  write_tls_ingress beszel "beszel.${HOSTNAME_SUFFIX}" 8090
-} | $KUBECTL apply -f -
 
 # --- Beszel admin + operator-metrics credential (§8) -------------------------
 # Fully automates what used to require opening the Beszel UI: create the
@@ -1095,16 +1067,18 @@ config:
     customDomainCnameTarget: "${HOSTNAME_SUFFIX}"
     certManagerClusterIssuer: "letsencrypt-production"
   observability:
-    # HTTPS is enforced by config validation (internal/config
-    # Observability.validate rejects plaintext http://), so these point at the
-    # Traefik-terminated ingresses, not the in-cluster http services.
-    openobserveBaseUrl: "https://oo.${HOSTNAME_SUFFIX}"
+    # In-cluster ClusterIP Services, NOT public ingresses (§8: "never exposed
+    # directly"). Config validation accepts plaintext http:// only for a
+    # Kubernetes .svc address (internal/adapters/observability/url.go); this
+    # traffic never leaves the cluster network and network-policy.yaml confines
+    # it to this namespace.
+    openobserveBaseUrl: "http://openobserve.${CYCLOPUS_NAMESPACE}.svc:5080"
     # Org/stream "default": where the Collector's otlphttp exporter lands
     # telemetry (infra/observability/otel-collector.yaml).
     openobserveOrganization: "default"
     openobserveLogStream: "default"
     openobserveTraceStream: "default"
-    beszelBaseUrl: "https://beszel.${HOSTNAME_SUFFIX}"
+    beszelBaseUrl: "http://beszel.${CYCLOPUS_NAMESPACE}.svc:8090"
 ingress:
   enabled: true
   className: traefik
@@ -1244,11 +1218,19 @@ ${AUTH_TOKEN_PEPPER}
 Database Password (PostgreSQL cyclopus user):
 ${DB_PASSWORD}
 
-OpenObserve (logs/traces UI): https://oo.${HOSTNAME_SUFFIX}
+OpenObserve (logs/traces backend — no public URL by design, §8)
+  Read logs and traces in the Cyclopus console; the API queries this backend
+  server-side and scopes every query to your org.
+  In-cluster only: http://openobserve.${CYCLOPUS_NAMESPACE}.svc:5080
+  To reach its own UI, port-forward from a trusted machine:
+    kubectl -n ${CYCLOPUS_NAMESPACE} port-forward svc/openobserve 5080:5080
   User: admin@cyclopus.local
   Password: ${OO_PASSWORD}
 
-Beszel (metrics UI, optional — browsing it is never required): https://beszel.${HOSTNAME_SUFFIX}
+Beszel (metrics backend — no public URL by design, browsing it is never required)
+  In-cluster only: http://beszel.${CYCLOPUS_NAMESPACE}.svc:8090
+  To reach its own UI, port-forward from a trusted machine:
+    kubectl -n ${CYCLOPUS_NAMESPACE} port-forward svc/beszel 8090:8090
   Admin login: ${BESZEL_ADMIN_EMAIL} / ${BESZEL_ADMIN_PASSWORD}
   ${BESZEL_STATUS_NOTE}
   This node (${NODE_IP}:45876) was auto-registered as a Beszel system.
@@ -1283,8 +1265,10 @@ log "Next steps:"
 log "  1. cat $SECRETS_FILE"
 log "  2. Open https://${CONSOLE_HOST} and claim the admin account with the bootstrap secret"
 log "  3. kubectl -n $CYCLOPUS_NAMESPACE get pods"
-log "  4. OpenObserve: https://oo.${HOSTNAME_SUFFIX} (credentials in $SECRETS_FILE)"
-log "  5. Beszel (optional UI): https://beszel.${HOSTNAME_SUFFIX} — admin + operator metrics were auto-provisioned"
+log "  4. Logs, traces, and metrics: read them in the Cyclopus console — OpenObserve and"
+log "     Beszel are in-cluster only by design (§8) and have no public URL."
+log "  5. Beszel admin + operator metrics were auto-provisioned; to reach either backend UI"
+log "     directly: kubectl -n $CYCLOPUS_NAMESPACE port-forward svc/openobserve 5080:5080 (or svc/beszel 8090:8090)"
 log "     - To register additional nodes later: /opt/cyclopus/beszel/register_node.sh <name> <ip>"
 log "     - Hub public key + private key (hub import), and troubleshooting if provisioning failed: $SECRETS_FILE"
 if [ "$CYCLOPUS_CONTROL_PLANE_TAINT" != "true" ]; then

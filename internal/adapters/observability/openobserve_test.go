@@ -216,6 +216,11 @@ func TestOpenObserveConstructorRequiresHTTPS(t *testing.T) {
 	if _, err := NewOpenObserveClient(OpenObserveConfig{BaseURL: "https://oo.example:5080", Organization: "o"}); err != nil {
 		t.Fatalf("valid HTTPS config rejected: %v", err)
 	}
+	// §8 keeps OpenObserve in-cluster only, so the installer points the API at
+	// its ClusterIP Service; that address is plaintext by design.
+	if _, err := NewOpenObserveClient(OpenObserveConfig{BaseURL: "http://openobserve.cyclopus.svc:5080", Organization: "o"}); err != nil {
+		t.Fatalf("in-cluster .svc config rejected: %v", err)
+	}
 }
 
 func TestOpenObserveClientRefusesRedirects(t *testing.T) {

@@ -194,6 +194,7 @@ echo "$WALG_SHA256  $B/walg/$WALG_TARBALL" | sha256sum -c - || fail "WAL-G check
 log "copying manifests, scripts, versions.env"
 cp "$ROOT"/infra/observability/openobserve.yaml "$ROOT"/infra/observability/beszel.yaml \
   "$ROOT"/infra/observability/otel-collector.yaml "$ROOT"/infra/observability/beszel-agent.yaml \
+  "$ROOT"/infra/observability/network-policy.yaml \
   "$ROOT"/infra/observability/register_beszel_node.sh \
   "$B/observability/"
 cp "$ROOT"/infra/backup/common.sh "$ROOT"/infra/backup/install_walg.sh \
