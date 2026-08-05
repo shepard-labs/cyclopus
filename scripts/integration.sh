@@ -13,6 +13,12 @@ case "${1:-}" in
   install)
     exec sh "$DIR/install_orbstack.sh"
     ;;
+  node-pressure)
+    # Provision a VM at the byo_vps memory floor, prod-install Cyclopus, and
+    # drive ingestion/compaction load to validate the floor holds (no OOM /
+    # eviction). Long-running; emulated amd64 on Apple Silicon.
+    exec sh "$DIR/node_pressure_orbstack.sh"
+    ;;
   install-ubuntu)
     exec env INSTALL_DISTRO=ubuntu sh "$DIR/install_orbstack.sh"
     ;;
