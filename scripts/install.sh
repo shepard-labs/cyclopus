@@ -753,6 +753,20 @@ install_traefik() {
 }
 
 install_kyverno() {
+  # Scope the fail-closed webhooks (§7.1) to platform-managed namespaces only.
+  # Kyverno's generated webhook configurations otherwise match every namespace
+  # except kube-system, so a webhook outage fails closed cluster-wide — including
+  # the kyverno and cyclopus namespaces, which deadlocks Kyverno's own recovery.
+  # With this selector only app namespaces (labeled managed-by=cyclopus) are
+  # webhook-matched; a Kyverno restart then pauses app-namespace admissions
+  # (§9.3's accepted behavior) without touching the control plane. Same flags on
+  # install AND upgrade (no --reuse-values): the flags are the config.
+  # The label/value MUST stay in sync with kyverno.policies.managedByLabel /
+  # managedByValue in charts/cyclopus/values.yaml (asserted by
+  # scripts/test_infrastructure.sh).
+  KYVERNO_SET_ARGS=(
+    --set-json 'config.webhooks={"namespaceSelector":{"matchLabels":{"app.kubernetes.io/managed-by":"cyclopus"}}}'
+  )
   _chart=$(chart_ref kyverno "$KYVERNO_CHART_VERSION" kyverno)
   _ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$KYVERNO_CHART_VERSION")
   _rc=0
@@ -762,6 +776,7 @@ install_kyverno() {
       helm install kyverno "$_chart" \
         "${_ver_args[@]}" \
         --namespace kyverno --create-namespace \
+        "${KYVERNO_SET_ARGS[@]}" \
         --wait --timeout 5m
       ;;
     2)
@@ -772,6 +787,7 @@ install_kyverno() {
       helm upgrade kyverno "$_chart" \
         "${_ver_args[@]}" \
         --namespace kyverno \
+        "${KYVERNO_SET_ARGS[@]}" \
         --cleanup-on-fail --wait --timeout 5m
       ;;
   esac

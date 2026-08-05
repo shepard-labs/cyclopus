@@ -187,9 +187,13 @@ helm repo update kyverno >/dev/null 2>&1 || true
 if helm_deployed kyverno kyverno; then
   printf 'install: Kyverno already installed, skipping\n'
 else
+  # Same fail-closed webhook scoping as scripts/install.sh install_kyverno:
+  # webhook configs match only platform-managed namespaces (label must stay in
+  # sync with charts/cyclopus/values.yaml kyverno.policies.managedBy*).
   helm install kyverno kyverno/kyverno \
     --version "$KYVERNO_CHART_VERSION" \
     --namespace kyverno --create-namespace \
+    --set-json 'config.webhooks={"namespaceSelector":{"matchLabels":{"app.kubernetes.io/managed-by":"cyclopus"}}}' \
     --wait --timeout 5m || fail "Kyverno install failed"
 fi
 # Wait for Kyverno admission webhook to have endpoints before installing Cyclopus.
@@ -438,10 +442,15 @@ for ds in opentelemetry-collector beszel-agent; do
   tolerance=$(sudo k3s kubectl -n "$NAMESPACE" get daemonset "$ds" -o jsonpath='{.spec.template.spec.tolerations[?(@.key=="cyclopus.app/role")].value}')
   [ "$tolerance" = control-plane ] || fail "$ds lacks the cyclopus.app/role=control-plane toleration (got '${tolerance:-none}')"
 done
+# Assert the collector reaches Running, not merely that a labeled pod exists: a
+# pod wedged in Init (e.g. the init-otelcol-storage chown container failing to
+# pull or run) still carries the label but never collects telemetry. Checking
+# the Running phase catches that regression, which existence alone would miss.
 _collector_pods() {
-  sudo k3s kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=opentelemetry-collector --no-headers 2>/dev/null | grep -q .
+  sudo k3s kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=opentelemetry-collector \
+    -o jsonpath='{.items[*].status.phase}' 2>/dev/null | grep -q Running
 }
-retry 40 _collector_pods || fail "no pods carry label app.kubernetes.io/name: opentelemetry-collector"
+retry 40 _collector_pods || fail "no opentelemetry-collector pod reached Running (a stuck init container would be caught here)"
 # §8: OpenObserve is "never exposed directly" and Beszel is "proxied the same
 # way", so NEITHER may have an Ingress — the API reads both over their ClusterIP
 # Services. Assert the absence, since a reintroduced Ingress is exactly the

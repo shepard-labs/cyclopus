@@ -96,7 +96,10 @@ KEDA_HTTP_SET_ARGS=(
 )
 {
   helm template traefik "$B/charts/traefik-${TRAEFIK_CHART_VERSION}.tgz" -n kube-system "${TRAEFIK_SET_ARGS[@]}"
-  helm template kyverno "$B/charts/kyverno-${KYVERNO_CHART_VERSION}.tgz" -n kyverno
+  # config.webhooks matches the install-time flags (install.sh install_kyverno)
+  # so the rendered manifest set used for image extraction reflects what ships.
+  helm template kyverno "$B/charts/kyverno-${KYVERNO_CHART_VERSION}.tgz" -n kyverno \
+    --set-json 'config.webhooks={"namespaceSelector":{"matchLabels":{"app.kubernetes.io/managed-by":"cyclopus"}}}'
   helm template cert-manager "$B/charts/cert-manager-${CERT_MANAGER_VERSION}.tgz" -n cert-manager --set crds.enabled=true
   helm template keda "$B/charts/keda-${KEDA_VERSION}.tgz" -n keda
   helm template keda-add-ons-http "$B/charts/keda-add-ons-http-${KEDA_HTTP_ADDON_VERSION}.tgz" -n keda "${KEDA_HTTP_SET_ARGS[@]}"
