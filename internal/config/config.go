@@ -82,9 +82,13 @@ type Config struct {
 // Observability configures the server-side proxies to the OpenObserve
 // (tenant-scoped logs/traces) and Beszel (operator-level metrics) backends.
 // When OpenObserveBaseURL is empty, the logs/traces RPCs report the backend as
-// unavailable rather than reaching anything; likewise BeszelBaseURL gates the
-// operator metrics RPC. Credential secret references are resolved through
-// internal/secretref at startup; plaintext credentials never sit in config.
+// unavailable rather than reaching anything; likewise MetricsEnabled gates the
+// operator metrics RPC — which requires BOTH BeszelBaseURL and
+// BeszelCredentialSecret, not the URL alone (a URL with no credential cannot
+// authenticate, so the RPC would otherwise silently fail against Beszel
+// instead of cleanly reporting "unavailable"). Credential secret references
+// are resolved through internal/secretref at startup; plaintext credentials
+// never sit in config.
 type Observability struct {
 	OpenObserveBaseURL          string
 	OpenObserveOrganization     string
@@ -92,7 +96,7 @@ type Observability struct {
 	OpenObserveTraceStream      string
 	OpenObserveCredentialSecret string
 	BeszelBaseURL               string
-	BeszelTokenSecret           string
+	BeszelCredentialSecret      string
 }
 
 type Auth struct {
@@ -212,7 +216,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.String("observability-openobserve-trace-stream", "", "OpenObserve stream holding application traces")
 	flags.String("observability-openobserve-credential-secret", "", "secret reference for the OpenObserve basic-auth credential")
 	flags.String("observability-beszel-base-url", "", "Beszel HTTPS base URL for operator-level metrics")
-	flags.String("observability-beszel-token-secret", "", "secret reference for the Beszel PocketBase auth token")
+	flags.String("observability-beszel-credential-secret", "", "secret reference for the Beszel superuser identity:password credential")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, fmt.Errorf("parse flags: %w", err)
 	}
@@ -282,7 +286,7 @@ func Load(args, environ []string) (Config, error) {
 		"observability-openobserve-trace-stream":      "observability.openobserve_trace_stream",
 		"observability-openobserve-credential-secret": "observability.openobserve_credential_secret",
 		"observability-beszel-base-url":               "observability.beszel_base_url",
-		"observability-beszel-token-secret":           "observability.beszel_token_secret",
+		"observability-beszel-credential-secret":      "observability.beszel_credential_secret",
 	}
 	for flagName, key := range flagKeys {
 		if !flags.Changed(flagName) {
@@ -363,7 +367,7 @@ func Load(args, environ []string) (Config, error) {
 			OpenObserveTraceStream:      v.GetString("observability.openobserve_trace_stream"),
 			OpenObserveCredentialSecret: v.GetString("observability.openobserve_credential_secret"),
 			BeszelBaseURL:               v.GetString("observability.beszel_base_url"),
-			BeszelTokenSecret:           v.GetString("observability.beszel_token_secret"),
+			BeszelCredentialSecret:      v.GetString("observability.beszel_credential_secret"),
 		},
 		InsecurePublicListeners: v.GetBool("insecure_public_listeners"),
 	}
@@ -455,7 +459,7 @@ func environment(environ []string) map[string]string {
 		"OBSERVABILITY_OPENOBSERVE_TRACE_STREAM":      "observability.openobserve_trace_stream",
 		"OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET": "observability.openobserve_credential_secret",
 		"OBSERVABILITY_BESZEL_BASE_URL":               "observability.beszel_base_url",
-		"OBSERVABILITY_BESZEL_TOKEN_SECRET":           "observability.beszel_token_secret",
+		"OBSERVABILITY_BESZEL_CREDENTIAL_SECRET":      "observability.beszel_credential_secret",
 	}
 	values := make(map[string]string)
 	for _, item := range environ {
@@ -644,8 +648,21 @@ func (o Observability) LogsEnabled() bool {
 	return strings.TrimSpace(o.OpenObserveBaseURL) != ""
 }
 
-// MetricsEnabled reports whether Beszel-backed operator metrics are configured.
+// MetricsEnabled reports whether Beszel-backed operator metrics are fully
+// configured: a base URL alone is not enough, since unauthenticated calls to
+// Beszel's PocketBase API fail. Until a credential is also wired in, metrics
+// stay disabled and the RPC reports the backend as unavailable rather than
+// reaching Beszel unauthenticated.
 func (o Observability) MetricsEnabled() bool {
+	return o.beszelConfigured() && strings.TrimSpace(o.BeszelCredentialSecret) != ""
+}
+
+// beszelConfigured reports whether a Beszel base URL is set, independent of
+// whether a credential has been wired in yet. It exists so the URL's format is
+// still validated even before the credential exists (see validate below),
+// rather than validation silently going quiet in the same window that
+// MetricsEnabled reports the feature as not-yet-usable.
+func (o Observability) beszelConfigured() bool {
 	return strings.TrimSpace(o.BeszelBaseURL) != ""
 }
 
@@ -659,9 +676,14 @@ func (o Observability) validate() []error {
 			errs = append(errs, fmt.Errorf("observability.openobserve_organization is required when OpenObserve is enabled"))
 		}
 	}
-	if o.MetricsEnabled() {
+	if o.beszelConfigured() {
 		if u, err := url.ParseRequestURI(o.BeszelBaseURL); err != nil || u.Scheme != "https" || u.Host == "" {
 			errs = append(errs, fmt.Errorf("observability.beszel_base_url must be an absolute HTTPS URL"))
+		}
+		if strings.TrimSpace(o.BeszelCredentialSecret) == "" {
+			slog.Warn("observability.beszel_base_url is set but observability.beszel_credential_secret is empty; "+
+				"operator metrics stay disabled until a Beszel credential is configured",
+				"beszel_base_url", o.BeszelBaseURL)
 		}
 	}
 	return errs

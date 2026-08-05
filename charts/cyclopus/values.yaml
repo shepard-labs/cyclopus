@@ -100,7 +100,10 @@ config:
     # Empty means the feature is disabled (see LogsEnabled()/MetricsEnabled() in
     # internal/config). When set, these must be absolute HTTPS URLs — config
     # validation rejects plaintext http:// endpoints, so the stock chart ships
-    # disabled rather than pointing at in-cluster http services.
+    # disabled rather than pointing at in-cluster http services. Beszel also
+    # requires secrets.beszelCredential to be set: MetricsEnabled() is false
+    # (and the RPC reports "unavailable") until both are present, since a URL
+    # alone can't authenticate.
     openobserveBaseUrl: ""
     openobserveOrganization: "cyclopus"
     openobserveLogStream: "app_logs"
@@ -118,7 +121,10 @@ secrets:
   authTokenPepper: ""
   authBootstrapSecret: ""
   openobserveCredential: ""
-  beszelToken: ""
+  # Beszel superuser "identity:password" credential (not a pre-minted session
+  # token: the client authenticates with this on demand and caches/refreshes
+  # its own session, so unlike a static token this never silently expires).
+  beszelCredential: ""
 
 # storage_destinations S3 target (§9.1): postgres_backup + observability_backing.
 # The API doesn't talk to S3 directly, but the endpoint/bucket are surfaced so

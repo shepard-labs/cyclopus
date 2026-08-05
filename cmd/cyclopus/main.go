@@ -174,11 +174,11 @@ func buildTelemetryProvider(ctx context.Context, cfg config.Observability, adapt
 	}
 	var metrics *observability.BeszelClient
 	if cfg.MetricsEnabled() {
-		token, err := resolve(cfg.BeszelTokenSecret)
+		credential, err := resolve(cfg.BeszelCredentialSecret)
 		if err != nil {
 			return nil, err
 		}
-		metrics, err = observability.NewBeszelClient(observability.BeszelConfig{BaseURL: cfg.BeszelBaseURL, Token: token})
+		metrics, err = observability.NewBeszelClient(observability.BeszelConfig{BaseURL: cfg.BeszelBaseURL, Credential: credential})
 		if err != nil {
 			return nil, err
 		}

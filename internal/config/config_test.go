@@ -553,3 +553,72 @@ func TestLoadAllowsPublicTLSListeners(t *testing.T) {
 		t.Fatalf("TLS config = HTTP %+v, gRPC %+v", cfg.HTTP, cfg.GRPC)
 	}
 }
+
+var baseValidEnv = []string{
+	"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+	"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+	"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+}
+
+func TestMetricsEnabledRequiresURLAndCredential(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantErr     bool
+		wantErrSub  string
+		wantEnabled bool
+	}{
+		{
+			name:        "neither set",
+			args:        nil,
+			wantEnabled: false,
+		},
+		{
+			name:        "URL only: still disabled, URL still validated",
+			args:        []string{"--observability-beszel-base-url", "https://beszel.example"},
+			wantEnabled: false,
+		},
+		{
+			name:        "credential only, no URL: disabled",
+			args:        []string{"--observability-beszel-credential-secret", "k8s-secret://cyclopus/beszel-auth#credential"},
+			wantEnabled: false,
+		},
+		{
+			name: "URL and credential: enabled",
+			args: []string{
+				"--observability-beszel-base-url", "https://beszel.example",
+				"--observability-beszel-credential-secret", "k8s-secret://cyclopus/beszel-auth#credential",
+			},
+			wantEnabled: true,
+		},
+		{
+			name:       "malformed URL with no credential is still rejected",
+			args:       []string{"--observability-beszel-base-url", "not-a-url"},
+			wantErr:    true,
+			wantErrSub: "observability.beszel_base_url must be an absolute HTTPS URL",
+		},
+		{
+			name:       "plaintext URL with a credential is still rejected",
+			args:       []string{"--observability-beszel-base-url", "http://beszel.example", "--observability-beszel-credential-secret", "k8s-secret://cyclopus/beszel-auth#credential"},
+			wantErr:    true,
+			wantErrSub: "observability.beszel_base_url must be an absolute HTTPS URL",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(tc.args, baseValidEnv)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErrSub) {
+					t.Fatalf("Load() error = %v, want substring %q", err, tc.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got := cfg.Observability.MetricsEnabled(); got != tc.wantEnabled {
+				t.Fatalf("MetricsEnabled() = %v, want %v", got, tc.wantEnabled)
+			}
+		})
+	}
+}

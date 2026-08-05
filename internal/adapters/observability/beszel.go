@@ -1,7 +1,9 @@
 package observability
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,9 +19,12 @@ import (
 type BeszelConfig struct {
 	// BaseURL is the Beszel HTTPS endpoint.
 	BaseURL string
-	// Token is a PocketBase auth token placed in the Authorization header. It is
-	// resolved from a secret reference by the caller.
-	Token string
+	// Credential is the Beszel superuser "identity:password" pair, resolved
+	// from a secret reference by the caller. Unlike a pre-minted PocketBase
+	// session token (capped at PocketBase's ~2 year maximum), a password
+	// credential lets the client re-authenticate indefinitely, so it never
+	// silently expires the way a static token would.
+	Credential string
 }
 
 // BeszelClient is a bounded, non-redirecting HTTPS client for Beszel's
@@ -26,10 +32,29 @@ type BeszelConfig struct {
 // host metrics describe the operator's own machines and cannot be attributed to
 // a tenant app (Phase 4 design note). GetOperatorMetrics returns a fixed
 // allowlist of system-level metrics only.
+//
+// Authentication is credential-based rather than a static token: the client
+// authenticates against PocketBase's superuser auth endpoint on first use,
+// caches the resulting session token in memory, and transparently
+// re-authenticates before the cached token's expiry (or immediately, on a 401
+// from the metrics endpoint). This mirrors OpenObserveClient's use of a
+// permanent Basic Auth credential rather than an expiring session — the only
+// difference is PocketBase requires a login call to mint a session token
+// instead of accepting the credential directly on every request.
 type BeszelClient struct {
-	config BeszelConfig
-	client *http.Client
+	config           BeszelConfig
+	identity         string
+	password         string
+	client           *http.Client
+	mu               sync.Mutex
+	cachedToken      string
+	cachedTokenUntil time.Time
 }
+
+// tokenRefreshMargin is subtracted from a cached token's expiry so a refresh
+// happens comfortably before PocketBase would reject the token, rather than
+// racing it.
+const tokenRefreshMargin = 60 * time.Second
 
 // metricAllowlist is the fixed set of system-level metric names Cyclopus will
 // surface from a Beszel system record's `info` object. Anything outside this
@@ -49,13 +74,18 @@ var metricAllowlist = []struct {
 }
 
 // NewBeszelClient builds a bounded client with the same posture as the
-// OpenObserve client.
+// OpenObserve client. Credential must be an "identity:password" pair for a
+// Beszel superuser account.
 func NewBeszelClient(config BeszelConfig) (*BeszelClient, error) {
 	parsed, err := url.Parse(config.BaseURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return nil, fmt.Errorf("observability: invalid Beszel base URL")
 	}
-	return &BeszelClient{config: config, client: boundedHTTPClient()}, nil
+	identity, password, ok := strings.Cut(config.Credential, ":")
+	if !ok || identity == "" || password == "" {
+		return nil, fmt.Errorf("observability: invalid Beszel credential")
+	}
+	return &BeszelClient{config: config, identity: identity, password: password, client: boundedHTTPClient()}, nil
 }
 
 type beszelListResponse struct {
@@ -68,33 +98,58 @@ type beszelSystem struct {
 	Info    json.RawMessage `json:"info"`
 }
 
+type beszelAuthResponse struct {
+	Token string `json:"token"`
+}
+
 // GetOperatorMetrics fetches the operator's host systems and projects only the
 // allowlisted system-level metrics from each. No tenant parameters are accepted
-// or forwarded.
+// or forwarded. It authenticates lazily (caching the session token) and
+// transparently re-authenticates once if the cached token is rejected.
 func (c *BeszelClient) GetOperatorMetrics(ctx context.Context) ([]OperatorMetric, error) {
-	endpoint := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/systems/records?perPage=200"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	token, err := c.token(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
-	if c.config.Token != "" {
-		req.Header.Set("Authorization", c.config.Token)
+	metrics, unauthorized, err := c.fetchOperatorMetrics(ctx, token)
+	if err != nil && unauthorized {
+		token, err = c.token(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		metrics, _, err = c.fetchOperatorMetrics(ctx, token)
 	}
+	return metrics, err
+}
+
+// fetchOperatorMetrics performs one authenticated request. The bool result
+// reports whether the failure was a 401 (and therefore worth one re-auth retry
+// by the caller) as opposed to any other error.
+func (c *BeszelClient) fetchOperatorMetrics(ctx context.Context, token string) ([]OperatorMetric, bool, error) {
+	endpoint := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/systems/records?perPage=200"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", token)
 	response, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("observability: Beszel request failed")
+		return nil, false, fmt.Errorf("observability: Beszel request failed")
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		return nil, true, fmt.Errorf("observability: Beszel returned HTTP 401")
+	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
-		return nil, errors.New("observability: Beszel returned a redirect")
+		return nil, false, errors.New("observability: Beszel returned a redirect")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("observability: Beszel returned HTTP %d", response.StatusCode)
+		return nil, false, fmt.Errorf("observability: Beszel returned HTTP %d", response.StatusCode)
 	}
 	var decoded beszelListResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, MaxResponseBytes)).Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("observability: decode Beszel response")
+		return nil, false, fmt.Errorf("observability: decode Beszel response")
 	}
 	metrics := make([]OperatorMetric, 0, len(decoded.Items)*len(metricAllowlist))
 	for _, system := range decoded.Items {
@@ -120,7 +175,91 @@ func (c *BeszelClient) GetOperatorMetrics(ctx context.Context) ([]OperatorMetric
 			})
 		}
 	}
-	return metrics, nil
+	return metrics, false, nil
+}
+
+// token returns a cached, still-valid session token, or authenticates for a
+// new one if forceRefresh is set or the cached token is missing/near expiry.
+func (c *BeszelClient) token(ctx context.Context, forceRefresh bool) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !forceRefresh && c.cachedToken != "" && time.Now().Before(c.cachedTokenUntil.Add(-tokenRefreshMargin)) {
+		return c.cachedToken, nil
+	}
+	token, expiry, err := c.authenticate(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.cachedToken = token
+	c.cachedTokenUntil = expiry
+	return token, nil
+}
+
+// authenticate logs in as the configured Beszel superuser and returns the
+// session token together with its expiry, decoded from the JWT's `exp` claim.
+// The signature is not verified client-side: the token is only ever used over
+// the same HTTPS channel it was issued on, so there is nothing to gain from
+// verifying it locally (the same trust posture OpenObserveClient applies to
+// its Basic Auth credential).
+func (c *BeszelClient) authenticate(ctx context.Context) (string, time.Time, error) {
+	body, err := json.Marshal(map[string]string{"identity": c.identity, "password": c.password})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	endpoint := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/_superusers/auth-with-password"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	response, err := c.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("observability: Beszel auth request failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return "", time.Time{}, errors.New("observability: Beszel auth returned a redirect")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", time.Time{}, fmt.Errorf("observability: Beszel auth returned HTTP %d", response.StatusCode)
+	}
+	var decoded beszelAuthResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, MaxResponseBytes)).Decode(&decoded); err != nil {
+		return "", time.Time{}, fmt.Errorf("observability: decode Beszel auth response")
+	}
+	if decoded.Token == "" {
+		return "", time.Time{}, errors.New("observability: Beszel auth response missing token")
+	}
+	expiry, err := jwtExpiry(decoded.Token)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return decoded.Token, expiry, nil
+}
+
+// jwtExpiry decodes the `exp` claim from a JWT without verifying its
+// signature (see authenticate's doc comment for why that's an acceptable
+// trust posture here).
+func jwtExpiry(token string) (time.Time, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, errors.New("observability: malformed Beszel session token")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("observability: decode Beszel session token: %w", err)
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("observability: decode Beszel session token claims: %w", err)
+	}
+	if claims.Exp == 0 {
+		return time.Time{}, errors.New("observability: Beszel session token has no expiry claim")
+	}
+	return time.Unix(claims.Exp, 0), nil
 }
 
 func parseBeszelTime(value string) time.Time {

@@ -83,11 +83,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "cyclopus.secretName" . }}
                   key: OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
-            - name: CYCLOPUS_OBSERVABILITY_BESZEL_TOKEN_SECRET
+            - name: CYCLOPUS_OBSERVABILITY_BESZEL_CREDENTIAL_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "cyclopus.secretName" . }}
-                  key: OBSERVABILITY_BESZEL_TOKEN_SECRET
+                  key: OBSERVABILITY_BESZEL_CREDENTIAL_SECRET
             # Re-map the non-secret ConfigMap keys to the CYCLOPUS_* namespace
             # the binary reads.
             - name: CYCLOPUS_LOG_LEVEL
