@@ -69,6 +69,13 @@ data:
           # from the file path, so k8sattributes can attach tenant identity
           # to filelog-tailed logs too (§8.1).
           - type: container
+        storage: file_storage/receiver_filelog
+    extensions:
+      file_storage/receiver_filelog:
+        directory: /var/lib/otelcol/receiver_filelog
+        create_directory: true
+        compaction:
+          on_start: true
     processors:
       # First in every pipeline: bound memory and drop on sustained overload
       # rather than stalling customer workloads (§8.1).
@@ -170,6 +177,7 @@ data:
         headers:
           Authorization: Basic ${env:OO_BASIC_AUTH}
     service:
+      extensions: [file_storage/receiver_filelog]
       pipelines:
         logs:
           receivers: [otlp, filelog]
@@ -204,6 +212,21 @@ spec:
           operator: Equal
           value: control-plane
           effect: NoSchedule
+      # The file_storage hostPath (/var/lib/otelcol) is created by kubelet as
+      # root:root, but the collector runs as UID 10001 (image default) and must
+      # write offset checkpoints there. This init container chowns it once per
+      # start. The collector image ships no shell, so a minimal busybox is used —
+      # fully qualified and digest-pinned to match the offline bundle's
+      # exact-name image matching (scripts/build_bundle.sh) and stay reproducible.
+      initContainers:
+        - name: init-otelcol-storage
+          image: docker.io/library/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+          command: ['sh', '-c', 'mkdir -p /var/lib/otelcol/receiver_filelog && chown -R 10001:10001 /var/lib/otelcol']
+          volumeMounts:
+            - name: otelcol-storage
+              mountPath: /var/lib/otelcol
+          securityContext:
+            runAsUser: 0
       containers:
         - name: opentelemetry-collector
           image: otel/opentelemetry-collector-contrib:0.157.0
@@ -237,6 +260,8 @@ spec:
             - name: varlogcontainers
               mountPath: /var/log/containers
               readOnly: true
+            - name: otelcol-storage
+              mountPath: /var/lib/otelcol
       volumes:
         - name: config
           configMap:
@@ -249,3 +274,7 @@ spec:
         - name: varlogcontainers
           hostPath:
             path: /var/log/containers
+        - name: otelcol-storage
+          hostPath:
+            path: /var/lib/otelcol
+            type: DirectoryOrCreate

@@ -20,6 +20,17 @@ type collectorConfigMapDoc struct {
 }
 
 type collectorConfig struct {
+	Receivers struct {
+		Filelog struct {
+			Storage string `yaml:"storage"`
+		} `yaml:"filelog"`
+	} `yaml:"receivers"`
+	Extensions struct {
+		FileStorage struct {
+			Directory       string `yaml:"directory"`
+			CreateDirectory bool   `yaml:"create_directory"`
+		} `yaml:"file_storage/receiver_filelog"`
+	} `yaml:"extensions"`
 	Processors struct {
 		K8sattributes struct {
 			PodAssociation []struct {
@@ -35,7 +46,8 @@ type collectorConfig struct {
 		} `yaml:"k8sattributes"`
 	} `yaml:"processors"`
 	Service struct {
-		Pipelines map[string]struct {
+		Extensions []string `yaml:"extensions"`
+		Pipelines  map[string]struct {
 			Processors []string `yaml:"processors"`
 		} `yaml:"pipelines"`
 	} `yaml:"service"`
@@ -117,5 +129,34 @@ func TestCollectorStampsTenantIdentityBeforeExport(t *testing.T) {
 		if annKey[tag] != key {
 			t.Fatalf("%s must map from the %s annotation, got %q", tag, key, annKey[tag])
 		}
+	}
+}
+
+func TestCollectorFilelogHasPersistentOffsetStore(t *testing.T) {
+	cfg := loadCollectorConfig(t)
+
+	if cfg.Service.Extensions == nil {
+		t.Fatal("service.extensions must be set")
+	}
+	found := false
+	for _, ext := range cfg.Service.Extensions {
+		if ext == "file_storage/receiver_filelog" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("service.extensions must include file_storage/receiver_filelog, got %v", cfg.Service.Extensions)
+	}
+
+	if cfg.Extensions.FileStorage.Directory != "/var/lib/otelcol/receiver_filelog" {
+		t.Fatalf("file_storage/receiver_filelog directory = %q, want /var/lib/otelcol/receiver_filelog", cfg.Extensions.FileStorage.Directory)
+	}
+	if !cfg.Extensions.FileStorage.CreateDirectory {
+		t.Fatal("file_storage/receiver_filelog.create_directory must be true")
+	}
+
+	if cfg.Receivers.Filelog.Storage != "file_storage/receiver_filelog" {
+		t.Fatalf("filelog receiver storage = %q, want file_storage/receiver_filelog", cfg.Receivers.Filelog.Storage)
 	}
 }
