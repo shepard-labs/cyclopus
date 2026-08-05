@@ -345,8 +345,11 @@ secrets:
   # Mirrors install.sh: the API expects a k8s-secret reference (resolved at boot
   # via internal/secretref); the referenced key holds the raw "user:password".
   openobserveCredential: "k8s-secret://${NAMESPACE}/openobserve-auth#credential"
-  # Hub admin is created interactively post-install; token is added via the UI.
-  beszelToken: ""
+  # Empty here: the Beszel hub isn't deployed yet at this point in the guest
+  # script (it's applied further below, unlike install.sh's real ordering).
+  # Provisioned and wired in via helm upgrade once Beszel exists — see the
+  # "provisioning Beszel superuser" step below.
+  beszelCredential: ""
 config:
   insecurePublicListeners: true
   kubernetes:
@@ -475,6 +478,59 @@ for ing in openobserve beszel; do
   tls=$(sudo k3s kubectl -n "$NAMESPACE" get ingress "$ing" -o jsonpath='{.spec.tls}')
   [ -n "$tls" ] || fail "$ing Ingress has no tls section"
 done
+
+step "provisioning Beszel superuser and re-wiring the credential (mirrors install.sh automation)"
+# Mirrors install.sh's Beszel automation (§8): create the PocketBase superuser
+# non-interactively, store its identity:password as a Secret (not a pre-minted
+# session token — internal/adapters/observability/beszel.go re-authenticates
+# with it on demand), register this node as a Beszel system, then helm upgrade
+# to wire the credential in. Unlike install.sh, this runs after the initial
+# helm install (this guest deploys observability after Cyclopus, not before),
+# so the wiring happens via upgrade rather than at install time.
+beszel_admin_email="beszel-admin@cyclopus.local"
+beszel_admin_password=$(openssl rand -base64 32 | tr -d '\n')
+sudo k3s kubectl -n "$NAMESPACE" rollout status deploy/beszel --timeout=3m >/dev/null 2>&1 \
+  || fail "beszel deployment did not become ready for superuser provisioning"
+beszel_pod=$(sudo k3s kubectl -n "$NAMESPACE" get pods -l app=beszel -o jsonpath='{.items[0].metadata.name}')
+[ -n "$beszel_pod" ] || fail "no beszel pod found for superuser provisioning"
+beszel_attempt=0
+beszel_superuser_ok=0
+while [ "$beszel_attempt" -lt 10 ]; do
+  if sudo k3s kubectl -n "$NAMESPACE" exec "$beszel_pod" -- /beszel superuser upsert "$beszel_admin_email" "$beszel_admin_password" >/dev/null 2>&1; then
+    beszel_superuser_ok=1
+    break
+  fi
+  beszel_attempt=$((beszel_attempt + 1))
+  sleep 3
+done
+[ "$beszel_superuser_ok" = 1 ] || fail "beszel superuser provisioning failed after $beszel_attempt attempts"
+sudo k3s kubectl -n "$NAMESPACE" create secret generic beszel-auth \
+  --from-literal=credential="${beszel_admin_email}:${beszel_admin_password}" \
+  --dry-run=client -o yaml | sudo k3s kubectl apply -f - >/dev/null || fail "beszel-auth secret creation failed"
+
+sudo install -d -m 0755 /opt/cyclopus/beszel || fail "cannot create /opt/cyclopus/beszel"
+sudo install -m 0755 "$ROOT/infra/observability/register_beszel_node.sh" /opt/cyclopus/beszel/register_node.sh \
+  || fail "register_node.sh staging failed"
+node_ip=$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)
+sudo /opt/cyclopus/beszel/register_node.sh "$(hostname)" "$node_ip" "$NAMESPACE" \
+  || fail "beszel node registration failed"
+
+helm upgrade "$RELEASE" "$ROOT/charts/cyclopus" \
+  --namespace "$NAMESPACE" \
+  --reuse-values \
+  --set secrets.beszelCredential="k8s-secret://${NAMESPACE}/beszel-auth#credential" \
+  --wait --timeout 5m || fail "helm upgrade to wire beszelCredential failed"
+retry 30 sudo k3s kubectl -n "$NAMESPACE" rollout status "deploy/$RELEASE" --timeout=30s \
+  || fail "Cyclopus API did not become ready after beszelCredential upgrade"
+
+step "asserting Beszel credential wiring"
+sudo k3s kubectl -n "$NAMESPACE" get secret beszel-auth -o jsonpath='{.data.credential}' | grep -q . \
+  || fail "beszel-auth secret lacks key credential"
+cyclopus_pod=$(sudo k3s kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=cyclopus -o name | head -n1)
+[ -n "$cyclopus_pod" ] || fail "no Cyclopus pod found for credential assertion"
+env_value=$(sudo k3s kubectl -n "$NAMESPACE" exec "$cyclopus_pod" -- printenv CYCLOPUS_OBSERVABILITY_BESZEL_CREDENTIAL_SECRET 2>/dev/null)
+[ "$env_value" = "k8s-secret://${NAMESPACE}/beszel-auth#credential" ] \
+  || fail "CYCLOPUS_OBSERVABILITY_BESZEL_CREDENTIAL_SECRET = '$env_value', expected the beszel-auth secretref"
 
 step "staging WAL-G backup toolkit at /opt/cyclopus/backup (mirrors install.sh staging)"
 # install.sh stages the toolkit unconditionally (even without S3 creds) so the

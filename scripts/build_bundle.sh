@@ -20,6 +20,7 @@
 #   gvisor/{runsc,containerd-shim-runsc-v1}
 #   walg/wal-g-pg-20.04-amd64.tar.gz
 #   observability/*.yaml                  applied by install.sh
+#   observability/register_beszel_node.sh staged to /opt/cyclopus/beszel by install.sh
 #   backup/*                              staged to /opt/cyclopus/backup
 #   bootstrap/*                           gVisor installer + common.sh
 #   versions.env                          pin SSOT snapshot
@@ -193,6 +194,7 @@ echo "$WALG_SHA256  $B/walg/$WALG_TARBALL" | sha256sum -c - || fail "WAL-G check
 log "copying manifests, scripts, versions.env"
 cp "$ROOT"/infra/observability/openobserve.yaml "$ROOT"/infra/observability/beszel.yaml \
   "$ROOT"/infra/observability/otel-collector.yaml "$ROOT"/infra/observability/beszel-agent.yaml \
+  "$ROOT"/infra/observability/register_beszel_node.sh \
   "$B/observability/"
 cp "$ROOT"/infra/backup/common.sh "$ROOT"/infra/backup/install_walg.sh \
   "$ROOT"/infra/backup/backup.sh "$ROOT"/infra/backup/restore.sh \

@@ -266,13 +266,13 @@ if [ -f "$STATE_FILE" ]; then
   # everything). Anything else — including $( )/` ` injection that would run
   # at source time — aborts before sourcing. Also turns a set -u abort on
   # garbage content into a clear message.
-  if grep -vqE '^(#.*|(AUTH_BOOTSTRAP_SECRET|AUTH_TOKEN_PEPPER|DB_PASSWORD|OO_PASSWORD|BESZEL_PUBLIC_KEY|BESZEL_PRIVATE_KEY)="[A-Za-z0-9+/=]*")$' "$STATE_FILE"; then
+  if grep -vqE '^(#.*|(AUTH_BOOTSTRAP_SECRET|AUTH_TOKEN_PEPPER|DB_PASSWORD|OO_PASSWORD|BESZEL_ADMIN_PASSWORD|BESZEL_PUBLIC_KEY|BESZEL_PRIVATE_KEY)="[A-Za-z0-9+/=]*")$' "$STATE_FILE"; then
     fail "STATE_FILE $STATE_FILE contains unexpected content (possible tampering); not sourcing"
   fi
   # shellcheck disable=SC1090
   . "$STATE_FILE"
   _missing=""
-  for _v in AUTH_BOOTSTRAP_SECRET AUTH_TOKEN_PEPPER DB_PASSWORD OO_PASSWORD BESZEL_PUBLIC_KEY BESZEL_PRIVATE_KEY; do
+  for _v in AUTH_BOOTSTRAP_SECRET AUTH_TOKEN_PEPPER DB_PASSWORD OO_PASSWORD BESZEL_ADMIN_PASSWORD BESZEL_PUBLIC_KEY BESZEL_PRIVATE_KEY; do
     [ -n "${!_v:-}" ] || _missing="$_missing $_v"
   done
   [ -z "$_missing" ] || fail "STATE_FILE $STATE_FILE is incomplete (missing${_missing}); fix it, or delete it to regenerate (WARNING: regenerating changes the OpenObserve admin password and invalidates enrolled Beszel agents)"
@@ -300,6 +300,13 @@ else
   # strips the only special chars base64 can produce), so build one that meets
   # every class unconditionally: fixed class sentinel + random base64 body.
   OO_PASSWORD="Cyclopus!0$(openssl rand -base64 24 | tr -d '\n' | tr '/+' 'xy')"
+  # Beszel PocketBase superuser password (§8). Plain base64 is fine here: unlike
+  # OpenObserve, PocketBase has no character-class password policy, just a
+  # minimum length that a 32-byte base64 value clears comfortably. This is a
+  # password the client re-authenticates with, not a pre-minted session token —
+  # see internal/adapters/observability/beszel.go for why that distinction
+  # matters (a static token would eventually expire; a credential doesn't).
+  BESZEL_ADMIN_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
   # Beszel hub<->agent SSH keypair. Only the PUBLIC key enters the cluster
   # (agents); the private key stays on the operator side in $SECRETS_FILE.
   # ssh-keygen comes from openssh-client (present on the supported base
@@ -318,12 +325,17 @@ AUTH_BOOTSTRAP_SECRET="${AUTH_BOOTSTRAP_SECRET}"
 AUTH_TOKEN_PEPPER="${AUTH_TOKEN_PEPPER}"
 DB_PASSWORD="${DB_PASSWORD}"
 OO_PASSWORD="${OO_PASSWORD}"
+BESZEL_ADMIN_PASSWORD="${BESZEL_ADMIN_PASSWORD}"
 BESZEL_PUBLIC_KEY="$(printf '%s' "$BESZEL_PUBLIC_KEY" | base64 | tr -d '\n')"
 BESZEL_PRIVATE_KEY="$(printf '%s' "$BESZEL_PRIVATE_KEY" | base64 | tr -d '\n')"
 EOF
   )
   log "Generated new secrets (saved to $STATE_FILE)"
 fi
+# Fixed, non-secret identity for the Beszel superuser Cyclopus provisions and
+# authenticates as (§8). Not persisted in STATE_FILE: it isn't a secret and
+# doesn't change between reruns.
+BESZEL_ADMIN_EMAIL="beszel-admin@cyclopus.local"
 
 # Install PostgreSQL. One apt transaction for ALL prerequisites (zstd extracts
 # the offline bundle; ufw avoids a second update+install in the firewall step).
@@ -989,6 +1001,58 @@ done
   write_tls_ingress beszel "beszel.${HOSTNAME_SUFFIX}" 8090
 } | $KUBECTL apply -f -
 
+# --- Beszel admin + operator-metrics credential (§8) -------------------------
+# Fully automates what used to require opening the Beszel UI: create the
+# PocketBase superuser non-interactively, store its credential (not a
+# pre-minted session token — see internal/adapters/observability/beszel.go for
+# why a password credential is used instead) as a k8s Secret, and register this
+# node as a Beszel "system" so the hub starts polling it immediately. Beszel is
+# an observability add-on: any failure below only leaves operator metrics
+# disabled (internal/config Observability.MetricsEnabled() requires both a base
+# URL and this credential) rather than failing the install.
+BESZEL_CREDENTIAL_SECRETREF=""
+# The whole chain runs inside one subshell so ANY step failing (script staging,
+# a slow/never-ready pod, the superuser CLI, secret creation) is caught by the
+# single `if (...)` below instead of tripping this script's `set -euo
+# pipefail` and aborting the entire platform install over an add-on.
+if (
+  mkdir -p /opt/cyclopus/beszel &&
+  if [ "$BUNDLE_MODE" = 1 ]; then
+    REGISTER_NODE_SRC="$BUNDLE_DIR/observability/register_beszel_node.sh"
+    [ -f "$REGISTER_NODE_SRC" ] || exit 1
+    cp "$REGISTER_NODE_SRC" /opt/cyclopus/beszel/register_node.sh
+  else
+    dl "$RAW_BASE/infra/observability/register_beszel_node.sh" -o /opt/cyclopus/beszel/register_node.sh
+  fi &&
+  chmod 0755 /opt/cyclopus/beszel/register_node.sh &&
+  $KUBECTL -n "$CYCLOPUS_NAMESPACE" rollout status deploy/beszel --timeout=3m >/dev/null 2>&1 &&
+  BESZEL_POD=$($KUBECTL -n "$CYCLOPUS_NAMESPACE" get pods -l app=beszel -o jsonpath='{.items[0].metadata.name}') &&
+  [ -n "$BESZEL_POD" ] &&
+  {
+    # A few retries: the pod can report Ready slightly before PocketBase has
+    # finished its local database migration, which the superuser CLI needs.
+    _bz_attempt=0
+    _bz_ok=0
+    while [ $_bz_attempt -lt 10 ]; do
+      if $KUBECTL -n "$CYCLOPUS_NAMESPACE" exec "$BESZEL_POD" -- /beszel superuser upsert "$BESZEL_ADMIN_EMAIL" "$BESZEL_ADMIN_PASSWORD" >/dev/null 2>&1; then
+        _bz_ok=1
+        break
+      fi
+      _bz_attempt=$((_bz_attempt + 1)); sleep 3
+    done
+    [ "$_bz_ok" = 1 ]
+  } &&
+  $KUBECTL -n "$CYCLOPUS_NAMESPACE" create secret generic beszel-auth \
+    --from-literal=credential="${BESZEL_ADMIN_EMAIL}:${BESZEL_ADMIN_PASSWORD}" \
+    --dry-run=client -o yaml | $KUBECTL apply -f -
+); then
+  BESZEL_CREDENTIAL_SECRETREF="k8s-secret://${CYCLOPUS_NAMESPACE}/beszel-auth#credential"
+  /opt/cyclopus/beszel/register_node.sh "$(hostname)" "$NODE_IP" "$CYCLOPUS_NAMESPACE" ||
+    warn "Beszel node registration failed (non-fatal); rerun /opt/cyclopus/beszel/register_node.sh $(hostname) $NODE_IP once Beszel is reachable"
+else
+  warn "Beszel superuser/credential provisioning failed (non-fatal); operator metrics stay disabled — rerun the installer, or provision manually and wire secrets.beszelCredential via helm upgrade"
+fi
+
 # Install Cyclopus. #2: secrets go in a 0600 values file (umask), never in argv.
 log "Installing Cyclopus..."
 DB_URL="postgres://cyclopus:${DB_PASSWORD}@${NODE_IP}:5432/cyclopus?sslmode=require"
@@ -1020,8 +1084,11 @@ secrets:
   # (internal/secretref, "k8s-secret://<namespace>/<name>#<key>") and resolves
   # it at boot; the referenced key holds the raw "user:password" value.
   openobserveCredential: "k8s-secret://${CYCLOPUS_NAMESPACE}/openobserve-auth#credential"
-  # Hub admin is created interactively post-install; token is added via the UI.
-  beszelToken: ""
+  # Same k8s-secret reference shape as openobserveCredential above. Empty when
+  # Beszel superuser provisioning (just above) didn't succeed — MetricsEnabled()
+  # then correctly reports metrics as disabled rather than reaching Beszel
+  # unauthenticated.
+  beszelCredential: "${BESZEL_CREDENTIAL_SECRETREF}"
 config:
   kubernetes:
     previewHostnameSuffix: "${HOSTNAME_SUFFIX}"
@@ -1154,6 +1221,12 @@ if [ -n "$WALG_S3_ENDPOINT" ] && [ -n "$WALG_S3_BUCKET" ] && [ -n "$AWS_ACCESS_K
   fi
 fi
 
+if [ -n "$BESZEL_CREDENTIAL_SECRETREF" ]; then
+  BESZEL_STATUS_NOTE="Auto-provisioned; Cyclopus already authenticates as this account for operator metrics."
+else
+  BESZEL_STATUS_NOTE="WARNING: automatic provisioning failed; operator metrics are disabled. Retry: kubectl -n ${CYCLOPUS_NAMESPACE} exec deploy/beszel -- /beszel superuser upsert ${BESZEL_ADMIN_EMAIL} '<password above>', then kubectl -n ${CYCLOPUS_NAMESPACE} create secret generic beszel-auth --from-literal=credential='${BESZEL_ADMIN_EMAIL}:<password above>' and helm upgrade ${CYCLOPUS_RELEASE} -n ${CYCLOPUS_NAMESPACE} --reuse-values --set secrets.beszelCredential=k8s-secret://${CYCLOPUS_NAMESPACE}/beszel-auth#credential <chart>"
+fi
+
 # Write secrets to a 0600 file created with a tight umask (#6) — no stdout leak (#2).
 ( umask 0077; cat > "$SECRETS_FILE" <<EOF
 Cyclopus Installation Secrets
@@ -1175,9 +1248,12 @@ OpenObserve (logs/traces UI): https://oo.${HOSTNAME_SUFFIX}
   User: admin@cyclopus.local
   Password: ${OO_PASSWORD}
 
-Beszel (metrics UI): https://beszel.${HOSTNAME_SUFFIX}
-  Create the admin account on first visit, then Add system for each node:
-    ${NODE_IP}:45876   (hub connects TO agents on the node IP)
+Beszel (metrics UI, optional — browsing it is never required): https://beszel.${HOSTNAME_SUFFIX}
+  Admin login: ${BESZEL_ADMIN_EMAIL} / ${BESZEL_ADMIN_PASSWORD}
+  ${BESZEL_STATUS_NOTE}
+  This node (${NODE_IP}:45876) was auto-registered as a Beszel system.
+  To register additional nodes later (no UI needed):
+    /opt/cyclopus/beszel/register_node.sh <node-name> <node-ip>
   Hub keypair (generated at install; private key is NOT in the cluster):
     Public key (already given to the agents via the beszel-agent-key secret):
     ${BESZEL_PUBLIC_KEY}
@@ -1208,10 +1284,9 @@ log "  1. cat $SECRETS_FILE"
 log "  2. Open https://${CONSOLE_HOST} and claim the admin account with the bootstrap secret"
 log "  3. kubectl -n $CYCLOPUS_NAMESPACE get pods"
 log "  4. OpenObserve: https://oo.${HOSTNAME_SUFFIX} (credentials in $SECRETS_FILE)"
-log "  5. Beszel: https://beszel.${HOSTNAME_SUFFIX}"
-log "     - Create the hub admin account, then Add system for each node: ${NODE_IP}:45876"
-log "     - Hub public key + private key (hub import): $SECRETS_FILE"
-log "     - Beszel API token for Cyclopus: add via the hub UI once the admin account exists"
+log "  5. Beszel (optional UI): https://beszel.${HOSTNAME_SUFFIX} — admin + operator metrics were auto-provisioned"
+log "     - To register additional nodes later: /opt/cyclopus/beszel/register_node.sh <name> <ip>"
+log "     - Hub public key + private key (hub import), and troubleshooting if provisioning failed: $SECRETS_FILE"
 if [ "$CYCLOPUS_CONTROL_PLANE_TAINT" != "true" ]; then
   log "  6. Optional (multi-node only): k3s kubectl taint nodes <node> cyclopus.app/role=control-plane:NoSchedule"
 fi
