@@ -3,7 +3,10 @@ package uihandler
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui"
@@ -35,6 +39,7 @@ func New(client *ui.Backend) http.Handler {
 
 	// Static assets (htmx, app.css) — embed.FS served at /static/*
 	r.Handle("/static/*", ui.StaticHandler())
+	r.Handle("/avatars/*", ui.AvatarHandler())
 
 	// Public routes — no session required
 	r.Get("/login", h.getLogin)
@@ -66,6 +71,10 @@ func New(client *ui.Backend) http.Handler {
 		r.Get("/environments/{envID}/status-fragment", h.getEnvStatusFragment)
 
 		// Settings
+		r.Get("/settings/user", h.getUserSettings)
+		r.Post("/settings/user/profile", h.postUserProfile)
+		r.Post("/settings/user/password", h.postUserPassword)
+
 		r.Get("/settings/git-connections", h.getGitConnections)
 		r.Post("/settings/git-connections", h.postGitConnection)
 		r.Post("/settings/git-connections/{id}/delete", h.deleteGitConnection)
@@ -90,6 +99,132 @@ func New(client *ui.Backend) http.Handler {
 	})
 
 	return r
+}
+
+func (h *Handler) getUserSettings(w http.ResponseWriter, r *http.Request) {
+	token, _ := ui.GetSession(r)
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	render(w, r, settingspages.User(user, org, flashFromCookie(w, r), "", "", ""))
+}
+
+func (h *Handler) postUserProfile(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	token, _ := ui.GetSession(r)
+	current, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	submitted := current
+	action := r.FormValue("action")
+	switch action {
+	case "avatar":
+		submitted.AvatarKey = r.FormValue("avatar_key")
+	case "email":
+		submitted.Email = r.FormValue("email")
+	default:
+		submitted.FirstName = r.FormValue("first_name")
+		submitted.LastName = r.FormValue("last_name")
+		submitted.DisplayName = r.FormValue("display_name")
+	}
+	_, err = h.client.UpdateCurrentUser(r.Context(), token, internalauth.UpdateProfileParams{
+		Email: submitted.Email, FirstName: submitted.FirstName, LastName: submitted.LastName,
+		DisplayName: submitted.DisplayName, AvatarKey: submitted.AvatarKey, CurrentPassword: r.FormValue("current_password"),
+	})
+	if err != nil {
+		openDialog := ""
+		if action == "avatar" || action == "email" {
+			openDialog = action
+		}
+		render(w, r, settingspages.User(submitted, org, nil, profileErrorMessage(err), "", openDialog))
+		return
+	}
+	message := "Profile updated."
+	if action == "avatar" {
+		message = "Avatar updated."
+	} else if action == "email" {
+		message = "Email updated."
+	}
+	redirectWithFlash(w, r, "/settings/user", "success", message)
+}
+
+func (h *Handler) postUserPassword(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	token, _ := ui.GetSession(r)
+	newPassword := r.FormValue("new_password")
+	if newPassword != r.FormValue("confirm_password") {
+		user, org, err := h.pageCtx(r.Context(), token)
+		if err != nil {
+			h.handleErr(w, r, err)
+			return
+		}
+		render(w, r, settingspages.User(user, org, nil, "", "New passwords do not match.", "password"))
+		return
+	}
+	if err := h.client.ChangePassword(r.Context(), token, r.FormValue("current_password"), newPassword); err != nil {
+		user, org, pageErr := h.pageCtx(r.Context(), token)
+		if pageErr != nil {
+			h.handleErr(w, r, pageErr)
+			return
+		}
+		render(w, r, settingspages.User(user, org, nil, "", passwordErrorMessage(err), "password"))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/user", "success", "Password changed. Other sessions were signed out.")
+}
+
+func profileErrorMessage(err error) string {
+	if errors.Is(err, internalauth.ErrUnauthenticated) {
+		return "Current password is incorrect."
+	}
+	if errors.Is(err, store.ErrAlreadyExists) || errors.Is(err, store.ErrConflict) {
+		return "That email address is already in use."
+	}
+	if errors.Is(err, internalauth.ErrInvalidCredential) {
+		return "Check the profile fields and selected avatar."
+	}
+	if errors.Is(err, internalauth.ErrRateLimited) {
+		return "Too many attempts. Wait a minute and try again."
+	}
+	return "Profile update failed. Try again."
+}
+
+func passwordErrorMessage(err error) string {
+	if errors.Is(err, internalauth.ErrUnauthenticated) {
+		return "Current password is incorrect."
+	}
+	if errors.Is(err, internalauth.ErrInvalidCredential) {
+		return "New password must contain at least 8 characters."
+	}
+	if errors.Is(err, internalauth.ErrRateLimited) {
+		return "Too many attempts. Wait a minute and try again."
+	}
+	if errors.Is(err, store.ErrConflict) {
+		return "Your password changed in another session. Reload and try again."
+	}
+	return "Password change failed. Try again."
+}
+
+func trustedFormOrigin(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(parsed.Host, r.Host)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -126,22 +261,34 @@ func newIdemKey() string {
 	return hex.EncodeToString(b)
 }
 
-// flashFromQuery reads ?flash=<kind>&msg=<text> from the request URL.
-func flashFromQuery(r *http.Request) *ui.FlashMessage {
-	kind := r.URL.Query().Get("flash")
-	msg := r.URL.Query().Get("msg")
-	if kind == "" || msg == "" {
+const flashCookieName = "cyclopus_flash"
+
+// flashFromCookie consumes the one-time notification set by redirectWithFlash.
+func flashFromCookie(w http.ResponseWriter, r *http.Request) *ui.FlashMessage {
+	cookie, err := r.Cookie(flashCookieName)
+	if err != nil || cookie.Value == "" {
 		return nil
 	}
-	return &ui.FlashMessage{Kind: kind, Message: msg}
+	http.SetCookie(w, &http.Cookie{Name: flashCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	payload, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return nil
+	}
+	var flash ui.FlashMessage
+	if json.Unmarshal(payload, &flash) != nil || flash.Message == "" {
+		return nil
+	}
+	return &flash
 }
 
-// redirectWithFlash appends flash query params and redirects.
+// redirectWithFlash stores a one-time notification without exposing it in the URL.
 func redirectWithFlash(w http.ResponseWriter, r *http.Request, path, kind, msg string) {
-	v := url.Values{}
-	v.Set("flash", kind)
-	v.Set("msg", msg)
-	http.Redirect(w, r, path+"?"+v.Encode(), http.StatusSeeOther)
+	payload, _ := json.Marshal(ui.FlashMessage{Kind: kind, Message: msg})
+	http.SetCookie(w, &http.Cookie{
+		Name: flashCookieName, Value: base64.RawURLEncoding.EncodeToString(payload), Path: "/",
+		MaxAge: 60, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, path, http.StatusSeeOther)
 }
 
 // render writes Content-Type and renders a templ component.
@@ -232,7 +379,7 @@ func (h *Handler) getProjects(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	render(w, r, pages.Projects(projects, org, user, flashFromQuery(r), ""))
+	render(w, r, pages.Projects(projects, org, user, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postProject(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +418,7 @@ func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	render(w, r, pages.ProjectDetail(*proj, apps, user, org, flashFromQuery(r), ""))
+	render(w, r, pages.ProjectDetail(*proj, apps, user, org, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postApp(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +494,7 @@ func (h *Handler) getApp(w http.ResponseWriter, r *http.Request) {
 			prodRelease, _ = h.client.GetRelease(r.Context(), token, *prodEnv.CurrentReleaseID)
 		}
 	}
-	render(w, r, pages.AppOverview(*app, *proj, prodEnv, prodAlias, prodRelease, previews, user, org, flashFromQuery(r)))
+	render(w, r, pages.AppOverview(*app, *proj, prodEnv, prodAlias, prodRelease, previews, user, org, flashFromCookie(w, r)))
 }
 
 func (h *Handler) getAppSettings(w http.ResponseWriter, r *http.Request) {
@@ -367,7 +514,7 @@ func (h *Handler) getAppSettings(w http.ResponseWriter, r *http.Request) {
 	if proj == nil {
 		proj = &store.Project{ID: app.ProjectID}
 	}
-	render(w, r, pages.AppSettings(*app, *proj, user, org, flashFromQuery(r), ""))
+	render(w, r, pages.AppSettings(*app, *proj, user, org, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postAppSettings(w http.ResponseWriter, r *http.Request) {
@@ -452,7 +599,7 @@ func (h *Handler) getLogs(w http.ResponseWriter, r *http.Request) {
 		entries = nil
 		nextCursor = ""
 	}
-	render(w, r, pages.Logs(*app, *proj, entries, nextCursor, envID, user, org, flashFromQuery(r)))
+	render(w, r, pages.Logs(*app, *proj, entries, nextCursor, envID, user, org, flashFromCookie(w, r)))
 }
 
 // ── Environments ──────────────────────────────────────────────────────────────
@@ -489,7 +636,7 @@ func (h *Handler) getEnvironment(w http.ResponseWriter, r *http.Request) {
 		a := aliases[0]
 		alias = &a
 	}
-	render(w, r, pages.EnvironmentDetail(*env, *app, *proj, releases, alias, certs, domains, envVars, user, org, flashFromQuery(r)))
+	render(w, r, pages.EnvironmentDetail(*env, *app, *proj, releases, alias, certs, domains, envVars, user, org, flashFromCookie(w, r)))
 }
 
 func (h *Handler) postRollback(w http.ResponseWriter, r *http.Request) {
@@ -535,7 +682,7 @@ func (h *Handler) getGitConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conns, _ := h.client.ListGitConnections(r.Context(), token, org.ID)
-	render(w, r, settingspages.GitConnections(conns, user, org, flashFromQuery(r), ""))
+	render(w, r, settingspages.GitConnections(conns, user, org, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postGitConnection(w http.ResponseWriter, r *http.Request) {
@@ -584,7 +731,7 @@ func (h *Handler) getRegistries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	regs, _ := h.client.ListRegistries(r.Context(), token, org.ID)
-	render(w, r, settingspages.Registries(regs, user, org, flashFromQuery(r), ""))
+	render(w, r, settingspages.Registries(regs, user, org, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postRegistry(w http.ResponseWriter, r *http.Request) {
@@ -627,7 +774,7 @@ func (h *Handler) getWebhooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hooks, _ := h.client.ListWebhooks(r.Context(), token, org.ID)
-	render(w, r, settingspages.Webhooks(hooks, user, org, flashFromQuery(r), ""))
+	render(w, r, settingspages.Webhooks(hooks, user, org, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postWebhook(w http.ResponseWriter, r *http.Request) {
@@ -674,7 +821,7 @@ func (h *Handler) getTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokens, _ := h.client.ListAPITokens(r.Context(), token)
-	render(w, r, settingspages.Tokens(tokens, "", user, org, flashFromQuery(r), ""))
+	render(w, r, settingspages.Tokens(tokens, "", user, org, flashFromCookie(w, r), ""))
 }
 
 func (h *Handler) postToken(w http.ResponseWriter, r *http.Request) {
@@ -723,7 +870,7 @@ func (h *Handler) getAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	pageToken := r.URL.Query().Get("page_token")
 	events, nextPageToken, _ := h.client.ListAuditEvents(r.Context(), token, org.ID, pageToken)
-	render(w, r, settingspages.AuditLog(events, nextPageToken, user, org, flashFromQuery(r)))
+	render(w, r, settingspages.AuditLog(events, nextPageToken, user, org, flashFromCookie(w, r)))
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
@@ -736,7 +883,7 @@ func (h *Handler) getReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runs, _ := h.client.ListReconciliations(r.Context(), token, org.ID)
-	render(w, r, adminpages.Reconcile(runs, user, org, flashFromQuery(r)))
+	render(w, r, adminpages.Reconcile(runs, user, org, flashFromCookie(w, r)))
 }
 
 func (h *Handler) postReconcile(w http.ResponseWriter, r *http.Request) {

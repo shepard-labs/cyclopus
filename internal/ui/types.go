@@ -21,7 +21,7 @@ type Session struct {
 	User        store.User
 }
 
-// FlashMessage is a transient UI notification passed via query param or context.
+// FlashMessage is a transient UI notification passed through a one-time cookie.
 type FlashMessage struct {
 	Kind    string // "success" | "error" | "info"
 	Message string

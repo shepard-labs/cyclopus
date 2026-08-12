@@ -37,3 +37,92 @@
 .sidebar-item svg {
   flex-shrink: 0;
 }
+
+.sidebar-account {
+  position: relative;
+}
+.sidebar-account summary {
+  list-style: none;
+}
+.sidebar-account summary::-webkit-details-marker {
+  display: none;
+}
+.sidebar-account-trigger {
+  width: 100%;
+  color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
+}
+.sidebar-account[open] .sidebar-account-trigger {
+  background-color: var(--color-base-300);
+  color: var(--color-base-content);
+}
+.sidebar-account-chevron {
+  width: 1rem;
+  height: 1rem;
+  margin-left: auto;
+  transition: transform 150ms;
+}
+.sidebar-account-avatar {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: var(--color-base-100);
+}
+.sidebar-account[open] .sidebar-account-chevron {
+  transform: rotate(180deg);
+}
+.sidebar-account-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 20;
+  padding: 0.25rem;
+  overflow: hidden;
+  background-color: var(--color-base-200);
+  border: var(--border) solid var(--color-base-300);
+  border-radius: var(--radius-field);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+.sidebar-account-label {
+  padding: 0.5rem 0.625rem;
+}
+.sidebar-account-label-title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-base-content);
+}
+.sidebar-account-email {
+  margin: 0.125rem 0 0;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-account-separator {
+  height: var(--border);
+  margin: 0.25rem -0.25rem;
+  background-color: var(--color-base-300);
+}
+.sidebar-account-action {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  color: var(--color-base-content);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-field);
+  cursor: pointer;
+}
+.sidebar-account-action:hover,
+.sidebar-account-action:focus-visible {
+  background-color: var(--color-base-300);
+  outline: none;
+}

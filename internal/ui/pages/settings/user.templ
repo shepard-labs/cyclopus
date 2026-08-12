@@ -1,0 +1,185 @@
+package settings
+
+import (
+	"github.com/shepard-labs/cyclopus/internal/avatar"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
+)
+
+templ User(user store.User, org store.Organization, flash *ui.FlashMessage, profileError, passwordError, openDialog string) {
+	@components.Page("User Settings", user, org, flash, "/settings/user", userContent(user, profileError, passwordError, openDialog))
+}
+
+templ userContent(user store.User, profileError, passwordError, openDialog string) {
+	<div class="user-settings max-w-3xl space-y-6">
+		<div>
+			<h1 class="text-xl font-semibold">User Settings</h1>
+			<p class="text-sm text-base-content/50 mt-1">Manage your profile and account security.</p>
+		</div>
+
+		<div class="card space-y-4">
+			<div>
+				<h2 class="text-sm font-semibold text-base-content/90">Profile</h2>
+			</div>
+			if profileError != "" && openDialog == "" {
+				<div class="alert alert-error" role="alert">{ profileError }</div>
+			}
+			<div class="profile-avatar-row">
+				<button type="button" class="current-avatar" onclick="document.getElementById('avatar-dialog').showModal()" aria-label="Change avatar">
+					<img src={ avatar.URL(user.AvatarKey) } alt="Current avatar"/>
+				</button>
+			</div>
+			<form id="profile-form" method="POST" action="/settings/user/profile" class="space-y-4">
+				<input type="hidden" name="action" value="profile"/>
+				<div class="grid grid-cols-2 gap-4">
+					<div class="fieldset">
+						<label for="first-name">First name</label>
+						<input id="first-name" name="first_name" value={ user.FirstName } maxlength="100" autocomplete="given-name"/>
+					</div>
+					<div class="fieldset">
+						<label for="last-name">Last name</label>
+						<input id="last-name" name="last_name" value={ user.LastName } maxlength="100" autocomplete="family-name"/>
+					</div>
+				</div>
+				<div class="fieldset">
+					<label for="display-name">Display name</label>
+					<input id="display-name" name="display_name" value={ user.DisplayName } maxlength="200" autocomplete="nickname" placeholder="How you appear in Cyclopus"/>
+				</div>
+				<div class="profile-actions"><button id="profile-save" type="submit" class="btn btn-primary" disabled>Save</button></div>
+			</form>
+			<script>
+				(function () {
+					const form = document.getElementById('profile-form')
+					const save = document.getElementById('profile-save')
+					const initial = new FormData(form)
+					function updateSaveState() {
+						const current = new FormData(form)
+						save.disabled = ['first_name', 'last_name', 'display_name'].every(function (name) {
+							return current.get(name) === initial.get(name)
+						})
+					}
+					form.addEventListener('input', updateSaveState)
+					form.addEventListener('reset', function () { requestAnimationFrame(updateSaveState) })
+				})()
+			</script>
+		</div>
+
+		<div class="card settings-row">
+			<div>
+				<h2 class="text-sm font-semibold text-base-content/90">Email</h2>
+				<p class="text-sm text-base-content/50 mt-1">{ user.Email }</p>
+			</div>
+			<button type="button" class="btn btn-ghost" onclick="document.getElementById('email-dialog').showModal()">Update</button>
+		</div>
+
+		<div class="card settings-row">
+			<div>
+				<h2 class="text-sm font-semibold text-base-content/90">Password</h2>
+				<p class="text-sm text-base-content/50 mt-1">Change your password and sign out other sessions.</p>
+			</div>
+			<button type="button" class="btn btn-ghost" onclick="document.getElementById('password-dialog').showModal()">Update</button>
+		</div>
+
+		<dialog id="avatar-dialog" class="settings-dialog">
+			<div class="dialog-panel">
+				<div class="dialog-header">
+					<div>
+						<h2>Choose an avatar</h2>
+						<p>Select the avatar you want to use.</p>
+					</div>
+					<button type="button" class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">@iconDialogClose()</button>
+				</div>
+				if profileError != "" && openDialog == "avatar" {
+					<div class="alert alert-error" role="alert">{ profileError }</div>
+				}
+				<form method="POST" action="/settings/user/profile" class="space-y-4">
+					<input type="hidden" name="action" value="avatar"/>
+					<div class="avatar-picker">
+						for _, key := range avatar.Keys {
+							<label class="avatar-option">
+								<input type="radio" name="avatar_key" value={ key } checked?={ user.AvatarKey == key } required/>
+								<img src={ avatar.URL(key) } alt=""/>
+								<span class="sr-only">Avatar option { key }</span>
+							</label>
+						}
+					</div>
+					<div class="dialog-actions">
+						<button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+			</div>
+		</dialog>
+
+		<dialog id="email-dialog" class="settings-dialog">
+			<div class="dialog-panel">
+				<div class="dialog-header">
+					<div><h2>Update email</h2><p>Enter your new email and current password.</p></div>
+					<button type="button" class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">@iconDialogClose()</button>
+				</div>
+				if profileError != "" && openDialog == "email" {
+					<div class="alert alert-error" role="alert">{ profileError }</div>
+				}
+				<form method="POST" action="/settings/user/profile" class="space-y-4">
+					<input type="hidden" name="action" value="email"/>
+					<div class="fieldset">
+						<label for="new-email">New email</label>
+						<input type="email" id="new-email" name="email" value={ user.Email } maxlength="320" autocomplete="email" required/>
+					</div>
+					<div class="fieldset">
+						<label for="email-password">Current password</label>
+						<input type="password" id="email-password" name="current_password" autocomplete="current-password" required/>
+					</div>
+					<div class="dialog-actions">
+						<button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+			</div>
+		</dialog>
+
+		<dialog id="password-dialog" class="settings-dialog">
+			<div class="dialog-panel">
+				<div class="dialog-header">
+					<div><h2>Change password</h2><p>Other signed-in sessions will be revoked.</p></div>
+					<button type="button" class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">@iconDialogClose()</button>
+				</div>
+				if passwordError != "" {
+					<div class="alert alert-error" role="alert">{ passwordError }</div>
+				}
+				<form method="POST" action="/settings/user/password" class="space-y-4">
+					<div class="fieldset">
+						<label for="current-password">Current password</label>
+						<input type="password" id="current-password" name="current_password" autocomplete="current-password" required/>
+					</div>
+					<div class="fieldset">
+						<label for="new-password">New password</label>
+						<input type="password" id="new-password" name="new_password" minlength="8" autocomplete="new-password" required/>
+					</div>
+					<div class="fieldset">
+						<label for="confirm-password">Confirm new password</label>
+						<input type="password" id="confirm-password" name="confirm_password" minlength="8" autocomplete="new-password" required/>
+					</div>
+					<div class="dialog-actions">
+						<button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+			</div>
+		</dialog>
+		if openDialog == "avatar" {
+			<script>document.getElementById('avatar-dialog').showModal()</script>
+		} else if openDialog == "email" {
+			<script>document.getElementById('email-dialog').showModal()</script>
+		} else if openDialog == "password" {
+			<script>document.getElementById('password-dialog').showModal()</script>
+		}
+	</div>
+}
+
+templ iconDialogClose() {
+	<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+	</svg>
+}
