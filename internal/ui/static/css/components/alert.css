@@ -43,7 +43,7 @@
   color: var(--color-base-content);
   background-color: var(--color-base-200);
   border-color: var(--color-base-300);
-  box-shadow: 0 16px 40px rgb(0 0 0 / 40%);
+  box-shadow: 0 16px 40px var(--shadow);
   animation: toast-in 180ms ease-out, toast-out 180ms ease-in 4.82s forwards;
 }
 .toast.alert-success svg:first-child { color: var(--color-success); }

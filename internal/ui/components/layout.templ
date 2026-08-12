@@ -10,11 +10,14 @@ import (
 // stylesheets (under /static/css/pages/) to link after the shared ui.css.
 templ Page(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, content templ.Component, extraCSS ...string) {
 	<!DOCTYPE html>
-	<html lang="en" class="h-full" data-theme="cyclopus-dark">
+	<html lang="en" class="h-full">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } — Cyclopus</title>
+			<!-- theme.js loads synchronously before the stylesheet: it applies the
+			     persisted preset to <html> so the first paint uses the right theme. -->
+			<script src="/static/theme.js"></script>
 			<link rel="stylesheet" href="/static/css/ui.css"/>
 			for _, href := range extraCSS {
 				<link rel="stylesheet" href={ href }/>
@@ -41,11 +44,13 @@ templ Page(title string, user store.User, org store.Organization, flash *ui.Flas
 // AuthPage renders a minimal centered page for login / bootstrap (no sidebar).
 templ AuthPage(title string) {
 	<!DOCTYPE html>
-	<html lang="en" class="h-full" data-theme="cyclopus-dark">
+	<html lang="en" class="h-full">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } — Cyclopus</title>
+			<!-- synchronous, before the stylesheet — see Page above. -->
+			<script src="/static/theme.js"></script>
 			<link rel="stylesheet" href="/static/css/ui.css"/>
 		</head>
 		<body class="h-full flex items-center justify-center bg-base-100 text-base-content">

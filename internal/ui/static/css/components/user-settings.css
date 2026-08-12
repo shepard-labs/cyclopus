@@ -25,6 +25,69 @@
 .profile-actions { display: flex; justify-content: flex-end; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 
+/* theme preset picker (populated by theme.js from cyclopusTheme.themes) */
+.theme-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--color-base-100);
+  border: var(--border) solid var(--color-base-300);
+  border-radius: var(--radius-box);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms;
+}
+.theme-option:hover { border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-base-300)); }
+.theme-option-selected { border-color: var(--color-primary); }
+
+/* type-sample tile: Aa in the preset's sans + mono, on its own page surface */
+.theme-type {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 20%, transparent);
+}
+.theme-type b { font-size: 1.125rem; font-weight: 600; line-height: 1; }
+.theme-type b + b { font-size: 1rem; }
+
+.theme-option-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.theme-option-label { font-size: 0.8125rem; font-weight: 600; color: var(--color-base-content); line-height: 1; }
+/* mode chip — shadcn badge outline variant: border-border, text-foreground,
+   px-2 py-0.5 text-xs font-medium rounded-full. Foreground (not a dimmed tone)
+   + full border is what keeps it legible on every surface; font inherits the
+   preset's sans from the label wrapper so the row reads as one family. */
+.theme-option-mode {
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  color: var(--color-base-content);
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 15%, transparent);
+  white-space: nowrap;
+}
+.theme-swatches { display: flex; gap: 3px; margin-left: auto; flex-shrink: 0; }
+.theme-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 20%, transparent);
+}
+
 .settings-dialog {
   position: fixed;
   inset: 0;
@@ -50,7 +113,7 @@
   background-color: var(--color-base-200);
   border: var(--border) solid var(--color-base-300);
   border-radius: var(--radius-box);
-  box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+  box-shadow: 0 24px 70px var(--shadow);
 }
 .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .dialog-header h2 { margin: 0; font-size: 1rem; font-weight: 600; }

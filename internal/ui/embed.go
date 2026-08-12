@@ -15,12 +15,19 @@ var staticFS embed.FS
 
 // StaticHandler serves files under internal/ui/static/ via embed.FS.
 // Requests arrive as /static/<file>; the FS path is static/<file>.
+// Assets are embedded at build time, so a deploy always changes their bytes:
+// safe to cache for a day without content hashing, and it keeps hx-boost
+// navigations from revalidating ~18 font files per click.
 func StaticHandler() http.Handler {
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		panic("ui: embed static subtree: " + err.Error())
 	}
-	return http.StripPrefix("/static/", http.FileServer(http.FS(sub)))
+	files := http.FileServer(http.FS(sub))
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		files.ServeHTTP(w, r)
+	}))
 }
 
 // AvatarHandler serves persisted avatar IDs and falls back to the default when

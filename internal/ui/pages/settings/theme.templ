@@ -1,0 +1,65 @@
+package settings
+
+import (
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
+)
+
+templ Theme(user store.User, org store.Organization, flash *ui.FlashMessage) {
+	@components.Page("Theme", user, org, flash, "/settings/theme", themeContent())
+}
+
+// ThemePreview renders just the theme card grid inside the bare layout for
+// headless design review (served only with CYCLOPUS_UI_PREVIEW=1).
+templ ThemePreview() {
+	@components.AuthPage("Theme Preview") {
+		<div class="w-full max-w-3xl p-6">
+			@themeContent()
+		</div>
+	}
+}
+
+templ themeContent() {
+	<div class="max-w-3xl space-y-6">
+		<div>
+			<h1 class="text-xl font-semibold">Theme</h1>
+			<p class="text-sm text-base-content/50 mt-1">Applies instantly and is remembered on this device.</p>
+		</div>
+		<div class="card">
+			<div class="theme-grid" id="theme-grid"></div>
+			<script>
+				(function () {
+					var grid = document.getElementById('theme-grid')
+					var themes = window.cyclopusTheme.themes
+					Object.keys(themes).forEach(function (name) {
+						var t = themes[name]
+						var v = t.vars
+						var b = document.createElement('button')
+						b.type = 'button'
+						b.className = 'theme-option'
+						b.setAttribute('data-theme-name', name)
+						b.setAttribute('aria-pressed', 'false')
+						var swatches = ['--color-base-100', '--color-base-300', '--color-primary', '--color-warning', '--color-error', '--color-success']
+							.map(function (k) {
+								return '<span class="theme-swatch" style="background:' + v[k] + '"></span>'
+							}).join('')
+						b.innerHTML =
+							'<span class="theme-type" style="background:' + v['--color-base-100'] + ';border-radius:' + v['--radius-field'] + '">' +
+								'<b style="color:' + v['--color-base-content'] + ';font-family:' + v['--font-sans'] + ',sans-serif">Aa</b>' +
+								'<b style="color:' + v['--color-primary'] + ';font-family:' + v['--font-mono'] + ',monospace">Aa</b>' +
+							'</span>' +
+							'<span class="theme-option-head">' +
+								'<span class="theme-option-label" style="font-family:' + v['--font-sans'] + ',sans-serif">' + t.label + '</span>' +
+								'<span class="theme-option-mode" style="font-family:' + v['--font-sans'] + ',sans-serif">' + (t.dark ? 'Dark' : 'Light') + '</span>' + /* shadcn badge outline */
+							'</span>' +
+							'<span class="theme-swatches">' + swatches + '</span>'
+						b.onclick = function () { window.cyclopusTheme.apply(name) }
+						grid.appendChild(b)
+					})
+					window.cyclopusTheme.sync()
+				})()
+			</script>
+		</div>
+	</div>
+}

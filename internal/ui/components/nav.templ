@@ -71,11 +71,15 @@ templ Sidebar(org store.Organization, user store.User, currentPath string) {
 						<p class="sidebar-account-email">{ user.Email }</p>
 					</div>
 					<div class="sidebar-account-separator"></div>
-					<a href="/settings/user" class="sidebar-account-action">
-						@iconSettings()
-						User Settings
-					</a>
-					<form method="POST" action="/logout" hx-boost="false">
+				<a href="/settings/user" class="sidebar-account-action">
+					@iconSettings()
+					User Settings
+				</a>
+				<a href="/settings/theme" class="sidebar-account-action">
+					@iconTheme()
+					Theme
+				</a>
+				<form method="POST" action="/logout" hx-boost="false">
 						<button type="submit" class="sidebar-account-action">
 							@iconLogout()
 							Sign out
@@ -174,6 +178,13 @@ templ iconLogout() {
 		<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
 		<polyline points="16 17 21 12 16 7"></polyline>
 		<line x1="21" y1="12" x2="9" y2="12"></line>
+	</svg>
+}
+
+templ iconTheme() {
+	<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+		<circle cx="12" cy="12" r="9"></circle>
+		<path d="M12 3a9 9 0 0 1 0 18V3Z" fill="currentColor" stroke="none"></path>
 	</svg>
 }
 

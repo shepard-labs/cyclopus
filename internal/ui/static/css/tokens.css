@@ -1,21 +1,24 @@
 /* Cyclopus UI design tokens — daisyUI-compatible token structure.
    Hand-rolled (no Tailwind build); token names follow the daisyUI standard:
    base surface scale, brand colors, semantic state colors, radius scale.
-   Values are the Cyclopus dark theme palette. */
-:root,
-[data-theme="cyclopus-dark"] {
+
+   These :root values are the Obsidian preset and serve two purposes: the no-JS
+   fallback, and the first paint before theme.js (loaded synchronously in <head>)
+   applies the persisted preset on top. theme.js is the source of truth for preset
+   values — keep this block in sync with the obsidian entry there. */
+:root {
   /* base surfaces (daisyUI: base-100 = page, base-200 = cards, base-300 = raised/borders) */
-  --color-base-100: #09090b;
-  --color-base-200: #18181b;
-  --color-base-300: #27272a;
-  --color-base-content: #f4f4f5;
+  --color-base-100: #0a0a0b;
+  --color-base-200: #111113;
+  --color-base-300: #18181b;
+  --color-base-content: #fafafa;
 
   /* brand */
-  --color-primary: #8b5cf6;
-  --color-primary-content: #f4f4f5;
-  --color-secondary: #27272a;
-  --color-secondary-content: #f4f4f5;
-  --color-accent: #a78bfa;
+  --color-primary: #2dd4bf;
+  --color-primary-content: #04211d;
+  --color-secondary: #18181b;
+  --color-secondary-content: #fafafa;
+  --color-accent: #5eead4;
   --color-accent-content: #09090b;
 
   /* neutral (used as the "gray" state color: offline, superseded, unknown) */
@@ -29,13 +32,20 @@
   --color-success-content: #022c22;
   --color-warning: #fbbf24;
   --color-warning-content: #451a03;
-  --color-error: #f87171;
+  --color-error: #fb7185;
   --color-error-content: #450a0a;
 
   /* radius scale (daisyUI: selector/field/box) */
   --radius-selector: 0.25rem;
-  --radius-field: 0.375rem;
-  --radius-box: 0.5rem;
+  --radius-field: 6px;
+  --radius-box: 8px;
 
   --border: 1px;
+
+  /* elevation (per-mode via theme.js: heavy on dark presets, softer on light) */
+  --shadow: rgb(0 0 0 / 40%);
+
+  /* type pairing (per-preset via theme.js) */
+  --font-sans: 'Space Grotesk';
+  --font-mono: 'JetBrains Mono';
 }

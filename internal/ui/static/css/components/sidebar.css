@@ -82,7 +82,7 @@
   background-color: var(--color-base-200);
   border: var(--border) solid var(--color-base-300);
   border-radius: var(--radius-field);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  box-shadow: 0 10px 30px var(--shadow);
 }
 .sidebar-account-label {
   padding: 0.5rem 0.625rem;
