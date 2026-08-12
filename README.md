@@ -248,6 +248,20 @@ go test -v ./internal/server -run TestE2EUserFlows
 go run cmd/cyclopus/main.go serve
 ```
 
+For full local development on macOS, including real Kubernetes deployments and
+automatic `templ`/Go/CSS rebuilds:
+
+```bash
+# Requires: Postgres 18, Docker or OrbStack, k3d, kubectl, Helm, templ, and Air
+./scripts/dev/setup.sh
+./scripts/dev/run.sh
+```
+
+Open `http://127.0.0.1:8080`. Local workload hostnames use
+`*.127.0.0.1.sslip.io`. The setup maps the `gvisor` RuntimeClass to k3d's `runc`
+handler because nested gVisor is unavailable on macOS; production installations
+continue to use real gVisor.
+
 ## 🤝 Contributing
 
 Cyclopus is under active development. Contributions welcome!

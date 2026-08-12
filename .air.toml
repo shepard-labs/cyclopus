@@ -1,0 +1,19 @@
+root = "."
+tmp_dir = ".cyclopus-dev/tmp"
+
+[build]
+cmd = "templ generate && go build -o .cyclopus-dev/tmp/cyclopus ./cmd/cyclopus"
+entrypoint = [".cyclopus-dev/tmp/cyclopus", "serve"]
+include_ext = ["go", "templ", "css"]
+exclude_dir = [".cyclopus-dev", ".git", ".codegraph"]
+exclude_regex = ["_templ.go$"]
+delay = 200
+stop_on_error = true
+send_interrupt = true
+kill_delay = 500
+
+[log]
+time = true
+
+[screen]
+clear_on_rebuild = false
