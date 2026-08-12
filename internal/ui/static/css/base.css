@@ -14,7 +14,7 @@ body {
 body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans, ui-sans-serif), system-ui, -apple-system, sans-serif;
 }
 img,
 picture,

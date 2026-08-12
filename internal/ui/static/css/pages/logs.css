@@ -1,6 +1,6 @@
 /* pages/logs.css — styles used only by the logs page. */
 .log-viewer {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono, ui-monospace), monospace;
   font-size: 0.8125rem;
   line-height: 1.6;
   background-color: var(--color-base-100);

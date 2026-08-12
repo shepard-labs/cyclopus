@@ -100,7 +100,7 @@
 .font-medium { font-weight: 500; }
 .font-semibold { font-weight: 600; }
 .font-bold { font-weight: 700; }
-.font-mono { font-family: ui-monospace, monospace; }
+.font-mono { font-family: var(--font-mono, ui-monospace), monospace; }
 .text-left { text-align: left; }
 .text-right { text-align: right; }
 .text-center { text-align: center; }
