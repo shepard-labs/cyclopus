@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
-	"github.com/google/uuid"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -132,6 +132,44 @@ func (h *apiHandlers) GetCurrentUser(ctx context.Context, _ *cyclopusv1.GetCurre
 		return nil, rpcError(err)
 	}
 	return &cyclopusv1.GetCurrentUserResponse{User: userProto(user)}, nil
+}
+
+func (h *apiHandlers) UpdateCurrentUser(ctx context.Context, req *cyclopusv1.UpdateCurrentUserRequest) (*cyclopusv1.UpdateCurrentUserResponse, error) {
+	if _, err := sessionActor(ctx); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"email": req.GetEmail(), "avatar_key": req.GetAvatarKey()}); err != nil {
+		return nil, err
+	}
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	user, err := h.auth.UpdateProfile(ctx, principal, internalauth.UpdateProfileParams{
+		Email: req.GetEmail(), FirstName: req.GetFirstName(), LastName: req.GetLastName(),
+		DisplayName: req.GetDisplayName(), AvatarKey: req.GetAvatarKey(), CurrentPassword: req.GetCurrentPassword(),
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.UpdateCurrentUserResponse{User: userProto(user)}, nil
+}
+
+func (h *apiHandlers) ChangePassword(ctx context.Context, req *cyclopusv1.ChangePasswordRequest) (*cyclopusv1.ChangePasswordResponse, error) {
+	if _, err := sessionActor(ctx); err != nil {
+		return nil, err
+	}
+	if err := requiredFields(map[string]string{"current_password": req.GetCurrentPassword(), "new_password": req.GetNewPassword()}); err != nil {
+		return nil, err
+	}
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.auth.ChangePassword(ctx, principal, req.GetCurrentPassword(), req.GetNewPassword()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.ChangePasswordResponse{}, nil
 }
 
 func (h *apiHandlers) CreateApiToken(ctx context.Context, req *cyclopusv1.CreateApiTokenRequest) (*cyclopusv1.CreateApiTokenResponse, error) {
@@ -1283,6 +1321,8 @@ func rpcError(err error) error {
 		return notFound()
 	case errors.Is(err, internalauth.ErrUnauthenticated):
 		return status.Error(codes.Unauthenticated, "invalid credentials")
+	case errors.Is(err, internalauth.ErrRateLimited):
+		return status.Error(codes.ResourceExhausted, "too many authentication attempts")
 	case errors.Is(err, service.ErrInvalidArgument), errors.Is(err, internalauth.ErrInvalidScope), errors.Is(err, internalauth.ErrInvalidCredential):
 		return fieldError("request", "contains invalid values")
 	case errors.Is(err, service.ErrForbidden):
@@ -1458,7 +1498,8 @@ func reconciliationInput(req *cyclopusv1.StartReconciliationRequest) (service.Re
 }
 
 func userProto(v store.User) *cyclopusv1.User {
-	return &cyclopusv1.User{Id: v.ID, OrganizationId: v.OrgID, Email: v.Email, CreatedAt: timestamppb.New(v.CreatedAt)}
+	return &cyclopusv1.User{Id: v.ID, OrganizationId: v.OrgID, Email: v.Email, FirstName: v.FirstName,
+		LastName: v.LastName, DisplayName: v.DisplayName, AvatarKey: v.AvatarKey, CreatedAt: timestamppb.New(v.CreatedAt)}
 }
 func organizationProto(v store.Organization) *cyclopusv1.Organization {
 	return &cyclopusv1.Organization{Id: v.ID, Name: v.Name, Slug: v.Slug, CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}

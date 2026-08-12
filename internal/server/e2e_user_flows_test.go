@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/store"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -237,6 +237,7 @@ func TestE2EAuthIdentity(t *testing.T) {
 	})
 
 	var loginToken string
+	var otherLoginToken string
 	t.Run("Login", func(t *testing.T) {
 		tokensBefore := queryInt(t, fixture.pool, `SELECT count(*) FROM api_tokens`)
 		if _, err := authClient.Login(ctx, &cyclopusv1.LoginRequest{Email: "operator@example.com", Password: "wrong password"}); status.Code(err) != codes.Unauthenticated {
@@ -250,6 +251,11 @@ func TestE2EAuthIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 		loginToken = login.GetSession().GetAccessToken()
+		otherLogin, err := authClient.Login(ctx, &cyclopusv1.LoginRequest{Email: "operator@example.com", Password: "e2e password"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherLoginToken = otherLogin.GetSession().GetAccessToken()
 		current, err := authClient.GetCurrentUser(bearerContext(ctx, loginToken), &cyclopusv1.GetCurrentUserRequest{})
 		if err != nil {
 			t.Fatal(err)
@@ -264,6 +270,59 @@ func TestE2EAuthIdentity(t *testing.T) {
 		prefix := loginToken[len("cyp_v1_") : len("cyp_v1_")+12]
 		if !queryBool(t, fixture.pool, `SELECT last_used_at IS NOT NULL AND last_used_at >= created_at FROM api_tokens WHERE token_prefix=$1`, prefix) {
 			t.Fatal("session token last_used_at not touched after authenticated call")
+		}
+	})
+
+	t.Run("UpdateProfile", func(t *testing.T) {
+		updated, err := authClient.UpdateCurrentUser(bearerContext(ctx, loginToken), &cyclopusv1.UpdateCurrentUserRequest{
+			Email: "updated@example.com", FirstName: "Octo", LastName: "Pod", DisplayName: "Captain Critter",
+			AvatarKey: "21d7a04043", CurrentPassword: "wrong password",
+		})
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("UpdateCurrentUser() wrong password error = %v", err)
+		}
+		updated, err = authClient.UpdateCurrentUser(bearerContext(ctx, loginToken), &cyclopusv1.UpdateCurrentUserRequest{
+			Email: "updated@example.com", FirstName: "Octo", LastName: "Pod", DisplayName: "Captain Critter",
+			AvatarKey: "21d7a04043", CurrentPassword: "e2e password",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		user := updated.GetUser()
+		if user.GetEmail() != "updated@example.com" || user.GetFirstName() != "Octo" || user.GetLastName() != "Pod" ||
+			user.GetDisplayName() != "Captain Critter" || user.GetAvatarKey() != "21d7a04043" {
+			t.Fatalf("UpdateCurrentUser() = %+v", user)
+		}
+		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM audit_events WHERE action='user.profile_updated'`); count != 1 {
+			t.Fatalf("user.profile_updated audit rows = %d", count)
+		}
+	})
+
+	t.Run("ChangePassword", func(t *testing.T) {
+		if _, err := authClient.ChangePassword(bearerContext(ctx, loginToken), &cyclopusv1.ChangePasswordRequest{
+			CurrentPassword: "wrong password", NewPassword: "new e2e password",
+		}); status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("ChangePassword() wrong password error = %v", err)
+		}
+		if _, err := authClient.ChangePassword(bearerContext(ctx, loginToken), &cyclopusv1.ChangePasswordRequest{
+			CurrentPassword: "e2e password", NewPassword: "new e2e password",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := authClient.GetCurrentUser(bearerContext(ctx, loginToken), &cyclopusv1.GetCurrentUserRequest{}); err != nil {
+			t.Fatalf("current session after password change = %v", err)
+		}
+		if _, err := authClient.GetCurrentUser(bearerContext(ctx, otherLoginToken), &cyclopusv1.GetCurrentUserRequest{}); status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("other session after password change error = %v", err)
+		}
+		if _, err := authClient.Login(ctx, &cyclopusv1.LoginRequest{Email: "updated@example.com", Password: "e2e password"}); status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("old password login error = %v", err)
+		}
+		if _, err := authClient.Login(ctx, &cyclopusv1.LoginRequest{Email: "updated@example.com", Password: "new e2e password"}); err != nil {
+			t.Fatalf("new password login = %v", err)
+		}
+		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM audit_events WHERE action='user.password_changed'`); count != 1 {
+			t.Fatalf("user.password_changed audit rows = %d", count)
 		}
 	})
 

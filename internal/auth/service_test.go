@@ -24,6 +24,30 @@ type fakeStore struct {
 	idempotency   store.IdempotencyResult
 }
 
+func (f *fakeStore) UserByID(context.Context, string, string) (store.User, error) {
+	if f.user.ID == "" {
+		return store.User{}, store.ErrNotFound
+	}
+	return f.user, nil
+}
+
+func (f *fakeStore) UpdateUserProfile(_ context.Context, params store.UpdateUserProfileParams) (store.User, error) {
+	f.user.Email = params.Email
+	f.user.FirstName = params.FirstName
+	f.user.LastName = params.LastName
+	f.user.DisplayName = params.DisplayName
+	f.user.AvatarKey = params.AvatarKey
+	return f.user, nil
+}
+
+func (f *fakeStore) ChangeUserPassword(_ context.Context, params store.ChangeUserPasswordParams) error {
+	if f.user.PasswordHash == nil || *f.user.PasswordHash != params.ExpectedPasswordHash {
+		return store.ErrConflict
+	}
+	f.user.PasswordHash = &params.PasswordHash
+	return nil
+}
+
 func (f *fakeStore) InstallationClaimed(context.Context) (bool, error) { return f.claimed, nil }
 
 func (f *fakeStore) ClaimFirstUser(_ context.Context, params store.ClaimFirstUserParams) (store.User, error) {
@@ -174,6 +198,22 @@ func TestBootstrapClaimedCheckPrecedesPasswordHashing(t *testing.T) {
 	}
 	if fake.claimCalls != 0 {
 		t.Fatalf("ClaimFirstUser store calls = %d, want 0", fake.claimCalls)
+	}
+}
+
+func TestClaimFirstUserAssignsAvatar(t *testing.T) {
+	const bootstrapToken = "bootstrap-0123456789abcdef0123456789abcdef"
+	fake := &fakeStore{user: store.User{ID: "user-id", OrgID: "org-id", Email: "user@example.com"}}
+	service, err := NewService(fake, []byte("0123456789abcdef0123456789abcdef"), []byte(bootstrapToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.avatarKey = func() (string, error) { return "21d7a04043", nil }
+	if _, err := service.ClaimFirstUser(context.Background(), "user@example.com", "password", bootstrapToken); err != nil {
+		t.Fatal(err)
+	}
+	if fake.claimedUser.AvatarKey != "21d7a04043" {
+		t.Fatalf("claimed avatar = %q", fake.claimedUser.AvatarKey)
 	}
 }
 

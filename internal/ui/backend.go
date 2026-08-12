@@ -115,6 +115,22 @@ func (b *Backend) GetCurrentUser(ctx context.Context, token string) (store.User,
 	return b.svc.CurrentUser(ctx, actor)
 }
 
+func (b *Backend) UpdateCurrentUser(ctx context.Context, token string, params auth.UpdateProfileParams) (store.User, error) {
+	principal, err := b.auth.AuthenticateToken(ctx, token)
+	if err != nil {
+		return store.User{}, ErrUnauthorized
+	}
+	return b.auth.UpdateProfile(ctx, principal, params)
+}
+
+func (b *Backend) ChangePassword(ctx context.Context, token, currentPassword, newPassword string) error {
+	principal, err := b.auth.AuthenticateToken(ctx, token)
+	if err != nil {
+		return ErrUnauthorized
+	}
+	return b.auth.ChangePassword(ctx, principal, currentPassword, newPassword)
+}
+
 // ── Organization ────────────────────────────────────────────────────────────
 
 func (b *Backend) GetOrganization(ctx context.Context, token, orgID string) (store.Organization, error) {

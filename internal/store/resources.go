@@ -67,8 +67,9 @@ type Release struct {
 func (s *Store) GetCurrentUser(ctx context.Context, orgID, userID string) (User, error) {
 	var value User
 	err := s.db.QueryRow(ctx,
-		`SELECT id::text, org_id::text, email, created_at FROM users WHERE org_id = $1 AND id = $2`, orgID, userID).
-		Scan(&value.ID, &value.OrgID, &value.Email, &value.CreatedAt)
+		`SELECT id::text, org_id::text, email, first_name, last_name, display_name, avatar_key, created_at
+		 FROM users WHERE org_id = $1 AND id = $2`, orgID, userID).
+		Scan(&value.ID, &value.OrgID, &value.Email, &value.FirstName, &value.LastName, &value.DisplayName, &value.AvatarKey, &value.CreatedAt)
 	return value, resourceQueryError("get current user", err)
 }
 

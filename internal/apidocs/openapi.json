@@ -369,6 +369,20 @@
         },
         "type": "object"
       },
+      "v1ChangePasswordRequest": {
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ChangePasswordResponse": {
+        "type": "object"
+      },
       "v1CreateApiTokenRequest": {
         "properties": {
           "expiresAt": {
@@ -1809,6 +1823,37 @@
         },
         "type": "object"
       },
+      "v1UpdateCurrentUserRequest": {
+        "properties": {
+          "avatarKey": {
+            "type": "string"
+          },
+          "currentPassword": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1UpdateCurrentUserResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/v1User"
+          }
+        },
+        "type": "object"
+      },
       "v1UpdateProjectResponse": {
         "properties": {
           "project": {
@@ -1827,14 +1872,26 @@
       },
       "v1User": {
         "properties": {
+          "avatarKey": {
+            "type": "string"
+          },
           "createdAt": {
             "format": "date-time",
+            "type": "string"
+          },
+          "displayName": {
             "type": "string"
           },
           "email": {
             "type": "string"
           },
+          "firstName": {
+            "type": "string"
+          },
           "id": {
+            "type": "string"
+          },
+          "lastName": {
             "type": "string"
           },
           "organizationId": {
@@ -4855,6 +4912,45 @@
         "tags": [
           "AuthenticationService"
         ]
+      },
+      "put": {
+        "operationId": "AuthenticationService_UpdateCurrentUser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1UpdateCurrentUserRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1UpdateCurrentUserResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
       }
     },
     "/v1/user/api-tokens": {
@@ -4969,6 +5065,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/v1RevokeApiTokenResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/user/change-password": {
+      "post": {
+        "operationId": "AuthenticationService_ChangePassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ChangePasswordResponse"
                 }
               }
             },

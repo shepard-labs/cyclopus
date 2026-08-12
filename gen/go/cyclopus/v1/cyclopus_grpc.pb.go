@@ -19,13 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AuthenticationService_Bootstrap_FullMethodName      = "/cyclopus.v1.AuthenticationService/Bootstrap"
-	AuthenticationService_Login_FullMethodName          = "/cyclopus.v1.AuthenticationService/Login"
-	AuthenticationService_Logout_FullMethodName         = "/cyclopus.v1.AuthenticationService/Logout"
-	AuthenticationService_GetCurrentUser_FullMethodName = "/cyclopus.v1.AuthenticationService/GetCurrentUser"
-	AuthenticationService_CreateApiToken_FullMethodName = "/cyclopus.v1.AuthenticationService/CreateApiToken"
-	AuthenticationService_ListApiTokens_FullMethodName  = "/cyclopus.v1.AuthenticationService/ListApiTokens"
-	AuthenticationService_RevokeApiToken_FullMethodName = "/cyclopus.v1.AuthenticationService/RevokeApiToken"
+	AuthenticationService_Bootstrap_FullMethodName         = "/cyclopus.v1.AuthenticationService/Bootstrap"
+	AuthenticationService_Login_FullMethodName             = "/cyclopus.v1.AuthenticationService/Login"
+	AuthenticationService_Logout_FullMethodName            = "/cyclopus.v1.AuthenticationService/Logout"
+	AuthenticationService_GetCurrentUser_FullMethodName    = "/cyclopus.v1.AuthenticationService/GetCurrentUser"
+	AuthenticationService_UpdateCurrentUser_FullMethodName = "/cyclopus.v1.AuthenticationService/UpdateCurrentUser"
+	AuthenticationService_ChangePassword_FullMethodName    = "/cyclopus.v1.AuthenticationService/ChangePassword"
+	AuthenticationService_CreateApiToken_FullMethodName    = "/cyclopus.v1.AuthenticationService/CreateApiToken"
+	AuthenticationService_ListApiTokens_FullMethodName     = "/cyclopus.v1.AuthenticationService/ListApiTokens"
+	AuthenticationService_RevokeApiToken_FullMethodName    = "/cyclopus.v1.AuthenticationService/RevokeApiToken"
 )
 
 // AuthenticationServiceClient is the client API for AuthenticationService service.
@@ -36,6 +38,8 @@ type AuthenticationServiceClient interface {
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
 	GetCurrentUser(ctx context.Context, in *GetCurrentUserRequest, opts ...grpc.CallOption) (*GetCurrentUserResponse, error)
+	UpdateCurrentUser(ctx context.Context, in *UpdateCurrentUserRequest, opts ...grpc.CallOption) (*UpdateCurrentUserResponse, error)
+	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error)
 	CreateApiToken(ctx context.Context, in *CreateApiTokenRequest, opts ...grpc.CallOption) (*CreateApiTokenResponse, error)
 	ListApiTokens(ctx context.Context, in *ListApiTokensRequest, opts ...grpc.CallOption) (*ListApiTokensResponse, error)
 	RevokeApiToken(ctx context.Context, in *RevokeApiTokenRequest, opts ...grpc.CallOption) (*RevokeApiTokenResponse, error)
@@ -89,6 +93,26 @@ func (c *authenticationServiceClient) GetCurrentUser(ctx context.Context, in *Ge
 	return out, nil
 }
 
+func (c *authenticationServiceClient) UpdateCurrentUser(ctx context.Context, in *UpdateCurrentUserRequest, opts ...grpc.CallOption) (*UpdateCurrentUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateCurrentUserResponse)
+	err := c.cc.Invoke(ctx, AuthenticationService_UpdateCurrentUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authenticationServiceClient) ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChangePasswordResponse)
+	err := c.cc.Invoke(ctx, AuthenticationService_ChangePassword_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authenticationServiceClient) CreateApiToken(ctx context.Context, in *CreateApiTokenRequest, opts ...grpc.CallOption) (*CreateApiTokenResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateApiTokenResponse)
@@ -127,6 +151,8 @@ type AuthenticationServiceServer interface {
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
 	GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error)
+	UpdateCurrentUser(context.Context, *UpdateCurrentUserRequest) (*UpdateCurrentUserResponse, error)
+	ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error)
 	CreateApiToken(context.Context, *CreateApiTokenRequest) (*CreateApiTokenResponse, error)
 	ListApiTokens(context.Context, *ListApiTokensRequest) (*ListApiTokensResponse, error)
 	RevokeApiToken(context.Context, *RevokeApiTokenRequest) (*RevokeApiTokenResponse, error)
@@ -151,6 +177,12 @@ func (UnimplementedAuthenticationServiceServer) Logout(context.Context, *LogoutR
 }
 func (UnimplementedAuthenticationServiceServer) GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCurrentUser not implemented")
+}
+func (UnimplementedAuthenticationServiceServer) UpdateCurrentUser(context.Context, *UpdateCurrentUserRequest) (*UpdateCurrentUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateCurrentUser not implemented")
+}
+func (UnimplementedAuthenticationServiceServer) ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ChangePassword not implemented")
 }
 func (UnimplementedAuthenticationServiceServer) CreateApiToken(context.Context, *CreateApiTokenRequest) (*CreateApiTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateApiToken not implemented")
@@ -254,6 +286,42 @@ func _AuthenticationService_GetCurrentUser_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthenticationService_UpdateCurrentUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateCurrentUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthenticationServiceServer).UpdateCurrentUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthenticationService_UpdateCurrentUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthenticationServiceServer).UpdateCurrentUser(ctx, req.(*UpdateCurrentUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthenticationService_ChangePassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChangePasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthenticationServiceServer).ChangePassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthenticationService_ChangePassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthenticationServiceServer).ChangePassword(ctx, req.(*ChangePasswordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthenticationService_CreateApiToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateApiTokenRequest)
 	if err := dec(in); err != nil {
@@ -330,6 +398,14 @@ var AuthenticationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCurrentUser",
 			Handler:    _AuthenticationService_GetCurrentUser_Handler,
+		},
+		{
+			MethodName: "UpdateCurrentUser",
+			Handler:    _AuthenticationService_UpdateCurrentUser_Handler,
+		},
+		{
+			MethodName: "ChangePassword",
+			Handler:    _AuthenticationService_ChangePassword_Handler,
 		},
 		{
 			MethodName: "CreateApiToken",

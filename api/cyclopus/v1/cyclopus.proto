@@ -130,6 +130,10 @@ message User {
   string organization_id = 2;
   string email = 3;
   google.protobuf.Timestamp created_at = 4;
+  string first_name = 5;
+  string last_name = 6;
+  string display_name = 7;
+  string avatar_key = 8;
 }
 
 message Session {
@@ -674,6 +678,22 @@ message LogoutResponse {}
 message GetCurrentUserRequest {}
 message GetCurrentUserResponse { User user = 1; }
 
+message UpdateCurrentUserRequest {
+  string email = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string display_name = 4;
+  string avatar_key = 5;
+  string current_password = 6;
+}
+message UpdateCurrentUserResponse { User user = 1; }
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+message ChangePasswordResponse {}
+
 message CreateApiTokenRequest {
   string name = 1;
   repeated string scopes = 2;
@@ -985,6 +1005,12 @@ service AuthenticationService {
   }
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse) {
     option (google.api.http) = { get: "/v1/user" };
+  }
+  rpc UpdateCurrentUser(UpdateCurrentUserRequest) returns (UpdateCurrentUserResponse) {
+    option (google.api.http) = { put: "/v1/user" body: "*" };
+  }
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
+    option (google.api.http) = { post: "/v1/user/change-password" body: "*" };
   }
   rpc CreateApiToken(CreateApiTokenRequest) returns (CreateApiTokenResponse) {
     option (google.api.http) = { post: "/v1/user/api-tokens" body: "*" };

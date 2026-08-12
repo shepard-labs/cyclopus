@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 const integrationPepper = "0123456789abcdef0123456789abcdef"

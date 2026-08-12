@@ -2358,6 +2358,36 @@
         "tags": [
           "AuthenticationService"
         ]
+      },
+      "put": {
+        "operationId": "AuthenticationService_UpdateCurrentUser",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UpdateCurrentUserResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1UpdateCurrentUserRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthenticationService"
+        ]
       }
     },
     "/v1/user/api-tokens": {
@@ -2456,6 +2486,38 @@
             "in": "query",
             "required": false,
             "type": "string"
+          }
+        ],
+        "tags": [
+          "AuthenticationService"
+        ]
+      }
+    },
+    "/v1/user/change-password": {
+      "post": {
+        "operationId": "AuthenticationService_ChangePassword",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ChangePasswordResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1ChangePasswordRequest"
+            }
           }
         ],
         "tags": [
@@ -2979,6 +3041,20 @@
         }
       },
       "description": "CertificateStatus is the live status of a cert-manager Certificate serving an\nenvironment's hostname, read directly from the cluster (read-only, §6). It is\nnot stored in Postgres; it is projected from the Certificate CRD's spec and\nstatus. ready reflects the Ready condition; reason carries the condition's\nmessage; not_after is the certificate expiry when known."
+    },
+    "v1ChangePasswordRequest": {
+      "type": "object",
+      "properties": {
+        "currentPassword": {
+          "type": "string"
+        },
+        "newPassword": {
+          "type": "string"
+        }
+      }
+    },
+    "v1ChangePasswordResponse": {
+      "type": "object"
     },
     "v1CreateApiTokenRequest": {
       "type": "object",
@@ -4445,6 +4521,37 @@
         }
       }
     },
+    "v1UpdateCurrentUserRequest": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "avatarKey": {
+          "type": "string"
+        },
+        "currentPassword": {
+          "type": "string"
+        }
+      }
+    },
+    "v1UpdateCurrentUserResponse": {
+      "type": "object",
+      "properties": {
+        "user": {
+          "$ref": "#/definitions/v1User"
+        }
+      }
+    },
     "v1UpdateProjectResponse": {
       "type": "object",
       "properties": {
@@ -4476,6 +4583,18 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "avatarKey": {
+          "type": "string"
         }
       }
     },

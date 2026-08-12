@@ -17,8 +17,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir() error = %v", err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "000001_foundation.up.sql" {
-		t.Fatalf("embedded migrations = %v, want baseline forward migration", entries)
+	if len(entries) != 3 || entries[0].Name() != "000001_foundation.up.sql" || entries[1].Name() != "000002_user_profiles.up.sql" || entries[2].Name() != "000003_avatar_key_format.up.sql" {
+		t.Fatalf("embedded migrations = %v, want baseline and user profile migrations", entries)
 	}
 	contents, err := fs.ReadFile(Migrations, "migrations/000001_foundation.up.sql")
 	if err != nil {
@@ -46,6 +46,22 @@ func TestEmbeddedMigrations(t *testing.T) {
 		if !strings.Contains(string(contents), want) {
 			t.Errorf("migration does not contain %q", want)
 		}
+	}
+	profile, err := fs.ReadFile(Migrations, "migrations/000002_user_profiles.up.sql")
+	if err != nil {
+		t.Fatalf("ReadFile(user profile migration) error = %v", err)
+	}
+	for _, want := range []string{"ADD COLUMN first_name", "ADD COLUMN avatar_key", "DROP FUNCTION claim_first_user", "claimed_avatar_key"} {
+		if !strings.Contains(string(profile), want) {
+			t.Errorf("user profile migration does not contain %q", want)
+		}
+	}
+	avatarFormat, err := fs.ReadFile(Migrations, "migrations/000003_avatar_key_format.up.sql")
+	if err != nil {
+		t.Fatalf("ReadFile(avatar format migration) error = %v", err)
+	}
+	if !strings.Contains(string(avatarFormat), "avatar_key ~ '^[a-f0-9]{10}$'") {
+		t.Error("avatar format migration must not pin the database to the current asset manifest")
 	}
 }
 

@@ -11,12 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/google/uuid"
+	"github.com/shepard-labs/cyclopus/internal/avatar"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 const (
@@ -35,11 +37,15 @@ const (
 var (
 	ErrUnauthenticated = errors.New("auth: unauthenticated")
 	ErrNotFound        = errors.New("auth: not found")
+	ErrRateLimited     = errors.New("auth: rate limited")
 )
 
 type Store interface {
 	ClaimFirstUser(context.Context, store.ClaimFirstUserParams) (store.User, error)
 	UserByEmail(context.Context, string) (store.User, error)
+	UserByID(context.Context, string, string) (store.User, error)
+	UpdateUserProfile(context.Context, store.UpdateUserProfileParams) (store.User, error)
+	ChangeUserPassword(context.Context, store.ChangeUserPasswordParams) error
 	CreateAPIToken(context.Context, store.CreateAPITokenParams) (store.APIToken, error)
 	ClaimIdempotency(context.Context, store.IdempotencyClaimParams) (store.IdempotencyResult, error)
 	AcceptAPIToken(context.Context, store.AcceptAPITokenParams) (store.APIToken, error)
@@ -67,6 +73,9 @@ type Service struct {
 	bootstrapMu      sync.RWMutex
 	bootstrapDigest  [sha256.Size]byte
 	bootstrapEnabled bool
+	avatarKey        func() (string, error)
+	reauthMu         sync.Mutex
+	reauthAttempts   map[string][]time.Time
 }
 
 func NewService(dataStore Store, pepper, bootstrapSecret []byte) (*Service, error) {
@@ -81,7 +90,8 @@ func NewService(dataStore Store, pepper, bootstrapSecret []byte) (*Service, erro
 	}
 	digest := sha256.Sum256(bootstrapSecret)
 	return &Service{store: dataStore, pepper: append([]byte(nil), pepper...),
-		passwordParams: DefaultPasswordParams(), now: time.Now, bootstrapDigest: digest, bootstrapEnabled: true}, nil
+		passwordParams: DefaultPasswordParams(), now: time.Now, bootstrapDigest: digest, bootstrapEnabled: true,
+		avatarKey: avatar.RandomKey, reauthAttempts: make(map[string][]time.Time)}, nil
 }
 
 type Principal struct {
@@ -119,14 +129,18 @@ func (s *Service) ClaimFirstUser(ctx context.Context, email, password, bootstrap
 		return Principal{}, ErrUnauthenticated
 	}
 	email = normalizeEmail(email)
-	if email == "" {
+	if !validEmail(email) || len(email) > 320 {
 		return Principal{}, ErrInvalidCredential
 	}
 	hash, err := HashPassword(password, s.passwordParams)
 	if err != nil {
 		return Principal{}, err
 	}
-	user, err := s.store.ClaimFirstUser(ctx, store.ClaimFirstUserParams{Email: email, PasswordHash: &hash,
+	avatarKey, err := s.avatarKey()
+	if err != nil {
+		return Principal{}, err
+	}
+	user, err := s.store.ClaimFirstUser(ctx, store.ClaimFirstUserParams{Email: email, AvatarKey: avatarKey, PasswordHash: &hash,
 		Audit: authAudit(nil)})
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -166,6 +180,93 @@ func (s *Service) AuthenticatePassword(ctx context.Context, email, password stri
 		return Principal{}, ErrUnauthenticated
 	}
 	return principalFromUser(user), nil
+}
+
+type UpdateProfileParams struct {
+	Email, FirstName, LastName, DisplayName, AvatarKey, CurrentPassword string
+}
+
+func (s *Service) UpdateProfile(ctx context.Context, principal Principal, params UpdateProfileParams) (store.User, error) {
+	if principal.Kind != CredentialKindSession || principal.UserID == "" || principal.OrgID == "" {
+		return store.User{}, ErrUnauthenticated
+	}
+	current, err := s.store.UserByID(ctx, principal.OrgID, principal.UserID)
+	if err != nil {
+		return store.User{}, err
+	}
+	params.Email = normalizeEmail(params.Email)
+	params.FirstName = strings.TrimSpace(params.FirstName)
+	params.LastName = strings.TrimSpace(params.LastName)
+	params.DisplayName = strings.TrimSpace(params.DisplayName)
+	if !validEmail(params.Email) || len(params.Email) > 320 || len(params.FirstName) > 100 || len(params.LastName) > 100 ||
+		len(params.DisplayName) > 200 || !avatar.Valid(params.AvatarKey) {
+		return store.User{}, ErrInvalidCredential
+	}
+	if params.Email != current.Email {
+		if !s.allowReauthentication(principal.UserID) {
+			return store.User{}, ErrRateLimited
+		}
+		if current.PasswordHash == nil {
+			return store.User{}, ErrInvalidCredential
+		}
+		valid, verifyErr := VerifyPassword(params.CurrentPassword, *current.PasswordHash)
+		if verifyErr != nil || !valid {
+			return store.User{}, ErrUnauthenticated
+		}
+	}
+	return s.store.UpdateUserProfile(ctx, store.UpdateUserProfileParams{
+		OrgID: principal.OrgID, UserID: principal.UserID, Email: params.Email, FirstName: params.FirstName,
+		LastName: params.LastName, DisplayName: params.DisplayName, AvatarKey: params.AvatarKey,
+		Audit: authAudit(&principal.UserID),
+	})
+}
+
+func (s *Service) ChangePassword(ctx context.Context, principal Principal, currentPassword, newPassword string) error {
+	if principal.Kind != CredentialKindSession || principal.UserID == "" || principal.OrgID == "" || principal.TokenID == "" {
+		return ErrUnauthenticated
+	}
+	if len(newPassword) < 8 {
+		return ErrInvalidCredential
+	}
+	current, err := s.store.UserByID(ctx, principal.OrgID, principal.UserID)
+	if err != nil || current.PasswordHash == nil {
+		return ErrUnauthenticated
+	}
+	if !s.allowReauthentication(principal.UserID) {
+		return ErrRateLimited
+	}
+	valid, err := VerifyPassword(currentPassword, *current.PasswordHash)
+	if err != nil || !valid {
+		return ErrUnauthenticated
+	}
+	hash, err := HashPassword(newPassword, s.passwordParams)
+	if err != nil {
+		return err
+	}
+	return s.store.ChangeUserPassword(ctx, store.ChangeUserPasswordParams{
+		OrgID: principal.OrgID, UserID: principal.UserID, CurrentTokenID: principal.TokenID,
+		ExpectedPasswordHash: *current.PasswordHash, PasswordHash: hash, ChangedAt: s.now(), Audit: authAudit(&principal.UserID),
+	})
+}
+
+func (s *Service) allowReauthentication(userID string) bool {
+	now := s.now()
+	cutoff := now.Add(-time.Minute)
+	s.reauthMu.Lock()
+	defer s.reauthMu.Unlock()
+	attempts := s.reauthAttempts[userID]
+	kept := attempts[:0]
+	for _, attempt := range attempts {
+		if attempt.After(cutoff) {
+			kept = append(kept, attempt)
+		}
+	}
+	if len(kept) >= 5 {
+		s.reauthAttempts[userID] = kept
+		return false
+	}
+	s.reauthAttempts[userID] = append(kept, now)
+	return true
 }
 
 type CreateTokenParams struct {
@@ -395,6 +496,11 @@ func parseToken(plaintext string) (string, []byte, error) {
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func validEmail(email string) bool {
+	parsed, err := mail.ParseAddress(email)
+	return err == nil && parsed.Address == email && strings.Contains(email, "@")
 }
 
 func principalFromUser(user store.User) Principal {

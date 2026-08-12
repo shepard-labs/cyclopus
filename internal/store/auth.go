@@ -15,6 +15,10 @@ type User struct {
 	ID           string
 	OrgID        string
 	Email        string
+	FirstName    string
+	LastName     string
+	DisplayName  string
+	AvatarKey    string
 	PasswordHash *string
 	GitHubUserID *int64
 	Operator     bool
@@ -23,6 +27,7 @@ type User struct {
 
 type ClaimFirstUserParams struct {
 	Email        string
+	AvatarKey    string
 	PasswordHash *string
 	GitHubUserID *int64
 	Audit        *AuditEvent
@@ -39,10 +44,11 @@ func (s *Store) InstallationClaimed(ctx context.Context) (bool, error) {
 func (s *Store) ClaimFirstUser(ctx context.Context, params ClaimFirstUserParams) (User, error) {
 	var user User
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT id::text, org_id::text, email, password_hash,
-			github_user_id, operator, created_at FROM claim_first_user($1, $2, $3)`,
-			params.Email, params.PasswordHash, params.GitHubUserID).Scan(
-			&user.ID, &user.OrgID, &user.Email, &user.PasswordHash, &user.GitHubUserID, &user.Operator, &user.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT id::text, org_id::text, email, first_name, last_name, display_name, avatar_key, password_hash,
+			github_user_id, operator, created_at FROM claim_first_user($1, $2, $3, $4)`,
+			params.Email, params.PasswordHash, params.GitHubUserID, params.AvatarKey).Scan(
+			&user.ID, &user.OrgID, &user.Email, &user.FirstName, &user.LastName, &user.DisplayName, &user.AvatarKey,
+			&user.PasswordHash, &user.GitHubUserID, &user.Operator, &user.CreatedAt)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -59,9 +65,10 @@ func (s *Store) ClaimFirstUser(ctx context.Context, params ClaimFirstUserParams)
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 	var user User
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT id::text, org_id::text, email, password_hash,
+		err := tx.QueryRow(ctx, `SELECT id::text, org_id::text, email, first_name, last_name, display_name, avatar_key, password_hash,
 			github_user_id, operator, created_at FROM users WHERE email = $1`, email).Scan(
-			&user.ID, &user.OrgID, &user.Email, &user.PasswordHash, &user.GitHubUserID, &user.Operator, &user.CreatedAt)
+			&user.ID, &user.OrgID, &user.Email, &user.FirstName, &user.LastName, &user.DisplayName, &user.AvatarKey,
+			&user.PasswordHash, &user.GitHubUserID, &user.Operator, &user.CreatedAt)
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -71,6 +78,78 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 		return nil
 	})
 	return user, err
+}
+
+func (s *Store) UserByID(ctx context.Context, orgID, userID string) (User, error) {
+	var user User
+	err := s.db.QueryRow(ctx, `SELECT id::text, org_id::text, email, first_name, last_name, display_name, avatar_key, password_hash,
+		github_user_id, operator, created_at FROM users WHERE org_id = $1 AND id = $2`, orgID, userID).Scan(
+		&user.ID, &user.OrgID, &user.Email, &user.FirstName, &user.LastName, &user.DisplayName, &user.AvatarKey,
+		&user.PasswordHash, &user.GitHubUserID, &user.Operator, &user.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("find user by ID: %w", err)
+	}
+	return user, nil
+}
+
+type UpdateUserProfileParams struct {
+	OrgID, UserID, Email, FirstName, LastName, DisplayName, AvatarKey string
+	Audit                                                             *AuditEvent
+}
+
+func (s *Store) UpdateUserProfile(ctx context.Context, params UpdateUserProfileParams) (User, error) {
+	var user User
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var before json.RawMessage
+		if err := tx.QueryRow(ctx, `SELECT jsonb_build_object('email', email, 'first_name', first_name, 'last_name', last_name,
+			'display_name', display_name, 'avatar_key', avatar_key) FROM users WHERE org_id=$1 AND id=$2`,
+			params.OrgID, params.UserID).Scan(&before); err != nil {
+			return mapMutationError("load user profile", err)
+		}
+		err := tx.QueryRow(ctx, `UPDATE users SET email=$3, first_name=$4, last_name=$5, display_name=$6, avatar_key=$7
+			WHERE org_id=$1 AND id=$2 RETURNING
+			id::text, org_id::text, email, first_name, last_name, display_name, avatar_key, password_hash,
+			github_user_id, operator, created_at`, params.OrgID, params.UserID, params.Email,
+			params.FirstName, params.LastName, params.DisplayName, params.AvatarKey).Scan(
+			&user.ID, &user.OrgID, &user.Email, &user.FirstName, &user.LastName, &user.DisplayName, &user.AvatarKey,
+			&user.PasswordHash, &user.GitHubUserID, &user.Operator, &user.CreatedAt)
+		if err != nil {
+			return mapMutationError("update user profile", err)
+		}
+		after, _ := json.Marshal(map[string]any{"email": user.Email, "first_name": user.FirstName,
+			"last_name": user.LastName, "display_name": user.DisplayName, "avatar_key": user.AvatarKey})
+		return insertAuditEvent(ctx, tx, params.OrgID, params.Audit, "user.profile_updated", "user", params.UserID, before, after)
+	})
+	return user, err
+}
+
+type ChangeUserPasswordParams struct {
+	OrgID, UserID, CurrentTokenID, ExpectedPasswordHash, PasswordHash string
+	ChangedAt                                                         time.Time
+	Audit                                                             *AuditEvent
+}
+
+func (s *Store) ChangeUserPassword(ctx context.Context, params ChangeUserPasswordParams) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE users SET password_hash=$4 WHERE org_id=$1 AND id=$2 AND password_hash=$3`,
+			params.OrgID, params.UserID, params.ExpectedPasswordHash, params.PasswordHash)
+		if err != nil {
+			return fmt.Errorf("change user password: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrConflict
+		}
+		if _, err := tx.Exec(ctx, `UPDATE api_tokens SET revoked_at=$4
+			WHERE user_id=$2 AND kind='session' AND id<>$3 AND revoked_at IS NULL`,
+			params.OrgID, params.UserID, params.CurrentTokenID, params.ChangedAt); err != nil {
+			return fmt.Errorf("revoke other sessions: %w", err)
+		}
+		after, _ := json.Marshal(map[string]any{"other_sessions_revoked": true})
+		return insertAuditEvent(ctx, tx, params.OrgID, params.Audit, "user.password_changed", "user", params.UserID, nil, after)
+	})
 }
 
 type APIToken struct {
