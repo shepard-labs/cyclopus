@@ -50,7 +50,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " — Cyclopus</title><!-- theme.js loads synchronously before the stylesheet: it applies the\n\t\t\t     persisted preset to <html> so the first paint uses the right theme. --><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"/static/css/ui.css\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " — Cyclopus</title><!-- theme.js loads synchronously before the stylesheet: it applies the\n\t\t\t     persisted preset to <html> so the first paint uses the right theme. --><script src=\"/static/theme.js\"></script><!-- Web Awesome base theme BEFORE our stylesheet so our unlayered token\n\t\t\t     overrides win the cascade. Autoloader is async (deferred module). --><link rel=\"stylesheet\" href=\"/static/vendor/webawesome/styles/themes/default.css\"><link rel=\"stylesheet\" href=\"/static/css/ui.css\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -62,7 +62,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 			var templ_7745c5c3_Var3 templ.SafeURL
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(href)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/layout.templ`, Line: 23, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/layout.templ`, Line: 26, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -73,7 +73,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script src=\"/static/htmx.min.js\" defer></script></head><body class=\"h-full flex bg-base-100 text-base-content\" hx-boost=\"true\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script type=\"module\" src=\"/static/vendor/webawesome/webawesome.loader.js\"></script><script src=\"/static/htmx.min.js\" defer></script></head><body class=\"h-full flex bg-base-100 text-base-content\" hx-boost=\"true\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -88,7 +88,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/layout.templ`, Line: 31, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/layout.templ`, Line: 35, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -145,13 +145,13 @@ func AuthPage(title string) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/layout.templ`, Line: 51, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/layout.templ`, Line: 55, Col: 17}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " — Cyclopus</title><!-- synchronous, before the stylesheet — see Page above. --><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"/static/css/ui.css\"></head><body class=\"h-full flex items-center justify-center bg-base-100 text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " — Cyclopus</title><!-- synchronous, before the stylesheet — see Page above. --><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"/static/vendor/webawesome/styles/themes/default.css\"><link rel=\"stylesheet\" href=\"/static/css/ui.css\"><script type=\"module\" src=\"/static/vendor/webawesome/webawesome.loader.js\"></script></head><body class=\"h-full flex items-center justify-center bg-base-100 text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
