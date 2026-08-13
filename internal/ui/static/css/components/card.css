@@ -1,7 +1,7 @@
 /* card.css — .card component (daisyUI class API). */
 .card {
-  background-color: var(--color-base-200);
-  border: var(--border) solid var(--color-base-300);
-  border-radius: var(--radius-box);
+  background-color: var(--wa-color-surface-raised);
+  border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+  border-radius: var(--wa-border-radius-l);
   padding: 1.25rem;
 }

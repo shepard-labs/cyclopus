@@ -7,17 +7,17 @@
   flex-shrink: 0;
 }
 .status-success {
-  background-color: var(--color-success);
+  background-color: var(--wa-color-success-fill-loud);
 }
 .status-warning {
-  background-color: var(--color-warning);
+  background-color: var(--wa-color-warning-fill-loud);
 }
 .status-error {
-  background-color: var(--color-error);
+  background-color: var(--wa-color-danger-fill-loud);
 }
 .status-info {
   background-color: var(--color-info);
 }
 .status-neutral {
-  background-color: var(--color-neutral);
+  background-color: var(--wa-color-neutral-fill-loud);
 }

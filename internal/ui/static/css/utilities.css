@@ -82,14 +82,14 @@
 .border { border-width: 1px; }
 .border-b { border-bottom-width: 1px; }
 .border-t { border-top-width: 1px; }
-.border-base-300 { border-color: var(--color-base-300); }
-.border-base-content\/30 { border-color: color-mix(in srgb, var(--color-base-content) 30%, transparent); }
-.hover\:border-base-content\/30:hover { border-color: color-mix(in srgb, var(--color-base-content) 30%, transparent); }
+.border-base-300 { border-color: var(--wa-color-surface-lowered); }
+.border-base-content\/30 { border-color: color-mix(in srgb, var(--wa-color-text-normal) 30%, transparent); }
+.hover\:border-base-content\/30:hover { border-color: color-mix(in srgb, var(--wa-color-text-normal) 30%, transparent); }
 .last\:border-0:last-child { border-bottom-width: 0; }
 .divide-y > * + * { border-top-width: 1px; }
-.divide-base-300 > * + * { border-color: var(--color-base-300); }
-.rounded { border-radius: var(--radius-selector); }
-.rounded-lg { border-radius: var(--radius-box); }
+.divide-base-300 > * + * { border-color: var(--wa-color-surface-lowered); }
+.rounded { border-radius: var(--wa-border-radius-s); }
+.rounded-lg { border-radius: var(--wa-border-radius-l); }
 
 /* typography */
 .text-xs { font-size: 0.75rem; line-height: 1rem; }
@@ -100,7 +100,7 @@
 .font-medium { font-weight: 500; }
 .font-semibold { font-weight: 600; }
 .font-bold { font-weight: 700; }
-.font-mono { font-family: var(--font-mono, ui-monospace), monospace; }
+.font-mono { font-family: var(--wa-font-family-code, ui-monospace), monospace; }
 .text-left { text-align: left; }
 .text-right { text-align: right; }
 .text-center { text-align: center; }
@@ -110,23 +110,23 @@
 .break-all { word-break: break-all; }
 
 /* semantic color utilities (daisyUI convention) */
-.bg-base-100 { background-color: var(--color-base-100); }
-.bg-base-200 { background-color: var(--color-base-200); }
-.text-base-content { color: var(--color-base-content); }
-.text-base-content\/90 { color: color-mix(in srgb, var(--color-base-content) 90%, transparent); }
-.text-base-content\/80 { color: color-mix(in srgb, var(--color-base-content) 80%, transparent); }
-.text-base-content\/65 { color: color-mix(in srgb, var(--color-base-content) 65%, transparent); }
-.text-base-content\/50 { color: color-mix(in srgb, var(--color-base-content) 50%, transparent); }
-.text-base-content\/35 { color: color-mix(in srgb, var(--color-base-content) 35%, transparent); }
-.hover\:text-base-content\/90:hover { color: color-mix(in srgb, var(--color-base-content) 90%, transparent); }
-.group:hover .group-hover\:text-base-content\/65 { color: color-mix(in srgb, var(--color-base-content) 65%, transparent); }
-.text-primary { color: var(--color-primary); }
+.bg-base-100 { background-color: var(--wa-color-surface-default); }
+.bg-base-200 { background-color: var(--wa-color-surface-raised); }
+.text-base-content { color: var(--wa-color-text-normal); }
+.text-base-content\/90 { color: color-mix(in srgb, var(--wa-color-text-normal) 90%, transparent); }
+.text-base-content\/80 { color: color-mix(in srgb, var(--wa-color-text-normal) 80%, transparent); }
+.text-base-content\/65 { color: color-mix(in srgb, var(--wa-color-text-normal) 65%, transparent); }
+.text-base-content\/50 { color: color-mix(in srgb, var(--wa-color-text-normal) 50%, transparent); }
+.text-base-content\/35 { color: color-mix(in srgb, var(--wa-color-text-normal) 35%, transparent); }
+.hover\:text-base-content\/90:hover { color: color-mix(in srgb, var(--wa-color-text-normal) 90%, transparent); }
+.group:hover .group-hover\:text-base-content\/65 { color: color-mix(in srgb, var(--wa-color-text-normal) 65%, transparent); }
+.text-primary { color: var(--wa-color-brand-fill-loud); }
 .text-accent { color: var(--color-accent); }
 .hover\:text-accent:hover { color: var(--color-accent); }
 .group:hover .group-hover\:text-accent { color: var(--color-accent); }
-.text-success { color: var(--color-success); }
-.text-warning { color: var(--color-warning); }
-.text-error { color: var(--color-error); }
+.text-success { color: var(--wa-color-success-fill-loud); }
+.text-warning { color: var(--wa-color-warning-fill-loud); }
+.text-error { color: var(--wa-color-danger-fill-loud); }
 .text-info { color: var(--color-info); }
 
 /* interaction, transitions, animation */

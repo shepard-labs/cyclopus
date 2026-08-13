@@ -14,52 +14,52 @@
 
 /* soft variants (default look in Cyclopus) */
 .badge-soft.badge-success {
-  background-color: color-mix(in srgb, var(--color-success) 15%, transparent);
-  color: var(--color-success);
+  background-color: color-mix(in srgb, var(--wa-color-success-fill-loud) 15%, transparent);
+  color: var(--wa-color-success-fill-loud);
 }
 .badge-soft.badge-warning {
-  background-color: color-mix(in srgb, var(--color-warning) 15%, transparent);
-  color: var(--color-warning);
+  background-color: color-mix(in srgb, var(--wa-color-warning-fill-loud) 15%, transparent);
+  color: var(--wa-color-warning-fill-loud);
 }
 .badge-soft.badge-error {
-  background-color: color-mix(in srgb, var(--color-error) 15%, transparent);
-  color: var(--color-error);
+  background-color: color-mix(in srgb, var(--wa-color-danger-fill-loud) 15%, transparent);
+  color: var(--wa-color-danger-fill-loud);
 }
 .badge-soft.badge-info {
   background-color: color-mix(in srgb, var(--color-info) 15%, transparent);
   color: var(--color-info);
 }
 .badge-soft.badge-neutral {
-  background-color: color-mix(in srgb, var(--color-neutral) 15%, transparent);
-  color: var(--color-neutral);
+  background-color: color-mix(in srgb, var(--wa-color-neutral-fill-loud) 15%, transparent);
+  color: var(--wa-color-neutral-fill-loud);
 }
 .badge-soft.badge-primary {
-  background-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  background-color: color-mix(in srgb, var(--wa-color-brand-fill-loud) 15%, transparent);
   color: var(--color-accent);
 }
 
 /* solid variants (daisyUI semantics: state color + state content color) */
 .badge-success:not(.badge-soft) {
-  background-color: var(--color-success);
-  color: var(--color-success-content);
+  background-color: var(--wa-color-success-fill-loud);
+  color: var(--wa-color-success-on-loud);
 }
 .badge-warning:not(.badge-soft) {
-  background-color: var(--color-warning);
-  color: var(--color-warning-content);
+  background-color: var(--wa-color-warning-fill-loud);
+  color: var(--wa-color-warning-on-loud);
 }
 .badge-error:not(.badge-soft) {
-  background-color: var(--color-error);
-  color: var(--color-error-content);
+  background-color: var(--wa-color-danger-fill-loud);
+  color: var(--wa-color-danger-on-loud);
 }
 .badge-info:not(.badge-soft) {
   background-color: var(--color-info);
   color: var(--color-info-content);
 }
 .badge-neutral:not(.badge-soft) {
-  background-color: var(--color-neutral);
-  color: var(--color-neutral-content);
+  background-color: var(--wa-color-neutral-fill-loud);
+  color: var(--wa-color-neutral-on-loud);
 }
 .badge-primary:not(.badge-soft) {
-  background-color: var(--color-primary);
-  color: var(--color-primary-content);
+  background-color: var(--wa-color-brand-fill-loud);
+  color: var(--wa-color-brand-on-loud);
 }
