@@ -43,10 +43,11 @@ pass "renders exactly two ClusterPolicy documents"
 contains "mutating policy name present" "name: cyclopus-inject-runtimeclass"
 contains "validating policy name present" "name: cyclopus-enforce-sandbox"
 
-# Fail-closed on BOTH policies (§7.1): two occurrences of failurePolicy: Fail.
+# Fail-closed (§7.1): failurePolicy: Fail on both Kyverno ClusterPolicies AND
+# on the ValidatingAdmissionPolicy backstop (3 occurrences total).
 fp=$(printf '%s\n' "$rendered" | grep -c 'failurePolicy: Fail' || true)
-[ "$fp" -eq 2 ] || fail "expected failurePolicy: Fail on both policies, got $fp"
-pass "both policies are fail-closed (failurePolicy: Fail x2)"
+[ "$fp" -eq 3 ] || fail "expected failurePolicy: Fail on both ClusterPolicies + the VAP backstop, got $fp"
+pass "both ClusterPolicies and the VAP are fail-closed (failurePolicy: Fail x3)"
 
 # Enforce on the validating policy — per-rule failureAction (the non-deprecated
 # form). Both validate rules (sandbox-class + pending-guard) must enforce.
@@ -71,6 +72,22 @@ contains "gvisor sandbox class present" "gvisor"
 # Kyverno v1.14 API kind/apiVersion.
 contains "kyverno v1 apiVersion" "apiVersion: kyverno.io/v1"
 
+# Admission-operation scoping (isolation verification, 2026-08-13): the
+# sandbox rule must be CREATE/UPDATE-only so a non-compliant pod stays
+# deletable, and the pending guard must be CREATE-only.
+ops_create_update=$(printf '%s\n' "$rendered" | grep -c '                - UPDATE' || true)
+[ "$ops_create_update" -eq 1 ] || fail "expected exactly one CREATE/UPDATE-scoped rule, got $ops_create_update"
+pass "sandbox rule scoped to CREATE/UPDATE (deletes stay possible)"
+
+# Webhook-free backstop (§7.1): a ValidatingAdmissionPolicy + binding that keep
+# enforcing while the Kyverno webhooks are absent (graceful shutdown/restart).
+contains "VAP backstop present" "kind: ValidatingAdmissionPolicy$"
+contains "VAP binding present" "kind: ValidatingAdmissionPolicyBinding$"
+contains "VAP apiVersion" "apiVersion: admissionregistration.k8s.io/v1"
+contains "VAP bound to policy by name" "policyName: cyclopus-enforce-sandbox"
+contains "VAP denies on violation" "validationActions: \[Deny\]"
+contains "VAP requires a sandbox runtime class" 'object.spec.runtimeClassName in'
+
 # --- toggle off (policies disabled) ------------------------------------------
 # shellcheck disable=SC2086
 disabled=$("$HELM" template cyclopus "$CHART" --kube-version 1.33.13 $SECRETS \
@@ -80,5 +97,9 @@ if printf '%s\n' "$disabled" | grep -q '^kind: ClusterPolicy'; then
   fail "kyverno.policies.enabled=false must render NO ClusterPolicy"
 fi
 pass "kyverno.policies.enabled=false renders no ClusterPolicy (toggle works)"
+if printf '%s\n' "$disabled" | grep -q '^kind: ValidatingAdmissionPolicy'; then
+  fail "kyverno.policies.enabled=false must render NO ValidatingAdmissionPolicy"
+fi
+pass "kyverno.policies.enabled=false renders no VAP backstop (toggle works)"
 
 printf 'kyverno policy render tests passed: %s assertions\n' "$assertions"

@@ -2,13 +2,12 @@ package kubernetes
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -759,7 +758,5 @@ func (e *reconcileExec) failRun(ctx context.Context, code string, cause error) e
 func strPtr(s string) *string { return &s }
 
 func reconcileAuditID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	return uuid.Must(uuid.NewV7()).String()
 }

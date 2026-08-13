@@ -32,11 +32,12 @@ runc break-glass handling (§7.1):
   The mutating policy only injects when runtimeClassName is absent/empty, so an
   explicitly-set runc (operator break-glass) is never clobbered.
 
-Kyverno API: v1.14 (chart pins kyverno v1.14.2). Uses the per-rule
-validate.failureAction: Enforce field (the current, non-deprecated form; the
-spec-level validationFailureAction is deprecated and, if dropped by a future
-Kyverno release, would silently degrade to Audit mode — admitting unsandboxed
-pods with only a warning). spec.failurePolicy: Fail gives fail-closed admission.
+Kyverno API: kyverno.io/v1 (pin lives in versions.env — currently kyverno
+v1.18.2 / chart 3.8.2). Uses the per-rule validate.failureAction: Enforce
+field (the current, non-deprecated form; the spec-level
+validationFailureAction is deprecated and, if dropped by a future Kyverno
+release, would silently degrade to Audit mode — admitting unsandboxed pods
+with only a warning). spec.failurePolicy: Fail gives fail-closed admission.
 
 Setting .Values.kyverno.policies.enabled=false REMOVES both policies and thereby
 DISABLES the §7.1 compute-isolation guarantee (pods may be admitted class-less on
@@ -117,6 +118,14 @@ spec:
           - resources:
               kinds:
                 - Pod
+              # CREATE/UPDATE only: without this scoping the rule also matches
+              # DELETE, and on delete admission Kyverno evaluates the rule
+              # against the object being deleted — so a non-compliant pod
+              # (e.g. one admitted during a webhook outage) could not be
+              # deleted without taking Kyverno down first.
+              operations:
+                - CREATE
+                - UPDATE
               namespaceSelector:
                 matchLabels:
                   {{ $mgmtKey }}: {{ $mgmtVal }}
@@ -145,6 +154,11 @@ spec:
           - resources:
               kinds:
                 - Pod
+              # CREATE only (guard against admission while NetworkPolicy
+              # provisioning is in flight); blocking UPDATE/DELETE here would
+              # wedge existing pods in a pending namespace.
+              operations:
+                - CREATE
               namespaceSelector:
                 matchLabels:
                   {{ $pendingKey }}: "true"
@@ -155,4 +169,56 @@ spec:
           ({{ $pendingKey }}=true); pod admission is blocked until Cyclopus
           finishes applying NetworkPolicies and clears the label (§4.3).
         deny: {}
+---
+# Webhook-free backstop for cyclopus-enforce-sandbox (§7.1).
+#
+# The Kyverno policies above are enforced through admission webhooks, and
+# webhooks have a fail-open window: on a graceful Kyverno shutdown or restart
+# the webhook configurations are temporarily absent, and pods can then be
+# admitted to app namespaces with no runtimeClassName — running unsandboxed
+# on the host runtime (observed during isolation verification, 2026-08-13).
+#
+# A ValidatingAdmissionPolicy is compiled into the API server itself (CEL,
+# GA since Kubernetes 1.30; the platform pins a newer k3s, and install.sh /
+# test_infrastructure.sh assert the running API server is >= 1.30), so it has
+# no webhook dependency and keeps enforcing while Kyverno is down, restarting,
+# or being upgraded. It deliberately duplicates only the sandbox-class
+# requirement — not the policies-pending guard, whose lifecycle is managed
+# alongside the Kyverno policy that also enforces it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cyclopus-enforce-sandbox
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+        # DELETE must stay excluded (same reason as the Kyverno rule above).
+        operations: ["CREATE", "UPDATE"]
+    namespaceSelector:
+      matchLabels:
+        {{ $mgmtKey }}: {{ $mgmtVal }}
+  validations:
+    - expression: >-
+        has(object.spec.runtimeClassName) && object.spec.runtimeClassName in [
+        {{- range $i, $c := $allowed }}{{ if $i }}, {{ end }}"{{ $c }}"{{- end }} ]
+      message: >-
+        Pods in Cyclopus app namespaces must run under a sandbox RuntimeClass
+        (one of: {{ join ", " $allowed }}). A pod with no runtimeClassName would
+        run on the host runtime, defeating gVisor isolation (§7.1).
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cyclopus-enforce-sandbox
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  policyName: cyclopus-enforce-sandbox
+  validationActions: [Deny]
 {{- end }}

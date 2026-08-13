@@ -356,6 +356,7 @@ if ! command -v psql >/dev/null 2>&1; then
   # can't wedge the installer forever.
   _pgdg_key_tmp=$(mktemp)
   TMP_FILES="$TMP_FILES $_pgdg_key_tmp"
+  install -d -m 0755 /usr/share/postgresql-common/pgdg
   dl https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$_pgdg_key_tmp" || fail "PGDG key download failed"
   timeout 30 gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg "$_pgdg_key_tmp" || fail "PGDG key dearmor failed"
   rm -f "$_pgdg_key_tmp"
@@ -528,6 +529,13 @@ done
 # the k3s staging dir and the bundle copies).
 [ "$BUNDLE_MODE" = 1 ] && rm -f /var/lib/rancher/k3s/agent/images/*.tar* "$BUNDLE_DIR"/images/*.tar*
 log "k3s ready"
+
+# The cyclopus chart ships a ValidatingAdmissionPolicy backstop for the §7.1
+# sandbox guarantee (webhook-free; compiled into the API server). VAP is GA
+# since Kubernetes 1.30 — refuse to install on anything older rather than
+# silently degrading to webhook-only enforcement.
+K8S_MINOR=$($KUBECTL version -o json 2>/dev/null | grep -o '"minor": *"[0-9]*"' | tail -1 | grep -o '[0-9]*' || true)
+[ -n "$K8S_MINOR" ] && [ "$K8S_MINOR" -ge 30 ] || fail "Kubernetes API server >= 1.30 is required (ValidatingAdmissionPolicy backstop for §7.1)"
 
 # §2.2 opt-in: repel ordinary app pods from the control-plane node. Off by
 # default because a single-node install must keep the node schedulable.
@@ -775,6 +783,16 @@ install_kyverno() {
   # scripts/test_infrastructure.sh).
   KYVERNO_SET_ARGS=(
     --set-json 'config.webhooks={"namespaceSelector":{"matchLabels":{"app.kubernetes.io/managed-by":"cyclopus"}}}'
+    # Two admission-controller replicas (§7.1): a rolling restart otherwise
+    # leaves zero healthy endpoints, and with no endpoints the fail-closed
+    # webhook blocks ALL app-namespace admissions — including the replacement
+    # pod's own startup probes landing in a matched namespace. The cyclopus
+    # chart's ValidatingAdmissionPolicy covers sandbox enforcement during
+    # such windows; replicas here shrink the window's likelihood. The chart
+    # auto-enables a PDB whenever replicas > 1; set it explicitly so the
+    # guarantee is visible rather than implicit.
+    --set admissionController.replicas=2
+    --set-json 'admissionController.podDisruptionBudget={"enabled":true,"minAvailable":1}'
   )
   _chart=$(chart_ref kyverno "$KYVERNO_CHART_VERSION" kyverno)
   _ver_args=(); [ "$BUNDLE_MODE" = 1 ] || _ver_args=(--version "$KYVERNO_CHART_VERSION")
