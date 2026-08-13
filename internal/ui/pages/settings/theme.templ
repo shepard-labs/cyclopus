@@ -40,18 +40,18 @@ templ themeContent() {
 						b.className = 'theme-option'
 						b.setAttribute('data-theme-name', name)
 						b.setAttribute('aria-pressed', 'false')
-						var swatches = ['--color-base-100', '--color-base-300', '--color-primary', '--color-warning', '--color-error', '--color-success']
+						var swatches = ['--wa-color-surface-default', '--wa-color-surface-lowered', '--wa-color-brand-fill-loud', '--wa-color-warning-fill-loud', '--wa-color-danger-fill-loud', '--wa-color-success-fill-loud']
 							.map(function (k) {
 								return '<span class="theme-swatch" style="background:' + v[k] + '"></span>'
 							}).join('')
 						b.innerHTML =
-							'<span class="theme-type" style="background:' + v['--color-base-100'] + ';border-radius:' + v['--radius-field'] + '">' +
-								'<b style="color:' + v['--color-base-content'] + ';font-family:' + v['--font-sans'] + ',sans-serif">Aa</b>' +
-								'<b style="color:' + v['--color-primary'] + ';font-family:' + v['--font-mono'] + ',monospace">Aa</b>' +
+							'<span class="theme-type" style="background:' + v['--wa-color-surface-default'] + ';border-radius:' + v['--wa-border-radius-m'] + '">' +
+								'<b style="color:' + v['--wa-color-text-normal'] + ';font-family:' + v['--wa-font-family-body'] + '">Aa</b>' +
+								'<b style="color:' + v['--wa-color-brand-fill-loud'] + ';font-family:' + v['--wa-font-family-code'] + '">Aa</b>' +
 							'</span>' +
 							'<span class="theme-option-head">' +
-								'<span class="theme-option-label" style="font-family:' + v['--font-sans'] + ',sans-serif">' + t.label + '</span>' +
-								'<span class="theme-option-mode" style="font-family:' + v['--font-sans'] + ',sans-serif">' + (t.dark ? 'Dark' : 'Light') + '</span>' + /* shadcn badge outline */
+								'<span class="theme-option-label" style="font-family:' + v['--wa-font-family-body'] + '">' + t.label + '</span>' +
+								'<span class="theme-option-mode" style="font-family:' + v['--wa-font-family-body'] + '">' + (t.dark ? 'Dark' : 'Light') + '</span>' +
 							'</span>' +
 							'<span class="theme-swatches">' + swatches + '</span>'
 						b.onclick = function () { window.cyclopusTheme.apply(name) }

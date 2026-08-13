@@ -1,51 +1,76 @@
-/* Cyclopus UI design tokens — daisyUI-compatible token structure.
-   Hand-rolled (no Tailwind build); token names follow the daisyUI standard:
-   base surface scale, brand colors, semantic state colors, radius scale.
+/* Cyclopus UI design tokens — Web Awesome (--wa-*) token structure.
+   Single source of truth is theme.js; these :root values are the Obsidian preset,
+   serving as the no-JS fallback and the first paint before theme.js (loaded
+   synchronously in <head>) applies the persisted preset on <html>.
 
-   These :root values are the Obsidian preset and serve two purposes: the no-JS
-   fallback, and the first paint before theme.js (loaded synchronously in <head>)
-   applies the persisted preset on top. theme.js is the source of truth for preset
-   values — keep this block in sync with the obsidian entry there. */
+   WA components read these via CSS custom properties that cascade into shadow DOM.
+   Variant tokens follow --wa-color-{variant}-{fill|border|on}-{quiet|normal|loud}.
+   --color-accent / --color-info(-content) are Cyclopus-private (no WA equivalent).
+   Keep this block in sync with the obsidian entry in theme.js (gen via the
+   generator in tasks/ if obsidian changes). */
 :root {
-  /* base surfaces (daisyUI: base-100 = page, base-200 = cards, base-300 = raised/borders) */
-  --color-base-100: #0a0a0b;
-  --color-base-200: #111113;
-  --color-base-300: #18181b;
-  --color-base-content: #fafafa;
-
-  /* brand */
-  --color-primary: #2dd4bf;
-  --color-primary-content: #04211d;
-  --color-secondary: #18181b;
-  --color-secondary-content: #fafafa;
-  --color-accent: #5eead4;
-  --color-accent-content: #09090b;
-
-  /* neutral (used as the "gray" state color: offline, superseded, unknown) */
-  --color-neutral: #a1a1aa;
-  --color-neutral-content: #09090b;
-
-  /* semantic states */
-  --color-info: #60a5fa;
-  --color-info-content: #082f49;
-  --color-success: #34d399;
-  --color-success-content: #022c22;
-  --color-warning: #fbbf24;
-  --color-warning-content: #451a03;
-  --color-error: #fb7185;
-  --color-error-content: #450a0a;
-
-  /* radius scale (daisyUI: selector/field/box) */
-  --radius-selector: 0.25rem;
-  --radius-field: 6px;
-  --radius-box: 8px;
-
-  --border: 1px;
-
-  /* elevation (per-mode via theme.js: heavy on dark presets, softer on light) */
-  --shadow: rgb(0 0 0 / 40%);
-
-  /* type pairing (per-preset via theme.js) */
-  --font-sans: 'Space Grotesk';
-  --font-mono: 'JetBrains Mono';
+  --wa-color-surface-default: #0A0A0B;
+  --wa-color-surface-raised: #111113;
+  --wa-color-surface-lowered: #18181B;
+  --wa-color-surface-border: #2A2A2D;
+  --wa-color-text-normal: #FAFAFA;
+  --wa-color-text-quiet: #8E8E8E;
+  --wa-color-text-link: #5EEAD4;
+  --wa-color-focus: #2DD4BF;
+  --wa-color-overlay-modal: color-mix(in oklab, black 60%, transparent);
+  --wa-color-shadow: rgb(0 0 0 / 40%);
+  --wa-border-width-s: 1px;
+  --wa-border-radius-s: 0.25rem;
+  --wa-border-radius-m: 6px;
+  --wa-border-radius-l: 8px;
+  --wa-font-family-body: 'Space Grotesk', system-ui, sans-serif;
+  --wa-font-family-code: 'JetBrains Mono', ui-monospace, monospace;
+  --color-accent: #5EEAD4;
+  --color-info: #60A5FA;
+  --color-info-content: #082F49;
+  --wa-color-brand-fill-quiet: #0E443D;
+  --wa-color-brand-fill-normal: #16685E;
+  --wa-color-brand-fill-loud: #2DD4BF;
+  --wa-color-brand-border-quiet: #16685E;
+  --wa-color-brand-border-normal: #1E8C7E;
+  --wa-color-brand-border-loud: #25B09F;
+  --wa-color-brand-on-quiet: #54DCCB;
+  --wa-color-brand-on-normal: #7AE4D7;
+  --wa-color-brand-on-loud: #04211D;
+  --wa-color-neutral-fill-quiet: #343436;
+  --wa-color-neutral-fill-normal: #4F4F53;
+  --wa-color-neutral-fill-loud: #A1A1AA;
+  --wa-color-neutral-border-quiet: #4F4F53;
+  --wa-color-neutral-border-normal: #6A6A70;
+  --wa-color-neutral-border-loud: #86868D;
+  --wa-color-neutral-on-quiet: #B2B2BA;
+  --wa-color-neutral-on-normal: #C4C4C9;
+  --wa-color-neutral-on-loud: #09090B;
+  --wa-color-success-fill-quiet: #114431;
+  --wa-color-success-fill-normal: #19674B;
+  --wa-color-success-fill-loud: #34D399;
+  --wa-color-success-border-quiet: #19674B;
+  --wa-color-success-border-normal: #228B65;
+  --wa-color-success-border-loud: #2BAF7F;
+  --wa-color-success-on-quiet: #59DBAC;
+  --wa-color-success-on-normal: #7FE3BF;
+  --wa-color-success-on-loud: #022C22;
+  --wa-color-warning-fill-quiet: #503D0C;
+  --wa-color-warning-fill-normal: #7B5E12;
+  --wa-color-warning-fill-loud: #FBBF24;
+  --wa-color-warning-border-quiet: #7B5E12;
+  --wa-color-warning-border-normal: #A67E18;
+  --wa-color-warning-border-loud: #D09F1E;
+  --wa-color-warning-on-quiet: #FCCB4C;
+  --wa-color-warning-on-normal: #FCD775;
+  --wa-color-warning-on-loud: #451A03;
+  --wa-color-danger-fill-quiet: #50242B;
+  --wa-color-danger-fill-normal: #7B3741;
+  --wa-color-danger-fill-loud: #FB7185;
+  --wa-color-danger-border-quiet: #7B3741;
+  --wa-color-danger-border-normal: #A64B58;
+  --wa-color-danger-border-loud: #D05E6E;
+  --wa-color-danger-on-quiet: #FC8B9B;
+  --wa-color-danger-on-normal: #FCA5B2;
+  --wa-color-danger-on-loud: #450A0A;
 }
