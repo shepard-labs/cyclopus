@@ -9,6 +9,8 @@
 }
 html,
 body {
+  color: var(--cyclopus-ink);
+  background-color: var(--cyclopus-base);
   height: 100%;
 }
 body {
@@ -45,5 +47,5 @@ a {
   text-decoration: none;
 }
 a:hover {
-  color: var(--color-accent);
+  color: var(--cyclopus-brand);
 }

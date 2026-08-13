@@ -64,35 +64,35 @@ func registriesContent(registries []store.Registry, errMsg string) templ.Compone
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-xl font-semibold\">Container Registries</h1><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Add registry</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-xl font-semibold\">Container Registries</h1><wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Add registry</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"alert alert-error\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<wa-callout variant=\"danger\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 19, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 19, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/settings/registries\" class=\"space-y-4\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"reg-provider\">Provider</label> <select id=\"reg-provider\" name=\"provider\"><option value=\"ghcr\">GitHub Container Registry (ghcr)</option> <option value=\"gcr\">Google Container Registry (gcr)</option> <option value=\"ecr\">Amazon ECR (ecr)</option> <option value=\"other\">Other</option></select></div><div class=\"fieldset\"><label for=\"reg-url\">Registry URL</label> <input type=\"text\" id=\"reg-url\" name=\"registry_url\" required placeholder=\"ghcr.io\"></div></div><div class=\"fieldset\"><label for=\"reg-cred\">Credential secret ref <span class=\"text-base-content/50 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"reg-cred\" name=\"credential_secret_ref\" required placeholder=\"k8s-secret://cyclopus/registry-cred#.dockerconfigjson\"></div><button type=\"submit\" class=\"btn btn-primary\">Add registry</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/settings/registries\" class=\"space-y-4\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-select id=\"reg-provider\" name=\"provider\" value=\"ghcr\" label=\"Provider\"><wa-option value=\"ghcr\">GitHub Container Registry (ghcr)</wa-option> <wa-option value=\"gcr\">Google Container Registry (gcr)</wa-option> <wa-option value=\"ecr\">Amazon ECR (ecr)</wa-option> <wa-option value=\"other\">Other</wa-option></wa-select></div><div class=\"fieldset\"><wa-input type=\"text\" id=\"reg-url\" name=\"registry_url\" required placeholder=\"ghcr.io\" label=\"Registry URL\"></wa-input></div></div><div class=\"fieldset\"><label for=\"reg-cred\">Credential secret ref <span class=\"text-base-content/50 font-normal\">(k8s-secret://…)</span></label> <wa-input type=\"text\" id=\"reg-cred\" name=\"credential_secret_ref\" required placeholder=\"k8s-secret://cyclopus/registry-cred#.dockerconfigjson\"></wa-input></div><wa-button type=\"submit\" variant=\"brand\">Add registry</wa-button></form></wa-card> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(registries) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"card\"><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">Provider</th><th class=\"text-left py-2\">URL</th><th class=\"text-left py-2\">Created</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<wa-card><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">Provider</th><th class=\"text-left py-2\">URL</th><th class=\"text-left py-2\">Created</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -104,7 +104,7 @@ func registriesContent(registries []store.Registry, errMsg string) templ.Compone
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(r.Provider)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 58, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 56, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -117,7 +117,7 @@ func registriesContent(registries []store.Registry, errMsg string) templ.Compone
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(r.RegistryURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 59, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 57, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -130,7 +130,7 @@ func registriesContent(registries []store.Registry, errMsg string) templ.Compone
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(relTimeSettings(r.CreatedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 60, Col: 84}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 58, Col: 84}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -143,18 +143,18 @@ func registriesContent(registries []store.Registry, errMsg string) templ.Compone
 				var templ_7745c5c3_Var7 templ.SafeURL
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/registries/" + r.ID + "/delete"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 62, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/registries.templ`, Line: 60, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" onsubmit=\"return confirm('Delete this registry?')\"><button type=\"submit\" class=\"btn btn-error btn-sm\">Delete</button></form></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" onsubmit=\"return confirm('Delete this registry?')\"><wa-button type=\"submit\" variant=\"danger\" size=\"small\">Delete</wa-button></form></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</tbody></table></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</tbody></table></wa-card>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

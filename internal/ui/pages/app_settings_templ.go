@@ -135,20 +135,20 @@ func appSettingsContent(app store.App, project store.Project, errMsg string) tem
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"alert alert-error\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<wa-callout variant=\"danger\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 27, Col: 42}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 27, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -166,281 +166,264 @@ func appSettingsContent(app store.App, project store.Project, errMsg string) tem
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" class=\"space-y-6\"><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Identity</h2><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"s-name\">Name</label> <input type=\"text\" id=\"s-name\" name=\"name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" class=\"space-y-6\"><wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Identity</h2><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-input type=\"text\" id=\"s-name\" name=\"name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(app.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 35, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 34, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" required></div><div class=\"fieldset\"><label for=\"s-hostname\">Hostname label</label> <input type=\"text\" id=\"s-hostname\" name=\"hostname_label\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" required label=\"Name\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"text\" id=\"s-hostname\" name=\"hostname_label\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(app.HostnameLabel)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 39, Col: 88}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 37, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" required pattern=\"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"s-port\">Container port</label> <input type=\"number\" id=\"s-port\" name=\"container_port\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" required pattern=\"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\" label=\"Hostname label\"></wa-input></div></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-port\" name=\"container_port\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.ContainerPort))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 45, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 42, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" min=\"1\" max=\"65535\" required></div><div class=\"fieldset\"><label for=\"s-health\">Health check path</label> <input type=\"text\" id=\"s-health\" name=\"health_check_path\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" min=\"1\" max=\"65535\" required label=\"Container port\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"text\" id=\"s-health\" name=\"health_check_path\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(app.HealthCheckPath)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 49, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 45, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" required></div></div><div class=\"fieldset\"><label for=\"s-ci\">CI workflow ID <span class=\"text-base-content/50 font-normal\">(GitHub Actions)</span></label> <input type=\"text\" id=\"s-ci\" name=\"ci_workflow_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" required label=\"Health check path\"></wa-input></div></div><div class=\"fieldset\"><label for=\"s-ci\">CI workflow ID <span class=\"text-base-content/50 font-normal\">(GitHub Actions)</span></label> <wa-input type=\"text\" id=\"s-ci\" name=\"ci_workflow_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(strptr(app.CIWorkflowID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 54, Col: 88}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 50, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" placeholder=\"deploy.yml\"></div><div class=\"fieldset\"><label for=\"s-image-repo\">Image repository</label> <input type=\"text\" id=\"s-image-repo\" name=\"image_repository\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" placeholder=\"deploy.yml\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"text\" id=\"s-image-repo\" name=\"image_repository\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(strptr(app.ImageRepository))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 58, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 53, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" placeholder=\"ghcr.io/org/repo\"></div></div><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Scaling <span class=\"text-base-content/50 font-normal\">(production only)</span></h2><div class=\"fieldset\"><label for=\"s-scaling\">Scaling mode</label> <select id=\"s-scaling\" name=\"scaling_mode\"><option value=\"hpa\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if app.ScalingMode == "hpa" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, ">HPA (default)</option> <option value=\"keda_cron\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if app.ScalingMode == "keda_cron" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, ">KEDA cron (opt-in)</option> <option value=\"keda_http\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if app.ScalingMode == "keda_http" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, ">KEDA HTTP (beta, opt-in)</option></select></div><div class=\"grid grid-cols-3 gap-4\"><div class=\"fieldset\"><label for=\"s-min\">Min replicas</label> <input type=\"number\" id=\"s-min\" name=\"min_replicas\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" placeholder=\"ghcr.io/org/repo\" label=\"Image repository\"></wa-input></div></wa-card> <wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Scaling <span class=\"text-base-content/50 font-normal\">(production only)</span></h2><div class=\"fieldset\"><wa-select id=\"s-scaling\" name=\"scaling_mode\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MinReplicas))
+		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(app.ScalingMode)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 74, Col: 100}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 59, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" min=\"0\"></div><div class=\"fieldset\"><label for=\"s-max\">Max replicas</label> <input type=\"number\" id=\"s-max\" name=\"max_replicas\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" label=\"Scaling mode\"><wa-option value=\"hpa\">HPA (default)</wa-option> <wa-option value=\"keda_cron\">KEDA cron (opt-in)</wa-option> <wa-option value=\"keda_http\">KEDA HTTP (beta, opt-in)</wa-option></wa-select></div><div class=\"grid grid-cols-3 gap-4\"><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-min\" name=\"min_replicas\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MaxReplicas))
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MinReplicas))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 78, Col: 100}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 67, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" min=\"1\"></div><div class=\"fieldset\"><label for=\"s-cpu-target\">HPA CPU target %</label> <input type=\"number\" id=\"s-cpu-target\" name=\"hpa_target_cpu_percent\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" min=\"0\" label=\"Min replicas\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-max\" name=\"max_replicas\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.HPATargetCPUPercent))
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MaxReplicas))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 82, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 70, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" min=\"1\" max=\"100\"></div></div></div><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Resources</h2><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"s-cpureq\">CPU request (millicores)</label> <input type=\"number\" id=\"s-cpureq\" name=\"cpu_request_millicores\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" min=\"1\" label=\"Max replicas\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-cpu-target\" name=\"hpa_target_cpu_percent\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.CPURequestMillicores))
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.HPATargetCPUPercent))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 91, Col: 122}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 73, Col: 128}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" min=\"1\"></div><div class=\"fieldset\"><label for=\"s-cpulim\">CPU limit (millicores)</label> <input type=\"number\" id=\"s-cpulim\" name=\"cpu_limit_millicores\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" min=\"1\" max=\"100\" label=\"HPA CPU target %\"></wa-input></div></div></wa-card> <wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Resources</h2><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-cpureq\" name=\"cpu_request_millicores\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.CPULimitMillicores))
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.CPURequestMillicores))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 95, Col: 118}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 81, Col: 125}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" min=\"1\"></div><div class=\"fieldset\"><label for=\"s-memreq\">Memory request (MiB)</label> <input type=\"number\" id=\"s-memreq\" name=\"memory_request_mib\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" min=\"1\" label=\"CPU request (millicores)\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-cpulim\" name=\"cpu_limit_millicores\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MemoryRequestMiB))
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.CPULimitMillicores))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 99, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 84, Col: 121}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" min=\"1\"></div><div class=\"fieldset\"><label for=\"s-memlim\">Memory limit (MiB)</label> <input type=\"number\" id=\"s-memlim\" name=\"memory_limit_mib\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" min=\"1\" label=\"CPU limit (millicores)\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-memreq\" name=\"memory_request_mib\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MemoryLimitMiB))
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MemoryRequestMiB))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 103, Col: 110}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 87, Col: 117}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" min=\"1\"></div></div></div><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Preview environments</h2><div class=\"flex items-center gap-3\"><input type=\"checkbox\" id=\"s-previews\" name=\"previews_enabled\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if app.PreviewsEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " checked")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "> <label for=\"s-previews\" class=\"text-sm font-normal text-base-content/80\">Enable preview environments</label></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"s-maxprev\">Max previews</label> <input type=\"number\" id=\"s-maxprev\" name=\"max_preview_environments\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" min=\"1\" label=\"Memory request (MiB)\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-memlim\" name=\"memory_limit_mib\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MaxPreviewEnvironments))
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MemoryLimitMiB))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 116, Col: 127}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 90, Col: 113}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" min=\"0\"></div><div class=\"fieldset\"><label for=\"s-previdlettl\">Idle TTL (hours)</label> <input type=\"number\" id=\"s-previdlettl\" name=\"preview_idle_ttl_hours\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" min=\"1\" label=\"Memory limit (MiB)\"></wa-input></div></div></wa-card> <wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Preview environments</h2><div class=\"flex items-center gap-3\"><wa-checkbox id=\"s-previews\" name=\"previews_enabled\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if app.PreviewsEnabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " checked")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, ">Enable preview environments</wa-checkbox></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-maxprev\" name=\"max_preview_environments\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.PreviewIdleTTLHours))
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.MaxPreviewEnvironments))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 120, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 101, Col: 130}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" min=\"1\"></div></div></div><div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Deploy behavior</h2><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"s-timeout\">Deploy timeout (seconds)</label> <input type=\"number\" id=\"s-timeout\" name=\"deploy_timeout_seconds\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" min=\"0\" label=\"Max previews\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-previdlettl\" name=\"preview_idle_ttl_hours\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.DeployTimeoutSeconds))
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.PreviewIdleTTLHours))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 129, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 104, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" min=\"1\"></div><div class=\"fieldset\"><label for=\"s-retention\">Release retention count</label> <input type=\"number\" id=\"s-retention\" name=\"release_retention_count\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" min=\"1\" label=\"Idle TTL (hours)\"></wa-input></div></div></wa-card> <wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Deploy behavior</h2><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-timeout\" name=\"deploy_timeout_seconds\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.ReleaseRetentionCount))
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.DeployTimeoutSeconds))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 133, Col: 127}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 112, Col: 126}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" min=\"1\"></div></div></div><div class=\"flex gap-3\"><button type=\"submit\" class=\"btn btn-primary\">Save settings</button> <a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" min=\"1\" label=\"Deploy timeout (seconds)\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"s-retention\" name=\"release_retention_count\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var27 templ.SafeURL
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/apps/" + app.ID))
+		var templ_7745c5c3_Var27 string
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", app.ReleaseRetentionCount))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 139, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 115, Col: 130}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" class=\"btn btn-secondary\">Cancel</a></div></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" min=\"1\" label=\"Release retention count\"></wa-input></div></div></wa-card><div class=\"flex gap-3\"><wa-button type=\"submit\" variant=\"brand\">Save settings</wa-button> <wa-button href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var28 string
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL("/apps/" + app.ID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app_settings.templ`, Line: 121, Col: 54}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" variant=\"neutral\">Cancel</wa-button></div></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -12,3 +12,4 @@
 /.codegraph
 /tasks
 /.cyclopus-dev
+/scripts/ui-check/node_modules

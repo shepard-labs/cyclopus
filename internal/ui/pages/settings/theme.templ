@@ -10,23 +10,13 @@ templ Theme(user store.User, org store.Organization, flash *ui.FlashMessage) {
 	@components.Page("Theme", user, org, flash, "/settings/theme", themeContent())
 }
 
-// ThemePreview renders just the theme card grid inside the bare layout for
-// headless design review (served only with CYCLOPUS_UI_PREVIEW=1).
-templ ThemePreview() {
-	@components.AuthPage("Theme Preview") {
-		<div class="w-full max-w-3xl p-6">
-			@themeContent()
-		</div>
-	}
-}
-
 templ themeContent() {
 	<div class="max-w-3xl space-y-6">
 		<div>
 			<h1 class="text-xl font-semibold">Theme</h1>
 			<p class="text-sm text-base-content/50 mt-1">Applies instantly and is remembered on this device.</p>
 		</div>
-		<div class="card">
+		<wa-card>
 			<div class="theme-grid" id="theme-grid"></div>
 			<script>
 				(function () {
@@ -53,6 +43,7 @@ templ themeContent() {
 								'<span class="theme-option-label" style="font-family:' + v['--wa-font-family-body'] + '">' + t.label + '</span>' +
 								'<span class="theme-option-mode" style="font-family:' + v['--wa-font-family-body'] + '">' + (t.dark ? 'Dark' : 'Light') + '</span>' +
 							'</span>' +
+							'<span class="theme-option-desc" style="color:' + v['--cyclopus-dim'] + ';font-family:' + v['--wa-font-family-body'] + '">' + t.desc + '</span>' +
 							'<span class="theme-swatches">' + swatches + '</span>'
 						b.onclick = function () { window.cyclopusTheme.apply(name) }
 						grid.appendChild(b)
@@ -60,6 +51,6 @@ templ themeContent() {
 					window.cyclopusTheme.sync()
 				})()
 			</script>
-		</div>
+		</wa-card>
 	</div>
 }

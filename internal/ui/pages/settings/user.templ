@@ -18,38 +18,29 @@ templ userContent(user store.User, profileError, passwordError, openDialog strin
 			<p class="text-sm text-base-content/50 mt-1">Manage your profile and account security.</p>
 		</div>
 
-		<div class="card space-y-4">
+		<wa-card class="space-y-4">
 			<div>
 				<h2 class="text-sm font-semibold text-base-content/90">Profile</h2>
 			</div>
 			if profileError != "" && openDialog == "" {
-				<div class="alert alert-error" role="alert">{ profileError }</div>
+				<wa-callout variant="danger">{ profileError }</wa-callout>
 			}
 			<div class="profile-avatar-row">
-				<button type="button" class="current-avatar" onclick="document.getElementById('avatar-dialog').showModal()" aria-label="Change avatar">
+				<wa-button type="button" appearance="plain" class="current-avatar" onclick="openSettingsDialog('avatar-dialog')" aria-label="Change avatar">
 					<img src={ avatar.URL(user.AvatarKey) } alt="Current avatar"/>
-				</button>
+				</wa-button>
 			</div>
 			<form id="profile-form" method="POST" action="/settings/user/profile" class="space-y-4">
 				<input type="hidden" name="action" value="profile"/>
 				<div class="grid grid-cols-2 gap-4">
-					<div class="fieldset">
-						<label for="first-name">First name</label>
-						<input id="first-name" name="first_name" value={ user.FirstName } maxlength="100" autocomplete="given-name"/>
-					</div>
-					<div class="fieldset">
-						<label for="last-name">Last name</label>
-						<input id="last-name" name="last_name" value={ user.LastName } maxlength="100" autocomplete="family-name"/>
-					</div>
+					<wa-input id="first-name" name="first_name" label="First name" value={ user.FirstName } maxlength="100" autocomplete="given-name"></wa-input>
+					<wa-input id="last-name" name="last_name" label="Last name" value={ user.LastName } maxlength="100" autocomplete="family-name"></wa-input>
 				</div>
-				<div class="fieldset">
-					<label for="display-name">Display name</label>
-					<input id="display-name" name="display_name" value={ user.DisplayName } maxlength="200" autocomplete="nickname" placeholder="How you appear in Cyclopus"/>
-				</div>
-				<div class="profile-actions"><button id="profile-save" type="submit" class="btn btn-primary" disabled>Save</button></div>
+				<wa-input id="display-name" name="display_name" label="Display name" value={ user.DisplayName } maxlength="200" autocomplete="nickname" placeholder="How you appear in Cyclopus"></wa-input>
+				<div class="profile-actions"><wa-button id="profile-save" type="submit" variant="brand" disabled>Save</wa-button></div>
 			</form>
 			<script>
-				(function () {
+				customElements.whenDefined('wa-input').then(function () {
 					const form = document.getElementById('profile-form')
 					const save = document.getElementById('profile-save')
 					const initial = new FormData(form)
@@ -61,125 +52,93 @@ templ userContent(user store.User, profileError, passwordError, openDialog strin
 					}
 					form.addEventListener('input', updateSaveState)
 					form.addEventListener('reset', function () { requestAnimationFrame(updateSaveState) })
-				})()
+				})
 			</script>
-		</div>
+		</wa-card>
 
-		<div class="card settings-row">
+		<wa-card class="settings-row">
 			<div>
 				<h2 class="text-sm font-semibold text-base-content/90">Email</h2>
 				<p class="text-sm text-base-content/50 mt-1">{ user.Email }</p>
 			</div>
-			<button type="button" class="btn btn-ghost" onclick="document.getElementById('email-dialog').showModal()">Update</button>
-		</div>
+			<wa-button type="button" appearance="plain" onclick="openSettingsDialog('email-dialog')">Update</wa-button>
+		</wa-card>
 
-		<div class="card settings-row">
+		<wa-card class="settings-row">
 			<div>
 				<h2 class="text-sm font-semibold text-base-content/90">Password</h2>
 				<p class="text-sm text-base-content/50 mt-1">Change your password and sign out other sessions.</p>
 			</div>
-			<button type="button" class="btn btn-ghost" onclick="document.getElementById('password-dialog').showModal()">Update</button>
-		</div>
+			<wa-button type="button" appearance="plain" onclick="openSettingsDialog('password-dialog')">Update</wa-button>
+		</wa-card>
 
-		<dialog id="avatar-dialog" class="settings-dialog">
-			<div class="dialog-panel">
-				<div class="dialog-header">
-					<div>
-						<h2>Choose an avatar</h2>
-						<p>Select the avatar you want to use.</p>
-					</div>
-					<button type="button" class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">@iconDialogClose()</button>
-				</div>
+		<wa-dialog id="avatar-dialog" label="Choose an avatar" class="settings-dialog">
+			<p class="text-sm text-base-content/50 mb-4">Select the avatar you want to use.</p>
 				if profileError != "" && openDialog == "avatar" {
-					<div class="alert alert-error" role="alert">{ profileError }</div>
+					<wa-callout variant="danger">{ profileError }</wa-callout>
 				}
 				<form method="POST" action="/settings/user/profile" class="space-y-4">
 					<input type="hidden" name="action" value="avatar"/>
-					<div class="avatar-picker">
+					<wa-radio-group name="avatar_key" value={ user.AvatarKey } label="Avatar" required class="avatar-picker">
 						for _, key := range avatar.Keys {
-							<label class="avatar-option">
-								<input type="radio" name="avatar_key" value={ key } checked?={ user.AvatarKey == key } required/>
+							<wa-radio value={ key } class="avatar-option">
 								<img src={ avatar.URL(key) } alt=""/>
 								<span class="sr-only">Avatar option { key }</span>
-							</label>
+							</wa-radio>
 						}
-					</div>
+					</wa-radio-group>
 					<div class="dialog-actions">
-						<button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
-						<button type="submit" class="btn btn-primary">Save</button>
+						<wa-button type="button" appearance="plain" onclick="this.closest('wa-dialog').open=false">Cancel</wa-button>
+						<wa-button type="submit" variant="brand">Save</wa-button>
 					</div>
 				</form>
-			</div>
-		</dialog>
+		</wa-dialog>
 
-		<dialog id="email-dialog" class="settings-dialog">
-			<div class="dialog-panel">
-				<div class="dialog-header">
-					<div><h2>Update email</h2><p>Enter your new email and current password.</p></div>
-					<button type="button" class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">@iconDialogClose()</button>
-				</div>
+		<wa-dialog id="email-dialog" label="Update email" class="settings-dialog">
+			<p class="text-sm text-base-content/50 mb-4">Enter your new email and current password.</p>
 				if profileError != "" && openDialog == "email" {
-					<div class="alert alert-error" role="alert">{ profileError }</div>
+					<wa-callout variant="danger">{ profileError }</wa-callout>
 				}
 				<form method="POST" action="/settings/user/profile" class="space-y-4">
 					<input type="hidden" name="action" value="email"/>
-					<div class="fieldset">
-						<label for="new-email">New email</label>
-						<input type="email" id="new-email" name="email" value={ user.Email } maxlength="320" autocomplete="email" required/>
-					</div>
-					<div class="fieldset">
-						<label for="email-password">Current password</label>
-						<input type="password" id="email-password" name="current_password" autocomplete="current-password" required/>
-					</div>
+					<wa-input type="email" id="new-email" name="email" label="New email" value={ user.Email } maxlength="320" autocomplete="email" required></wa-input>
+					<wa-input type="password" id="email-password" name="current_password" label="Current password" autocomplete="current-password" required></wa-input>
 					<div class="dialog-actions">
-						<button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
-						<button type="submit" class="btn btn-primary">Save</button>
+						<wa-button type="button" appearance="plain" onclick="this.closest('wa-dialog').open=false">Cancel</wa-button>
+						<wa-button type="submit" variant="brand">Save</wa-button>
 					</div>
 				</form>
-			</div>
-		</dialog>
+		</wa-dialog>
 
-		<dialog id="password-dialog" class="settings-dialog">
-			<div class="dialog-panel">
-				<div class="dialog-header">
-					<div><h2>Change password</h2><p>Other signed-in sessions will be revoked.</p></div>
-					<button type="button" class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">@iconDialogClose()</button>
-				</div>
+		<wa-dialog id="password-dialog" label="Change password" class="settings-dialog">
+			<p class="text-sm text-base-content/50 mb-4">Other signed-in sessions will be revoked.</p>
 				if passwordError != "" {
-					<div class="alert alert-error" role="alert">{ passwordError }</div>
+					<wa-callout variant="danger">{ passwordError }</wa-callout>
 				}
 				<form method="POST" action="/settings/user/password" class="space-y-4">
-					<div class="fieldset">
-						<label for="current-password">Current password</label>
-						<input type="password" id="current-password" name="current_password" autocomplete="current-password" required/>
-					</div>
-					<div class="fieldset">
-						<label for="new-password">New password</label>
-						<input type="password" id="new-password" name="new_password" minlength="8" autocomplete="new-password" required/>
-					</div>
-					<div class="fieldset">
-						<label for="confirm-password">Confirm new password</label>
-						<input type="password" id="confirm-password" name="confirm_password" minlength="8" autocomplete="new-password" required/>
-					</div>
+					<wa-input type="password" id="current-password" name="current_password" label="Current password" autocomplete="current-password" required></wa-input>
+					<wa-input type="password" id="new-password" name="new_password" label="New password" minlength="8" autocomplete="new-password" required></wa-input>
+					<wa-input type="password" id="confirm-password" name="confirm_password" label="Confirm new password" minlength="8" autocomplete="new-password" required></wa-input>
 					<div class="dialog-actions">
-						<button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
-						<button type="submit" class="btn btn-primary">Save</button>
+						<wa-button type="button" appearance="plain" onclick="this.closest('wa-dialog').open=false">Cancel</wa-button>
+						<wa-button type="submit" variant="brand">Save</wa-button>
 					</div>
 				</form>
-			</div>
-		</dialog>
+		</wa-dialog>
+		<script>
+			window.openSettingsDialog = function (id) {
+				customElements.whenDefined('wa-dialog').then(function () {
+					var dialog = document.getElementById(id)
+					if (dialog) { dialog.open = true }
+				})
+			}
+		</script>
 		if openDialog == "avatar" {
-			<script>document.getElementById('avatar-dialog').showModal()</script>
+			<script>openSettingsDialog('avatar-dialog')</script>
 		} else if openDialog == "email" {
-			<script>document.getElementById('email-dialog').showModal()</script>
+			<script>openSettingsDialog('email-dialog')</script>
 		} else if openDialog == "password" {
-			<script>document.getElementById('password-dialog').showModal()</script>
+			<script>openSettingsDialog('password-dialog')</script>
 		}
 	</div>
-}
-
-templ iconDialogClose() {
-	<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-		<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-	</svg>
 }

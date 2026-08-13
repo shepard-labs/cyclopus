@@ -14,29 +14,28 @@ templ Webhooks(webhooks []store.Webhook, user store.User, org store.Organization
 templ webhooksContent(webhooks []store.Webhook, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
 		<h1 class="text-xl font-semibold">Webhooks</h1>
-		<div class="card space-y-4">
+		<wa-card class="space-y-4">
 			<h2 class="text-sm font-semibold text-base-content/80">Add endpoint</h2>
 			if errMsg != "" {
-				<div class="alert alert-error">{ errMsg }</div>
+				<wa-callout variant="danger">{ errMsg }</wa-callout>
 			}
 			<form method="POST" action="/settings/webhooks" class="space-y-4">
 				<div class="fieldset">
-					<label for="wh-url">Target URL</label>
-					<input type="url" id="wh-url" name="target_url" required placeholder="https://example.com/hooks/cyclopus"/>
+					<wa-input type="url" id="wh-url" name="target_url" required placeholder="https://example.com/hooks/cyclopus" label="Target URL"></wa-input>
 				</div>
 				<div class="fieldset">
 					<label for="wh-secret">Signing secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-					<input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value"/>
+					<wa-input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value"></wa-input>
 				</div>
 				<div class="fieldset">
 					<label for="wh-events">Events <span class="text-base-content/50 font-normal">(comma-separated, empty = all)</span></label>
-					<input type="text" id="wh-events" name="events" placeholder="deploy.succeeded,deploy.failed"/>
+					<wa-input type="text" id="wh-events" name="events" placeholder="deploy.succeeded,deploy.failed"></wa-input>
 				</div>
-				<button type="submit" class="btn btn-primary">Add webhook</button>
+				<wa-button type="submit" variant="brand">Add webhook</wa-button>
 			</form>
-		</div>
+		</wa-card>
 		if len(webhooks) > 0 {
-			<div class="card">
+			<wa-card>
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="text-xs text-base-content/50 border-b border-base-300">
@@ -52,22 +51,22 @@ templ webhooksContent(webhooks []store.Webhook, errMsg string) {
 								<td class="py-2 text-xs font-mono text-base-content/65 truncate max-w-xs">{ w.TargetURL }</td>
 								<td class="py-2">
 									if w.DisabledAt == nil {
-										<span class="badge badge-soft badge-success">Enabled</span>
+										<wa-badge variant="success">Enabled</wa-badge>
 									} else {
-										<span class="badge badge-soft badge-error">Disabled</span>
+										<wa-badge variant="danger">Disabled</wa-badge>
 									}
 								</td>
 								<td class="py-2 text-xs text-base-content/65">{ fmt.Sprintf("%d", w.ConsecutiveFailures) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/webhooks/" + w.ID + "/delete") } onsubmit="return confirm('Delete this webhook?')">
-										<button type="submit" class="btn btn-error btn-sm">Delete</button>
+										<wa-button type="submit" variant="danger" size="small">Delete</wa-button>
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</div>
+			</wa-card>
 		}
 	</div>
 }

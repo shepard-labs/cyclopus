@@ -4,9 +4,9 @@
   top: 0;
   left: 0;
   height: 100%;
-  width: 16rem;
-  background-color: var(--wa-color-surface-raised);
-  border-right: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+  width: 14rem;
+  background-color: color-mix(in srgb, var(--cyclopus-panel) 92%, transparent);
+  border-right: var(--wa-border-width-s) solid var(--cyclopus-line);
   display: flex;
   flex-direction: column;
   z-index: 10;
@@ -16,9 +16,9 @@
   align-items: center;
   gap: 0.625rem;
   padding: 0.5rem 0.75rem;
-  border-radius: var(--wa-border-radius-m);
+  border-radius: var(--cyclopus-control-radius);
   font-size: 0.875rem;
-  color: color-mix(in srgb, var(--wa-color-text-normal) 65%, transparent);
+  color: var(--cyclopus-sub);
   cursor: pointer;
   transition:
     background-color 150ms,
@@ -27,33 +27,51 @@
   white-space: nowrap;
 }
 .sidebar-item:hover {
-  background-color: var(--wa-color-surface-lowered);
-  color: var(--wa-color-text-normal);
+  background-color: var(--cyclopus-raise);
+  color: var(--cyclopus-ink);
 }
 .sidebar-item.active {
-  background-color: color-mix(in srgb, var(--wa-color-brand-fill-loud) 15%, transparent);
-  color: var(--color-accent);
+  background-color: var(--cyclopus-brand-dim);
+  color: var(--cyclopus-ink);
 }
-.sidebar-item svg {
+.sidebar-item wa-icon {
   flex-shrink: 0;
 }
 
-.sidebar-account {
+.sidebar-account-shell {
   position: relative;
-}
-.sidebar-account summary {
-  list-style: none;
-}
-.sidebar-account summary::-webkit-details-marker {
-  display: none;
-}
-.sidebar-account-trigger {
+  display: block;
   width: 100%;
-  color: color-mix(in srgb, var(--wa-color-text-normal) 50%, transparent);
 }
-.sidebar-account[open] .sidebar-account-trigger {
-  background-color: var(--wa-color-surface-lowered);
-  color: var(--wa-color-text-normal);
+.sidebar-account { width: 100%; }
+.sidebar-account-trigger {
+  display: block;
+  width: 100%;
+  color: var(--cyclopus-sub);
+}
+.sidebar-account-trigger::part(button) {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--cyclopus-control-radius);
+}
+.sidebar-account-trigger::part(label) { width: 100%; }
+.sidebar-account-trigger-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+}
+.sidebar-account-trigger:hover::part(button),
+.sidebar-account-trigger:focus-visible::part(button),
+.sidebar-account[open] .sidebar-account-trigger::part(button) {
+  background-color: var(--cyclopus-raise);
+  color: var(--cyclopus-ink);
 }
 .sidebar-account-chevron {
   width: 1rem;
@@ -66,23 +84,11 @@
   height: 1.5rem;
   flex-shrink: 0;
   border-radius: 9999px;
-  background-color: var(--wa-color-surface-default);
+  background-color: var(--cyclopus-raise);
+  border: var(--wa-border-width-s) solid var(--cyclopus-line-strong);
 }
 .sidebar-account[open] .sidebar-account-chevron {
   transform: rotate(180deg);
-}
-.sidebar-account-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 0.5rem);
-  left: 0;
-  z-index: 20;
-  padding: 0.25rem;
-  overflow: hidden;
-  background-color: var(--wa-color-surface-raised);
-  border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
-  border-radius: var(--wa-border-radius-m);
-  box-shadow: 0 10px 30px var(--wa-color-shadow);
 }
 .sidebar-account-label {
   padding: 0.5rem 0.625rem;
@@ -91,38 +97,22 @@
   margin: 0;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--wa-color-text-normal);
+  color: var(--cyclopus-ink);
 }
 .sidebar-account-email {
   margin: 0.125rem 0 0;
   overflow: hidden;
   font-size: 0.75rem;
-  color: color-mix(in srgb, var(--wa-color-text-normal) 50%, transparent);
+  color: var(--cyclopus-sub);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-account-separator {
-  height: var(--wa-border-width-s);
-  margin: 0.25rem -0.25rem;
-  background-color: var(--wa-color-surface-lowered);
-}
-.sidebar-account-action {
+.sidebar-account wa-dropdown-item wa-icon { width: 1rem; height: 1rem; }
+.account-menu-link {
   display: flex;
   align-items: center;
   gap: 0.625rem;
   width: 100%;
-  padding: 0.5rem 0.625rem;
-  color: var(--wa-color-text-normal);
-  font: inherit;
-  font-size: 0.875rem;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-radius: var(--wa-border-radius-m);
-  cursor: pointer;
-}
-.sidebar-account-action:hover,
-.sidebar-account-action:focus-visible {
-  background-color: var(--wa-color-surface-lowered);
-  outline: none;
+  color: inherit;
+  text-decoration: none;
 }

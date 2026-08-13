@@ -43,9 +43,7 @@ func Theme(user store.User, org store.Organization, flash *ui.FlashMessage) temp
 	})
 }
 
-// ThemePreview renders just the theme card grid inside the bare layout for
-// headless design review (served only with CYCLOPUS_UI_PREVIEW=1).
-func ThemePreview() templ.Component {
+func themeContent() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -66,62 +64,7 @@ func ThemePreview() templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var3 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-3xl p-6\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = themeContent().Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = components.AuthPage("Theme Preview").Render(templ.WithChildren(ctx, templ_7745c5c3_Var3), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
-func themeContent() templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var4 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var4 == nil {
-			templ_7745c5c3_Var4 = templ.NopComponent
-		}
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"max-w-3xl space-y-6\"><div><h1 class=\"text-xl font-semibold\">Theme</h1><p class=\"text-sm text-base-content/50 mt-1\">Applies instantly and is remembered on this device.</p></div><div class=\"card\"><div class=\"theme-grid\" id=\"theme-grid\"></div><script>\n\t\t\t\t(function () {\n\t\t\t\t\tvar grid = document.getElementById('theme-grid')\n\t\t\t\t\tvar themes = window.cyclopusTheme.themes\n\t\t\t\t\tObject.keys(themes).forEach(function (name) {\n\t\t\t\t\t\tvar t = themes[name]\n\t\t\t\t\t\tvar v = t.vars\n\t\t\t\t\t\tvar b = document.createElement('button')\n\t\t\t\t\t\tb.type = 'button'\n\t\t\t\t\t\tb.className = 'theme-option'\n\t\t\t\t\t\tb.setAttribute('data-theme-name', name)\n\t\t\t\t\t\tb.setAttribute('aria-pressed', 'false')\n\t\t\t\t\t\tvar swatches = ['--wa-color-surface-default', '--wa-color-surface-lowered', '--wa-color-brand-fill-loud', '--wa-color-warning-fill-loud', '--wa-color-danger-fill-loud', '--wa-color-success-fill-loud']\n\t\t\t\t\t\t\t.map(function (k) {\n\t\t\t\t\t\t\t\treturn '<span class=\"theme-swatch\" style=\"background:' + v[k] + '\"></span>'\n\t\t\t\t\t\t\t}).join('')\n\t\t\t\t\t\tb.innerHTML =\n\t\t\t\t\t\t\t'<span class=\"theme-type\" style=\"background:' + v['--wa-color-surface-default'] + ';border-radius:' + v['--wa-border-radius-m'] + '\">' +\n\t\t\t\t\t\t\t\t'<b style=\"color:' + v['--wa-color-text-normal'] + ';font-family:' + v['--wa-font-family-body'] + '\">Aa</b>' +\n\t\t\t\t\t\t\t\t'<b style=\"color:' + v['--wa-color-brand-fill-loud'] + ';font-family:' + v['--wa-font-family-code'] + '\">Aa</b>' +\n\t\t\t\t\t\t\t'</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-option-head\">' +\n\t\t\t\t\t\t\t\t'<span class=\"theme-option-label\" style=\"font-family:' + v['--wa-font-family-body'] + '\">' + t.label + '</span>' +\n\t\t\t\t\t\t\t\t'<span class=\"theme-option-mode\" style=\"font-family:' + v['--wa-font-family-body'] + '\">' + (t.dark ? 'Dark' : 'Light') + '</span>' +\n\t\t\t\t\t\t\t'</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-swatches\">' + swatches + '</span>'\n\t\t\t\t\t\tb.onclick = function () { window.cyclopusTheme.apply(name) }\n\t\t\t\t\t\tgrid.appendChild(b)\n\t\t\t\t\t})\n\t\t\t\t\twindow.cyclopusTheme.sync()\n\t\t\t\t})()\n\t\t\t</script></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-3xl space-y-6\"><div><h1 class=\"text-xl font-semibold\">Theme</h1><p class=\"text-sm text-base-content/50 mt-1\">Applies instantly and is remembered on this device.</p></div><wa-card><div class=\"theme-grid\" id=\"theme-grid\"></div><script>\n\t\t\t\t(function () {\n\t\t\t\t\tvar grid = document.getElementById('theme-grid')\n\t\t\t\t\tvar themes = window.cyclopusTheme.themes\n\t\t\t\t\tObject.keys(themes).forEach(function (name) {\n\t\t\t\t\t\tvar t = themes[name]\n\t\t\t\t\t\tvar v = t.vars\n\t\t\t\t\t\tvar b = document.createElement('button')\n\t\t\t\t\t\tb.type = 'button'\n\t\t\t\t\t\tb.className = 'theme-option'\n\t\t\t\t\t\tb.setAttribute('data-theme-name', name)\n\t\t\t\t\t\tb.setAttribute('aria-pressed', 'false')\n\t\t\t\t\t\tvar swatches = ['--wa-color-surface-default', '--wa-color-surface-lowered', '--wa-color-brand-fill-loud', '--wa-color-warning-fill-loud', '--wa-color-danger-fill-loud', '--wa-color-success-fill-loud']\n\t\t\t\t\t\t\t.map(function (k) {\n\t\t\t\t\t\t\t\treturn '<span class=\"theme-swatch\" style=\"background:' + v[k] + '\"></span>'\n\t\t\t\t\t\t\t}).join('')\n\t\t\t\t\t\tb.innerHTML =\n\t\t\t\t\t\t\t'<span class=\"theme-type\" style=\"background:' + v['--wa-color-surface-default'] + ';border-radius:' + v['--wa-border-radius-m'] + '\">' +\n\t\t\t\t\t\t\t\t'<b style=\"color:' + v['--wa-color-text-normal'] + ';font-family:' + v['--wa-font-family-body'] + '\">Aa</b>' +\n\t\t\t\t\t\t\t\t'<b style=\"color:' + v['--wa-color-brand-fill-loud'] + ';font-family:' + v['--wa-font-family-code'] + '\">Aa</b>' +\n\t\t\t\t\t\t\t'</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-option-head\">' +\n\t\t\t\t\t\t\t\t'<span class=\"theme-option-label\" style=\"font-family:' + v['--wa-font-family-body'] + '\">' + t.label + '</span>' +\n\t\t\t\t\t\t\t\t'<span class=\"theme-option-mode\" style=\"font-family:' + v['--wa-font-family-body'] + '\">' + (t.dark ? 'Dark' : 'Light') + '</span>' +\n\t\t\t\t\t\t\t'</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-option-desc\" style=\"color:' + v['--cyclopus-dim'] + ';font-family:' + v['--wa-font-family-body'] + '\">' + t.desc + '</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-swatches\">' + swatches + '</span>'\n\t\t\t\t\t\tb.onclick = function () { window.cyclopusTheme.apply(name) }\n\t\t\t\t\t\tgrid.appendChild(b)\n\t\t\t\t\t})\n\t\t\t\t\twindow.cyclopusTheme.sync()\n\t\t\t\t})()\n\t\t\t</script></wa-card></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

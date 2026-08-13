@@ -5,29 +5,29 @@ package components
 templ ReleaseStatusBadge(status string) {
 	switch status {
 		case "live":
-			<span class="badge badge-soft badge-success">
+			<wa-badge variant="success" appearance="accent">
 				<span class="status status-success"></span>
 				Live
-			</span>
+			</wa-badge>
 		case "deploying":
-			<span class="badge badge-soft badge-info animate-pulse">
+			<wa-badge variant="brand" appearance="accent" class="animate-pulse">
 				<span class="status status-info"></span>
 				Deploying
-			</span>
+			</wa-badge>
 		case "pending":
-			<span class="badge badge-soft badge-warning animate-pulse">
+			<wa-badge variant="warning" appearance="accent" class="animate-pulse">
 				<span class="status status-warning"></span>
 				Pending
-			</span>
+			</wa-badge>
 		case "failed":
-			<span class="badge badge-soft badge-error">
+			<wa-badge variant="danger" appearance="accent">
 				<span class="status status-error"></span>
 				Failed
-			</span>
+			</wa-badge>
 		case "superseded":
-			<span class="badge badge-soft badge-neutral">Superseded</span>
+			<wa-badge variant="neutral" appearance="accent">Superseded</wa-badge>
 		default:
-			<span class="badge badge-soft badge-neutral">{ status }</span>
+			<wa-badge variant="neutral" appearance="accent">{ status }</wa-badge>
 	}
 }
 
@@ -36,29 +36,29 @@ templ ReleaseStatusBadge(status string) {
 templ EnvLifecycleBadge(status string) {
 	switch status {
 		case "ready":
-			<span class="badge badge-soft badge-success">
+			<wa-badge variant="success" appearance="accent">
 				<span class="status status-success"></span>
 				Ready
-			</span>
+			</wa-badge>
 		case "torn_down":
-			<span class="badge badge-soft badge-neutral">Torn Down</span>
+			<wa-badge variant="neutral" appearance="accent">Torn Down</wa-badge>
 		case "failed":
-			<span class="badge badge-soft badge-error">Failed</span>
+			<wa-badge variant="danger" appearance="accent">Failed</wa-badge>
 		case "policy_blocked":
-			<span class="badge badge-soft badge-warning">Policy Blocked</span>
+			<wa-badge variant="warning" appearance="accent">Policy Blocked</wa-badge>
 		case "reserved":
-			<span class="badge badge-soft badge-warning animate-pulse">Provisioning</span>
+			<wa-badge variant="warning" appearance="accent" class="animate-pulse">Provisioning</wa-badge>
 		case "teardown_requested":
-			<span class="badge badge-soft badge-warning animate-pulse">Tearing Down</span>
+			<wa-badge variant="warning" appearance="accent" class="animate-pulse">Tearing Down</wa-badge>
 		default:
-			<span class="badge badge-soft badge-neutral">{ status }</span>
+			<wa-badge variant="neutral" appearance="accent">{ status }</wa-badge>
 	}
 }
 
 // RuntimeClassBadge shows a warning badge for unsandboxed apps.
 templ RuntimeClassBadge(runtimeClass string) {
 	if runtimeClass == "runc" {
-		<span class="badge badge-soft badge-warning">⚠ UNSANDBOXED</span>
+		<wa-badge variant="warning" appearance="accent">⚠ UNSANDBOXED</wa-badge>
 	}
 }
 
@@ -67,16 +67,16 @@ templ RuntimeClassBadge(runtimeClass string) {
 templ OperationStatusBadge(status string) {
 	switch status {
 		case "completed", "succeeded":
-			<span class="badge badge-soft badge-success">Succeeded</span>
+			<wa-badge variant="success" appearance="accent">Succeeded</wa-badge>
 		case "leased", "running":
-			<span class="badge badge-soft badge-info animate-pulse">Running</span>
+			<wa-badge variant="brand" appearance="accent" class="animate-pulse">Running</wa-badge>
 		case "queued", "accepted":
-			<span class="badge badge-soft badge-warning">Queued</span>
+			<wa-badge variant="warning" appearance="accent">Queued</wa-badge>
 		case "failed":
-			<span class="badge badge-soft badge-error">Failed</span>
+			<wa-badge variant="danger" appearance="accent">Failed</wa-badge>
 		case "cancelled":
-			<span class="badge badge-soft badge-neutral">Cancelled</span>
+			<wa-badge variant="neutral" appearance="accent">Cancelled</wa-badge>
 		default:
-			<span class="badge badge-soft badge-neutral">{ status }</span>
+			<wa-badge variant="neutral" appearance="accent">{ status }</wa-badge>
 	}
 }

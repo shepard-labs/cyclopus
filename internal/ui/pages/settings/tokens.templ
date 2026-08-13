@@ -15,32 +15,31 @@ templ tokensContent(tokens []store.APIToken, createdToken string, errMsg string)
 	<div class="space-y-6 max-w-3xl">
 		<h1 class="text-xl font-semibold">API Tokens</h1>
 		if createdToken != "" {
-			<div class="alert alert-success flex-col items-start space-y-2 p-4">
+			<wa-callout variant="success" class="flex-col items-start space-y-2 p-4">
 				<p class="text-sm text-success font-semibold">Token created — save it now. It will not be shown again.</p>
 				<code class="block font-mono text-xs text-success bg-base-200 p-3 rounded break-all">{ createdToken }</code>
-			</div>
+			</wa-callout>
 		}
-		<div class="card space-y-4">
+		<wa-card class="space-y-4">
 			<h2 class="text-sm font-semibold text-base-content/80">Create token</h2>
 			if errMsg != "" {
-				<div class="alert alert-error">{ errMsg }</div>
+				<wa-callout variant="danger">{ errMsg }</wa-callout>
 			}
 			<form method="POST" action="/settings/tokens" class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
 					<div class="fieldset">
-						<label for="tok-name">Name</label>
-						<input type="text" id="tok-name" name="name" required placeholder="CI deploy token"/>
+						<wa-input type="text" id="tok-name" name="name" required placeholder="CI deploy token" label="Name"></wa-input>
 					</div>
 					<div class="fieldset">
 						<label for="tok-scopes">Scopes <span class="text-base-content/50 font-normal">(comma-separated)</span></label>
-						<input type="text" id="tok-scopes" name="scopes" placeholder="deploy:app-id"/>
+						<wa-input type="text" id="tok-scopes" name="scopes" placeholder="deploy:app-id"></wa-input>
 					</div>
 				</div>
-				<button type="submit" class="btn btn-primary">Create token</button>
+				<wa-button type="submit" variant="brand">Create token</wa-button>
 			</form>
-		</div>
+		</wa-card>
 		if len(tokens) > 0 {
-			<div class="card">
+			<wa-card>
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="text-xs text-base-content/50 border-b border-base-300">
@@ -64,14 +63,14 @@ templ tokensContent(tokens []store.APIToken, createdToken string, errMsg string)
 								</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/tokens/" + t.ID + "/revoke") } onsubmit="return confirm('Revoke this token?')">
-										<button type="submit" class="btn btn-error btn-sm">Revoke</button>
+										<wa-button type="submit" variant="danger" size="small">Revoke</wa-button>
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</div>
+			</wa-card>
 		}
 	</div>
 }

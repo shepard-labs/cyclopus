@@ -1,0 +1,63 @@
+package settings
+
+import "github.com/shepard-labs/cyclopus/internal/ui/components"
+
+// ThemePreview is the environment-gated, unauthenticated component rig used by
+// scripts/dev/check_ui.mjs. Keep test-only controls out of the real Theme page.
+templ ThemePreview() {
+	@components.AuthPage("Theme Preview") {
+		<script src="/static/htmx.min.js"></script>
+		<div class="w-full max-w-3xl p-6 space-y-6">
+			@themeContent()
+			<wa-card class="space-y-4" id="wa-rig">
+				<div class="flex items-center gap-2">
+					<wa-button variant="brand">Brand</wa-button>
+					<wa-button id="rig-neutral">Neutral</wa-button>
+					<wa-button id="rig-danger" variant="danger" size="small">Danger</wa-button>
+					<wa-button id="rig-avatar" appearance="plain" class="current-avatar" aria-label="Avatar"><span class="block w-16 h-16"></span></wa-button>
+				</div>
+				<form id="rig-form">
+					<wa-input name="input_value" label="Input" value="hello"></wa-input>
+					<wa-radio-group name="avatar_key" label="Avatar" value="otter">
+						<wa-radio value="otter">Otter</wa-radio>
+						<wa-radio value="fox">Fox</wa-radio>
+					</wa-radio-group>
+				</form>
+				<wa-select label="Select" value="a">
+					<wa-option value="a">Option A</wa-option>
+					<wa-option value="b">Option B</wa-option>
+				</wa-select>
+				<wa-badge variant="success">Deployed</wa-badge>
+				<wa-callout id="rig-callout" variant="danger">Validation failed.</wa-callout>
+				<wa-checkbox id="rig-checkbox" checked>Enabled</wa-checkbox>
+				<wa-divider id="rig-divider"></wa-divider>
+				<wa-icon id="rig-icon" name="gear" class="w-4 h-4"></wa-icon>
+				<wa-dropdown id="rig-dropdown">
+					<wa-button slot="trigger" with-caret>Dropdown</wa-button>
+					<wa-dropdown-item value="first">First action</wa-dropdown-item>
+					<wa-dropdown-item value="second">Second action</wa-dropdown-item>
+				</wa-dropdown>
+				<wa-tooltip for="rig-tooltip-button">Tooltip content</wa-tooltip>
+				<wa-button id="rig-tooltip-button">Tooltip</wa-button>
+				<wa-button id="rig-dialog-open">Open dialog</wa-button>
+				<wa-dialog id="rig-dialog" label="Preview dialog">Dialog body on raised surface.</wa-dialog>
+				<wa-toast></wa-toast>
+				<wa-button id="rig-toast-open">Toast</wa-button>
+				<div id="rig-flash-target"></div>
+				<wa-button id="rig-flash-load" hx-get="/__theme-preview/flash" hx-target="#rig-flash-target" hx-swap="innerHTML">Boosted toast</wa-button>
+				<script>
+					customElements.whenDefined('wa-dialog').then(function () {
+						var dlg = document.getElementById('rig-dialog')
+						document.getElementById('rig-dialog-open').addEventListener('click', function () { dlg.open = true })
+					})
+					customElements.whenDefined('wa-toast').then(function () {
+						var t = document.querySelector('#wa-rig wa-toast')
+						document.getElementById('rig-toast-open').addEventListener('click', function () {
+							t.create('Preview toast', { variant: 'success', duration: 3000 })
+						})
+					})
+				</script>
+			</wa-card>
+		</div>
+	}
+}

@@ -14,37 +14,34 @@ templ GitConnections(connections []store.GitConnection, user store.User, org sto
 templ gitConnectionsContent(connections []store.GitConnection, org store.Organization, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
 		<h1 class="text-xl font-semibold">Git Connections</h1>
-		<div class="card space-y-4">
+		<wa-card class="space-y-4">
 			<h2 class="text-sm font-semibold text-base-content/80">Add GitHub App connection</h2>
 			if errMsg != "" {
-				<div class="alert alert-error">{ errMsg }</div>
+				<wa-callout variant="danger">{ errMsg }</wa-callout>
 			}
 			<form method="POST" action="/settings/git-connections" class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
 					<div class="fieldset">
-						<label for="gc-repo">Repository (owner/repo)</label>
-						<input type="text" id="gc-repo" name="repo_full_name" required placeholder="acme/api"/>
+						<wa-input type="text" id="gc-repo" name="repo_full_name" required placeholder="acme/api" label="Repository (owner/repo)"></wa-input>
 					</div>
 					<div class="fieldset">
-						<label for="gc-installation">GitHub App Installation ID</label>
-						<input type="number" id="gc-installation" name="installation_id" required placeholder="12345678"/>
+						<wa-input type="number" id="gc-installation" name="installation_id" required placeholder="12345678" label="GitHub App Installation ID"></wa-input>
 					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-4">
 					<div class="fieldset">
-						<label for="gc-branch">Default branch</label>
-						<input type="text" id="gc-branch" name="default_branch" value="main"/>
+						<wa-input type="text" id="gc-branch" name="default_branch" value="main" label="Default branch"></wa-input>
 					</div>
 					<div class="fieldset">
 						<label for="gc-secret">Webhook secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-						<input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value"/>
+						<wa-input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value"></wa-input>
 					</div>
 				</div>
-				<button type="submit" class="btn btn-primary">Add connection</button>
+				<wa-button type="submit" variant="brand">Add connection</wa-button>
 			</form>
-		</div>
+		</wa-card>
 		if len(connections) > 0 {
-			<div class="card">
+			<wa-card>
 				<h2 class="text-sm font-semibold text-base-content/80 mb-4">Connections</h2>
 				<table class="table-auto w-full text-sm">
 					<thead>
@@ -65,14 +62,14 @@ templ gitConnectionsContent(connections []store.GitConnection, org store.Organiz
 								<td class="py-2 text-xs text-base-content/50">{ relTimeSettings(gc.CreatedAt) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/git-connections/" + gc.ID + "/delete") } onsubmit="return confirm('Delete this connection?')">
-										<button type="submit" class="btn btn-error btn-sm">Delete</button>
+										<wa-button type="submit" variant="danger" size="small">Delete</wa-button>
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</div>
+			</wa-card>
 		}
 	</div>
 }

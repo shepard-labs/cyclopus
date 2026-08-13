@@ -65,30 +65,30 @@ func userContent(user store.User, profileError, passwordError, openDialog string
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"user-settings max-w-3xl space-y-6\"><div><h1 class=\"text-xl font-semibold\">User Settings</h1><p class=\"text-sm text-base-content/50 mt-1\">Manage your profile and account security.</p></div><div class=\"card space-y-4\"><div><h2 class=\"text-sm font-semibold text-base-content/90\">Profile</h2></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"user-settings max-w-3xl space-y-6\"><div><h1 class=\"text-xl font-semibold\">User Settings</h1><p class=\"text-sm text-base-content/50 mt-1\">Manage your profile and account security.</p></div><wa-card class=\"space-y-4\"><div><h2 class=\"text-sm font-semibold text-base-content/90\">Profile</h2></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if profileError != "" && openDialog == "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"alert alert-error\" role=\"alert\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<wa-callout variant=\"danger\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(profileError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 26, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 26, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"profile-avatar-row\"><button type=\"button\" class=\"current-avatar\" onclick=\"document.getElementById('avatar-dialog').showModal()\" aria-label=\"Change avatar\"><img src=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"profile-avatar-row\"><wa-button type=\"button\" appearance=\"plain\" class=\"current-avatar\" onclick=\"openSettingsDialog('avatar-dialog')\" aria-label=\"Change avatar\"><img src=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -101,273 +101,223 @@ func userContent(user store.User, profileError, passwordError, openDialog string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" alt=\"Current avatar\"></button></div><form id=\"profile-form\" method=\"POST\" action=\"/settings/user/profile\" class=\"space-y-4\"><input type=\"hidden\" name=\"action\" value=\"profile\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"first-name\">First name</label> <input id=\"first-name\" name=\"first_name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" alt=\"Current avatar\"></wa-button></div><form id=\"profile-form\" method=\"POST\" action=\"/settings/user/profile\" class=\"space-y-4\"><input type=\"hidden\" name=\"action\" value=\"profile\"><div class=\"grid grid-cols-2 gap-4\"><wa-input id=\"first-name\" name=\"first_name\" label=\"First name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.FirstName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 38, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 36, Col: 90}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" maxlength=\"100\" autocomplete=\"given-name\"></div><div class=\"fieldset\"><label for=\"last-name\">Last name</label> <input id=\"last-name\" name=\"last_name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" maxlength=\"100\" autocomplete=\"given-name\"></wa-input> <wa-input id=\"last-name\" name=\"last_name\" label=\"Last name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.LastName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 42, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 37, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" maxlength=\"100\" autocomplete=\"family-name\"></div></div><div class=\"fieldset\"><label for=\"display-name\">Display name</label> <input id=\"display-name\" name=\"display_name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" maxlength=\"100\" autocomplete=\"family-name\"></wa-input></div><wa-input id=\"display-name\" name=\"display_name\" label=\"Display name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 47, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 39, Col: 97}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" maxlength=\"200\" autocomplete=\"nickname\" placeholder=\"How you appear in Cyclopus\"></div><div class=\"profile-actions\"><button id=\"profile-save\" type=\"submit\" class=\"btn btn-primary\" disabled>Save</button></div></form><script>\n\t\t\t\t(function () {\n\t\t\t\t\tconst form = document.getElementById('profile-form')\n\t\t\t\t\tconst save = document.getElementById('profile-save')\n\t\t\t\t\tconst initial = new FormData(form)\n\t\t\t\t\tfunction updateSaveState() {\n\t\t\t\t\t\tconst current = new FormData(form)\n\t\t\t\t\t\tsave.disabled = ['first_name', 'last_name', 'display_name'].every(function (name) {\n\t\t\t\t\t\t\treturn current.get(name) === initial.get(name)\n\t\t\t\t\t\t})\n\t\t\t\t\t}\n\t\t\t\t\tform.addEventListener('input', updateSaveState)\n\t\t\t\t\tform.addEventListener('reset', function () { requestAnimationFrame(updateSaveState) })\n\t\t\t\t})()\n\t\t\t</script></div><div class=\"card settings-row\"><div><h2 class=\"text-sm font-semibold text-base-content/90\">Email</h2><p class=\"text-sm text-base-content/50 mt-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" maxlength=\"200\" autocomplete=\"nickname\" placeholder=\"How you appear in Cyclopus\"></wa-input><div class=\"profile-actions\"><wa-button id=\"profile-save\" type=\"submit\" variant=\"brand\" disabled>Save</wa-button></div></form><script>\n\t\t\t\tcustomElements.whenDefined('wa-input').then(function () {\n\t\t\t\t\tconst form = document.getElementById('profile-form')\n\t\t\t\t\tconst save = document.getElementById('profile-save')\n\t\t\t\t\tconst initial = new FormData(form)\n\t\t\t\t\tfunction updateSaveState() {\n\t\t\t\t\t\tconst current = new FormData(form)\n\t\t\t\t\t\tsave.disabled = ['first_name', 'last_name', 'display_name'].every(function (name) {\n\t\t\t\t\t\t\treturn current.get(name) === initial.get(name)\n\t\t\t\t\t\t})\n\t\t\t\t\t}\n\t\t\t\t\tform.addEventListener('input', updateSaveState)\n\t\t\t\t\tform.addEventListener('reset', function () { requestAnimationFrame(updateSaveState) })\n\t\t\t\t})\n\t\t\t</script></wa-card> <wa-card class=\"settings-row\"><div><h2 class=\"text-sm font-semibold text-base-content/90\">Email</h2><p class=\"text-sm text-base-content/50 mt-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(user.Email)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 71, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 62, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</p></div><button type=\"button\" class=\"btn btn-ghost\" onclick=\"document.getElementById('email-dialog').showModal()\">Update</button></div><div class=\"card settings-row\"><div><h2 class=\"text-sm font-semibold text-base-content/90\">Password</h2><p class=\"text-sm text-base-content/50 mt-1\">Change your password and sign out other sessions.</p></div><button type=\"button\" class=\"btn btn-ghost\" onclick=\"document.getElementById('password-dialog').showModal()\">Update</button></div><dialog id=\"avatar-dialog\" class=\"settings-dialog\"><div class=\"dialog-panel\"><div class=\"dialog-header\"><div><h2>Choose an avatar</h2><p>Select the avatar you want to use.</p></div><button type=\"button\" class=\"dialog-close\" aria-label=\"Close\" onclick=\"this.closest('dialog').close()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = iconDialogClose().Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</p></div><wa-button type=\"button\" appearance=\"plain\" onclick=\"openSettingsDialog('email-dialog')\">Update</wa-button></wa-card> <wa-card class=\"settings-row\"><div><h2 class=\"text-sm font-semibold text-base-content/90\">Password</h2><p class=\"text-sm text-base-content/50 mt-1\">Change your password and sign out other sessions.</p></div><wa-button type=\"button\" appearance=\"plain\" onclick=\"openSettingsDialog('password-dialog')\">Update</wa-button></wa-card> <wa-dialog id=\"avatar-dialog\" label=\"Choose an avatar\" class=\"settings-dialog\"><p class=\"text-sm text-base-content/50 mb-4\">Select the avatar you want to use.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if profileError != "" && openDialog == "avatar" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"alert alert-error\" role=\"alert\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<wa-callout variant=\"danger\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(profileError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 94, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 78, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<form method=\"POST\" action=\"/settings/user/profile\" class=\"space-y-4\"><input type=\"hidden\" name=\"action\" value=\"avatar\"><div class=\"avatar-picker\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<form method=\"POST\" action=\"/settings/user/profile\" class=\"space-y-4\"><input type=\"hidden\" name=\"action\" value=\"avatar\"> <wa-radio-group name=\"avatar_key\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var10 string
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.AvatarKey)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 82, Col: 61}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" label=\"Avatar\" required class=\"avatar-picker\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, key := range avatar.Keys {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<label class=\"avatar-option\"><input type=\"radio\" name=\"avatar_key\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(key)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 101, Col: 57}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if user.AvatarKey == key {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " checked")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " required> <img src=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<wa-radio value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var11 string
-			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(avatar.URL(key))
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 102, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 84, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" alt=\"\"> <span class=\"sr-only\">Avatar option ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" class=\"avatar-option\"><img src=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(key)
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(avatar.URL(key))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 103, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 85, Col: 34}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</span></label>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div><div class=\"dialog-actions\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"this.closest('dialog').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div></dialog> <dialog id=\"email-dialog\" class=\"settings-dialog\"><div class=\"dialog-panel\"><div class=\"dialog-header\"><div><h2>Update email</h2><p>Enter your new email and current password.</p></div><button type=\"button\" class=\"dialog-close\" aria-label=\"Close\" onclick=\"this.closest('dialog').close()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = iconDialogClose().Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</button></div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if profileError != "" && openDialog == "email" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div class=\"alert alert-error\" role=\"alert\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" alt=\"\"> <span class=\"sr-only\">Avatar option ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
-			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(profileError)
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 122, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 86, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span></wa-radio>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<form method=\"POST\" action=\"/settings/user/profile\" class=\"space-y-4\"><input type=\"hidden\" name=\"action\" value=\"email\"><div class=\"fieldset\"><label for=\"new-email\">New email</label> <input type=\"email\" id=\"new-email\" name=\"email\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</wa-radio-group><div class=\"dialog-actions\"><wa-button type=\"button\" appearance=\"plain\" onclick=\"this.closest('wa-dialog').open=false\">Cancel</wa-button> <wa-button type=\"submit\" variant=\"brand\">Save</wa-button></div></form></wa-dialog> <wa-dialog id=\"email-dialog\" label=\"Update email\" class=\"settings-dialog\"><p class=\"text-sm text-base-content/50 mb-4\">Enter your new email and current password.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.Email)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 128, Col: 72}
+		if profileError != "" && openDialog == "email" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<wa-callout variant=\"danger\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var14 string
+			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(profileError)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 100, Col: 48}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</wa-callout>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<form method=\"POST\" action=\"/settings/user/profile\" class=\"space-y-4\"><input type=\"hidden\" name=\"action\" value=\"email\"> <wa-input type=\"email\" id=\"new-email\" name=\"email\" label=\"New email\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" maxlength=\"320\" autocomplete=\"email\" required></div><div class=\"fieldset\"><label for=\"email-password\">Current password</label> <input type=\"password\" id=\"email-password\" name=\"current_password\" autocomplete=\"current-password\" required></div><div class=\"dialog-actions\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"this.closest('dialog').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div></dialog> <dialog id=\"password-dialog\" class=\"settings-dialog\"><div class=\"dialog-panel\"><div class=\"dialog-header\"><div><h2>Change password</h2><p>Other signed-in sessions will be revoked.</p></div><button type=\"button\" class=\"dialog-close\" aria-label=\"Close\" onclick=\"this.closest('dialog').close()\">")
+		var templ_7745c5c3_Var15 string
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.Email)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 104, Col: 92}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = iconDialogClose().Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" maxlength=\"320\" autocomplete=\"email\" required></wa-input> <wa-input type=\"password\" id=\"email-password\" name=\"current_password\" label=\"Current password\" autocomplete=\"current-password\" required></wa-input><div class=\"dialog-actions\"><wa-button type=\"button\" appearance=\"plain\" onclick=\"this.closest('wa-dialog').open=false\">Cancel</wa-button> <wa-button type=\"submit\" variant=\"brand\">Save</wa-button></div></form></wa-dialog> <wa-dialog id=\"password-dialog\" label=\"Change password\" class=\"settings-dialog\"><p class=\"text-sm text-base-content/50 mb-4\">Other signed-in sessions will be revoked.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if passwordError != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"alert alert-error\" role=\"alert\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<wa-callout variant=\"danger\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var15 string
-			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(passwordError)
+			var templ_7745c5c3_Var16 string
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(passwordError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 149, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/user.templ`, Line: 116, Col: 49}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<form method=\"POST\" action=\"/settings/user/password\" class=\"space-y-4\"><div class=\"fieldset\"><label for=\"current-password\">Current password</label> <input type=\"password\" id=\"current-password\" name=\"current_password\" autocomplete=\"current-password\" required></div><div class=\"fieldset\"><label for=\"new-password\">New password</label> <input type=\"password\" id=\"new-password\" name=\"new_password\" minlength=\"8\" autocomplete=\"new-password\" required></div><div class=\"fieldset\"><label for=\"confirm-password\">Confirm new password</label> <input type=\"password\" id=\"confirm-password\" name=\"confirm_password\" minlength=\"8\" autocomplete=\"new-password\" required></div><div class=\"dialog-actions\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"this.closest('dialog').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div></dialog> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<form method=\"POST\" action=\"/settings/user/password\" class=\"space-y-4\"><wa-input type=\"password\" id=\"current-password\" name=\"current_password\" label=\"Current password\" autocomplete=\"current-password\" required></wa-input> <wa-input type=\"password\" id=\"new-password\" name=\"new_password\" label=\"New password\" minlength=\"8\" autocomplete=\"new-password\" required></wa-input> <wa-input type=\"password\" id=\"confirm-password\" name=\"confirm_password\" label=\"Confirm new password\" minlength=\"8\" autocomplete=\"new-password\" required></wa-input><div class=\"dialog-actions\"><wa-button type=\"button\" appearance=\"plain\" onclick=\"this.closest('wa-dialog').open=false\">Cancel</wa-button> <wa-button type=\"submit\" variant=\"brand\">Save</wa-button></div></form></wa-dialog><script>\n\t\t\twindow.openSettingsDialog = function (id) {\n\t\t\t\tcustomElements.whenDefined('wa-dialog').then(function () {\n\t\t\t\t\tvar dialog = document.getElementById(id)\n\t\t\t\t\tif (dialog) { dialog.open = true }\n\t\t\t\t})\n\t\t\t}\n\t\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if openDialog == "avatar" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<script>document.getElementById('avatar-dialog').showModal()</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<script>openSettingsDialog('avatar-dialog')</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if openDialog == "email" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<script>document.getElementById('email-dialog').showModal()</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<script>openSettingsDialog('email-dialog')</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if openDialog == "password" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<script>document.getElementById('password-dialog').showModal()</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<script>openSettingsDialog('password-dialog')</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
-func iconDialogClose() templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var16 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var16 == nil {
-			templ_7745c5c3_Var16 = templ.NopComponent
-		}
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<svg class=\"w-4 h-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><line x1=\"18\" y1=\"6\" x2=\"6\" y2=\"18\"></line><line x1=\"6\" y1=\"6\" x2=\"18\" y2=\"18\"></line></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -29,11 +29,11 @@ templ logsContent(app store.App, project store.Project, entries []observability.
 				if envID != "" {
 					<input type="hidden" name="env" value={ envID }/>
 				}
-				<input type="text" name="q" placeholder="Filter logs…" class="text-sm w-64"/>
-				<button type="submit" class="btn btn-secondary btn-sm">Search</button>
+				<wa-input type="text" name="q" placeholder="Filter logs…" class="text-sm w-64"></wa-input>
+				<wa-button type="submit" variant="neutral" appearance="outlined" size="small">Search</wa-button>
 			</form>
 		</div>
-		<div class="flex-1 card overflow-hidden flex flex-col">
+		<wa-card class="flex-1 overflow-hidden flex flex-col">
 			<div id="log-entries" class="log-viewer flex-1 overflow-y-auto">
 				if len(entries) == 0 {
 					<div class="text-base-content/50 text-center py-8">No log entries found.</div>
@@ -49,18 +49,21 @@ templ logsContent(app store.App, project store.Project, entries []observability.
 			</div>
 			if nextCursor != "" {
 				<div class="p-3 border-t border-base-300">
-					<button
-						class="btn btn-secondary btn-sm w-full"
+					<wa-button
+						variant="neutral"
+						appearance="outlined"
+						size="small"
+						class="w-full"
 						hx-get={ fmt.Sprintf("/apps/%s/logs?cursor=%s&env=%s", app.ID, nextCursor, envID) }
 						hx-target="#log-entries"
 						hx-swap="beforeend"
 						hx-indicator="#load-more-spinner"
 					>
 						Load older entries
-					</button>
+					</wa-button>
 				</div>
 			}
-		</div>
+		</wa-card>
 	</div>
 }
 

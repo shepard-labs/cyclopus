@@ -13,36 +13,34 @@ templ Registries(registries []store.Registry, user store.User, org store.Organiz
 templ registriesContent(registries []store.Registry, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
 		<h1 class="text-xl font-semibold">Container Registries</h1>
-		<div class="card space-y-4">
+		<wa-card class="space-y-4">
 			<h2 class="text-sm font-semibold text-base-content/80">Add registry</h2>
 			if errMsg != "" {
-				<div class="alert alert-error">{ errMsg }</div>
+				<wa-callout variant="danger">{ errMsg }</wa-callout>
 			}
 			<form method="POST" action="/settings/registries" class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
 					<div class="fieldset">
-						<label for="reg-provider">Provider</label>
-						<select id="reg-provider" name="provider">
-							<option value="ghcr">GitHub Container Registry (ghcr)</option>
-							<option value="gcr">Google Container Registry (gcr)</option>
-							<option value="ecr">Amazon ECR (ecr)</option>
-							<option value="other">Other</option>
-						</select>
+						<wa-select id="reg-provider" name="provider" value="ghcr" label="Provider">
+							<wa-option value="ghcr">GitHub Container Registry (ghcr)</wa-option>
+							<wa-option value="gcr">Google Container Registry (gcr)</wa-option>
+							<wa-option value="ecr">Amazon ECR (ecr)</wa-option>
+							<wa-option value="other">Other</wa-option>
+						</wa-select>
 					</div>
 					<div class="fieldset">
-						<label for="reg-url">Registry URL</label>
-						<input type="text" id="reg-url" name="registry_url" required placeholder="ghcr.io"/>
+						<wa-input type="text" id="reg-url" name="registry_url" required placeholder="ghcr.io" label="Registry URL"></wa-input>
 					</div>
 				</div>
 				<div class="fieldset">
 					<label for="reg-cred">Credential secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-					<input type="text" id="reg-cred" name="credential_secret_ref" required placeholder="k8s-secret://cyclopus/registry-cred#.dockerconfigjson"/>
+					<wa-input type="text" id="reg-cred" name="credential_secret_ref" required placeholder="k8s-secret://cyclopus/registry-cred#.dockerconfigjson"></wa-input>
 				</div>
-				<button type="submit" class="btn btn-primary">Add registry</button>
+				<wa-button type="submit" variant="brand">Add registry</wa-button>
 			</form>
-		</div>
+		</wa-card>
 		if len(registries) > 0 {
-			<div class="card">
+			<wa-card>
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="text-xs text-base-content/50 border-b border-base-300">
@@ -60,14 +58,14 @@ templ registriesContent(registries []store.Registry, errMsg string) {
 								<td class="py-2 text-xs text-base-content/50">{ relTimeSettings(r.CreatedAt) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/registries/" + r.ID + "/delete") } onsubmit="return confirm('Delete this registry?')">
-										<button type="submit" class="btn btn-error btn-sm">Delete</button>
+										<wa-button type="submit" variant="danger" size="small">Delete</wa-button>
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</div>
+			</wa-card>
 		}
 	</div>
 }

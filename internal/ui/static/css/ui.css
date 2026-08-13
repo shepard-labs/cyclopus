@@ -8,11 +8,9 @@
 @import "./components/sidebar.css";
 @import "./components/user-settings.css";
 @import "./components/topbar.css";
-@import "./components/button.css";
-@import "./components/badge.css";
 @import "./components/card.css";
 @import "./components/form.css";
 @import "./components/table.css";
-@import "./components/alert.css";
 @import "./components/status.css";
 @import "./utilities.css";
+@import "./wa-overrides.css";

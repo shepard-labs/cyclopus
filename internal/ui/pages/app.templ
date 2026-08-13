@@ -25,9 +25,9 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 				<h1 class="text-xl font-semibold text-base-content">{ app.Name }</h1>
 				@components.RuntimeClassBadge(app.RuntimeClass)
 			</div>
-			<a href={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="btn btn-secondary btn-sm">Settings</a>
+			<wa-button href={ templ.SafeURL("/apps/" + app.ID + "/settings") } variant="neutral" appearance="outlined" size="small">Settings</wa-button>
 		</div>
-		<div class="card" id="prod-status">
+		<wa-card id="prod-status">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-base-content/80">Production</h2>
 				if prodEnv != nil {
@@ -59,24 +59,26 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 						</div>
 					}
 					if prodEnv.InProgressReleaseID != nil {
-						<div
-							class="alert alert-info animate-pulse"
+						<wa-callout
+							id="prod-status"
+							variant="brand"
+							class="animate-pulse"
 							hx-get={ "/environments/" + prodEnv.ID + "/status-fragment" }
 							hx-trigger="every 3s"
 							hx-swap="outerHTML"
 							hx-target="#prod-status"
 						>
-							<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"></path></svg>
+							<wa-icon name="rotate" class="w-4 h-4 animate-spin" aria-hidden="true"></wa-icon>
 							Deploy in progress…
-						</div>
+						</wa-callout>
 					}
 					<div class="flex items-center gap-2 pt-2">
-						<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="btn btn-secondary btn-sm">View releases</a>
+						<wa-button href={ templ.SafeURL("/environments/" + prodEnv.ID) } variant="neutral" appearance="outlined" size="small">View releases</wa-button>
 					</div>
 				</div>
 			}
-		</div>
-		<div class="card">
+		</wa-card>
+		<wa-card>
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-base-content/80">Preview environments</h2>
 				<span class="text-xs text-base-content/50">{ fmt.Sprintf("%d / %d", len(previews), app.MaxPreviewEnvironments) }</span>
@@ -106,15 +108,15 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 								</td>
 								<td class="py-2">@components.EnvLifecycleBadge(env.LifecycleStatus)</td>
 								<td class="py-2 text-right">
-									<a href={ templ.SafeURL("/environments/" + env.ID) } class="btn btn-ghost btn-sm">View</a>
+									<wa-button href={ templ.SafeURL("/environments/" + env.ID) } variant="neutral" appearance="plain" size="small">View</wa-button>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
 			}
-		</div>
-		<div class="card">
+		</wa-card>
+		<wa-card>
 			<h2 class="text-sm font-semibold text-base-content/80 mb-3">App configuration</h2>
 			<div class="grid grid-cols-2 gap-4 text-sm">
 				<div class="space-y-2">
@@ -130,7 +132,7 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 					<div class="flex justify-between"><span class="text-base-content/50">Memory limit</span><span class="font-mono">{ fmt.Sprintf("%dMi", app.MemoryLimitMiB) }</span></div>
 				</div>
 			</div>
-		</div>
+		</wa-card>
 	</div>
 }
 

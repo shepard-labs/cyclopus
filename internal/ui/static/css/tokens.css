@@ -1,41 +1,71 @@
-/* Cyclopus UI design tokens — Web Awesome (--wa-*) token structure.
-   Single source of truth is theme.js; these :root values are the Obsidian preset,
-   serving as the no-JS fallback and the first paint before theme.js (loaded
-   synchronously in <head>) applies the persisted preset on <html>.
-
-   WA components read these via CSS custom properties that cascade into shadow DOM.
-   Variant tokens follow --wa-color-{variant}-{fill|border|on}-{quiet|normal|loud}.
-   --color-accent / --color-info(-content) are Cyclopus-private (no WA equivalent).
-   Keep this block in sync with the obsidian entry in theme.js (gen via the
-   generator in tasks/ if obsidian changes). */
+/* Cyclopus + Web Awesome design tokens. theme.js is the source of truth;
+   these :root values mirror Obsidian for no-JS/first-paint fallback. Every
+   mockup token is preserved as --cyclopus-*; WA aliases derive from them. */
 :root {
-  --wa-color-surface-default: #0A0A0B;
-  --wa-color-surface-raised: #111113;
-  --wa-color-surface-lowered: #18181B;
-  --wa-color-surface-border: #2A2A2D;
+  --wa-color-surface-default: #111113;
+  --wa-color-surface-raised: #18181B;
+  --cyclopus-base: #0A0A0B;
+  --cyclopus-panel: #111113;
+  --cyclopus-raise: #18181B;
+  --cyclopus-ink: #FAFAFA;
+  --cyclopus-sub: #A1A1AA;
+  --cyclopus-dim: #52525B;
+  --cyclopus-brand: #2DD4BF;
+  --cyclopus-violet: #8B5CF6;
+  --cyclopus-brand-ink: #04211D;
+  --cyclopus-brand-glow: rgba(45,212,191,.25);
+  --cyclopus-brand-dim: rgba(45,212,191,.08);
+  --cyclopus-brand-line: rgba(45,212,191,.35);
+  --cyclopus-brand-faint: rgba(45,212,191,.05);
+  --cyclopus-line: rgba(255,255,255,0.06);
+  --cyclopus-line-strong: rgba(255,255,255,0.10);
+  --cyclopus-card-radius: 8px;
+  --cyclopus-control-radius: 6px;
+  --cyclopus-border-width: 1px;
+  --cyclopus-amber: #FBBF24;
+  --cyclopus-rose: #FB7185;
+  --cyclopus-emerald: #34D399;
+  --cyclopus-font-sans: 'Space Grotesk';
+  --cyclopus-font-mono: 'JetBrains Mono';
+  --wa-color-surface-lowered: #0A0A0B;
+  --wa-color-surface-border: rgba(255,255,255,0.06);
   --wa-color-text-normal: #FAFAFA;
-  --wa-color-text-quiet: #8E8E8E;
-  --wa-color-text-link: #5EEAD4;
+  --wa-color-text-quiet: #A1A1AA;
+  --wa-color-text-link: #2DD4BF;
   --wa-color-focus: #2DD4BF;
   --wa-color-overlay-modal: color-mix(in oklab, black 60%, transparent);
   --wa-color-shadow: rgb(0 0 0 / 40%);
   --wa-border-width-s: 1px;
-  --wa-border-radius-s: 0.25rem;
+  --wa-border-width-m: 1px;
+  --wa-border-width-l: 1px;
+  --wa-focus-ring-width: 1px;
+  --wa-focus-ring-offset: 1px;
+  --wa-form-control-background-color: var(--cyclopus-base);
+  --wa-form-control-border-color: var(--cyclopus-line-strong);
+  --wa-form-control-border-width: var(--cyclopus-border-width);
+  --wa-form-control-border-radius: var(--cyclopus-control-radius);
+  --wa-form-control-label-color: var(--cyclopus-sub);
+  --wa-form-control-placeholder-color: var(--cyclopus-dim);
+  --wa-panel-border-width: var(--cyclopus-border-width);
+  --wa-panel-border-radius: var(--cyclopus-card-radius);
+  --wa-tooltip-border-width: var(--cyclopus-border-width);
+  --wa-tooltip-border-radius: var(--cyclopus-control-radius);
+  --wa-border-radius-s: 6px;
   --wa-border-radius-m: 6px;
   --wa-border-radius-l: 8px;
   --wa-font-family-body: 'Space Grotesk', system-ui, sans-serif;
   --wa-font-family-code: 'JetBrains Mono', ui-monospace, monospace;
-  --color-accent: #5EEAD4;
-  --color-info: #60A5FA;
+  --color-accent: #2DD4BF;
+  --color-info: #8B5CF6;
   --color-info-content: #082F49;
-  --wa-color-brand-fill-quiet: #0E443D;
-  --wa-color-brand-fill-normal: #16685E;
+  --wa-color-brand-fill-quiet: rgba(45,212,191,.05);
+  --wa-color-brand-fill-normal: rgba(45,212,191,.08);
   --wa-color-brand-fill-loud: #2DD4BF;
-  --wa-color-brand-border-quiet: #16685E;
-  --wa-color-brand-border-normal: #1E8C7E;
-  --wa-color-brand-border-loud: #25B09F;
-  --wa-color-brand-on-quiet: #54DCCB;
-  --wa-color-brand-on-normal: #7AE4D7;
+  --wa-color-brand-border-quiet: rgba(45,212,191,.08);
+  --wa-color-brand-border-normal: rgba(45,212,191,.35);
+  --wa-color-brand-border-loud: #2DD4BF;
+  --wa-color-brand-on-quiet: #2DD4BF;
+  --wa-color-brand-on-normal: #2DD4BF;
   --wa-color-brand-on-loud: #04211D;
   --wa-color-neutral-fill-quiet: #343436;
   --wa-color-neutral-fill-normal: #4F4F53;

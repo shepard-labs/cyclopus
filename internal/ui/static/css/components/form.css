@@ -1,49 +1,11 @@
-/* form.css — form controls and .fieldset (daisyUI v5 name for a label+control stack). */
+/* form.css — layout around Web Awesome form controls. */
 .fieldset {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
 
-input,
-select,
-textarea {
-  background-color: var(--wa-color-surface-lowered);
-  border: var(--wa-border-width-s) solid color-mix(in srgb, var(--wa-color-text-normal) 15%, transparent);
-  border-radius: var(--wa-border-radius-m);
-  padding: 0.5rem 0.75rem;
-  color: var(--wa-color-text-normal);
-  font-size: 0.875rem;
-  width: 100%;
-}
-input:focus,
-select:focus,
-textarea:focus {
-  outline: none;
-  border-color: var(--wa-color-brand-fill-loud);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wa-color-brand-fill-loud) 30%, transparent);
-}
-input::placeholder,
-textarea::placeholder {
-  color: color-mix(in srgb, var(--wa-color-text-normal) 50%, transparent);
-}
-input[type="checkbox"] {
-  width: 1rem;
-  height: 1rem;
-  border-radius: var(--wa-border-radius-s);
-  border-color: color-mix(in srgb, var(--wa-color-text-normal) 30%, transparent);
-  cursor: pointer;
-}
-
-label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--wa-color-text-normal) 80%, transparent);
-  display: block;
-  margin-bottom: 0.25rem;
-}
-
-select option {
-  background-color: var(--wa-color-surface-lowered);
-  color: var(--wa-color-text-normal);
-}
+.fieldset > wa-input,
+.fieldset > wa-select,
+.fieldset > wa-textarea,
+.fieldset > wa-checkbox { width: 100%; }

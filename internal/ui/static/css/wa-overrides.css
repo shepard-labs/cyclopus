@@ -1,0 +1,204 @@
+/* wa-overrides.css — align Web Awesome components with the Cyclopus aesthetic.
+   Loaded LAST in ui.css so our unlayered rules beat WA's layered component
+   styles. Token values already follow the active preset; these rules handle the
+   structural/typographic gaps tokens can't reach.
+
+   Because our presets set --wa-* on <html> inline, they always win over WA's
+   :where(:root) theme defaults. The rules below only adjust geometry/type. */
+
+/* Buttons: the mock primitive is a compact raised control. WA's default accent
+   button is taller and uses a loud neutral fill, so style the visible wrapper. */
+wa-button::part(button) {
+  height: 2rem;
+  padding-inline: 0.75rem;
+  background-color: var(--cyclopus-raise);
+  border-color: var(--cyclopus-line-strong);
+  border-radius: var(--cyclopus-control-radius);
+  color: var(--cyclopus-ink);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+wa-button::part(label) {
+  font-family: var(--wa-font-family-body);
+}
+wa-button[size="small"]::part(button) {
+  height: 1.75rem;
+  padding-inline: 0.625rem;
+  font-size: 0.75rem;
+}
+wa-button[variant="brand"]::part(button) {
+  background-color: var(--cyclopus-brand);
+  border-color: var(--cyclopus-brand);
+  color: var(--cyclopus-brand-ink);
+  font-weight: 600;
+}
+wa-button[variant="danger"]::part(button) {
+  background-color: transparent;
+  border-color: color-mix(in srgb, var(--wa-color-danger-fill-loud) 30%, transparent);
+  color: var(--wa-color-danger-fill-loud);
+}
+wa-button[appearance="plain"]::part(button) {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+/* Inputs/selects: WA draws the visible border/ring on the wrapper parts, not
+   the native input node inside shadow DOM. */
+wa-input::part(base),
+wa-select::part(combobox),
+wa-textarea::part(base) {
+  min-height: 2.25rem;
+  background-color: var(--cyclopus-base);
+  border: var(--wa-border-width-s) solid var(--cyclopus-line-strong);
+  border-radius: var(--cyclopus-control-radius);
+  box-shadow: none;
+  color: var(--wa-color-text-normal);
+  font-family: var(--wa-font-family-body);
+  font-size: 0.8125rem;
+}
+wa-input::part(input),
+wa-textarea::part(textarea) {
+  background: transparent;
+  color: var(--wa-color-text-normal);
+  font-family: var(--wa-font-family-body);
+}
+wa-input:focus-within::part(base),
+wa-select:focus-within::part(combobox),
+wa-textarea:focus-within::part(base) {
+  border-color: var(--wa-color-focus);
+  box-shadow: 0 0 0 1px var(--cyclopus-brand);
+  outline: none;
+}
+
+/* Dialogs: panel on raised surface, hairline border, preset radius/shadow. */
+wa-dialog::part(dialog) {
+  background-color: var(--cyclopus-panel);
+  color: var(--wa-color-text-normal);
+  border: var(--wa-border-width-s) solid var(--cyclopus-line-strong);
+  border-radius: var(--cyclopus-card-radius);
+  box-shadow: 0 24px 70px var(--wa-color-shadow);
+  font-family: var(--wa-font-family-body);
+}
+wa-dialog::part(header),
+wa-dialog::part(body),
+wa-dialog::part(footer) {
+  background-color: transparent;
+  color: var(--wa-color-text-normal);
+  font-family: var(--wa-font-family-body);
+}
+
+/* Dropdown panel: raised surface + hairline, like the old account menu. */
+wa-dropdown::part(menu),
+wa-select::part(listbox) {
+  background-color: var(--cyclopus-panel);
+  border: var(--wa-border-width-s) solid var(--cyclopus-line-strong);
+  border-radius: var(--cyclopus-card-radius);
+  box-shadow: 0 10px 30px var(--wa-color-shadow);
+}
+
+/* Tooltip/toast overlays use the same panel + strong hairline role as menus. */
+wa-tooltip::part(body) {
+  background-color: var(--cyclopus-panel);
+  color: var(--wa-color-text-normal);
+  border: var(--wa-border-width-s) solid var(--cyclopus-line-strong);
+  font-family: var(--wa-font-family-body);
+  font-size: 0.75rem;
+}
+wa-toast-item::part(toast-item) {
+  background-color: var(--cyclopus-panel);
+  border: var(--cyclopus-border-width) solid var(--cyclopus-line-strong);
+  border-radius: var(--cyclopus-card-radius);
+}
+
+/* Badges are source-design chips. WA paints the host, while ::part(base) only
+   addresses an inner content wrapper and cannot change the visible surface. */
+wa-badge {
+  padding: 0.125rem 0.5rem;
+  background-color: transparent;
+  border-color: var(--cyclopus-line);
+  border-radius: 9999px;
+  color: var(--cyclopus-sub);
+  font-family: var(--wa-font-family-body);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+wa-badge[variant="brand"] {
+  border-color: color-mix(in srgb, var(--cyclopus-brand) 30%, transparent);
+  color: var(--cyclopus-brand);
+}
+wa-badge[variant="success"] {
+  border-color: color-mix(in srgb, var(--wa-color-success-fill-loud) 30%, transparent);
+  color: var(--wa-color-success-fill-loud);
+}
+wa-badge[variant="warning"] {
+  border-color: color-mix(in srgb, var(--wa-color-warning-fill-loud) 30%, transparent);
+  color: var(--wa-color-warning-fill-loud);
+}
+wa-badge[variant="danger"] {
+  border-color: color-mix(in srgb, var(--wa-color-danger-fill-loud) 30%, transparent);
+  color: var(--wa-color-danger-fill-loud);
+}
+wa-tag::part(base) {
+  font-family: var(--wa-font-family-body);
+  border-radius: var(--wa-border-radius-s);
+}
+
+/* Cards replace the old .card primitive: default surface + border, not
+   surface-raised (reserved for menus/dialogs). */
+wa-card {
+  --spacing: 1rem;
+  display: block;
+  width: 100%;
+  color: var(--cyclopus-ink);
+  background-color: var(--cyclopus-panel);
+  border: var(--cyclopus-border-width) solid var(--cyclopus-line);
+  border-radius: var(--cyclopus-card-radius);
+  box-shadow: none;
+  overflow: hidden;
+  transition: border-color 150ms;
+}
+wa-card::part(body) {
+  box-sizing: border-box;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 0;
+  padding: var(--spacing);
+}
+/* Utility classes live on custom-element hosts; mirror the handful that need to
+   affect the shadow-DOM body rather than the host itself. */
+wa-card.flex::part(body) { display: flex; }
+wa-card.flex-col::part(body) { flex-direction: column; }
+wa-card.items-center::part(body) { align-items: center; }
+wa-card.justify-between::part(body) { justify-content: space-between; }
+wa-card.text-center::part(body) { text-align: center; }
+wa-card.py-12::part(body) { padding-top: 3rem; padding-bottom: 3rem; }
+wa-card.overflow-hidden::part(body) { overflow: hidden; }
+wa-card.flex-1 { flex: 1 1 0%; }
+.settings-row::part(body) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+wa-button.w-full { display: block; width: 100%; }
+wa-button.w-full::part(button) { width: 100%; }
+
+/* WA's fixed icon canvas has a 1.25em minimum width. The source templates use
+   w-4 for a true 16px canvas, so mirror that utility onto the host minimum. */
+wa-icon.w-4 { min-width: 1rem; }
+
+/* Callouts replace inline alerts while keeping compact server-side validation
+   messages from becoming oversized marketing banners. WA paints the host; it
+   has no base part. */
+wa-callout {
+  padding: 0.75rem 1rem;
+  font-family: var(--wa-font-family-body);
+  border-radius: var(--wa-border-radius-m);
+}
+wa-callout.flex-col { flex-direction: column; align-items: flex-start; }
+wa-callout.p-4 { padding: 1rem; }
+
+/* Keep the SSR fallback visible if the module loader fails. WA upgrades the
+   same markup in place; no permanent :not(:defined) hiding. */

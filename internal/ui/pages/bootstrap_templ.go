@@ -43,30 +43,30 @@ func Bootstrap(errMsg string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-sm\"><div class=\"text-center mb-8\"><div class=\"inline-flex items-center gap-2 mb-4\"><svg class=\"w-8 h-8 text-primary\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle> <line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"12\"></line> <line x1=\"12\" y1=\"16\" x2=\"12.01\" y2=\"16\"></line></svg> <span class=\"text-2xl font-bold\">Cyclopus</span></div><h1 class=\"text-xl font-semibold text-base-content\">Claim your Cyclopus install</h1><p class=\"mt-2 text-sm text-base-content/65\">Create the first administrator account.</p></div><div class=\"card\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-sm\"><div class=\"text-center mb-8\"><div class=\"inline-flex items-center gap-2 mb-4\"><wa-icon name=\"circle-info\" class=\"w-8 h-8 text-primary\" aria-hidden=\"true\"></wa-icon> <span class=\"text-2xl font-bold\">Cyclopus</span></div><h1 class=\"text-xl font-semibold text-base-content\">Claim your Cyclopus install</h1><p class=\"mt-2 text-sm text-base-content/65\">Create the first administrator account.</p></div><wa-card>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if errMsg != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"alert alert-error mb-4\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<wa-callout variant=\"danger\" class=\"mb-4\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/bootstrap.templ`, Line: 23, Col: 14}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/bootstrap.templ`, Line: 19, Col: 14}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</wa-callout>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/bootstrap\" class=\"space-y-4\"><div class=\"fieldset\"><label for=\"email\">Email address</label> <input type=\"email\" id=\"email\" name=\"email\" required placeholder=\"admin@example.com\"></div><div class=\"fieldset\"><label for=\"password\">Password</label> <input type=\"password\" id=\"password\" name=\"password\" required placeholder=\"••••••••\" minlength=\"8\"></div><div class=\"fieldset\"><label for=\"bootstrap_token\">Bootstrap token</label> <input type=\"password\" id=\"bootstrap_token\" name=\"bootstrap_token\" required placeholder=\"Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET\"> <span class=\"text-xs text-base-content/50 mt-1\">Must match the <code class=\"text-base-content/65\">CYCLOPUS_AUTH_BOOTSTRAP_SECRET</code> the server was started with.</span></div><button type=\"submit\" class=\"btn btn-primary w-full justify-center mt-2\">Create account</button></form></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/bootstrap\" class=\"space-y-4\"><div class=\"fieldset\"><wa-input type=\"email\" id=\"email\" name=\"email\" required placeholder=\"admin@example.com\" label=\"Email address\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"password\" id=\"password\" name=\"password\" required placeholder=\"••••••••\" minlength=\"8\" label=\"Password\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"password\" id=\"bootstrap_token\" name=\"bootstrap_token\" required placeholder=\"Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET\" label=\"Bootstrap token\"></wa-input> <span class=\"text-xs text-base-content/50 mt-1\">Must match the <code class=\"text-base-content/65\">CYCLOPUS_AUTH_BOOTSTRAP_SECRET</code> the server was started with.</span></div><wa-button type=\"submit\" variant=\"brand\" class=\"w-full mt-2\">Create account</wa-button></form></wa-card></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -21,43 +21,39 @@ templ projectDetailContent(project store.Project, apps []store.App, errMsg strin
 		<div class="flex items-center justify-between">
 			<h1 class="text-xl font-semibold text-base-content">{ project.Name }</h1>
 		</div>
-		<div class="card">
+		<wa-card>
 			<h2 class="text-sm font-semibold text-base-content/80 mb-4">New application</h2>
 			if errMsg != "" {
-				<div class="alert alert-error mb-4">{ errMsg }</div>
+				<wa-callout variant="danger" class="mb-4">{ errMsg }</wa-callout>
 			}
 			<form method="POST" action={ templ.SafeURL("/projects/" + project.ID + "/apps") } class="space-y-3">
 				<div class="grid grid-cols-2 gap-3">
 					<div class="fieldset">
-						<label for="app-name">Name</label>
-						<input type="text" id="app-name" name="name" required placeholder="api"/>
+						<wa-input type="text" id="app-name" name="name" required placeholder="api" label="Name"></wa-input>
 					</div>
 					<div class="fieldset">
-						<label for="app-slug">Slug</label>
-						<input type="text" id="app-slug" name="slug" required placeholder="api" pattern="[a-z0-9-]+"/>
+						<wa-input type="text" id="app-slug" name="slug" required placeholder="api" pattern="[a-z0-9-]+" label="Slug"></wa-input>
 					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div class="fieldset">
-						<label for="app-hostname">Hostname label</label>
-						<input type="text" id="app-hostname" name="hostname_label" required placeholder="api" pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"/>
+						<wa-input type="text" id="app-hostname" name="hostname_label" required placeholder="api" pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" label="Hostname label"></wa-input>
 					</div>
 					<div class="fieldset">
-						<label for="app-port">Container port</label>
-						<input type="number" id="app-port" name="container_port" value="8080" min="1" max="65535"/>
+						<wa-input type="number" id="app-port" name="container_port" value="8080" min="1" max="65535" label="Container port"></wa-input>
 					</div>
 				</div>
-				<button type="submit" class="btn btn-primary">Create application</button>
+				<wa-button type="submit" variant="brand" appearance="accent">Create application</wa-button>
 			</form>
-		</div>
+		</wa-card>
 		if len(apps) == 0 {
-			<div class="card text-center py-12">
+			<wa-card class="text-center py-12">
 				<p class="text-base-content/65 text-sm">No applications yet. Create one above.</p>
-			</div>
+			</wa-card>
 		} else {
 			<div class="grid grid-cols-1 gap-3">
 				for _, a := range apps {
-					<a href={ templ.SafeURL("/apps/" + a.ID) } class="card flex items-center justify-between hover:border-base-content/30 transition-colors group">
+					<a href={ templ.SafeURL("/apps/" + a.ID) } class="link-card flex items-center justify-between hover:border-base-content/30 transition-colors group">
 						<div class="flex items-center gap-3 min-w-0">
 							<div class="min-w-0">
 								<div class="font-medium text-base-content group-hover:text-accent transition-colors">{ a.Name }</div>
@@ -67,7 +63,7 @@ templ projectDetailContent(project store.Project, apps []store.App, errMsg strin
 						</div>
 						<div class="flex items-center gap-2 text-base-content/65">
 							<span class="text-xs">{ fmt.Sprintf(":%d", a.ContainerPort) }</span>
-							<svg class="w-4 h-4 text-base-content/35 group-hover:text-base-content/65" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+							<wa-icon name="chevron-right" class="w-4 h-4 text-base-content/35 group-hover:text-base-content/65" aria-hidden="true"></wa-icon>
 						</div>
 					</a>
 				}

@@ -91,25 +91,25 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</h1></div><div class=\"card\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">New application</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</h1></div><wa-card><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">New application</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"alert alert-error mb-4\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<wa-callout variant=\"danger\" class=\"mb-4\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 27, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 27, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -127,12 +127,12 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"space-y-3\"><div class=\"grid grid-cols-2 gap-3\"><div class=\"fieldset\"><label for=\"app-name\">Name</label> <input type=\"text\" id=\"app-name\" name=\"name\" required placeholder=\"api\"></div><div class=\"fieldset\"><label for=\"app-slug\">Slug</label> <input type=\"text\" id=\"app-slug\" name=\"slug\" required placeholder=\"api\" pattern=\"[a-z0-9-]+\"></div></div><div class=\"grid grid-cols-2 gap-3\"><div class=\"fieldset\"><label for=\"app-hostname\">Hostname label</label> <input type=\"text\" id=\"app-hostname\" name=\"hostname_label\" required placeholder=\"api\" pattern=\"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\"></div><div class=\"fieldset\"><label for=\"app-port\">Container port</label> <input type=\"number\" id=\"app-port\" name=\"container_port\" value=\"8080\" min=\"1\" max=\"65535\"></div></div><button type=\"submit\" class=\"btn btn-primary\">Create application</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"space-y-3\"><div class=\"grid grid-cols-2 gap-3\"><div class=\"fieldset\"><wa-input type=\"text\" id=\"app-name\" name=\"name\" required placeholder=\"api\" label=\"Name\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"text\" id=\"app-slug\" name=\"slug\" required placeholder=\"api\" pattern=\"[a-z0-9-]+\" label=\"Slug\"></wa-input></div></div><div class=\"grid grid-cols-2 gap-3\"><div class=\"fieldset\"><wa-input type=\"text\" id=\"app-hostname\" name=\"hostname_label\" required placeholder=\"api\" pattern=\"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\" label=\"Hostname label\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"number\" id=\"app-port\" name=\"container_port\" value=\"8080\" min=\"1\" max=\"65535\" label=\"Container port\"></wa-input></div></div><wa-button type=\"submit\" variant=\"brand\" appearance=\"accent\">Create application</wa-button></form></wa-card> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(apps) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"card text-center py-12\"><p class=\"text-base-content/65 text-sm\">No applications yet. Create one above.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<wa-card class=\"text-center py-12\"><p class=\"text-base-content/65 text-sm\">No applications yet. Create one above.</p></wa-card>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -149,20 +149,20 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 				var templ_7745c5c3_Var7 templ.SafeURL
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/apps/" + a.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 60, Col: 45}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 56, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" class=\"card flex items-center justify-between hover:border-base-content/30 transition-colors group\"><div class=\"flex items-center gap-3 min-w-0\"><div class=\"min-w-0\"><div class=\"font-medium text-base-content group-hover:text-accent transition-colors\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" class=\"link-card flex items-center justify-between hover:border-base-content/30 transition-colors group\"><div class=\"flex items-center gap-3 min-w-0\"><div class=\"min-w-0\"><div class=\"font-medium text-base-content group-hover:text-accent transition-colors\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(a.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 63, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 59, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -175,7 +175,7 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(a.HostnameLabel)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 64, Col: 84}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 60, Col: 84}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -196,13 +196,13 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf(":%d", a.ContainerPort))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 69, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 65, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> <svg class=\"w-4 h-4 text-base-content/35 group-hover:text-base-content/65\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"9 18 15 12 9 6\"></polyline></svg></div></a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> <wa-icon name=\"chevron-right\" class=\"w-4 h-4 text-base-content/35 group-hover:text-base-content/65\" aria-hidden=\"true\"></wa-icon></div></a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

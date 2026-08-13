@@ -70,7 +70,7 @@ func tokensContent(tokens []store.APIToken, createdToken string, errMsg string) 
 			return templ_7745c5c3_Err
 		}
 		if createdToken != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"alert alert-success flex-col items-start space-y-2 p-4\"><p class=\"text-sm text-success font-semibold\">Token created — save it now. It will not be shown again.</p><code class=\"block font-mono text-xs text-success bg-base-200 p-3 rounded break-all\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<wa-callout variant=\"success\" class=\"flex-col items-start space-y-2 p-4\"><p class=\"text-sm text-success font-semibold\">Token created — save it now. It will not be shown again.</p><code class=\"block font-mono text-xs text-success bg-base-200 p-3 rounded break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -83,40 +83,40 @@ func tokensContent(tokens []store.APIToken, createdToken string, errMsg string) 
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</code></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</code></wa-callout> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"card space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Create token</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Create token</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"alert alert-error\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<wa-callout variant=\"danger\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 26, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 26, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</wa-callout>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<form method=\"POST\" action=\"/settings/tokens\" class=\"space-y-4\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><label for=\"tok-name\">Name</label> <input type=\"text\" id=\"tok-name\" name=\"name\" required placeholder=\"CI deploy token\"></div><div class=\"fieldset\"><label for=\"tok-scopes\">Scopes <span class=\"text-base-content/50 font-normal\">(comma-separated)</span></label> <input type=\"text\" id=\"tok-scopes\" name=\"scopes\" placeholder=\"deploy:app-id\"></div></div><button type=\"submit\" class=\"btn btn-primary\">Create token</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<form method=\"POST\" action=\"/settings/tokens\" class=\"space-y-4\"><div class=\"grid grid-cols-2 gap-4\"><div class=\"fieldset\"><wa-input type=\"text\" id=\"tok-name\" name=\"name\" required placeholder=\"CI deploy token\" label=\"Name\"></wa-input></div><div class=\"fieldset\"><label for=\"tok-scopes\">Scopes <span class=\"text-base-content/50 font-normal\">(comma-separated)</span></label> <wa-input type=\"text\" id=\"tok-scopes\" name=\"scopes\" placeholder=\"deploy:app-id\"></wa-input></div></div><wa-button type=\"submit\" variant=\"brand\">Create token</wa-button></form></wa-card> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(tokens) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"card\"><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">Name</th><th class=\"text-left py-2\">Scopes</th><th class=\"text-left py-2\">Last used</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<wa-card><table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">Name</th><th class=\"text-left py-2\">Scopes</th><th class=\"text-left py-2\">Last used</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -128,7 +128,7 @@ func tokensContent(tokens []store.APIToken, createdToken string, errMsg string) 
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(t.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 56, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 55, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -141,7 +141,7 @@ func tokensContent(tokens []store.APIToken, createdToken string, errMsg string) 
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(strings.Join(t.Scopes, ", "))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 57, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 56, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -155,7 +155,7 @@ func tokensContent(tokens []store.APIToken, createdToken string, errMsg string) 
 					var templ_7745c5c3_Var7 string
 					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(relTimeSettings(*t.LastUsedAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 60, Col: 42}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 59, Col: 42}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 					if templ_7745c5c3_Err != nil {
@@ -174,18 +174,18 @@ func tokensContent(tokens []store.APIToken, createdToken string, errMsg string) 
 				var templ_7745c5c3_Var8 templ.SafeURL
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/tokens/" + t.ID + "/revoke"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 66, Col: 91}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/tokens.templ`, Line: 65, Col: 91}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" onsubmit=\"return confirm('Revoke this token?')\"><button type=\"submit\" class=\"btn btn-error btn-sm\">Revoke</button></form></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" onsubmit=\"return confirm('Revoke this token?')\"><wa-button type=\"submit\" variant=\"danger\" size=\"small\">Revoke</wa-button></form></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</tbody></table></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</tbody></table></wa-card>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

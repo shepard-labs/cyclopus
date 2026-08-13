@@ -154,7 +154,7 @@ func logsContent(app store.App, project store.Project, entries []observability.L
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<input type=\"text\" name=\"q\" placeholder=\"Filter logs…\" class=\"text-sm w-64\"> <button type=\"submit\" class=\"btn btn-secondary btn-sm\">Search</button></form></div><div class=\"flex-1 card overflow-hidden flex flex-col\"><div id=\"log-entries\" class=\"log-viewer flex-1 overflow-y-auto\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<wa-input type=\"text\" name=\"q\" placeholder=\"Filter logs…\" class=\"text-sm w-64\"></wa-input> <wa-button type=\"submit\" variant=\"neutral\" appearance=\"outlined\" size=\"small\">Search</wa-button></form></div><wa-card class=\"flex-1 overflow-hidden flex flex-col\"><div id=\"log-entries\" class=\"log-viewer flex-1 overflow-y-auto\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -237,25 +237,25 @@ func logsContent(app store.App, project store.Project, entries []observability.L
 			return templ_7745c5c3_Err
 		}
 		if nextCursor != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"p-3 border-t border-base-300\"><button class=\"btn btn-secondary btn-sm w-full\" hx-get=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"p-3 border-t border-base-300\"><wa-button variant=\"neutral\" appearance=\"outlined\" size=\"small\" class=\"w-full\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/apps/%s/logs?cursor=%s&env=%s", app.ID, nextCursor, envID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/logs.templ`, Line: 54, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/logs.templ`, Line: 57, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#log-entries\" hx-swap=\"beforeend\" hx-indicator=\"#load-more-spinner\">Load older entries</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#log-entries\" hx-swap=\"beforeend\" hx-indicator=\"#load-more-spinner\">Load older entries</wa-button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</wa-card></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

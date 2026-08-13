@@ -2,34 +2,45 @@ package components
 
 import "github.com/shepard-labs/cyclopus/internal/ui"
 
+// Flash renders a <wa-toast> stack and, when a flash is present, a data element
+// the toast script reads to create the notification. Using data attributes (read
+// by the static script below) avoids embedding the message as a JS string literal,
+// which templ would escape. The stack lives in <main> and is re-created on every
+// hx-boost body swap; the script re-runs after each swap, so the toast reappears
+// on the fresh stack.
+// Variant map: success->success, error->danger, info/other->brand (WA has no
+// "info" variant).
 templ Flash(f *ui.FlashMessage) {
+	<wa-toast></wa-toast>
 	if f != nil {
-		switch f.Kind {
-			case "success":
-				<div class="toast alert alert-success" role="status" aria-live="polite">
-					<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-					<span>{ f.Message }</span>
-					<button type="button" class="toast-close" aria-label="Dismiss notification" onclick="this.parentElement.remove()">@iconClose()</button>
-				</div>
-			case "error":
-				<div class="toast alert alert-error" role="alert" aria-live="assertive">
-					<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
-					<span>{ f.Message }</span>
-					<button type="button" class="toast-close" aria-label="Dismiss notification" onclick="this.parentElement.remove()">@iconClose()</button>
-				</div>
-			default:
-				<div class="toast alert alert-info" role="status" aria-live="polite">
-					<svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-					<span>{ f.Message }</span>
-					<button type="button" class="toast-close" aria-label="Dismiss notification" onclick="this.parentElement.remove()">@iconClose()</button>
-				</div>
-		}
+		<div class="flash-data" data-flash-message={ f.Message } data-flash-variant={ flashVariant(f) } hidden></div>
 	}
+	@flashToastScript()
 }
 
-templ iconClose() {
-	<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-		<line x1="18" y1="6" x2="6" y2="18"></line>
-		<line x1="6" y1="6" x2="18" y2="18"></line>
-	</svg>
+templ flashToastScript() {
+	<script>
+		customElements.whenDefined('wa-toast').then(function () {
+			var host = document.querySelector('wa-toast')
+			var data = document.querySelector('.flash-data')
+			if (host && data) {
+				host.create(data.getAttribute('data-flash-message'), {
+					variant: data.getAttribute('data-flash-variant'),
+					duration: 5000
+				})
+				data.remove()
+			}
+		})
+	</script>
+}
+
+func flashVariant(f *ui.FlashMessage) string {
+	switch f.Kind {
+	case "success":
+		return "success"
+	case "error":
+		return "danger"
+	default:
+		return "brand"
+	}
 }
