@@ -50,7 +50,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " — Cyclopus</title><!-- theme.js loads synchronously before the stylesheet: it applies the\n\t\t\t     persisted preset to <html> so the first paint uses the right theme. --><script src=\"/static/theme.js\"></script><!-- Web Awesome base theme BEFORE our stylesheet so our unlayered token\n\t\t\t     overrides win the cascade. Autoloader is async (deferred module). --><link rel=\"stylesheet\" href=\"/static/vendor/webawesome/styles/themes/default.css\"><link rel=\"stylesheet\" href=\"/static/css/ui.css\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " — Cyclopus</title><!-- theme.js loads synchronously before the stylesheet: it applies the\n\t\t\t     persisted preset to <html> so the first paint uses the right theme. --><script src=\"/static/theme.js\"></script><!-- Web Awesome base theme BEFORE our stylesheet so our unlayered token\n\t\t\t     overrides win the cascade. Autoloader is async (deferred module). --><link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/styles/themes/default.css\"><link rel=\"stylesheet\" href=\"/static/css/ui.css\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -73,7 +73,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script type=\"module\" src=\"/static/vendor/webawesome/webawesome.loader.js\"></script><script src=\"/static/htmx.min.js\" defer></script></head><body class=\"h-full flex bg-base-100 text-base-content\" hx-boost=\"true\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script type=\"module\" src=\"https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/webawesome.loader.js\"></script><script src=\"/static/htmx.min.js\" defer></script></head><body class=\"h-full flex bg-base-100 text-base-content\" hx-boost=\"true\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -151,7 +151,7 @@ func AuthPage(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " — Cyclopus</title><!-- synchronous, before the stylesheet — see Page above. --><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"/static/vendor/webawesome/styles/themes/default.css\"><link rel=\"stylesheet\" href=\"/static/css/ui.css\"><script type=\"module\" src=\"/static/vendor/webawesome/webawesome.loader.js\"></script></head><body class=\"h-full flex items-center justify-center bg-base-100 text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " — Cyclopus</title><!-- synchronous, before the stylesheet — see Page above. --><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/styles/themes/default.css\"><link rel=\"stylesheet\" href=\"/static/css/ui.css\"><script type=\"module\" src=\"https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/webawesome.loader.js\"></script></head><body class=\"h-full flex items-center justify-center bg-base-100 text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

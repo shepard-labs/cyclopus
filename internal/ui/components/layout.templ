@@ -20,12 +20,12 @@ templ Page(title string, user store.User, org store.Organization, flash *ui.Flas
 			<script src="/static/theme.js"></script>
 			<!-- Web Awesome base theme BEFORE our stylesheet so our unlayered token
 			     overrides win the cascade. Autoloader is async (deferred module). -->
-			<link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css"/>
+			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/styles/themes/default.css"/>
 			<link rel="stylesheet" href="/static/css/ui.css"/>
 			for _, href := range extraCSS {
 				<link rel="stylesheet" href={ href }/>
 			}
-			<script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
+			<script type="module" src="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/webawesome.loader.js"></script>
 			<script src="/static/htmx.min.js" defer></script>
 		</head>
 		<body class="h-full flex bg-base-100 text-base-content" hx-boost="true">
@@ -55,9 +55,9 @@ templ AuthPage(title string) {
 			<title>{ title } — Cyclopus</title>
 			<!-- synchronous, before the stylesheet — see Page above. -->
 			<script src="/static/theme.js"></script>
-			<link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css"/>
+			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/styles/themes/default.css"/>
 			<link rel="stylesheet" href="/static/css/ui.css"/>
-			<script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
+			<script type="module" src="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/webawesome.loader.js"></script>
 		</head>
 		<body class="h-full flex items-center justify-center bg-base-100 text-base-content">
 			{ children... }
