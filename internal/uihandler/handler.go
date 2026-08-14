@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/a-h/templ"
@@ -21,7 +20,6 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui"
-	"github.com/shepard-labs/cyclopus/internal/ui/components"
 	"github.com/shepard-labs/cyclopus/internal/ui/pages"
 	adminpages "github.com/shepard-labs/cyclopus/internal/ui/pages/admin"
 	settingspages "github.com/shepard-labs/cyclopus/internal/ui/pages/settings"
@@ -51,13 +49,6 @@ func New(client *ui.Backend) http.Handler {
 	r.Post("/logout", h.postLogout)
 
 	// Protected routes — authMiddleware redirects to /login if no session
-	// Local design preview (no auth) — lets headless browsers screenshot theme
-	// components. Environment-gated; production deployments must leave it unset.
-	if os.Getenv("CYCLOPUS_UI_PREVIEW") == "1" {
-		r.Get("/__theme-preview", h.getThemePreview)
-		r.Get("/__theme-preview/flash", h.getThemePreviewFlash)
-	}
-
 	r.Group(func(r chi.Router) {
 		r.Use(ui.AuthMiddleware)
 		r.Get("/", h.getRoot)
@@ -129,16 +120,6 @@ func (h *Handler) getTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render(w, r, settingspages.Theme(user, org, flashFromCookie(w, r)))
-}
-
-// getThemePreview serves the unauthenticated theme-card preview used for
-// headless design review. Only registered when CYCLOPUS_UI_PREVIEW=1.
-func (h *Handler) getThemePreview(w http.ResponseWriter, r *http.Request) {
-	render(w, r, settingspages.ThemePreview())
-}
-
-func (h *Handler) getThemePreviewFlash(w http.ResponseWriter, r *http.Request) {
-	render(w, r, components.Flash(&ui.FlashMessage{Kind: "success", Message: "Boosted toast"}))
 }
 
 func (h *Handler) postUserProfile(w http.ResponseWriter, r *http.Request) {
