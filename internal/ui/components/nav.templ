@@ -34,7 +34,7 @@ templ MobileNavTrigger() {
 }
 
 templ sidebarContent(org store.Organization, user store.User, currentPath, titleID, accountTriggerID, accountMenuID string) {
-	<div class="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">@IconLogo("size-7 text-primary")<div class="min-w-0"><div id={ titleID } class="text-sm font-medium">Cyclopus</div><div class="truncate text-xs text-base-content/50">{ org.Name }</div></div></div>
+	<div class="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">@IconLogo("size-7 text-primary")<div class="min-w-0"><div id={ titleID } class="truncate text-sm font-medium">{ org.Name }</div></div></div>
 	<nav aria-label="Primary" class="flex flex-1 flex-col overflow-y-auto px-4 py-5">
 			<ul role="list" class="flex flex-1 flex-col gap-y-7">
 				<li><ul role="list" class="space-y-1"><li>@navLink("/projects", "Projects", currentPath, IconSquares("size-5 shrink-0"))</li></ul></li>

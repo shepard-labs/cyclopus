@@ -12,7 +12,7 @@ templ Webhooks(webhooks []store.Webhook, user store.User, org store.Organization
 }
 
 templ webhooksContent(webhooks []store.Webhook, errMsg string) {
-	<div class="space-y-6 max-w-3xl">
+	<div class="w-full space-y-6">
 		@components.SectionCard("Add endpoint") {
 			if errMsg != "" {
 				@components.Alert("error", errMsg)

@@ -12,7 +12,7 @@ templ Tokens(tokens []store.APIToken, createdToken string, user store.User, org 
 }
 
 templ tokensContent(tokens []store.APIToken, createdToken string, errMsg string) {
-	<div class="space-y-6 max-w-3xl">
+	<div class="w-full space-y-6">
 		if createdToken != "" {
 			<div role="status" class="space-y-2 rounded-box border border-success/30 bg-success/10 p-4">
 				<p class="text-sm font-semibold text-base-content"><span aria-hidden="true" class="mr-1.5 inline-block size-1.5 rounded-full bg-success"></span>Token created — save it now. It will not be shown again.</p>

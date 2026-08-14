@@ -12,7 +12,7 @@ templ User(user store.User, org store.Organization, flash *ui.FlashMessage, prof
 templ userField(id, name, label, typ, value, autocomplete, maxlength, placeholder string, required bool) { <div><label for={ id } class="block text-xs font-medium">{ label }</label><input id={ id } name={ name } type={ typ } value={ value } autocomplete={ autocomplete } maxlength={ maxlength } placeholder={ placeholder } required?={ required } class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div> }
 
 templ userContent(user store.User, profileError, passwordError, openDialog string) {
-	<div class="max-w-3xl space-y-6">
+	<div class="w-full space-y-6">
 		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6"><h2 class="text-sm font-semibold">Profile</h2>if profileError != "" && openDialog == "" {
 			@components.Alert("error", profileError)
 		}

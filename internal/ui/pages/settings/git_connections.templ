@@ -12,7 +12,7 @@ templ GitConnections(connections []store.GitConnection, user store.User, org sto
 }
 
 templ gitConnectionsContent(connections []store.GitConnection, org store.Organization, errMsg string) {
-	<div class="space-y-6 max-w-3xl">
+	<div class="w-full space-y-6">
 		@components.SectionCard("Add GitHub App connection") {
 			if errMsg != "" {
 				@components.Alert("error", errMsg)

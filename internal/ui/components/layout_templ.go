@@ -56,7 +56,7 @@ func Page(title string, user store.User, org store.Organization, flash *ui.Flash
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"min-w-0 lg:pl-56\"><header class=\"sticky top-0 z-30 border-b border-line bg-base-100\"><div class=\"relative mx-auto flex h-14 max-w-5xl items-center justify-center px-4 sm:px-6 lg:px-8\"><div class=\"absolute left-4 sm:left-6 lg:hidden\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"min-w-0 lg:pl-56\"><header class=\"sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-100\"><div class=\"relative mx-auto flex h-full w-full max-w-5xl items-center justify-center px-4 sm:px-6 lg:px-8\"><div class=\"absolute left-4 sm:left-6 lg:hidden\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

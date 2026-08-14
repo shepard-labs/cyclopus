@@ -11,7 +11,7 @@ templ Registries(registries []store.Registry, user store.User, org store.Organiz
 }
 
 templ registriesContent(registries []store.Registry, errMsg string) {
-	<div class="space-y-6 max-w-3xl">
+	<div class="w-full space-y-6">
 		@components.SectionCard("Add registry") {
 			if errMsg != "" {
 				@components.Alert("error", errMsg)
