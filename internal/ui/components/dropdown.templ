@@ -1,10 +1,29 @@
 package components
 
-templ Dropdown(triggerID, menuID, label string) {
-	<el-dropdown class="relative inline-block">
-		<button id={ triggerID } type="button" aria-haspopup="menu" aria-controls={ menuID } class="inline-flex items-center gap-2 rounded-field px-3 py-2 text-sm font-medium text-base-content outline-none hover:bg-base-300 focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200">{ label }@IconChevronDown("size-4")</button>
-		<el-menu id={ menuID } role="menu" anchor="bottom end" popover class="w-56 origin-top-right rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete data-closed:scale-95 data-closed:opacity-0">{ children... }</el-menu>
+import (
+	templcomponent "github.com/a-h/templ"
+
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/avatar"
+)
+
+templ Dropdown(triggerID, menuID, label string, leading templcomponent.Component) {
+	<el-dropdown class="block w-full">
+		<button id={ triggerID } type="button" aria-haspopup="menu" aria-controls={ menuID } class="group flex w-full items-center gap-3 rounded-field px-2 py-2 text-sm font-normal text-base-content/70 outline-none transition hover:bg-base-300 hover:text-base-content aria-expanded:bg-base-300 aria-expanded:text-base-content">
+			if leading != nil {
+				@leading
+			}
+			if label != "" {
+				<span class="min-w-0 flex-1 truncate text-left">{ label }</span>
+			}
+			@IconChevronDown("size-4 shrink-0 text-base-content/50 transition-transform duration-200 group-aria-expanded:rotate-180")
+		</button>
+		<el-menu id={ menuID } role="menu" anchor="bottom start" popover class="w-56 origin-top-left rounded-box divide-y divide-line bg-base-200 shadow-theme outline-1 outline-line transition transition-discrete [--anchor-gap:--spacing(2)] data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in">{ children... }</el-menu>
 	</el-dropdown>
 }
 
-templ DropdownItem(href, label string) { <a href={ templ.SafeURL(href) } role="menuitem" class="flex rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-base-200 focus:text-base-content focus:outline-none">{ label }</a> }
+templ DropdownItem(href, label string) { <a href={ templ.SafeURL(href) } role="menuitem" class="flex items-center px-4 py-2 text-sm text-base-content/75 focus:bg-base-300 focus:text-base-content focus:outline-none">{ label }</a> }
+
+templ accountTriggerLeading(user store.User) {
+	<img class="size-8 shrink-0 rounded-full bg-base-300" src={ avatar.URL(user.AvatarKey) } alt=""/>
+}

@@ -94,7 +94,7 @@ func Combobox(id, name, label, value string, options []SelectOption) templ.Compo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" autocomplete=\"off\" class=\"block w-full rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"> <input type=\"hidden\" name=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" autocomplete=\"off\" class=\"block w-full rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"> <input type=\"hidden\" name=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

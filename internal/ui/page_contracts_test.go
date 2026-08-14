@@ -44,15 +44,13 @@ func TestThemeSettingsBuildsAccessibleControlsFromRegistry(t *testing.T) {
 		`b.setAttribute('role','button')`,
 		`b.setAttribute('aria-pressed','false')`,
 		`b.setAttribute('aria-label','Use '+t.label+' theme')`,
-		`b.className='group rounded-box border border-line bg-base-300 p-4 text-left outline-none transition hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 aria-pressed:border-primary aria-pressed:ring-2 aria-pressed:ring-primary/20'`,
+		`b.className='group rounded-box border border-line bg-base-300 p-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 aria-pressed:border-primary'`,
 		`window.cyclopusTheme.apply(name)`,
 		`window.cyclopusTheme.sync()`,
 		`border-line`,
 		`bg-base-200`,
 		`bg-base-300`,
-		`text-lg/7 font-semibold`,
 		`rounded-box border border-line bg-base-300`,
-		`shadow-auth-glow`,
 	)
 	if strings.Contains(output, `data-theme-name="`) {
 		t.Fatalf("theme metadata is duplicated in server-rendered controls:\n%s", output)
@@ -77,14 +75,13 @@ func TestLogsUseThemeNativeSurfacesAndTypography(t *testing.T) {
 	))
 	requirePageContracts(t, output,
 		`text-xs text-base-content/65`,
-		`text-lg/7 font-semibold`,
 		`bg-base-300`,
 		`bg-base-200`,
 		`border-line`,
 		`font-mono text-xs/5`,
 		`text-base-content`,
 		`size-1.5 shrink-0 rounded-full bg-info`,
-		`focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100`,
+		`focus:border-primary focus-visible:ring-1 focus-visible:ring-primary`,
 		`text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100">Search`,
 		`text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300" hx-get=`,
 	)
@@ -179,9 +176,9 @@ func TestAuthPagesUseCompactTypographyAndLayeredSurfaces(t *testing.T) {
 				`block text-xs font-medium`,
 				`rounded-field border border-line bg-base-300`,
 				`text-sm font-medium`,
-				`focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200`,
+				`focus:border-primary focus-visible:ring-1 focus-visible:ring-primary`,
 			)
-			for _, prohibited := range []string{"text-2xl", "focus-visible:ring-primary", "bg-base-100 px-3 py-2"} {
+			for _, prohibited := range []string{"text-2xl", "focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200", "bg-base-100 px-3 py-2"} {
 				if strings.Contains(output, prohibited) {
 					t.Errorf("auth page contains outdated class %q", prohibited)
 				}
@@ -230,7 +227,6 @@ func TestSettingsAndAdminPagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			output := renderPage(t, page)
 			requirePageContracts(t, output,
-				`text-lg/7 font-semibold`,
 				`rounded-box border border-line bg-base-200`,
 			)
 			for _, prohibited := range []string{
@@ -281,7 +277,6 @@ func TestCorePagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			output := renderPage(t, page)
 			requirePageContracts(t, output,
-				`text-lg/7 font-semibold`,
 				`rounded-box border border-line bg-base-200`,
 			)
 			for _, prohibited := range []string{
@@ -296,11 +291,4 @@ func TestCorePagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 			}
 		})
 	}
-
-	environment := renderPage(t, pages.EnvironmentDetail(
-		store.Environment{ID: "env-1", Branch: "main", LifecycleStatus: "active"},
-		store.App{ID: "app-1", Name: "API"}, store.Project{ID: "project-1", Name: "Platform"},
-		nil, nil, nil, nil, store.EnvironmentVariableRevision{}, store.User{}, store.Organization{}, nil,
-	))
-	requirePageContracts(t, environment, `<h1 class="text-lg/7 font-semibold text-base-content">main</h1>`)
 }

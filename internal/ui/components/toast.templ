@@ -1,13 +1,13 @@
 package components
 
 templ Toast(id, kind, message string) {
-	<div id={ id } role={ toastRole(kind) } class={ "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-box border border-line bg-base-300 p-4 shadow-theme transition duration-300 data-[leaving=true]:translate-x-4 data-[leaving=true]:opacity-0 " + alertTone(kind) }>
+	<div id={ id } role={ toastRole(kind) } class="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-box border border-primary/30 bg-primary/10 p-4 text-base-content shadow-theme transition duration-300 data-[leaving=true]:translate-x-4 data-[leaving=true]:opacity-0">
 		if kind == "error" {
-			@IconExclamationTriangle("size-5 shrink-0")
+			@IconExclamationTriangle("size-5 shrink-0 text-primary")
 		} else {
-			@IconInformationCircle("size-5 shrink-0")
+			@IconInformationCircle("size-5 shrink-0 text-primary")
 		}
-		<p class="flex-1 text-sm font-medium">{ message }</p><button type="button" aria-label="Dismiss notification" onclick="this.parentElement.dataset.leaving='true';setTimeout(()=>this.parentElement.remove(),300)" class="rounded-field p-0.5">@IconXMark("size-4")</button>
+		<p class="flex-1 text-sm font-medium text-base-content">{ message }</p><button type="button" aria-label="Dismiss notification" onclick="this.parentElement.dataset.leaving='true';setTimeout(()=>this.parentElement.remove(),300)" class="cursor-pointer rounded-field p-0.5 text-base-content/60 hover:text-base-content">@IconXMark("size-4")</button>
 	</div>
 }
 

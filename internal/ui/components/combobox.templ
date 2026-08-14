@@ -3,7 +3,7 @@ package components
 templ Combobox(id, name, label, value string, options []SelectOption) {
 	<label for={ id } class="block text-xs font-medium">{ label }</label>
 	<el-autocomplete class="relative mt-2 block">
-		<input id={ id } value={ comboboxLabel(value, options) } type="text" role="combobox" aria-controls={ id + "-options" } autocomplete="off" class="block w-full rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/>
+		<input id={ id } value={ comboboxLabel(value, options) } type="text" role="combobox" aria-controls={ id + "-options" } autocomplete="off" class="block w-full rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 		<input type="hidden" name={ name } value={ value }/>
 		<button type="button" aria-label={ "Show " + label + " options" } class="absolute inset-y-0 right-0 rounded-field px-3 outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200">@IconChevronDown("size-4 text-base-content/50")</button>
 		<el-options id={ id + "-options" } anchor="bottom end" popover class="max-h-60 w-(--input-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition-discrete data-closed:opacity-0">

@@ -46,7 +46,6 @@ templ envDetailContent(
 			<span class="text-base-content">{ env.Branch }</span>
 		</div>
 		<div class="flex items-center gap-3">
-			<h1 class="text-lg/7 font-semibold text-base-content">{ env.Branch }</h1>
 			@components.EnvLifecycleBadge(env.LifecycleStatus)
 			if env.TornDownAt != nil {
 				<span class="text-xs text-base-content/50">torn down { relTime(*env.TornDownAt) }</span>

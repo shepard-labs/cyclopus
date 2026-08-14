@@ -24,12 +24,11 @@ templ logsContent(app store.App, project store.Project, entries []observability.
 			<span class="text-base-content">Logs</span>
 		</div>
 		<div class="flex items-center gap-3">
-			<h1 class="text-lg/7 font-semibold">Logs</h1>
 			<form method="GET" action={ templ.SafeURL("/apps/" + app.ID + "/logs") } class="flex items-center gap-2 ml-auto">
 				if envID != "" {
 					<input type="hidden" name="env" value={ envID }/>
 				}
-				<label for="log-query" class="sr-only">Filter logs</label><input id="log-query" type="text" name="q" value={ query } placeholder="Filter logs…" class="w-64 rounded-field bg-base-300 px-3 py-2 text-sm ring-1 ring-line outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100"/>
+				<label for="log-query" class="sr-only">Filter logs</label><input id="log-query" type="text" name="q" value={ query } placeholder="Filter logs…" class="w-64 rounded-field bg-base-300 px-3 py-2 text-sm ring-1 ring-line outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 				<button type="submit" class="rounded-field bg-base-300 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100">Search</button>
 			</form>
 		</div>

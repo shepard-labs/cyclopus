@@ -22,7 +22,6 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 		</div>
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-3">
-				<h1 class="text-lg/7 font-semibold text-base-content">{ app.Name }</h1>
 				@components.RuntimeClassBadge(app.RuntimeClass)
 			</div>
 			<a href={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">Settings</a>

@@ -56,7 +56,7 @@ func TestWriteBrowserFixture(t *testing.T) {
 		markup(`<button id="dialog-trigger" type="button" command="show-modal" commandfor="dialog-panel">Open dialog</button>`),
 		withChildren(Dialog("dialog-panel", "Confirm deployment"), markup(`<button id="fixture-dialog-confirm" type="button" command="close" commandfor="dialog-panel">Confirm</button>`)),
 		withChildren(Disclosure("disclosure", "Advanced settings", false), markup(`<p id="fixture-disclosure-content">Advanced content</p>`)),
-		withChildren(Dropdown("dropdown-trigger", "dropdown-menu", "Actions"), markup(`<button id="dropdown-action-table" type="button" role="menuitem" data-dropdown-value="table">View table</button><button id="dropdown-action-tabs" type="button" role="menuitem" data-dropdown-value="tabs">View tabs</button>`)),
+		withChildren(Dropdown("dropdown-trigger", "dropdown-menu", "Actions", nil), markup(`<button id="dropdown-action-table" type="button" role="menuitem" data-dropdown-value="table">View table</button><button id="dropdown-action-tabs" type="button" role="menuitem" data-dropdown-value="tabs">View tabs</button>`)),
 		markup(`<output id="dropdown-selected-action" aria-live="polite">No action selected.</output>`),
 		withChildren(EmptyState("No deployments", "Create a deployment to continue."), markup(`<button id="fixture-empty-action" type="button">Create deployment</button>`)),
 		Flash(flash),

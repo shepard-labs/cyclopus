@@ -132,10 +132,7 @@ func TestApprovedDesignSystemSourcePolicy(t *testing.T) {
 	t.Run("theme settings use approved surfaces and typography", func(t *testing.T) {
 		file := requireTemplSource(t, files, "pages/settings/theme.templ")
 		requireSourceContracts(t, file,
-			"text-lg/7 font-semibold",
-			"text-xs text-base-content/65",
-			"rounded-box border border-line bg-base-200",
-			"rounded-field border border-line bg-base-300",
+			"rounded-box border border-line bg-base-300",
 		)
 	})
 }

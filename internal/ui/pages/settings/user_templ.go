@@ -192,7 +192,7 @@ func userField(id, name, label, typ, value, autocomplete, maxlength, placeholder
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -221,7 +221,7 @@ func userContent(user store.User, profileError, passwordError, openDialog string
 			templ_7745c5c3_Var12 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"max-w-3xl space-y-6\"><div><h1 class=\"text-lg/7 font-semibold\">User Settings</h1><p class=\"mt-1 text-xs text-base-content/65\">Manage your profile and account security.</p></div><section class=\"space-y-4 rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold\">Profile</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"max-w-3xl space-y-6\"><section class=\"space-y-4 rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold\">Profile</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -434,7 +434,7 @@ func userContent(user store.User, profileError, passwordError, openDialog string
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div><label for=\"new-password\" class=\"block text-xs font-medium\">New password</label><input id=\"new-password\" name=\"new_password\" type=\"password\" minlength=\"8\" autocomplete=\"new-password\" required class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div><div><label for=\"confirm-password\" class=\"block text-xs font-medium\">Confirm new password</label><input id=\"confirm-password\" name=\"confirm_password\" type=\"password\" minlength=\"8\" autocomplete=\"new-password\" required class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div><div class=\"flex justify-end gap-3\"><button type=\"button\" command=\"close\" commandfor=\"password-dialog\" class=\"rounded-field px-3 py-2 text-sm font-medium\">Cancel</button><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Save</button></div></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div><label for=\"new-password\" class=\"block text-xs font-medium\">New password</label><input id=\"new-password\" name=\"new_password\" type=\"password\" minlength=\"8\" autocomplete=\"new-password\" required class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div><div><label for=\"confirm-password\" class=\"block text-xs font-medium\">Confirm new password</label><input id=\"confirm-password\" name=\"confirm_password\" type=\"password\" minlength=\"8\" autocomplete=\"new-password\" required class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div><div class=\"flex justify-end gap-3\"><button type=\"button\" command=\"close\" commandfor=\"password-dialog\" class=\"rounded-field px-3 py-2 text-sm font-medium\">Cancel</button><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Save</button></div></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

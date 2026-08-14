@@ -96,8 +96,8 @@ func TestLayoutAssetContract(t *testing.T) {
 				requireContains(t, output,
 					`<body class="min-h-full bg-base-100 font-sans text-base-content antialiased" hx-boost="true">`,
 					`class="min-w-0 lg:pl-56"`,
-					`class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-200 px-4 sm:px-6 lg:px-8"`,
-					`class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-200 lg:flex"`,
+					`class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-100 px-4 sm:px-6 lg:px-8"`,
+					`class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-100 lg:flex"`,
 					`class="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4"`,
 					`<main class="p-4 sm:p-6 lg:p-8">`,
 					`id="mobile-navigation"`,
@@ -136,7 +136,7 @@ func TestWrapperMarkupContracts(t *testing.T) {
 		withChildren(Dialog("confirm-dialog", "Confirm action"), markup(`<button id="confirm-action">Confirm</button>`)),
 		withChildren(Disclosure("advanced", "Advanced", false), markup(`<p>Advanced controls</p>`)),
 		withChildren(Disclosure("expanded", "Expanded", true), markup(`<p>Visible controls</p>`)),
-		withChildren(Dropdown("actions-trigger", "actions-menu", "Actions"), DropdownItem("/projects", "Projects")),
+		withChildren(Dropdown("actions-trigger", "actions-menu", "Actions", nil), DropdownItem("/projects", "Projects")),
 		withChildren(EmptyState("Nothing here", "Create the first item."), markup(`<button id="empty-action">Create</button>`)),
 		Flash(flash),
 		withChildren(Popover("help-trigger", "help-panel", "Help"), markup(`<p>Popover help</p>`)),
@@ -216,7 +216,7 @@ func TestWrapperMarkupContracts(t *testing.T) {
 		`text-xs font-medium`,
 		`text-sm font-medium`,
 		`shadow-theme`,
-		`focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200`,
+		`focus:border-primary focus-visible:ring-1 focus-visible:ring-primary`,
 		`rounded-field px-3 outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200`,
 	)
 
@@ -286,7 +286,7 @@ func TestSharedControlsUseThemeRadiusUtilities(t *testing.T) {
 	output := renderComponent(t, componentGroup(
 		Combobox("combo", "combo", "Combo", "", nil),
 		Select("select", "select", "Select", "", nil, false),
-		withChildren(Dropdown("trigger", "menu", "Actions"), DropdownItem("/", "Home")),
+		withChildren(Dropdown("trigger", "menu", "Actions", nil), DropdownItem("/", "Home")),
 		withChildren(Dialog("dialog", "Dialog"), markup("Body")),
 	))
 	requireContains(t, output, `rounded-field`, `rounded-box`)
@@ -300,7 +300,7 @@ func TestElementsWrapperTags(t *testing.T) {
 		Combobox("combo", "combo", "Combo", "", options),
 		withChildren(Dialog("dialog", "Dialog"), markup("Dialog body")),
 		withChildren(Disclosure("disclosure", "Disclosure", false), markup("Disclosure body")),
-		withChildren(Dropdown("dropdown-trigger", "dropdown-menu", "Dropdown"), DropdownItem("/", "Home")),
+		withChildren(Dropdown("dropdown-trigger", "dropdown-menu", "Dropdown", nil), DropdownItem("/", "Home")),
 		withChildren(Popover("popover-trigger", "popover-panel", "Popover"), markup("Popover body")),
 		Select("select", "select", "Select", "one", options, false),
 		Tabs("tabs", tabs, 0),

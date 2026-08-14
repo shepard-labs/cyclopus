@@ -13,7 +13,6 @@ templ GitConnections(connections []store.GitConnection, user store.User, org sto
 
 templ gitConnectionsContent(connections []store.GitConnection, org store.Organization, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
-		<h1 class="text-lg/7 font-semibold">Git Connections</h1>
 		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6">
 			<h2 class="text-sm font-semibold text-base-content/80">Add GitHub App connection</h2>
 			if errMsg != "" {
@@ -22,19 +21,19 @@ templ gitConnectionsContent(connections []store.GitConnection, org store.Organiz
 			<form method="POST" action="/settings/git-connections" class="space-y-4">
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div>
-						<div><label for="gc-repo" class="block text-xs font-medium">Repository (owner/repo)</label><input type="text" id="gc-repo" name="repo_full_name" required placeholder="acme/api" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
+						<div><label for="gc-repo" class="block text-xs font-medium">Repository (owner/repo)</label><input type="text" id="gc-repo" name="repo_full_name" required placeholder="acme/api" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
 					</div>
 					<div>
-						<div><label for="gc-installation" class="block text-xs font-medium">GitHub App Installation ID</label><input type="number" id="gc-installation" name="installation_id" required placeholder="12345678" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
+						<div><label for="gc-installation" class="block text-xs font-medium">GitHub App Installation ID</label><input type="number" id="gc-installation" name="installation_id" required placeholder="12345678" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
 					</div>
 				</div>
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div>
-						<div><label for="gc-branch" class="block text-xs font-medium">Default branch</label><input type="text" id="gc-branch" name="default_branch" value="main" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
+						<div><label for="gc-branch" class="block text-xs font-medium">Default branch</label><input type="text" id="gc-branch" name="default_branch" value="main" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
 					</div>
 					<div>
 						<label for="gc-secret" class="block text-xs font-medium">Webhook secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-					<input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/>
+					<input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 					</div>
 				</div>
 				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Add connection</button>

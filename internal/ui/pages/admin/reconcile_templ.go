@@ -65,7 +65,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-4xl\"><div><h1 class=\"text-lg/7 font-semibold\">Reconciliation</h1><p class=\"mt-1 text-xs text-base-content/65\">Regenerate Kubernetes objects from Postgres state. Dry-run is the default.</p></div><section class=\"space-y-4 rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold text-base-content/80\">Start reconciliation</h2><form method=\"POST\" action=\"/admin/reconcile\" class=\"flex flex-wrap items-center gap-4\"><div class=\"flex items-center gap-2\"><label class=\"flex items-center gap-2 text-sm font-medium\"><input type=\"checkbox\" id=\"dry-run\" name=\"dry_run\" value=\"true\" checked class=\"size-4 rounded-field border-line bg-base-300 text-primary\">Dry run <span class=\"text-xs font-normal text-base-content/50\">(report changes without applying)</span></label></div><div class=\"flex items-center gap-2\"><label class=\"flex items-center gap-2 text-sm font-medium\"><input type=\"checkbox\" id=\"prune\" name=\"prune\" value=\"true\" class=\"size-4 rounded-field border-line bg-base-300 text-primary\">Prune orphaned objects</label></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Run reconciliation</button></form></section><section class=\"rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">Recent runs</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-4xl\"><section class=\"space-y-4 rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold text-base-content/80\">Start reconciliation</h2><form method=\"POST\" action=\"/admin/reconcile\" class=\"flex flex-wrap items-center gap-4\"><div class=\"flex items-center gap-2\"><label class=\"flex items-center gap-2 text-sm font-medium\"><input type=\"checkbox\" id=\"dry-run\" name=\"dry_run\" value=\"true\" checked class=\"size-4 rounded-field border-line bg-base-300 text-primary\">Dry run <span class=\"text-xs font-normal text-base-content/50\">(report changes without applying)</span></label></div><div class=\"flex items-center gap-2\"><label class=\"flex items-center gap-2 text-sm font-medium\"><input type=\"checkbox\" id=\"prune\" name=\"prune\" value=\"true\" class=\"size-4 rounded-field border-line bg-base-300 text-primary\">Prune orphaned objects</label></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Run reconciliation</button></form></section><section class=\"rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">Recent runs</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -87,7 +87,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(r.ID[:8])
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 51, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 47, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
@@ -108,7 +108,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(r.ScopeKind)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 53, Col: 72}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 49, Col: 72}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -136,7 +136,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", findingCount(r.Report)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 61, Col: 102}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 57, Col: 102}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -149,7 +149,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(relTimeAdmin(r.CreatedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 62, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/reconcile.templ`, Line: 58, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {

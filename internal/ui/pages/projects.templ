@@ -12,12 +12,6 @@ templ Projects(projects []store.Project, org store.Organization, user store.User
 
 templ projectsContent(projects []store.Project, errMsg string) {
 	<div class="space-y-6">
-		<div class="flex items-center justify-between">
-			<div>
-				<h1 class="text-lg/7 font-semibold text-base-content">Projects</h1>
-				<p class="text-sm text-base-content/65 mt-1">Organize your applications into projects.</p>
-			</div>
-		</div>
 		<div class="rounded-box border border-line bg-base-200 p-6">
 			<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-4">New project</h2>
 			if errMsg != "" {
@@ -25,8 +19,8 @@ templ projectsContent(projects []store.Project, errMsg string) {
 </div>
 			}
 			<form method="POST" action="/projects" class="flex items-end gap-3">
-				<div class="flex-1"><label for="proj-name" class="block text-xs font-medium">Name</label><input type="text" id="proj-name" name="name" required placeholder="My Project" class="mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
-				<div class="flex-1"><label for="proj-slug" class="block text-xs font-medium">Slug</label><input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" class="mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
+				<div class="flex-1"><label for="proj-name" class="block text-xs font-medium">Name</label><input type="text" id="proj-name" name="name" required placeholder="My Project" class="mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
+				<div class="flex-1"><label for="proj-slug" class="block text-xs font-medium">Slug</label><input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" class="mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
 				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Create</button>
 			</form>
 		</div>

@@ -2,27 +2,26 @@ package components
 
 import (
 	"strings"
-	"github.com/shepard-labs/cyclopus/internal/avatar"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 templ Sidebar(org store.Organization, user store.User, currentPath string) {
 	<el-dialog>
 		<dialog id="mobile-navigation" aria-labelledby="mobile-navigation-title" class="backdrop:bg-transparent lg:hidden">
-			<el-dialog-backdrop class="fixed inset-0 bg-base-content/60 transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200"></el-dialog-backdrop>
+			<el-dialog-backdrop class="fixed inset-0 backdrop-blur-sm transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200"></el-dialog-backdrop>
 			<div tabindex="0" class="fixed inset-0 flex focus:outline-none">
 				<el-dialog-panel class="group/dialog-panel relative mr-16 flex w-full max-w-xs flex-1 transform transition duration-300 ease-in-out data-closed:-translate-x-full">
 					<div class="absolute top-0 left-full flex w-16 justify-center pt-5 duration-300 group-data-closed/dialog-panel:opacity-0">
 						<button type="button" command="close" commandfor="mobile-navigation" class="rounded-field p-2 text-base-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-100"><span class="sr-only">Close navigation</span>@IconXMark("size-6")</button>
 					</div>
-					<div class="flex grow flex-col overflow-y-auto border-r border-line bg-base-200">
+					<div class="flex grow flex-col overflow-y-auto border-r border-line bg-base-100">
 						@sidebarContent(org, user, currentPath, "mobile-navigation-title", "mobile-account-trigger", "mobile-account-menu")
 					</div>
 				</el-dialog-panel>
 			</div>
 		</dialog>
 	</el-dialog>
-	<aside class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-200 lg:flex">
+	<aside class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-100 lg:flex">
 		@sidebarContent(org, user, currentPath, "desktop-navigation-title", "account-trigger", "account-menu")
 	</aside>
 }
@@ -47,13 +46,17 @@ templ sidebarContent(org store.Organization, user store.User, currentPath, title
 					<li>@navLink("/settings/audit", "Audit Log", currentPath, IconList("size-5 shrink-0"))</li>
 				</ul></li>
 				<li><div class="px-2 text-xs font-semibold uppercase tracking-wide text-base-content/40">Admin</div><ul role="list" class="mt-2 space-y-1"><li>@navLink("/admin/reconcile", "Reconcile", currentPath, IconArrowPath("size-5 shrink-0"))</li></ul></li>
-				<li class="mt-auto">
-					@Dropdown(accountTriggerID, accountMenuID, userAccountName(user)) {
-						<div class="px-3 py-2"><div class="flex items-center gap-3"><img class="size-9 rounded-full bg-base-300" src={ avatar.URL(user.AvatarKey) } alt=""/><div class="min-w-0"><p class="truncate text-sm font-medium">{ userAccountName(user) }</p><p class="truncate text-xs text-base-content/50">{ user.Email }</p></div></div></div>
-						<a href="/settings/user" role="menuitem" class="flex items-center gap-2 rounded-field px-3 py-2 text-sm font-medium hover:bg-base-300">@IconCog("size-4")<span>User Settings</span></a>
-						<a href="/settings/theme" role="menuitem" class="flex items-center gap-2 rounded-field px-3 py-2 text-sm font-medium hover:bg-base-300">@IconPalette("size-4")<span>Theme</span></a>
-						<form method="POST" action="/logout" hx-boost="false"><button type="submit" role="menuitem" class="flex w-full items-center gap-2 rounded-field border border-error/30 px-3 py-2 text-left text-sm font-medium text-base-content hover:bg-error/10">@IconArrowRightOnRectangle("size-4")<span>Sign out</span></button></form>
-					}
+			<li class="mt-auto">
+				@Dropdown(accountTriggerID, accountMenuID, userAccountName(user), accountTriggerLeading(user)) {
+					<div class="px-4 py-3"><p class="text-sm text-base-content/60">Signed in as</p><p class="truncate text-sm font-medium text-base-content">{ user.Email }</p></div>
+					<div class="py-1">
+						<a href="/settings/user" role="menuitem" class="flex cursor-pointer items-center px-4 py-2 text-sm text-base-content/75 focus:bg-base-300 focus:text-base-content focus:outline-none">@IconCog("mr-3 size-4 text-base-content/40")<span>User Settings</span></a>
+						<a href="/settings/theme" role="menuitem" class="flex cursor-pointer items-center px-4 py-2 text-sm text-base-content/75 focus:bg-base-300 focus:text-base-content focus:outline-none">@IconPalette("mr-3 size-4 text-base-content/40")<span>Theme</span></a>
+					</div>
+					<div class="py-1">
+						<form method="POST" action="/logout" hx-boost="false"><button type="submit" role="menuitem" class="flex w-full cursor-pointer items-center px-4 py-2 text-left text-sm text-base-content/75 focus:bg-base-300 focus:text-base-content focus:outline-none">@IconArrowRightOnRectangle("mr-3 size-4 text-base-content/40")<span>Sign out</span></button></form>
+					</div>
+				}
 				</li>
 			</ul>
 	</nav>

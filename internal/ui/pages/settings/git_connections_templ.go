@@ -65,7 +65,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><h1 class=\"text-lg/7 font-semibold\">Git Connections</h1><section class=\"space-y-4 rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold text-base-content/80\">Add GitHub App connection</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-3xl\"><section class=\"space-y-4 rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-sm font-semibold text-base-content/80\">Add GitHub App connection</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -75,7 +75,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<form method=\"POST\" action=\"/settings/git-connections\" class=\"space-y-4\"><div class=\"grid gap-4 sm:grid-cols-2\"><div><div><label for=\"gc-repo\" class=\"block text-xs font-medium\">Repository (owner/repo)</label><input type=\"text\" id=\"gc-repo\" name=\"repo_full_name\" required placeholder=\"acme/api\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div></div><div><div><label for=\"gc-installation\" class=\"block text-xs font-medium\">GitHub App Installation ID</label><input type=\"number\" id=\"gc-installation\" name=\"installation_id\" required placeholder=\"12345678\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div></div></div><div class=\"grid gap-4 sm:grid-cols-2\"><div><div><label for=\"gc-branch\" class=\"block text-xs font-medium\">Default branch</label><input type=\"text\" id=\"gc-branch\" name=\"default_branch\" value=\"main\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div></div><div><label for=\"gc-secret\" class=\"block text-xs font-medium\">Webhook secret ref <span class=\"text-base-content/50 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"gc-secret\" name=\"webhook_secret_ref\" required placeholder=\"k8s-secret://cyclopus/webhook-secret#value\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Add connection</button></form></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<form method=\"POST\" action=\"/settings/git-connections\" class=\"space-y-4\"><div class=\"grid gap-4 sm:grid-cols-2\"><div><div><label for=\"gc-repo\" class=\"block text-xs font-medium\">Repository (owner/repo)</label><input type=\"text\" id=\"gc-repo\" name=\"repo_full_name\" required placeholder=\"acme/api\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div></div><div><div><label for=\"gc-installation\" class=\"block text-xs font-medium\">GitHub App Installation ID</label><input type=\"number\" id=\"gc-installation\" name=\"installation_id\" required placeholder=\"12345678\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div></div></div><div class=\"grid gap-4 sm:grid-cols-2\"><div><div><label for=\"gc-branch\" class=\"block text-xs font-medium\">Default branch</label><input type=\"text\" id=\"gc-branch\" name=\"default_branch\" value=\"main\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div></div><div><label for=\"gc-secret\" class=\"block text-xs font-medium\">Webhook secret ref <span class=\"text-base-content/50 font-normal\">(k8s-secret://…)</span></label> <input type=\"text\" id=\"gc-secret\" name=\"webhook_secret_ref\" required placeholder=\"k8s-secret://cyclopus/webhook-secret#value\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"></div></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Add connection</button></form></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -92,7 +92,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(gc.RepoFullName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 59, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 58, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
@@ -105,7 +105,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(gc.DefaultBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 60, Col: 72}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 59, Col: 72}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -118,7 +118,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", gc.InstallationID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 61, Col: 102}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 60, Col: 102}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -131,7 +131,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(relTimeSettings(gc.CreatedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 62, Col: 85}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 61, Col: 85}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -144,7 +144,7 @@ func gitConnectionsContent(connections []store.GitConnection, org store.Organiza
 				var templ_7745c5c3_Var7 templ.SafeURL
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/git-connections/" + gc.ID + "/delete"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 64, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/git_connections.templ`, Line: 63, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {

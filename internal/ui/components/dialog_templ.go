@@ -55,7 +55,7 @@ func Dialog(id, title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"fixed inset-0 size-auto max-h-none max-w-none overflow-y-auto bg-transparent backdrop:bg-transparent\"><el-dialog-backdrop class=\"fixed inset-0 bg-base-content/60 transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200\"></el-dialog-backdrop><div tabindex=\"0\" class=\"flex min-h-full items-end justify-center p-4 focus:outline-none sm:items-center\"><el-dialog-panel class=\"relative w-full max-w-lg transform overflow-hidden rounded-box border border-line bg-base-300 p-6 text-left shadow-theme transition data-closed:translate-y-4 data-closed:opacity-0 data-closed:sm:scale-95\"><div class=\"flex items-start justify-between gap-4\"><h2 id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"fixed inset-0 size-auto max-h-none max-w-none overflow-y-auto bg-transparent backdrop:bg-transparent\"><el-dialog-backdrop class=\"fixed inset-0 backdrop-blur-sm transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200\"></el-dialog-backdrop><div tabindex=\"0\" class=\"flex min-h-full items-end justify-center p-4 focus:outline-none sm:items-center\"><el-dialog-panel class=\"relative w-full max-w-lg transform overflow-hidden rounded-box border border-line bg-base-300 p-6 text-left shadow-theme transition data-closed:translate-y-4 data-closed:opacity-0 data-closed:sm:scale-95\"><div class=\"flex items-start justify-between gap-4\"><h2 id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

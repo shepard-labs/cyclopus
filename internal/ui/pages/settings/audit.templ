@@ -12,7 +12,6 @@ templ AuditLog(events []store.AuditEventRecord, nextPageToken string, user store
 
 templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 	<div class="space-y-6 max-w-5xl">
-		<h1 class="text-lg/7 font-semibold">Audit Log</h1>
 		<section class="rounded-box border border-line bg-base-200 p-6">
 			if len(events) == 0 {
 				<p class="text-sm text-base-content/65 text-center py-8">No audit events.</p>
