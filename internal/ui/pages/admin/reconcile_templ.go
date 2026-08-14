@@ -65,7 +65,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-4xl\"><div><h1 class=\"text-xl font-semibold\">Reconciliation</h1><p class=\"text-sm text-base-content/65 mt-1\">Regenerate Kubernetes objects from Postgres state. Dry-run is the default.</p></div><wa-card class=\"space-y-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Start reconciliation</h2><form method=\"POST\" action=\"/admin/reconcile\" class=\"flex items-center gap-4\"><div class=\"flex items-center gap-2\"><wa-checkbox id=\"dry-run\" name=\"dry_run\" value=\"true\" checked>Dry run <span class=\"text-base-content/50\">(report changes without applying)</span></wa-checkbox></div><div class=\"flex items-center gap-2\"><wa-checkbox id=\"prune\" name=\"prune\" value=\"true\">Prune orphaned objects</wa-checkbox></div><wa-button type=\"submit\" variant=\"brand\">Run reconciliation</wa-button></form></wa-card> <wa-card><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">Recent runs</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-4xl\"><div><h1 class=\"text-xl font-semibold\">Reconciliation</h1><p class=\"text-sm text-base-content/65 mt-1\">Regenerate Kubernetes objects from Postgres state. Dry-run is the default.</p></div><section class=\"space-y-4 rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><h2 class=\"text-sm font-semibold text-base-content/80\">Start reconciliation</h2><form method=\"POST\" action=\"/admin/reconcile\" class=\"flex items-center gap-4\"><div class=\"flex items-center gap-2\"><label class=\"flex items-center gap-2 text-sm\"><input type=\"checkbox\" id=\"dry-run\" name=\"dry_run\" value=\"true\" checked class=\"size-4 rounded border-base-content/30 text-primary\">Dry run <span class=\"text-base-content/50\">(report changes without applying)</span></label></div><div class=\"flex items-center gap-2\"><label class=\"flex items-center gap-2 text-sm\"><input type=\"checkbox\" id=\"prune\" name=\"prune\" value=\"true\" class=\"size-4 rounded border-base-content/30 text-primary\">Prune orphaned objects</label></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content\">Run reconciliation</button></form></section><section class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">Recent runs</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -119,17 +119,17 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 					return templ_7745c5c3_Err
 				}
 				if r.DryRun {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<wa-badge variant=\"warning\">Dry run</wa-badge>")
+					templ_7745c5c3_Err = components.Badge("warning", "Dry run").Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<wa-badge variant=\"brand\">Applied</wa-badge>")
+					templ_7745c5c3_Err = components.Badge("primary", "Applied").Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</td><td class=\"py-2 pr-4 text-xs text-base-content/65\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</td><td class=\"py-2 pr-4 text-xs text-base-content/65\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -142,7 +142,7 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</td><td class=\"py-2 text-xs text-base-content/50\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</td><td class=\"py-2 text-xs text-base-content/50\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -155,17 +155,17 @@ func reconcileContent(runs []store.ReconciliationRun, org store.Organization) te
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</tbody></table>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</tbody></table>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</wa-card></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</section></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

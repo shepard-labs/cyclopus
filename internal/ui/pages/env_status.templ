@@ -9,18 +9,18 @@ import (
 // When no deploy is in progress it returns a static element that stops polling.
 templ EnvStatusFragment(env store.Environment, alias *store.Alias, release *store.Release) {
 	if env.InProgressReleaseID != nil {
-		<wa-callout
+		<div
 			id="prod-status"
-			variant="brand"
-			class="animate-pulse"
+			role="status"
+			class="flex items-center gap-2 rounded-box border border-primary/30 bg-primary/10 p-4 text-sm text-primary animate-pulse"
 			hx-get={ "/environments/" + env.ID + "/status-fragment" }
 			hx-trigger="every 3s"
 			hx-swap="outerHTML"
 			hx-target="#prod-status"
 		>
-			<wa-icon name="rotate" class="w-4 h-4 animate-spin" aria-hidden="true"></wa-icon>
+			@components.IconArrowPath("size-4 animate-spin")
 			Deploy in progress…
-		</wa-callout>
+		</div>
 	} else {
 		<div id="prod-status" class="space-y-3">
 			if alias != nil && alias.Hostname != "" {

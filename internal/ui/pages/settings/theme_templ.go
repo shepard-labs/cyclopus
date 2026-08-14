@@ -14,6 +14,8 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
+var themeNames = []string{"obsidian", "mono", "ember", "graphite", "terminal", "paper", "console", "solar"}
+
 func Theme(user store.User, org store.Organization, flash *ui.FlashMessage) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -64,7 +66,43 @@ func themeContent() templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-3xl space-y-6\"><div><h1 class=\"text-xl font-semibold\">Theme</h1><p class=\"text-sm text-base-content/50 mt-1\">Applies instantly and is remembered on this device.</p></div><wa-card><div class=\"theme-grid\" id=\"theme-grid\"></div><script>\n\t\t\t\t(function () {\n\t\t\t\t\tvar grid = document.getElementById('theme-grid')\n\t\t\t\t\tvar themes = window.cyclopusTheme.themes\n\t\t\t\t\tObject.keys(themes).forEach(function (name) {\n\t\t\t\t\t\tvar t = themes[name]\n\t\t\t\t\t\tvar v = t.vars\n\t\t\t\t\t\tvar b = document.createElement('button')\n\t\t\t\t\t\tb.type = 'button'\n\t\t\t\t\t\tb.className = 'theme-option'\n\t\t\t\t\t\tb.setAttribute('data-theme-name', name)\n\t\t\t\t\t\tb.setAttribute('aria-pressed', 'false')\n\t\t\t\t\t\tvar swatches = ['--wa-color-surface-default', '--wa-color-surface-lowered', '--wa-color-brand-fill-loud', '--wa-color-warning-fill-loud', '--wa-color-danger-fill-loud', '--wa-color-success-fill-loud']\n\t\t\t\t\t\t\t.map(function (k) {\n\t\t\t\t\t\t\t\treturn '<span class=\"theme-swatch\" style=\"background:' + v[k] + '\"></span>'\n\t\t\t\t\t\t\t}).join('')\n\t\t\t\t\t\tb.innerHTML =\n\t\t\t\t\t\t\t'<span class=\"theme-type\" style=\"background:' + v['--wa-color-surface-default'] + ';border-radius:' + v['--wa-border-radius-m'] + '\">' +\n\t\t\t\t\t\t\t\t'<b style=\"color:' + v['--wa-color-text-normal'] + ';font-family:' + v['--wa-font-family-body'] + '\">Aa</b>' +\n\t\t\t\t\t\t\t\t'<b style=\"color:' + v['--wa-color-brand-fill-loud'] + ';font-family:' + v['--wa-font-family-code'] + '\">Aa</b>' +\n\t\t\t\t\t\t\t'</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-option-head\">' +\n\t\t\t\t\t\t\t\t'<span class=\"theme-option-label\" style=\"font-family:' + v['--wa-font-family-body'] + '\">' + t.label + '</span>' +\n\t\t\t\t\t\t\t\t'<span class=\"theme-option-mode\" style=\"font-family:' + v['--wa-font-family-body'] + '\">' + (t.dark ? 'Dark' : 'Light') + '</span>' +\n\t\t\t\t\t\t\t'</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-option-desc\" style=\"color:' + v['--cyclopus-dim'] + ';font-family:' + v['--wa-font-family-body'] + '\">' + t.desc + '</span>' +\n\t\t\t\t\t\t\t'<span class=\"theme-swatches\">' + swatches + '</span>'\n\t\t\t\t\t\tb.onclick = function () { window.cyclopusTheme.apply(name) }\n\t\t\t\t\t\tgrid.appendChild(b)\n\t\t\t\t\t})\n\t\t\t\t\twindow.cyclopusTheme.sync()\n\t\t\t\t})()\n\t\t\t</script></wa-card></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-4xl space-y-6\"><div><h1 class=\"text-xl font-semibold\">Theme</h1><p class=\"mt-1 text-sm text-base-content/50\">Applies instantly and is remembered on this device.</p></div><section class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><div id=\"theme-grid\" class=\"grid gap-4 sm:grid-cols-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, name := range themeNames {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<button id=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var3 string
+			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue("theme-" + name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/theme.templ`, Line: 17, Col: 32}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" type=\"button\" data-theme-name=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var4 string
+			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/settings/theme.templ`, Line: 17, Col: 71}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" aria-pressed=\"false\" class=\"group rounded-box border border-base-content/10 bg-base-100 p-4 text-left transition hover:border-primary/50 focus-visible:outline-2 focus-visible:outline-primary aria-pressed:border-primary aria-pressed:ring-2 aria-pressed:ring-primary/20\"><span data-theme-preview></span></button>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div></section><script>\n\t\t\t(function(){var themes=window.cyclopusTheme.themes;document.querySelectorAll('#theme-grid [data-theme-name]').forEach(function(b){var name=b.getAttribute('data-theme-name'),t=themes[name],v=t.vars;var swatches=['--color-base-100','--color-base-300','--color-primary','--color-warning','--color-error','--color-success'].map(function(k){return '<span class=\"size-5 rounded-full ring-1 ring-black/10\" style=\"background:'+v[k]+'\"></span>'}).join('');b.firstElementChild.innerHTML='<span class=\"flex items-start justify-between gap-3\"><span><span class=\"block font-semibold\" style=\"font-family:'+v['--font-sans']+'\">'+t.label+'</span><span class=\"mt-1 block text-xs opacity-60\">'+t.desc+'</span></span><span class=\"rounded-full border border-current/20 px-2 py-0.5 text-xs opacity-70\">'+(t.dark?'Dark':'Light')+'</span></span><span class=\"mt-4 flex gap-2\">'+swatches+'</span><span class=\"mt-4 flex items-center gap-3 rounded-field p-3\" style=\"background:'+v['--color-base-100']+'\"><b style=\"color:'+v['--color-base-content']+';font-family:'+v['--font-sans']+'\">Aa</b><b style=\"color:'+v['--color-primary']+';font-family:'+v['--font-mono']+'\">Aa</b></span>';b.onclick=function(){window.cyclopusTheme.apply(name)}});window.cyclopusTheme.sync()})()\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -1,0 +1,20 @@
+package components
+
+import "fmt"
+
+type TabItem struct { ID string; Label string; Content templ.Component }
+
+templ Tabs(id string, tabs []TabItem, active int) {
+	<el-tab-group>
+		<el-tab-list id={ id } role="tablist" class="flex gap-6 border-b border-base-300">
+			for i, tab := range tabs {
+				<button type="button" role="tab" id={ tab.ID + "-tab" } aria-controls={ tab.ID + "-panel" } aria-selected={ fmt.Sprintf("%t", i == active) } class="border-b-2 px-1 py-3 text-sm font-medium aria-selected:border-primary aria-selected:text-primary">{ tab.Label }</button>
+			}
+		</el-tab-list>
+		<el-tab-panels>
+			for i, tab := range tabs {
+				<div id={ tab.ID + "-panel" } role="tabpanel" aria-labelledby={ tab.ID + "-tab" } hidden?={ i != active } class="py-4">@tab.Content</div>
+			}
+		</el-tab-panels>
+	</el-tab-group>
+}

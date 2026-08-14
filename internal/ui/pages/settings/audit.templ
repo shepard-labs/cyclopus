@@ -13,7 +13,7 @@ templ AuditLog(events []store.AuditEventRecord, nextPageToken string, user store
 templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 	<div class="space-y-6 max-w-5xl">
 		<h1 class="text-xl font-semibold">Audit Log</h1>
-		<wa-card>
+		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 			if len(events) == 0 {
 				<p class="text-sm text-base-content/65 text-center py-8">No audit events.</p>
 			} else {
@@ -47,10 +47,10 @@ templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 				</table>
 				if nextPageToken != "" {
 					<div class="p-3 border-t border-base-300 text-center">
-						<wa-button href={ templ.SafeURL("/settings/audit?page_token=" + nextPageToken) } variant="neutral" size="small">Load more</wa-button>
+						<a href={ templ.SafeURL("/settings/audit?page_token=" + nextPageToken) } class="rounded-field px-3 py-1.5 text-xs font-semibold ring-1 ring-base-content/20">Load more</a>
 					</div>
 				}
 			}
-		</wa-card>
+		</section>
 	</div>
 }

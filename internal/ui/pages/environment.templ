@@ -53,21 +53,21 @@ templ envDetailContent(
 			}
 		</div>
 		if alias != nil && alias.Hostname != "" {
-			<wa-card class="flex items-center justify-between">
+			<section class="flex items-center justify-between rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 				<div>
 					<span class="text-xs text-base-content/50 block mb-1">Live URL</span>
 					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="font-mono text-primary hover:text-accent">
 						https://{ alias.Hostname } ↗
 					</a>
 				</div>
-			</wa-card>
+			</section>
 		} else if env.PlannedHostname != nil {
-			<wa-card>
+			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 				<span class="text-xs text-base-content/50 block mb-1">Planned hostname (cert pending)</span>
 				<span class="font-mono text-base-content/80">{ strptr(env.PlannedHostname) }</span>
-			</wa-card>
+			</section>
 		}
-		<wa-card>
+		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 			<h2 class="text-sm font-semibold text-base-content/80 mb-4">Releases</h2>
 			if len(releases) == 0 {
 				<p class="text-sm text-base-content/65">No releases yet.</p>
@@ -103,15 +103,11 @@ templ envDetailContent(
 									if r.Status != "live" && r.Status != "deploying" && r.Status != "pending" {
 										<form method="POST" action={ templ.SafeURL("/environments/" + env.ID + "/rollback") }>
 											<input type="hidden" name="release_id" value={ r.ID }/>
-										<wa-button
-											type="submit"
-											variant="neutral"
-											appearance="plain"
-											size="small"
+										<button type="submit" class="rounded-field px-2 py-1 text-xs font-semibold hover:bg-base-200"
 											onclick="return confirm('Roll back to release '+ this.form.release_id.value.substring(0,8) + '?')"
 										>
 											Rollback
-										</wa-button>
+										</button>
 										</form>
 									}
 								</td>
@@ -120,9 +116,9 @@ templ envDetailContent(
 					</tbody>
 				</table>
 			}
-		</wa-card>
+		</section>
 		<div class="grid grid-cols-1 gap-4">
-			<wa-card>
+			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Environment variables</h2>
 				if len(envVars.Variables) == 0 {
 					<p class="text-sm text-base-content/65">No environment variables set.</p>
@@ -137,8 +133,8 @@ templ envDetailContent(
 						}
 					</div>
 				}
-			</wa-card>
-			<wa-card>
+			</section>
+			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Certificates</h2>
 				if len(certs) == 0 {
 					<p class="text-sm text-base-content/65">No certificates found.</p>
@@ -157,9 +153,9 @@ templ envDetailContent(
 									<td class="py-2 font-mono text-xs">{ cert.Hostname }</td>
 								<td class="py-2">
 									if cert.Ready {
-										<wa-badge variant="success" appearance="accent">Ready</wa-badge>
+										@components.Badge("success", "Ready")
 									} else {
-										<wa-badge variant="warning" appearance="accent" class="animate-pulse">{ cert.Reason }</wa-badge>
+										@components.Badge("warning", cert.Reason)
 										}
 									</td>
 									<td class="py-2 text-xs text-base-content/65">
@@ -174,8 +170,8 @@ templ envDetailContent(
 						</tbody>
 					</table>
 				}
-			</wa-card>
-			<wa-card>
+			</section>
+			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Custom domains</h2>
 				if len(domains) == 0 {
 					<p class="text-sm text-base-content/65 mb-4">No custom domains configured.</p>
@@ -195,9 +191,9 @@ templ envDetailContent(
 									<td class="py-2 text-xs text-base-content/65">{ d.VerificationMethod }</td>
 								<td class="py-2">
 									if d.VerifiedAt != nil {
-										<wa-badge variant="success" appearance="accent">Verified</wa-badge>
+										@components.Badge("success", "Verified")
 									} else {
-										<wa-badge variant="warning" appearance="accent">Pending</wa-badge>
+										@components.Badge("warning", "Pending")
 										}
 									</td>
 								</tr>
@@ -205,7 +201,7 @@ templ envDetailContent(
 						</tbody>
 					</table>
 				}
-			</wa-card>
+			</section>
 		</div>
 	</div>
 }

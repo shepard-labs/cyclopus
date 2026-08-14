@@ -6,51 +6,19 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ Theme(user store.User, org store.Organization, flash *ui.FlashMessage) {
-	@components.Page("Theme", user, org, flash, "/settings/theme", themeContent())
-}
+var themeNames = []string{"obsidian", "mono", "ember", "graphite", "terminal", "paper", "console", "solar"}
+
+templ Theme(user store.User, org store.Organization, flash *ui.FlashMessage) { @components.Page("Theme", user, org, flash, "/settings/theme", themeContent()) }
 
 templ themeContent() {
-	<div class="max-w-3xl space-y-6">
-		<div>
-			<h1 class="text-xl font-semibold">Theme</h1>
-			<p class="text-sm text-base-content/50 mt-1">Applies instantly and is remembered on this device.</p>
-		</div>
-		<wa-card>
-			<div class="theme-grid" id="theme-grid"></div>
-			<script>
-				(function () {
-					var grid = document.getElementById('theme-grid')
-					var themes = window.cyclopusTheme.themes
-					Object.keys(themes).forEach(function (name) {
-						var t = themes[name]
-						var v = t.vars
-						var b = document.createElement('button')
-						b.type = 'button'
-						b.className = 'theme-option'
-						b.setAttribute('data-theme-name', name)
-						b.setAttribute('aria-pressed', 'false')
-						var swatches = ['--wa-color-surface-default', '--wa-color-surface-lowered', '--wa-color-brand-fill-loud', '--wa-color-warning-fill-loud', '--wa-color-danger-fill-loud', '--wa-color-success-fill-loud']
-							.map(function (k) {
-								return '<span class="theme-swatch" style="background:' + v[k] + '"></span>'
-							}).join('')
-						b.innerHTML =
-							'<span class="theme-type" style="background:' + v['--wa-color-surface-default'] + ';border-radius:' + v['--wa-border-radius-m'] + '">' +
-								'<b style="color:' + v['--wa-color-text-normal'] + ';font-family:' + v['--wa-font-family-body'] + '">Aa</b>' +
-								'<b style="color:' + v['--wa-color-brand-fill-loud'] + ';font-family:' + v['--wa-font-family-code'] + '">Aa</b>' +
-							'</span>' +
-							'<span class="theme-option-head">' +
-								'<span class="theme-option-label" style="font-family:' + v['--wa-font-family-body'] + '">' + t.label + '</span>' +
-								'<span class="theme-option-mode" style="font-family:' + v['--wa-font-family-body'] + '">' + (t.dark ? 'Dark' : 'Light') + '</span>' +
-							'</span>' +
-							'<span class="theme-option-desc" style="color:' + v['--cyclopus-dim'] + ';font-family:' + v['--wa-font-family-body'] + '">' + t.desc + '</span>' +
-							'<span class="theme-swatches">' + swatches + '</span>'
-						b.onclick = function () { window.cyclopusTheme.apply(name) }
-						grid.appendChild(b)
-					})
-					window.cyclopusTheme.sync()
-				})()
-			</script>
-		</wa-card>
+	<div class="max-w-4xl space-y-6"><div><h1 class="text-xl font-semibold">Theme</h1><p class="mt-1 text-sm text-base-content/50">Applies instantly and is remembered on this device.</p></div>
+		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10"><div id="theme-grid" class="grid gap-4 sm:grid-cols-2">
+			for _, name := range themeNames {
+				<button id={ "theme-" + name } type="button" data-theme-name={ name } aria-pressed="false" class="group rounded-box border border-base-content/10 bg-base-100 p-4 text-left transition hover:border-primary/50 focus-visible:outline-2 focus-visible:outline-primary aria-pressed:border-primary aria-pressed:ring-2 aria-pressed:ring-primary/20"><span data-theme-preview></span></button>
+			}
+		</div></section>
+		<script>
+			(function(){var themes=window.cyclopusTheme.themes;document.querySelectorAll('#theme-grid [data-theme-name]').forEach(function(b){var name=b.getAttribute('data-theme-name'),t=themes[name],v=t.vars;var swatches=['--color-base-100','--color-base-300','--color-primary','--color-warning','--color-error','--color-success'].map(function(k){return '<span class="size-5 rounded-full ring-1 ring-black/10" style="background:'+v[k]+'"></span>'}).join('');b.firstElementChild.innerHTML='<span class="flex items-start justify-between gap-3"><span><span class="block font-semibold" style="font-family:'+v['--font-sans']+'">'+t.label+'</span><span class="mt-1 block text-xs opacity-60">'+t.desc+'</span></span><span class="rounded-full border border-current/20 px-2 py-0.5 text-xs opacity-70">'+(t.dark?'Dark':'Light')+'</span></span><span class="mt-4 flex gap-2">'+swatches+'</span><span class="mt-4 flex items-center gap-3 rounded-field p-3" style="background:'+v['--color-base-100']+'"><b style="color:'+v['--color-base-content']+';font-family:'+v['--font-sans']+'">Aa</b><b style="color:'+v['--color-primary']+';font-family:'+v['--font-mono']+'">Aa</b></span>';b.onclick=function(){window.cyclopusTheme.apply(name)}});window.cyclopusTheme.sync()})()
+		</script>
 	</div>
 }

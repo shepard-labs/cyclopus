@@ -6,35 +6,26 @@ import (
 )
 
 // Page renders the full-page shell with sidebar, topbar, content area, and flash.
-// content is rendered inside the main area. extraCSS lists page-specific
-// stylesheets (under /static/css/pages/) to link after the shared ui.css.
-templ Page(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, content templ.Component, extraCSS ...string) {
+templ Page(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, content templ.Component) {
 	<!DOCTYPE html>
 	<html lang="en" class="h-full">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } — Cyclopus</title>
-			<!-- theme.js loads synchronously before the stylesheet: it applies the
-			     persisted preset to <html> so the first paint uses the right theme. -->
 			<script src="/static/theme.js"></script>
-			<!-- Web Awesome base theme BEFORE our stylesheet so our unlayered token
-			     overrides win the cascade. Autoloader is async (deferred module). -->
-			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/styles/themes/default.css"/>
-			<link rel="stylesheet" href="/static/css/ui.css"/>
-			for _, href := range extraCSS {
-				<link rel="stylesheet" href={ href }/>
-			}
-			<script type="module" src="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/webawesome.loader.js"></script>
+			<link rel="stylesheet" href="/static/css/output.css"/>
 			<script src="/static/htmx.min.js" defer></script>
+			<script type="module" src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1"></script>
 		</head>
-		<body class="h-full flex bg-base-100 text-base-content" hx-boost="true">
+		<body class="min-h-full bg-base-200 font-sans text-base-content" hx-boost="true">
 			@Sidebar(org, user, currentPath)
-			<div class="flex-1 flex flex-col ml-64 min-w-0">
-				<header class="topbar">
-					<span class="text-sm text-base-content/65">{ title }</span>
+			<div class="min-w-0 lg:pl-72">
+				<header class="sticky top-0 z-30 flex h-16 items-center border-b border-base-300 bg-base-100 px-4 sm:px-6 lg:px-8">
+					@MobileNavTrigger()
+					<span class="text-sm font-semibold text-base-content/70">{ title }</span>
 				</header>
-				<main class="flex-1 overflow-y-auto p-6">
+				<main class="p-4 sm:p-6 lg:p-8">
 					if flash != nil {
 						@Flash(flash)
 					}
@@ -53,13 +44,12 @@ templ AuthPage(title string) {
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } — Cyclopus</title>
-			<!-- synchronous, before the stylesheet — see Page above. -->
 			<script src="/static/theme.js"></script>
-			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/styles/themes/default.css"/>
-			<link rel="stylesheet" href="/static/css/ui.css"/>
-			<script type="module" src="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.11.0/dist-cdn/webawesome.loader.js"></script>
+			<link rel="stylesheet" href="/static/css/output.css"/>
+			<script src="/static/htmx.min.js" defer></script>
+			<script type="module" src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1"></script>
 		</head>
-		<body class="h-full flex items-center justify-center bg-base-100 text-base-content">
+		<body class="flex min-h-full items-center justify-center bg-base-200 p-6 font-sans text-base-content">
 			{ children... }
 		</body>
 	</html>

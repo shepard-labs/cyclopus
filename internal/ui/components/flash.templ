@@ -2,45 +2,9 @@ package components
 
 import "github.com/shepard-labs/cyclopus/internal/ui"
 
-// Flash renders a <wa-toast> stack and, when a flash is present, a data element
-// the toast script reads to create the notification. Using data attributes (read
-// by the static script below) avoids embedding the message as a JS string literal,
-// which templ would escape. The stack lives in <main> and is re-created on every
-// hx-boost body swap; the script re-runs after each swap, so the toast reappears
-// on the fresh stack.
-// Variant map: success->success, error->danger, info/other->brand (WA has no
-// "info" variant).
 templ Flash(f *ui.FlashMessage) {
-	<wa-toast></wa-toast>
 	if f != nil {
-		<div class="flash-data" data-flash-message={ f.Message } data-flash-variant={ flashVariant(f) } hidden></div>
-	}
-	@flashToastScript()
-}
-
-templ flashToastScript() {
-	<script>
-		customElements.whenDefined('wa-toast').then(function () {
-			var host = document.querySelector('wa-toast')
-			var data = document.querySelector('.flash-data')
-			if (host && data) {
-				host.create(data.getAttribute('data-flash-message'), {
-					variant: data.getAttribute('data-flash-variant'),
-					duration: 5000
-				})
-				data.remove()
-			}
-		})
-	</script>
-}
-
-func flashVariant(f *ui.FlashMessage) string {
-	switch f.Kind {
-	case "success":
-		return "success"
-	case "error":
-		return "danger"
-	default:
-		return "brand"
+		<div id="flash-region" class="fixed top-4 right-4 z-50" aria-live="polite">@Toast("flash-message", f.Kind, f.Message)</div>
+		<script>setTimeout(function(){var n=document.getElementById('flash-message');if(n){n.dataset.leaving='true';setTimeout(function(){n.remove()},300)}},5000)</script>
 	}
 }

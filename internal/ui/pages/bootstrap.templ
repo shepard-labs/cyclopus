@@ -7,32 +7,25 @@ templ Bootstrap(errMsg string) {
 		<div class="w-full max-w-sm">
 			<div class="text-center mb-8">
 				<div class="inline-flex items-center gap-2 mb-4">
-					<wa-icon name="circle-info" class="w-8 h-8 text-primary" aria-hidden="true"></wa-icon>
+					@components.IconLogo("size-8 text-primary")
 					<span class="text-2xl font-bold">Cyclopus</span>
 				</div>
 				<h1 class="text-xl font-semibold text-base-content">Claim your Cyclopus install</h1>
 				<p class="mt-2 text-sm text-base-content/65">Create the first administrator account.</p>
 			</div>
-			<wa-card>
+			<div class="rounded-box bg-base-100 p-6 shadow-theme ring-1 ring-base-content/10">
 				if errMsg != "" {
-					<wa-callout variant="danger" class="mb-4">
-						{ errMsg }
-					</wa-callout>
+					<div class="mb-4">@components.Alert("error", errMsg)</div>
 				}
 				<form method="POST" action="/bootstrap" class="space-y-4">
-					<div class="fieldset">
-						<wa-input type="email" id="email" name="email" required placeholder="admin@example.com" label="Email address"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="password" id="password" name="password" required placeholder="••••••••" minlength="8" label="Password"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="password" id="bootstrap_token" name="bootstrap_token" required placeholder="Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET" label="Bootstrap token"></wa-input>
+					<div><label for="email" class="block text-sm font-medium">Email address</label><input type="email" id="email" name="email" required placeholder="admin@example.com" class="mt-2 block w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
+					<div><label for="password" class="block text-sm font-medium">Password</label><input type="password" id="password" name="password" required placeholder="••••••••" minlength="8" class="mt-2 block w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
+					<div><label for="bootstrap_token" class="block text-sm font-medium">Bootstrap token</label><input type="password" id="bootstrap_token" name="bootstrap_token" required placeholder="Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET" class="mt-2 block w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/>
 						<span class="text-xs text-base-content/50 mt-1">Must match the <code class="text-base-content/65">CYCLOPUS_AUTH_BOOTSTRAP_SECRET</code> the server was started with.</span>
 					</div>
-					<wa-button type="submit" variant="brand" class="w-full mt-2">Create account</wa-button>
+					<button type="submit" class="mt-2 w-full rounded-field bg-primary px-3 py-2 text-sm font-semibold text-primary-content">Create account</button>
 				</form>
-			</wa-card>
+			</div>
 		</div>
 	}
 }

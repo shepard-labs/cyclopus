@@ -1,0 +1,6 @@
+package components
+
+templ Popover(triggerID, panelID, label string) {
+	<button id={ triggerID } type="button" popovertarget={ panelID } aria-controls={ panelID } class="rounded-field px-3 py-2 text-sm font-semibold hover:bg-base-200">{ label }</button>
+	<el-popover id={ panelID } popover anchor={ triggerID } class="rounded-box bg-base-100 p-4 text-sm shadow-xl ring-1 ring-base-content/10 transition-discrete data-closed:opacity-0">{ children... }</el-popover>
+}

@@ -43,30 +43,33 @@ func Login(errMsg string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-sm\"><div class=\"text-center mb-8\"><div class=\"inline-flex items-center gap-2 mb-4\"><wa-icon name=\"circle-info\" class=\"w-8 h-8 text-primary\" aria-hidden=\"true\"></wa-icon> <span class=\"text-2xl font-bold\">Cyclopus</span></div><h1 class=\"text-xl font-semibold text-base-content\">Sign in to your install</h1></div><wa-card>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-sm\"><div class=\"text-center mb-8\"><div class=\"inline-flex items-center gap-2 mb-4\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = components.IconLogo("size-8 text-primary").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<span class=\"text-2xl font-bold\">Cyclopus</span></div><h1 class=\"text-xl font-semibold text-base-content\">Sign in to your install</h1></div><div class=\"rounded-box bg-base-100 p-6 shadow-theme ring-1 ring-base-content/10\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if errMsg != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<wa-callout variant=\"danger\" class=\"mb-4\"><wa-icon name=\"xmark\" class=\"w-4 h-4 flex-shrink-0\" aria-hidden=\"true\"></wa-icon> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"mb-4\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var3 string
-				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/login.templ`, Line: 19, Col: 14}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
+				templ_7745c5c3_Err = components.Alert("error", errMsg).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</wa-callout>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/login\" class=\"space-y-4\"><div class=\"fieldset\"><wa-input type=\"email\" id=\"email\" name=\"email\" required placeholder=\"you@example.com\" autocomplete=\"email\" label=\"Email address\"></wa-input></div><div class=\"fieldset\"><wa-input type=\"password\" id=\"password\" name=\"password\" required placeholder=\"••••••••\" autocomplete=\"current-password\" label=\"Password\"></wa-input></div><wa-button type=\"submit\" variant=\"brand\" class=\"w-full mt-2\">Sign in</wa-button></form></wa-card></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<form method=\"POST\" action=\"/login\" class=\"space-y-4\"><div><label for=\"email\" class=\"block text-sm font-medium\">Email address</label><input type=\"email\" id=\"email\" name=\"email\" required placeholder=\"you@example.com\" autocomplete=\"email\" class=\"mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"></div><div><label for=\"password\" class=\"block text-sm font-medium\">Password</label><input type=\"password\" id=\"password\" name=\"password\" required placeholder=\"••••••••\" autocomplete=\"current-password\" class=\"mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"></div><button type=\"submit\" class=\"mt-2 w-full rounded-field bg-primary px-3 py-2 text-sm font-semibold text-primary-content hover:opacity-90\">Sign in</button></form></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

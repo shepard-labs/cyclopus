@@ -1,33 +1,25 @@
 package components
 
+templ Badge(kind, text string) { <span class={ "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset " + badgeTone(kind) }>{ text }</span> }
+
+func badgeTone(kind string) string { switch kind { case "success": return "bg-success/10 text-success ring-success/20"; case "warning": return "bg-warning/10 text-warning ring-warning/20"; case "error", "danger": return "bg-error/10 text-error ring-error/20"; case "primary", "brand", "info": return "bg-primary/10 text-primary ring-primary/20"; default: return "bg-base-200 text-base-content/70 ring-base-content/10" } }
+
 // ReleaseStatusBadge renders a colored badge for a release status string
 // (store value: pending/deploying/live/failed/superseded).
 templ ReleaseStatusBadge(status string) {
 	switch status {
 		case "live":
-			<wa-badge variant="success" appearance="accent">
-				<span class="status status-success"></span>
-				Live
-			</wa-badge>
+			@Badge("success", "Live")
 		case "deploying":
-			<wa-badge variant="brand" appearance="accent" class="animate-pulse">
-				<span class="status status-info"></span>
-				Deploying
-			</wa-badge>
+			@Badge("primary", "Deploying")
 		case "pending":
-			<wa-badge variant="warning" appearance="accent" class="animate-pulse">
-				<span class="status status-warning"></span>
-				Pending
-			</wa-badge>
+			@Badge("warning", "Pending")
 		case "failed":
-			<wa-badge variant="danger" appearance="accent">
-				<span class="status status-error"></span>
-				Failed
-			</wa-badge>
+			@Badge("error", "Failed")
 		case "superseded":
-			<wa-badge variant="neutral" appearance="accent">Superseded</wa-badge>
+			@Badge("neutral", "Superseded")
 		default:
-			<wa-badge variant="neutral" appearance="accent">{ status }</wa-badge>
+			@Badge("neutral", status)
 	}
 }
 
@@ -36,29 +28,26 @@ templ ReleaseStatusBadge(status string) {
 templ EnvLifecycleBadge(status string) {
 	switch status {
 		case "ready":
-			<wa-badge variant="success" appearance="accent">
-				<span class="status status-success"></span>
-				Ready
-			</wa-badge>
+			@Badge("success", "Ready")
 		case "torn_down":
-			<wa-badge variant="neutral" appearance="accent">Torn Down</wa-badge>
+			@Badge("neutral", "Torn Down")
 		case "failed":
-			<wa-badge variant="danger" appearance="accent">Failed</wa-badge>
+			@Badge("error", "Failed")
 		case "policy_blocked":
-			<wa-badge variant="warning" appearance="accent">Policy Blocked</wa-badge>
+			@Badge("warning", "Policy Blocked")
 		case "reserved":
-			<wa-badge variant="warning" appearance="accent" class="animate-pulse">Provisioning</wa-badge>
+			@Badge("warning", "Provisioning")
 		case "teardown_requested":
-			<wa-badge variant="warning" appearance="accent" class="animate-pulse">Tearing Down</wa-badge>
+			@Badge("warning", "Tearing Down")
 		default:
-			<wa-badge variant="neutral" appearance="accent">{ status }</wa-badge>
+			@Badge("neutral", status)
 	}
 }
 
 // RuntimeClassBadge shows a warning badge for unsandboxed apps.
 templ RuntimeClassBadge(runtimeClass string) {
 	if runtimeClass == "runc" {
-		<wa-badge variant="warning" appearance="accent">⚠ UNSANDBOXED</wa-badge>
+		@Badge("warning", "⚠ UNSANDBOXED")
 	}
 }
 
@@ -67,16 +56,16 @@ templ RuntimeClassBadge(runtimeClass string) {
 templ OperationStatusBadge(status string) {
 	switch status {
 		case "completed", "succeeded":
-			<wa-badge variant="success" appearance="accent">Succeeded</wa-badge>
+			@Badge("success", "Succeeded")
 		case "leased", "running":
-			<wa-badge variant="brand" appearance="accent" class="animate-pulse">Running</wa-badge>
+			@Badge("primary", "Running")
 		case "queued", "accepted":
-			<wa-badge variant="warning" appearance="accent">Queued</wa-badge>
+			@Badge("warning", "Queued")
 		case "failed":
-			<wa-badge variant="danger" appearance="accent">Failed</wa-badge>
+			@Badge("error", "Failed")
 		case "cancelled":
-			<wa-badge variant="neutral" appearance="accent">Cancelled</wa-badge>
+			@Badge("neutral", "Cancelled")
 		default:
-			<wa-badge variant="neutral" appearance="accent">{ status }</wa-badge>
+			@Badge("neutral", status)
 	}
 }

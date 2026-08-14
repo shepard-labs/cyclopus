@@ -7,119 +7,36 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ AppSettings(app store.App, project store.Project, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
-	@components.Page("Settings — "+app.Name, user, org, flash, "/projects", appSettingsContent(app, project, errMsg))
+templ AppSettings(app store.App, project store.Project, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) { @components.Page("Settings — "+app.Name, user, org, flash, "/projects", appSettingsContent(app, project, errMsg)) }
+
+templ settingInput(id, name, label, typ, value, min, max, pattern, placeholder string, required bool) {
+	<div><label for={ id } class="block text-sm font-medium">{ label }</label><input id={ id } name={ name } type={ typ } value={ value } min={ min } max={ max } pattern={ pattern } placeholder={ placeholder } required?={ required } class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
 }
 
+templ settingsCard(title string) { <section class="space-y-4 rounded-box bg-base-100 p-6 ring-1 ring-base-content/10"><h2 class="text-sm font-semibold text-base-content/80">{ title }</h2>{ children... }</section> }
+
 templ appSettingsContent(app store.App, project store.Project, errMsg string) {
-	<div class="space-y-6 max-w-2xl">
-		<div class="flex items-center gap-2 text-sm text-base-content/65">
-			<a href="/projects" class="hover:text-accent">Projects</a>
-			<span>/</span>
-			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
-			<span>/</span>
-			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-accent">{ app.Name }</a>
-			<span>/</span>
-			<span class="text-base-content">Settings</span>
-		</div>
+	<div class="max-w-2xl space-y-6">
+		<div class="flex items-center gap-2 text-sm text-base-content/65"><a href="/projects" class="hover:text-primary">Projects</a><span>/</span><a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-primary">{ project.Name }</a><span>/</span><a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-primary">{ app.Name }</a><span>/</span><span>Settings</span></div>
 		<h1 class="text-xl font-semibold">{ app.Name } — Settings</h1>
 		if errMsg != "" {
-			<wa-callout variant="danger">{ errMsg }</wa-callout>
+			@components.Alert("error", errMsg)
 		}
 		<form method="POST" action={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="space-y-6">
-			<wa-card class="space-y-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Identity</h2>
-				<div class="grid grid-cols-2 gap-4">
-					<div class="fieldset">
-						<wa-input type="text" id="s-name" name="name" value={ app.Name } required label="Name"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="text" id="s-hostname" name="hostname_label" value={ app.HostnameLabel } required pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" label="Hostname label"></wa-input>
-					</div>
-				</div>
-				<div class="grid grid-cols-2 gap-4">
-					<div class="fieldset">
-						<wa-input type="number" id="s-port" name="container_port" value={ fmt.Sprintf("%d", app.ContainerPort) } min="1" max="65535" required label="Container port"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="text" id="s-health" name="health_check_path" value={ app.HealthCheckPath } required label="Health check path"></wa-input>
-					</div>
-				</div>
-				<div class="fieldset">
-					<label for="s-ci">CI workflow ID <span class="text-base-content/50 font-normal">(GitHub Actions)</span></label>
-					<wa-input type="text" id="s-ci" name="ci_workflow_id" value={ strptr(app.CIWorkflowID) } placeholder="deploy.yml"></wa-input>
-				</div>
-				<div class="fieldset">
-					<wa-input type="text" id="s-image-repo" name="image_repository" value={ strptr(app.ImageRepository) } placeholder="ghcr.io/org/repo" label="Image repository"></wa-input>
-				</div>
-			</wa-card>
-			<wa-card class="space-y-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Scaling <span class="text-base-content/50 font-normal">(production only)</span></h2>
-				<div class="fieldset">
-					<wa-select id="s-scaling" name="scaling_mode" value={ app.ScalingMode } label="Scaling mode">
-						<wa-option value="hpa">HPA (default)</wa-option>
-						<wa-option value="keda_cron">KEDA cron (opt-in)</wa-option>
-						<wa-option value="keda_http">KEDA HTTP (beta, opt-in)</wa-option>
-					</wa-select>
-				</div>
-				<div class="grid grid-cols-3 gap-4">
-					<div class="fieldset">
-						<wa-input type="number" id="s-min" name="min_replicas" value={ fmt.Sprintf("%d", app.MinReplicas) } min="0" label="Min replicas"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-max" name="max_replicas" value={ fmt.Sprintf("%d", app.MaxReplicas) } min="1" label="Max replicas"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-cpu-target" name="hpa_target_cpu_percent" value={ fmt.Sprintf("%d", app.HPATargetCPUPercent) } min="1" max="100" label="HPA CPU target %"></wa-input>
-					</div>
-				</div>
-			</wa-card>
-			<wa-card class="space-y-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Resources</h2>
-				<div class="grid grid-cols-2 gap-4">
-					<div class="fieldset">
-						<wa-input type="number" id="s-cpureq" name="cpu_request_millicores" value={ fmt.Sprintf("%d", app.CPURequestMillicores) } min="1" label="CPU request (millicores)"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-cpulim" name="cpu_limit_millicores" value={ fmt.Sprintf("%d", app.CPULimitMillicores) } min="1" label="CPU limit (millicores)"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-memreq" name="memory_request_mib" value={ fmt.Sprintf("%d", app.MemoryRequestMiB) } min="1" label="Memory request (MiB)"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-memlim" name="memory_limit_mib" value={ fmt.Sprintf("%d", app.MemoryLimitMiB) } min="1" label="Memory limit (MiB)"></wa-input>
-					</div>
-				</div>
-			</wa-card>
-			<wa-card class="space-y-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Preview environments</h2>
-				<div class="flex items-center gap-3">
-					<wa-checkbox id="s-previews" name="previews_enabled" checked?={ app.PreviewsEnabled }>Enable preview environments</wa-checkbox>
-				</div>
-				<div class="grid grid-cols-2 gap-4">
-					<div class="fieldset">
-						<wa-input type="number" id="s-maxprev" name="max_preview_environments" value={ fmt.Sprintf("%d", app.MaxPreviewEnvironments) } min="0" label="Max previews"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-previdlettl" name="preview_idle_ttl_hours" value={ fmt.Sprintf("%d", app.PreviewIdleTTLHours) } min="1" label="Idle TTL (hours)"></wa-input>
-					</div>
-				</div>
-			</wa-card>
-			<wa-card class="space-y-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Deploy behavior</h2>
-				<div class="grid grid-cols-2 gap-4">
-					<div class="fieldset">
-						<wa-input type="number" id="s-timeout" name="deploy_timeout_seconds" value={ fmt.Sprintf("%d", app.DeployTimeoutSeconds) } min="1" label="Deploy timeout (seconds)"></wa-input>
-					</div>
-					<div class="fieldset">
-						<wa-input type="number" id="s-retention" name="release_retention_count" value={ fmt.Sprintf("%d", app.ReleaseRetentionCount) } min="1" label="Release retention count"></wa-input>
-					</div>
-				</div>
-			</wa-card>
-			<div class="flex gap-3">
-				<wa-button type="submit" variant="brand">Save settings</wa-button>
-				<wa-button href={ templ.SafeURL("/apps/" + app.ID) } variant="neutral">Cancel</wa-button>
-			</div>
+			@settingsCard("Identity") {
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-name", "name", "Name", "text", app.Name, "", "", "", "", true)@settingInput("s-hostname", "hostname_label", "Hostname label", "text", app.HostnameLabel, "", "", "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", "", true)</div>
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-port", "container_port", "Container port", "number", fmt.Sprintf("%d", app.ContainerPort), "1", "65535", "", "", true)@settingInput("s-health", "health_check_path", "Health check path", "text", app.HealthCheckPath, "", "", "", "", true)</div>
+				@settingInput("s-ci", "ci_workflow_id", "CI workflow ID (GitHub Actions)", "text", strptr(app.CIWorkflowID), "", "", "", "deploy.yml", false)
+				@settingInput("s-image-repo", "image_repository", "Image repository", "text", strptr(app.ImageRepository), "", "", "", "ghcr.io/org/repo", false)
+			}
+			@settingsCard("Scaling (production only)") {
+				@components.Select("s-scaling", "scaling_mode", "Scaling mode", app.ScalingMode, []components.SelectOption{{Value:"hpa",Label:"HPA (default)"},{Value:"keda_cron",Label:"KEDA cron (opt-in)"},{Value:"keda_http",Label:"KEDA HTTP (beta, opt-in)"}}, true)
+				<div class="grid gap-4 sm:grid-cols-3">@settingInput("s-min", "min_replicas", "Min replicas", "number", fmt.Sprintf("%d", app.MinReplicas), "0", "", "", "", false)@settingInput("s-max", "max_replicas", "Max replicas", "number", fmt.Sprintf("%d", app.MaxReplicas), "1", "", "", "", false)@settingInput("s-cpu-target", "hpa_target_cpu_percent", "HPA CPU target %", "number", fmt.Sprintf("%d", app.HPATargetCPUPercent), "1", "100", "", "", false)</div>
+			}
+			@settingsCard("Resources") { <div class="grid gap-4 sm:grid-cols-2">@settingInput("s-cpureq", "cpu_request_millicores", "CPU request (millicores)", "number", fmt.Sprintf("%d", app.CPURequestMillicores), "1", "", "", "", false)@settingInput("s-cpulim", "cpu_limit_millicores", "CPU limit (millicores)", "number", fmt.Sprintf("%d", app.CPULimitMillicores), "1", "", "", "", false)@settingInput("s-memreq", "memory_request_mib", "Memory request (MiB)", "number", fmt.Sprintf("%d", app.MemoryRequestMiB), "1", "", "", "", false)@settingInput("s-memlim", "memory_limit_mib", "Memory limit (MiB)", "number", fmt.Sprintf("%d", app.MemoryLimitMiB), "1", "", "", "", false)</div> }
+			@settingsCard("Preview environments") { <label class="flex items-center gap-3 text-sm"><input id="s-previews" type="checkbox" name="previews_enabled" checked?={ app.PreviewsEnabled } class="size-4 rounded border-base-content/30 text-primary"/>Enable preview environments</label><div class="grid gap-4 sm:grid-cols-2">@settingInput("s-maxprev", "max_preview_environments", "Max previews", "number", fmt.Sprintf("%d", app.MaxPreviewEnvironments), "0", "", "", "", false)@settingInput("s-previdlettl", "preview_idle_ttl_hours", "Idle TTL (hours)", "number", fmt.Sprintf("%d", app.PreviewIdleTTLHours), "1", "", "", "", false)</div> }
+			@settingsCard("Deploy behavior") { <div class="grid gap-4 sm:grid-cols-2">@settingInput("s-timeout", "deploy_timeout_seconds", "Deploy timeout (seconds)", "number", fmt.Sprintf("%d", app.DeployTimeoutSeconds), "1", "", "", "", false)@settingInput("s-retention", "release_retention_count", "Release retention count", "number", fmt.Sprintf("%d", app.ReleaseRetentionCount), "1", "", "", "", false)</div> }
+			<div class="flex gap-3"><button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content">Save settings</button><a href={ templ.SafeURL("/apps/" + app.ID) } class="rounded-field px-4 py-2 text-sm font-semibold ring-1 ring-base-content/20">Cancel</a></div>
 		</form>
 	</div>
 }

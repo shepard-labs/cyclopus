@@ -1,0 +1,18 @@
+package components
+
+templ Combobox(id, name, label, value string, options []SelectOption) {
+	<label for={ id } class="block text-sm font-medium">{ label }</label>
+	<el-autocomplete class="relative mt-2 block">
+		<input id={ id } value={ comboboxLabel(value, options) } type="text" role="combobox" aria-controls={ id + "-options" } autocomplete="off" class="block w-full rounded-field bg-base-100 py-2 pr-10 pl-3 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/>
+		<input type="hidden" name={ name } value={ value }/>
+		<button type="button" aria-label={ "Show " + label + " options" } class="absolute inset-y-0 right-0 px-3">@IconChevronDown("size-4 text-base-content/50")</button>
+		<el-options id={ id + "-options" } anchor="bottom end" popover class="max-h-60 w-(--input-width) overflow-auto rounded-box bg-base-100 p-1 shadow-xl ring-1 ring-base-content/10 transition-discrete data-closed:opacity-0">
+			for _, option := range options {
+				<el-option value={ option.Label } data-value={ option.Value } class="block rounded-field px-3 py-2 text-sm select-none aria-selected:bg-primary aria-selected:text-primary-content">{ option.Label }</el-option>
+			}
+		</el-options>
+	</el-autocomplete>
+	<script>(function(){var root=document.currentScript.previousElementSibling,input=root.querySelector('input[type="text"]'),value=root.querySelector('input[type="hidden"]'),options=root.querySelectorAll('el-option');function sync(){var match='';options.forEach(function(option){if(option.textContent.trim()===input.value.trim()){match=option.dataset.value}});value.value=match}input.addEventListener('input',sync);options.forEach(function(option){option.addEventListener('click',function(){input.value=option.textContent.trim();value.value=option.dataset.value;input.dispatchEvent(new Event('input',{bubbles:true}))})});sync()})()</script>
+}
+
+func comboboxLabel(value string, options []SelectOption) string { for _, option := range options { if option.Value == value { return option.Label } }; return "" }

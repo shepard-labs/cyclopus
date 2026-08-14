@@ -7,118 +7,60 @@ import (
 )
 
 templ Sidebar(org store.Organization, user store.User, currentPath string) {
-	<nav class="sidebar">
-		<div class="p-4 border-b border-base-300">
-			<div class="flex items-center gap-2 mb-1">
-				<wa-icon name="circle-info" class="w-6 h-6 text-primary" aria-hidden="true"></wa-icon>
-				<span class="font-semibold text-base-content">Cyclopus</span>
+	<el-dialog>
+		<dialog id="mobile-navigation" aria-labelledby="mobile-navigation-title" class="backdrop:bg-transparent lg:hidden">
+			<el-dialog-backdrop class="fixed inset-0 bg-black/60 transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200"></el-dialog-backdrop>
+			<div tabindex="0" class="fixed inset-0 flex focus:outline-none">
+				<el-dialog-panel class="group/dialog-panel relative mr-16 flex w-full max-w-xs flex-1 transform transition duration-300 ease-in-out data-closed:-translate-x-full">
+					<div class="absolute top-0 left-full flex w-16 justify-center pt-5 duration-300 group-data-closed/dialog-panel:opacity-0">
+						<button type="button" command="close" commandfor="mobile-navigation" class="rounded-field p-2 text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><span class="sr-only">Close navigation</span>@IconXMark("size-6")</button>
+					</div>
+					<div class="flex grow flex-col overflow-y-auto border-r border-base-300 bg-base-100">
+						@sidebarContent(org, user, currentPath, "mobile-navigation-title", "mobile-account-trigger", "mobile-account-menu")
+					</div>
+				</el-dialog-panel>
 			</div>
-			<div class="text-xs text-base-content/50 truncate pl-8">{ org.Name }</div>
-		</div>
-		<div class="flex-1 overflow-y-auto p-2 space-y-1">
-			<a
-				href="/projects"
-				class={ sidebarItemClass(currentPath, "/projects") }
-			>
-				<wa-icon name="table-cells-large" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				Projects
-			</a>
-			<div class="pt-4 pb-1 px-3">
-				<span class="text-xs font-medium text-base-content/35 uppercase tracking-wide">Settings</span>
-			</div>
-			<a href="/settings/git-connections" class={ sidebarItemClass(currentPath, "/settings/git-connections") }>
-				<wa-icon name="code-branch" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				Git Connections
-			</a>
-			<a href="/settings/registries" class={ sidebarItemClass(currentPath, "/settings/registries") }>
-				<wa-icon name="box" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				Registries
-			</a>
-			<a href="/settings/webhooks" class={ sidebarItemClass(currentPath, "/settings/webhooks") }>
-				<wa-icon name="plug" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				Webhooks
-			</a>
-			<a href="/settings/tokens" class={ sidebarItemClass(currentPath, "/settings/tokens") }>
-				<wa-icon name="key" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				API Tokens
-			</a>
-			<a href="/settings/audit" class={ sidebarItemClass(currentPath, "/settings/audit") }>
-				<wa-icon name="list" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				Audit Log
-			</a>
-			<div class="pt-4 pb-1 px-3">
-				<span class="text-xs font-medium text-base-content/35 uppercase tracking-wide">Admin</span>
-			</div>
-			<a href="/admin/reconcile" class={ sidebarItemClass(currentPath, "/admin/reconcile") }>
-				<wa-icon name="rotate" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-				Reconcile
-			</a>
-		</div>
-		<div class="p-2 border-t border-base-300">
-			<div class="sidebar-account-shell">
-			<wa-dropdown placement="top-start" class="sidebar-account">
-				<wa-button slot="trigger" appearance="plain" class="sidebar-item sidebar-account-trigger">
-					<span class="sidebar-account-trigger-content">
-						<img class="sidebar-account-avatar" src={ avatar.URL(user.AvatarKey) } alt=""/>
-						<span class="truncate text-xs">{ userAccountName(user) }</span>
-						<wa-icon name="chevron-up" class="sidebar-account-chevron" aria-hidden="true"></wa-icon>
-					</span>
-				</wa-button>
-				<div class="sidebar-account-label">
-					<p class="sidebar-account-label-title">Account</p>
-					<p class="sidebar-account-email">{ user.Email }</p>
-				</div>
-				<wa-divider></wa-divider>
-				<wa-dropdown-item value="user-settings">
-					<a href="/settings/user" class="account-menu-link" onclick="event.stopPropagation()">
-						<wa-icon name="gear" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-						User Settings
-					</a>
-				</wa-dropdown-item>
-				<wa-dropdown-item value="theme">
-					<a href="/settings/theme" class="account-menu-link" onclick="event.stopPropagation()">
-						<wa-icon name="palette" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-						Theme
-					</a>
-				</wa-dropdown-item>
-				<wa-dropdown-item value="logout" variant="danger">
-					<wa-icon name="right-from-bracket" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></wa-icon>
-					Sign out
-				</wa-dropdown-item>
-			</wa-dropdown>
-			<form method="POST" action="/logout" hx-boost="false" class="logout" hidden></form>
-			<script>
-				customElements.whenDefined('wa-dropdown').then(function () {
-					var menu = document.querySelector('.sidebar-account')
-					if (!menu || menu.dataset.bound) { return }
-					menu.dataset.bound = 'true'
-					menu.addEventListener('wa-select', function (event) {
-						var value = event.detail.item.value
-						if (value === 'user-settings') { window.location.assign('/settings/user') }
-						if (value === 'theme') { window.location.assign('/settings/theme') }
-						if (value === 'logout') { menu.closest('nav').querySelector('form.logout').requestSubmit() }
-					})
-				})
-			</script>
-			</div>
-		</div>
+		</dialog>
+	</el-dialog>
+	<aside class="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col border-r border-base-300 bg-base-100 lg:flex">
+		@sidebarContent(org, user, currentPath, "desktop-navigation-title", "account-trigger", "account-menu")
+	</aside>
+}
+
+templ MobileNavTrigger() {
+	<button type="button" command="show-modal" commandfor="mobile-navigation" aria-controls="mobile-navigation" class="mr-4 -ml-2 rounded-field p-2 text-base-content/70 hover:bg-base-200 hover:text-base-content focus-visible:outline-2 focus-visible:outline-primary lg:hidden">
+		<span class="sr-only">Open navigation</span>
+		@Icon("size-6") { <path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path> }
+	</button>
+}
+
+templ sidebarContent(org store.Organization, user store.User, currentPath, titleID, accountTriggerID, accountMenuID string) {
+	<div class="flex h-16 shrink-0 items-center gap-3 border-b border-base-300 px-6">@IconLogo("size-7 text-primary")<div class="min-w-0"><div id={ titleID } class="font-semibold">Cyclopus</div><div class="truncate text-xs text-base-content/50">{ org.Name }</div></div></div>
+	<nav aria-label="Primary" class="flex flex-1 flex-col overflow-y-auto px-4 py-5">
+			<ul role="list" class="flex flex-1 flex-col gap-y-7">
+				<li><ul role="list" class="space-y-1"><li>@navLink("/projects", "Projects", currentPath, IconSquares("size-5 shrink-0"))</li></ul></li>
+				<li><div class="px-2 text-xs font-semibold uppercase tracking-wide text-base-content/40">Settings</div><ul role="list" class="mt-2 space-y-1">
+					<li>@navLink("/settings/git-connections", "Git Connections", currentPath, IconCodeBranch("size-5 shrink-0"))</li>
+					<li>@navLink("/settings/registries", "Registries", currentPath, IconCube("size-5 shrink-0"))</li>
+					<li>@navLink("/settings/webhooks", "Webhooks", currentPath, IconBolt("size-5 shrink-0"))</li>
+					<li>@navLink("/settings/tokens", "API Tokens", currentPath, IconKey("size-5 shrink-0"))</li>
+					<li>@navLink("/settings/audit", "Audit Log", currentPath, IconList("size-5 shrink-0"))</li>
+				</ul></li>
+				<li><div class="px-2 text-xs font-semibold uppercase tracking-wide text-base-content/40">Admin</div><ul role="list" class="mt-2 space-y-1"><li>@navLink("/admin/reconcile", "Reconcile", currentPath, IconArrowPath("size-5 shrink-0"))</li></ul></li>
+				<li class="mt-auto">
+					@Dropdown(accountTriggerID, accountMenuID, userAccountName(user)) {
+						<div class="px-3 py-2"><div class="flex items-center gap-3"><img class="size-9 rounded-full bg-base-200" src={ avatar.URL(user.AvatarKey) } alt=""/><div class="min-w-0"><p class="truncate text-sm font-medium">{ userAccountName(user) }</p><p class="truncate text-xs text-base-content/50">{ user.Email }</p></div></div></div>
+						<a href="/settings/user" role="menuitem" class="flex items-center gap-2 rounded-field px-3 py-2 text-sm hover:bg-base-200">@IconCog("size-4")<span>User Settings</span></a>
+						<a href="/settings/theme" role="menuitem" class="flex items-center gap-2 rounded-field px-3 py-2 text-sm hover:bg-base-200">@IconPalette("size-4")<span>Theme</span></a>
+						<form method="POST" action="/logout" hx-boost="false"><button type="submit" role="menuitem" class="flex w-full items-center gap-2 rounded-field px-3 py-2 text-left text-sm text-error hover:bg-error/10">@IconArrowRightOnRectangle("size-4")<span>Sign out</span></button></form>
+					}
+				</li>
+			</ul>
 	</nav>
 }
 
-func userAccountName(user store.User) string {
-	if name := strings.TrimSpace(user.DisplayName); name != "" {
-		return name
-	}
-	if name := strings.TrimSpace(user.FirstName + " " + user.LastName); name != "" {
-		return name
-	}
-	return user.Email
-}
+templ navLink(href, label, currentPath string, icon templ.Component) { <a href={ templ.SafeURL(href) } aria-current={ navCurrent(currentPath, href) } class={ sidebarItemClass(currentPath, href) }>@icon<span>{ label }</span></a> }
 
-func sidebarItemClass(currentPath, prefix string) string {
-	base := "sidebar-item"
-	if len(currentPath) >= len(prefix) && currentPath[:len(prefix)] == prefix {
-		return base + " active"
-	}
-	return base
-}
+func userAccountName(user store.User) string { if name := strings.TrimSpace(user.DisplayName); name != "" { return name }; if name := strings.TrimSpace(user.FirstName + " " + user.LastName); name != "" { return name }; return user.Email }
+func navCurrent(currentPath, prefix string) string { if strings.HasPrefix(currentPath, prefix) { return "page" }; return "false" }
+func sidebarItemClass(currentPath, prefix string) string { base := "group flex items-center gap-3 rounded-field px-2 py-2 text-sm font-semibold "; if strings.HasPrefix(currentPath, prefix) { return base + "bg-primary/10 text-primary" }; return base + "text-base-content/70 hover:bg-base-200 hover:text-base-content" }

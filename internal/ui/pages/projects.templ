@@ -18,34 +18,28 @@ templ projectsContent(projects []store.Project, errMsg string) {
 				<p class="text-sm text-base-content/65 mt-1">Organize your applications into projects.</p>
 			</div>
 		</div>
-		<wa-card>
+		<div class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 			<h2 class="text-sm font-semibold text-base-content/80 mb-4">New project</h2>
 			if errMsg != "" {
-				<wa-callout variant="danger" class="mb-4">{ errMsg }</wa-callout>
+				<div class="mb-4">@components.Alert("error", errMsg)</div>
 			}
 			<form method="POST" action="/projects" class="flex items-end gap-3">
-				<div class="fieldset flex-1">
-					<wa-input type="text" id="proj-name" name="name" required placeholder="My Project" label="Name"></wa-input>
-				</div>
-				<div class="fieldset flex-1">
-					<wa-input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" label="Slug"></wa-input>
-				</div>
-				<wa-button type="submit" variant="brand" appearance="accent">Create</wa-button>
+				<div class="flex-1"><label for="proj-name" class="block text-sm font-medium">Name</label><input type="text" id="proj-name" name="name" required placeholder="My Project" class="mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
+				<div class="flex-1"><label for="proj-slug" class="block text-sm font-medium">Slug</label><input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" class="mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
+				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content">Create</button>
 			</form>
-		</wa-card>
+		</div>
 		if len(projects) == 0 {
-			<wa-card class="text-center py-12">
-				<p class="text-base-content/65 text-sm">No projects yet. Create one above.</p>
-			</wa-card>
+			@components.EmptyState("No projects yet", "Create your first project above.")
 		} else {
 			<div class="grid grid-cols-1 gap-3">
 				for _, p := range projects {
-					<a href={ templ.SafeURL("/projects/" + p.ID) } class="link-card flex items-center justify-between hover:border-base-content/30 transition-colors group">
+					<a href={ templ.SafeURL("/projects/" + p.ID) } class="group flex items-center justify-between rounded-box bg-base-100 p-5 ring-1 ring-base-content/10 transition hover:ring-primary/40">
 						<div>
 							<div class="font-medium text-base-content group-hover:text-accent transition-colors">{ p.Name }</div>
 							<div class="text-xs text-base-content/50 mt-0.5">{ p.Slug }</div>
 						</div>
-						<wa-icon name="chevron-right" class="w-4 h-4 text-base-content/35 group-hover:text-base-content/65" aria-hidden="true"></wa-icon>
+						@components.IconChevronRight("size-4 text-base-content/40 group-hover:text-primary")
 					</a>
 				}
 			</div>

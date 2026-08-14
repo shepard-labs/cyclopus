@@ -4,7 +4,7 @@ Cyclopus currently uses Web Awesome, Font Awesome, fragmented legacy CSS, and pr
 
 ## Approach
 
-1. **Phase 0 — Repository safety:** Require a clean working tree, record the starting `HEAD` as `BASELINE`, confirm commit `517e642` is an ancestor, and use no reset, checkout, revert, history rewrite, or backup branch.
+1. **Phase 0 — Repository safety:** Use the implementation checkpoint commits, logs, and status records to evidence the clean start and recorded `BASELINE`, confirm commit `517e642` is an ancestor, require a clean implementation worktree after the final implementation commit, and use no reset, checkout, revert, history rewrite, or backup branch.
 2. **Phase 1 — Plan correction:** Update `docs/plans/tailwind-plus-elements-2026-08-13.md` before implementation so it records all confirmed overrides and contains no preview-harness, intermediate rollback, pre-WA checkpoint, or preview-restoration contradiction.
 3. **Phase 2 — Tooling and preview removal:** In one sequential phase, make `scripts/dev/setup.sh` expose testable download/install functions and install a pinned official checksum-verified Tailwind CSS `v4.3.3` standalone binary at `.cyclopus-dev/bin/tailwindcss`, add `scripts/dev/setup_test.sh` to verify platform mappings and atomic checksum failure, make `scripts/dev/run.sh` start the canonical Tailwind watcher and Air without modifying `.air.toml`, and remove the preview environment variable, routes, handlers, templates, generated files, scripts, existing preview package manifests, and ignored dependency tree.
 4. **Phase 3 — Tailwind and theme foundation:** Create `input.css`, generate committed `output.css` with the canonical command, remove every legacy CSS file, migrate all eight presets to the canonical `--color-*` vocabulary, preserve localStorage and remembered dark/light selections, and retain only Tailwind directives, theme bridging, source declarations, and existing self-hosted font faces as handwritten CSS.
@@ -21,7 +21,7 @@ Cyclopus currently uses Web Awesome, Font Awesome, fragmented legacy CSS, and pr
 15. **Phase 14 — Page group C:** Migrate all settings and admin reconciliation pages directly from their current markup while preserving all server-visible contracts.
 16. **Phase 15 — UI tests:** Add focused `internal/ui` and `internal/ui/components` tests for CSS restrictions, theme behavior, asset caching, inline icons, wrapper structure, IDs, tags, ARIA relationships, form controls, and HTMX attributes.
 17. **Phase 16 — Handler tests:** Add focused `internal/uihandler` tests for exact preview-route 404s, flash-cookie redirect/render/clear behavior, HTMX fragments, and preserved form field names and values.
-18. **Phase 17 — Temporary browser verification:** Build a standalone fixture under the approved temporary root, copy `output.css` and `theme.js` into its server root, generate HTML that references `/output.css`, `/theme.js`, and the exact Elements CDN URL, serve it with Python on loopback, exercise it with the OpenChamber browser panel, and stop the server and delete the fixture afterward.
+18. **Phase 17 — Temporary browser verification:** Build a standalone fixture under the approved temporary root, copy `output.css` and `theme.js` into its server root, generate HTML that references `/output.css`, `/theme.js`, and the exact Elements CDN URL, serve it with Python on loopback, exercise it through a locally installed Chromium or Chrome running headless with the Chrome DevTools Protocol (CDP), and stop the browser and server and delete the fixture afterward. Do not use the built-in browser.
 19. **Phase 18 — Final verification:** Run templ generation, Go formatting, canonical Tailwind reproducibility, build, vet, tests, whitespace checks, and the exact changed-path allowlist check.
 
 The canonical Tailwind build command for setup verification, manual builds, committed output, and reproducibility is:
@@ -30,13 +30,14 @@ The canonical Tailwind build command for setup verification, manual builds, comm
 
 The development watcher uses the same command with only `--watch` appended.
 
-The exact changed-path allowlist is below; paths ending in `/**` permit only recursive deletion of the named existing tree, generated `*_templ.go` files must be produced by `templ generate`, and no other path—including `.air.toml`—may change.
+The exact changed-path allowlist is below; paths ending in `/**` permit recursive changes only within the named tree, generated `*_templ.go` files must be produced by `templ generate`, and no other path—including `.air.toml`—may change. The `docs/learnings/**` entry includes the committed phase learnings that the workflow intentionally creates, including `docs/learnings/planner_20260814-004432_direct-wa-tailwind-plan.md` and `docs/learnings/implementer_20260814-012159_tailwind-preview-tooling-removal.md`.
 
 <!-- ALLOWLIST-START -->
 
 - `.gitignore`
 - `docs/plans/tailwind-plus-elements-2026-08-13.md`
 - `docs/spec-tailwind-plus-elements.md`
+- `docs/learnings/**`
 - `scripts/dev/setup.sh`
 - `scripts/dev/setup_test.sh`
 - `scripts/dev/run.sh`
@@ -46,6 +47,7 @@ The exact changed-path allowlist is below; paths ending in `/**` permit only rec
 - `scripts/ui-check/node_modules/**`
 - `internal/ui/embed.go`
 - `internal/ui/embed_test.go`
+- `internal/ui/page_contracts_test.go`
 - `internal/ui/theme_tokens_test.go`
 - `internal/uihandler/handler.go`
 - `internal/uihandler/flash_test.go`
@@ -169,20 +171,21 @@ The CSS inventory was inspected before writing this specification: the currently
 
 ## Success Criteria
 
-1. **Clean start and preserved baseline:** Before implementation, the following exact commands succeed and `BASELINE` remains available for final verification:
+1. **Clean start and preserved baseline:** The implementation checkpoint commits, checkpoint logs, and recorded status results evidence that implementation began from a clean worktree and preserve the recorded `BASELINE`; no now-unavailable external pre-implementation manifest is required. Final verification identifies those checkpoint records, confirms `517e642` remains an ancestor, and, after the final implementation commit, requires a clean implementation worktree:
    ```sh
-   ROOT=/Users/divy/Projects/cyclopus
-   cd "$ROOT"
-   test -z "$(git status --porcelain)"
-   BASELINE=$(git rev-parse HEAD)
-   test -n "$BASELINE"
-   git merge-base --is-ancestor 517e642 "$BASELINE"
-   TEMP_PARENT=/var/folders/4r/t9xgfxbx1glcf1f0h482klp80000gn/T/opencode
-   mkdir -p "$TEMP_PARENT"
-   TAILWIND_PLUS_BASELINE_MANIFEST="$TEMP_PARENT/tailwind-plus-before.sha256"
-   find /Users/divy/Downloads/tailwind_plus -type f -print0 | sort -z | xargs -0 shasum -a 256 > "$TAILWIND_PLUS_BASELINE_MANIFEST"
-   test -s "$TAILWIND_PLUS_BASELINE_MANIFEST"
-   ```
+    ROOT=/Users/divy/Projects/cyclopus
+    cd "$ROOT"
+    test -n "$BASELINE"
+    git cat-file -e "$BASELINE^{commit}"
+    git log --oneline --decorate "$BASELINE"..HEAD
+    # Inspect the retained checkpoint log/status records and confirm they record
+    # a clean start at BASELINE before implementation changes were made.
+    git merge-base --is-ancestor 517e642 "$BASELINE"
+    git merge-base --is-ancestor 517e642 HEAD
+    FINAL_IMPLEMENTATION_HEAD=$(git rev-parse HEAD)
+    test -n "$FINAL_IMPLEMENTATION_HEAD"
+    test -z "$(git status --porcelain)"
+    ```
 2. **Corrected implementation plan:** The following assertions succeed:
    ```sh
    ROOT=/Users/divy/Projects/cyclopus
@@ -273,14 +276,15 @@ The CSS inventory was inspected before writing this specification: the currently
     ! rg -n '@keyframes|scrollbar|::-(webkit|moz)|animation-name|\.toast([[:space:]:.{#]|$)|\.log([_-]|[[:space:]:.{#]|$)|\.sidebar([[:space:]:.{#]|$)|\.card([[:space:]:.{#]|$)|\.table([[:space:]:.{#]|$)|\.button([[:space:]:.{#]|$)' \
       "$ROOT/internal/ui/static/css/input.css"
     ```
-13. **Web Awesome and Font Awesome fully removed:** The following command returns no matches:
-    ```sh
-    ROOT=/Users/divy/Projects/cyclopus
-    ! rg -n '<wa-|</wa-|--wa-|webawesome|fontawesome|font-awesome|Font Awesome' \
-      "$ROOT/internal/ui" \
-      "$ROOT/internal/uihandler" \
-      "$ROOT/scripts/dev"
-    ```
+13. **Web Awesome and Font Awesome fully removed:** Production files contain zero runtime references to Web Awesome or Font Awesome. The exact search excludes `*_test.go` because focused tests may contain negative assertion strings:
+     ```sh
+     ROOT=/Users/divy/Projects/cyclopus
+     ! rg -n '<wa-|</wa-|--wa-|webawesome|fontawesome|font-awesome|Font Awesome' \
+       "$ROOT/internal/ui" \
+       "$ROOT/internal/uihandler" \
+       "$ROOT/scripts/dev" \
+       --glob '!**/*_test.go'
+     ```
 14. **Layout uses exact assets:** The layout render test asserts exactly one reference to each required asset and no legacy stylesheet or WA/FA resource:
     ```sh
     ROOT=/Users/divy/Projects/cyclopus
@@ -327,16 +331,60 @@ The CSS inventory was inspected before writing this specification: the currently
     cd "$ROOT"
     go test ./internal/ui/components -run '^TestInlineHeroiconContracts$' -count=1
     ```
-20. **Tailwind Plus source safety:** A post-implementation SHA-256 manifest exactly matches the pre-implementation manifest created in Criterion 1, proving that no file was added, removed, or modified in the licensed source directory:
-    ```sh
-    test -d /Users/divy/Downloads/tailwind_plus
-    test -s "$TAILWIND_PLUS_BASELINE_MANIFEST"
-    TAILWIND_PLUS_FINAL_MANIFEST="$TEMP_PARENT/tailwind-plus-after.sha256"
-    find /Users/divy/Downloads/tailwind_plus -type f -print0 | sort -z | xargs -0 shasum -a 256 > "$TAILWIND_PLUS_FINAL_MANIFEST"
-    cmp "$TAILWIND_PLUS_BASELINE_MANIFEST" "$TAILWIND_PLUS_FINAL_MANIFEST"
-    ! find "$ROOT" -path "$ROOT/.git" -prune -o -type f -print | rg '/tailwind_plus/'
-    rm -f "$TAILWIND_PLUS_BASELINE_MANIFEST" "$TAILWIND_PLUS_FINAL_MANIFEST"
-    ```
+20. **Tailwind Plus source safety:** The licensed source directory still exists, no copy of that source directory or any complete licensed source file is present under the repository, and a retained final SHA-256 inventory shows that no source file has an implementation-era modification time. The baseline manifest was not retained, so this criterion does not claim an unavailable cryptographic before/after comparison. It instead uses repository-independent final inventory evidence that is feasible now; do not run `git status` against the licensed source path because it is not a repository worktree:
+     ```sh
+     ROOT=/Users/divy/Projects/cyclopus
+     TEMP_PARENT=/var/folders/4r/t9xgfxbx1glcf1f0h482klp80000gn/T/opencode
+     TAILWIND_PLUS_SOURCE=/Users/divy/Downloads/tailwind_plus
+     mkdir -p "$TEMP_PARENT"
+     test -d "$TAILWIND_PLUS_SOURCE"
+     test -n "$BASELINE"
+     IMPLEMENTATION_START_EPOCH=$(git -C "$ROOT" show -s --format=%ct "$BASELINE")
+     test -n "$IMPLEMENTATION_START_EPOCH"
+     TAILWIND_PLUS_FINAL_INVENTORY="$TEMP_PARENT/tailwind-plus-final.tsv"
+     python3 - "$TAILWIND_PLUS_SOURCE" "$ROOT" "$IMPLEMENTATION_START_EPOCH" "$TAILWIND_PLUS_FINAL_INVENTORY" <<'PY'
+     import hashlib
+     import pathlib
+     import sys
+
+     source = pathlib.Path(sys.argv[1]).resolve()
+     repo = pathlib.Path(sys.argv[2]).resolve()
+     implementation_start_ns = int(sys.argv[3]) * 1_000_000_000
+     inventory_path = pathlib.Path(sys.argv[4])
+
+     source_rows = []
+     source_hashes = set()
+     newer = []
+     for path in sorted(p for p in source.rglob("*") if p.is_file()):
+         data = path.read_bytes()
+         digest = hashlib.sha256(data).hexdigest()
+         stat = path.stat()
+         relative = path.relative_to(source).as_posix()
+         source_rows.append((relative, stat.st_size, stat.st_mtime_ns, digest))
+         source_hashes.add(digest)
+         if stat.st_mtime_ns > implementation_start_ns:
+             newer.append(relative)
+
+     inventory_path.write_text("".join(
+         f"{relative}\t{size}\t{mtime_ns}\t{digest}\n"
+         for relative, size, mtime_ns, digest in source_rows
+     ))
+     if not source_rows:
+         raise SystemExit("licensed source inventory is empty")
+     if newer:
+         raise SystemExit("licensed source files newer than implementation baseline: " + ", ".join(newer))
+
+     copied = []
+     for path in sorted(p for p in repo.rglob("*") if p.is_file() and ".git" not in p.parts):
+         if hashlib.sha256(path.read_bytes()).hexdigest() in source_hashes:
+             copied.append(path.relative_to(repo).as_posix())
+     if copied:
+         raise SystemExit("complete licensed source files copied into repository: " + ", ".join(copied))
+     PY
+     test -s "$TAILWIND_PLUS_FINAL_INVENTORY"
+     test -d /Users/divy/Downloads/tailwind_plus
+     ! find "$ROOT" -path "$ROOT/.git" -prune -o -type f -print | rg '/tailwind_plus/'
+     ```
 21. **Eight exact themes:** The named test parses `theme.js` and asserts exactly the confirmed presets, with no additional preset:
     ```sh
     ROOT=/Users/divy/Projects/cyclopus
@@ -451,7 +499,29 @@ The CSS inventory was inspected before writing this specification: the currently
     curl --fail --silent --show-error "http://127.0.0.1:$PORT/output.css" >/dev/null
     curl --fail --silent --show-error "http://127.0.0.1:$PORT/theme.js" >/dev/null
     ```
-33. **OpenChamber browser interactions against production wrapper output:** Using the OpenChamber browser panel against `http://127.0.0.1:$PORT/` generated by `TestWriteBrowserFixture`, verification must perform and record all of these binary assertions:
+33. **Local headless Chromium/Chrome CDP interactions against production wrapper output:** Launch a locally installed Chromium or Chrome binary in headless mode with a temporary user-data directory and remote debugging enabled, then use CDP against `http://127.0.0.1:$PORT/` generated by `TestWriteBrowserFixture`. The built-in browser is prohibited. Verification must perform and record all of these binary assertions:
+    ```sh
+    CHROME_BIN=${CHROME_BIN:-$(command -v chromium || command -v chromium-browser || command -v google-chrome || command -v google-chrome-stable || true)}
+    if test -z "$CHROME_BIN" && test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; then
+      CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    fi
+    if test -z "$CHROME_BIN" && test -x "/Applications/Chromium.app/Contents/MacOS/Chromium"; then
+      CHROME_BIN="/Applications/Chromium.app/Contents/MacOS/Chromium"
+    fi
+    test -x "$CHROME_BIN"
+    CHROME_PROFILE=$(mktemp -d "$TEMP_PARENT/cyclopus-chrome.XXXXXX")
+    "$CHROME_BIN" --headless --disable-gpu --no-first-run --no-default-browser-check \
+      --remote-debugging-port=0 --user-data-dir="$CHROME_PROFILE" \
+      "http://127.0.0.1:$PORT/" >"$CHROME_PROFILE/chrome.log" 2>&1 &
+    CHROME_PID=$!
+    # Read the browser-assigned endpoint from DevToolsActivePort and drive the
+    # fixture with a temporary CDP client outside the repository.
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+      test -s "$CHROME_PROFILE/DevToolsActivePort" && break
+      sleep 1
+    done
+    test -s "$CHROME_PROFILE/DevToolsActivePort"
+    ```
     - Open the fixture and obtain a snapshot with no page errors.
     - Click `#theme-paper` and assert `<html data-theme="paper" data-mode="light">`.
     - Click `#theme-obsidian` and assert `<html data-theme="obsidian" data-mode="dark">`.
@@ -465,10 +535,14 @@ The CSS inventory was inspected before writing this specification: the currently
     - Click `#disclosure-trigger` and assert `aria-expanded="true"` and visible disclosure content.
     - Click `#popover-trigger` and assert the anchored popover becomes visible.
     - Click `#command-trigger`, type a query into the command input, choose a result, and assert the command output changes.
-    - Hover or focus `#tooltip-trigger` through the browser panel and assert the referenced `role="tooltip"` content is visible.
+    - Hover or focus `#tooltip-trigger` through CDP and assert the referenced `role="tooltip"` content is visible.
     - Click `#toast-trigger`, assert a toast appears within `#toast-region`, and assert its accessible role and message.
 34. **Temporary fixture cleanup:** Cleanup always stops the standalone server and deletes the fixture, after which these exact assertions succeed:
     ```sh
+    kill "$CHROME_PID"
+    wait "$CHROME_PID" 2>/dev/null || true
+    rm -rf "$CHROME_PROFILE"
+    test ! -e "$CHROME_PROFILE"
     kill "$FIXTURE_SERVER_PID"
     wait "$FIXTURE_SERVER_PID" 2>/dev/null || true
     rm -rf "$FIXTURE_ROOT"

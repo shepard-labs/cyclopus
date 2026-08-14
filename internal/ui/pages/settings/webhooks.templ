@@ -14,28 +14,28 @@ templ Webhooks(webhooks []store.Webhook, user store.User, org store.Organization
 templ webhooksContent(webhooks []store.Webhook, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
 		<h1 class="text-xl font-semibold">Webhooks</h1>
-		<wa-card class="space-y-4">
+		<section class="space-y-4 rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 			<h2 class="text-sm font-semibold text-base-content/80">Add endpoint</h2>
 			if errMsg != "" {
-				<wa-callout variant="danger">{ errMsg }</wa-callout>
+				@components.Alert("error", errMsg)
 			}
 			<form method="POST" action="/settings/webhooks" class="space-y-4">
-				<div class="fieldset">
-					<wa-input type="url" id="wh-url" name="target_url" required placeholder="https://example.com/hooks/cyclopus" label="Target URL"></wa-input>
+				<div>
+					<div><label for="wh-url" class="block text-sm font-medium">Target URL</label><input type="url" id="wh-url" name="target_url" required placeholder="https://example.com/hooks/cyclopus" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
 				</div>
-				<div class="fieldset">
+				<div>
 					<label for="wh-secret">Signing secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-					<wa-input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value"></wa-input>
+					<input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/>
 				</div>
-				<div class="fieldset">
+				<div>
 					<label for="wh-events">Events <span class="text-base-content/50 font-normal">(comma-separated, empty = all)</span></label>
-					<wa-input type="text" id="wh-events" name="events" placeholder="deploy.succeeded,deploy.failed"></wa-input>
+					<input type="text" id="wh-events" name="events" placeholder="deploy.succeeded,deploy.failed" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/>
 				</div>
-				<wa-button type="submit" variant="brand">Add webhook</wa-button>
+				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content">Add webhook</button>
 			</form>
-		</wa-card>
+		</section>
 		if len(webhooks) > 0 {
-			<wa-card>
+			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="text-xs text-base-content/50 border-b border-base-300">
@@ -51,22 +51,22 @@ templ webhooksContent(webhooks []store.Webhook, errMsg string) {
 								<td class="py-2 text-xs font-mono text-base-content/65 truncate max-w-xs">{ w.TargetURL }</td>
 								<td class="py-2">
 									if w.DisabledAt == nil {
-										<wa-badge variant="success">Enabled</wa-badge>
+										@components.Badge("success", "Enabled")
 									} else {
-										<wa-badge variant="danger">Disabled</wa-badge>
+										@components.Badge("error", "Disabled")
 									}
 								</td>
 								<td class="py-2 text-xs text-base-content/65">{ fmt.Sprintf("%d", w.ConsecutiveFailures) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/webhooks/" + w.ID + "/delete") } onsubmit="return confirm('Delete this webhook?')">
-										<wa-button type="submit" variant="danger" size="small">Delete</wa-button>
+										<button type="submit" class="rounded-field px-3 py-1.5 text-xs font-semibold text-error ring-1 ring-error/30 hover:bg-error/10">Delete</button>
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</wa-card>
+			</section>
 		}
 	</div>
 }

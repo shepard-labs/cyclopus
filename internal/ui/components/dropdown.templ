@@ -1,0 +1,10 @@
+package components
+
+templ Dropdown(triggerID, menuID, label string) {
+	<el-dropdown class="relative inline-block">
+		<button id={ triggerID } type="button" aria-haspopup="menu" aria-controls={ menuID } class="inline-flex items-center gap-2 rounded-field px-3 py-2 text-sm font-semibold text-base-content hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-primary">{ label }@IconChevronDown("size-4")</button>
+		<el-menu id={ menuID } role="menu" anchor="bottom end" popover class="w-56 origin-top-right rounded-box bg-base-100 p-1 shadow-xl ring-1 ring-base-content/10 transition transition-discrete data-closed:scale-95 data-closed:opacity-0">{ children... }</el-menu>
+	</el-dropdown>
+}
+
+templ DropdownItem(href, label string) { <a href={ templ.SafeURL(href) } role="menuitem" class="flex rounded-field px-3 py-2 text-sm text-base-content/75 focus:bg-base-200 focus:text-base-content focus:outline-none">{ label }</a> }

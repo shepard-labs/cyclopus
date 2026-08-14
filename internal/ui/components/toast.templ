@@ -1,0 +1,14 @@
+package components
+
+templ Toast(id, kind, message string) {
+	<div id={ id } role={ toastRole(kind) } class={ "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-box bg-base-100 p-4 shadow-xl ring-1 ring-base-content/10 transition duration-300 data-[leaving=true]:translate-x-4 data-[leaving=true]:opacity-0 " + alertTone(kind) }>
+		if kind == "error" {
+			@IconExclamationTriangle("size-5 shrink-0")
+		} else {
+			@IconInformationCircle("size-5 shrink-0")
+		}
+		<p class="flex-1 text-sm font-medium">{ message }</p><button type="button" aria-label="Dismiss notification" onclick="this.parentElement.dataset.leaving='true';setTimeout(()=>this.parentElement.remove(),300)" class="rounded p-0.5">@IconXMark("size-4")</button>
+	</div>
+}
+
+func toastRole(kind string) string { if kind == "error" { return "alert" }; return "status" }

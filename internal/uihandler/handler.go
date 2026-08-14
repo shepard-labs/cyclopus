@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
@@ -27,13 +28,34 @@ import (
 
 // Handler is the chi router serving all Cyclopus UI routes.
 type Handler struct {
-	client *ui.Backend
+	client   *ui.Backend
+	loadLogs logsPageLoader
 }
+
+type logsPageData struct {
+	app        store.App
+	project    store.Project
+	entries    []observability.LogEntry
+	nextCursor string
+	envID      string
+	query      string
+	user       store.User
+	org        store.Organization
+}
+
+type logsPageLoader func(context.Context, string, string, string, string, string) (logsPageData, error)
 
 // New constructs the UI http.Handler. The backend resolves UI reads and writes
 // in-process against the service/auth layers.
 func New(client *ui.Backend) http.Handler {
-	h := &Handler{client: client}
+	return newHandler(client, nil)
+}
+
+func newHandler(client *ui.Backend, loadLogs logsPageLoader) http.Handler {
+	h := &Handler{client: client, loadLogs: loadLogs}
+	if h.loadLogs == nil {
+		h.loadLogs = h.loadLogsPage
+	}
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Recoverer)
 
@@ -587,30 +609,41 @@ func (h *Handler) postAppSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getLogs(w http.ResponseWriter, r *http.Request) {
 	token := ui.TokenFromContext(r.Context())
-	user, org, err := h.pageCtx(r.Context(), token)
-	if err != nil {
-		h.handleErr(w, r, err)
-		return
-	}
 	appID := chi.URLParam(r, "appID")
-	app, err := h.client.GetApplication(r.Context(), token, appID)
-	if err != nil {
-		h.handleErr(w, r, err)
-		return
-	}
-	proj, _ := h.client.GetProject(r.Context(), token, app.ProjectID)
-	if proj == nil {
-		proj = &store.Project{ID: app.ProjectID}
-	}
 	envID := r.URL.Query().Get("env")
 	cursor := r.URL.Query().Get("cursor")
 	query := r.URL.Query().Get("q")
-	entries, nextCursor, err := h.client.QueryLogs(r.Context(), token, appID, envID, cursor, query, 100)
+	data, err := h.loadLogs(r.Context(), token, appID, envID, cursor, query)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	if strings.EqualFold(r.Header.Get("HX-Request"), "true") && (cursor != "" || r.URL.Query().Get("load_more") == "true") {
+		render(w, r, pages.LogsEntriesFragment(appID, data.entries, data.nextCursor, envID, query))
+		return
+	}
+	render(w, r, pages.Logs(data.app, data.project, data.entries, data.nextCursor, data.envID, data.query, data.user, data.org, flashFromCookie(w, r)))
+}
+
+func (h *Handler) loadLogsPage(ctx context.Context, token, appID, envID, cursor, query string) (logsPageData, error) {
+	user, org, err := h.pageCtx(ctx, token)
+	if err != nil {
+		return logsPageData{}, err
+	}
+	app, err := h.client.GetApplication(ctx, token, appID)
+	if err != nil {
+		return logsPageData{}, err
+	}
+	proj, _ := h.client.GetProject(ctx, token, app.ProjectID)
+	if proj == nil {
+		proj = &store.Project{ID: app.ProjectID}
+	}
+	entries, nextCursor, err := h.client.QueryLogs(ctx, token, appID, envID, cursor, query, 100)
 	if err != nil {
 		entries = nil
 		nextCursor = ""
 	}
-	render(w, r, pages.Logs(*app, *proj, entries, nextCursor, envID, user, org, flashFromCookie(w, r)))
+	return logsPageData{app: *app, project: *proj, entries: entries, nextCursor: nextCursor, envID: envID, query: query, user: user, org: org}, nil
 }
 
 // ── Environments ──────────────────────────────────────────────────────────────

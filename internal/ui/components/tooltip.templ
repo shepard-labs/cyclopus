@@ -1,0 +1,6 @@
+package components
+
+templ Tooltip(triggerID, tooltipID, label string) {
+	<button id={ triggerID } type="button" interestfor={ tooltipID } aria-describedby={ tooltipID } class="rounded-field focus-visible:outline-2 focus-visible:outline-primary">{ children... }</button>
+	<el-popover id={ tooltipID } role="tooltip" popover="hint" anchor={ triggerID } class="rounded-field bg-neutral px-2 py-1 text-xs text-neutral-content shadow-lg transition-discrete data-closed:opacity-0">{ label }</el-popover>
+}
