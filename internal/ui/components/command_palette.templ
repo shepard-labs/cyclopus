@@ -5,11 +5,11 @@ package components
 // falls back to trimmed option text when omitted.
 templ CommandPalette(triggerID, dialogID, title string) {
 	<div data-command-palette>
-		<button id={ triggerID } type="button" command="show-modal" commandfor={ dialogID } aria-controls={ dialogID } class="inline-flex items-center gap-2 rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20">@IconMagnifyingGlass("size-4")<span>{ title }</span></button>
+		<button id={ triggerID } type="button" command="show-modal" commandfor={ dialogID } aria-controls={ dialogID } class="inline-flex items-center gap-2 rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">@IconMagnifyingGlass("size-4")<span>{ title }</span></button>
 		@Dialog(dialogID, title) {
-			<div role="search" class="flex items-center gap-2 border-b border-base-300 pb-3">
+			<div role="search" class="flex items-center gap-2 border-b border-line pb-3">
 				@IconMagnifyingGlass("size-5 text-base-content/50")
-				<input id={ dialogID + "-input" } type="search" role="combobox" aria-label="Search commands" aria-autocomplete="list" aria-controls={ dialogID + "-listbox" } aria-expanded="false" autocomplete="off" class="w-full bg-transparent text-sm outline-none" placeholder="Type a command…"/>
+				<input id={ dialogID + "-input" } type="search" role="combobox" aria-label="Search commands" aria-autocomplete="list" aria-controls={ dialogID + "-listbox" } aria-expanded="false" autocomplete="off" class="w-full bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300" placeholder="Type a command…"/>
 			</div>
 			<div id={ dialogID + "-listbox" } class="mt-2" role="listbox">{ children... }</div>
 			<input id={ dialogID + "-value" } type="hidden" data-command-value-output/>

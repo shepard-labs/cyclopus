@@ -64,7 +64,7 @@ func projectsContent(projects []store.Project, errMsg string) templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-center justify-between\"><div><h1 class=\"text-xl font-semibold text-base-content\">Projects</h1><p class=\"text-sm text-base-content/65 mt-1\">Organize your applications into projects.</p></div></div><div class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">New project</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-center justify-between\"><div><h1 class=\"text-lg/7 font-semibold text-base-content\">Projects</h1><p class=\"text-sm text-base-content/65 mt-1\">Organize your applications into projects.</p></div></div><div class=\"rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-4\">New project</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -82,7 +82,7 @@ func projectsContent(projects []store.Project, errMsg string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/projects\" class=\"flex items-end gap-3\"><div class=\"flex-1\"><label for=\"proj-name\" class=\"block text-sm font-medium\">Name</label><input type=\"text\" id=\"proj-name\" name=\"name\" required placeholder=\"My Project\" class=\"mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"></div><div class=\"flex-1\"><label for=\"proj-slug\" class=\"block text-sm font-medium\">Slug</label><input type=\"text\" id=\"proj-slug\" name=\"slug\" required placeholder=\"my-project\" pattern=\"[a-z0-9-]+\" class=\"mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content\">Create</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<form method=\"POST\" action=\"/projects\" class=\"flex items-end gap-3\"><div class=\"flex-1\"><label for=\"proj-name\" class=\"block text-xs font-medium\">Name</label><input type=\"text\" id=\"proj-name\" name=\"name\" required placeholder=\"My Project\" class=\"mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div><div class=\"flex-1\"><label for=\"proj-slug\" class=\"block text-xs font-medium\">Slug</label><input type=\"text\" id=\"proj-slug\" name=\"slug\" required placeholder=\"my-project\" pattern=\"[a-z0-9-]+\" class=\"mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Create</button></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -104,20 +104,20 @@ func projectsContent(projects []store.Project, errMsg string) templ.Component {
 				var templ_7745c5c3_Var3 templ.SafeURL
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/projects/" + p.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/projects.templ`, Line: 37, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/projects.templ`, Line: 38, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"group flex items-center justify-between rounded-box bg-base-100 p-5 ring-1 ring-base-content/10 transition hover:ring-primary/40\"><div><div class=\"font-medium text-base-content group-hover:text-accent transition-colors\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"group flex items-center justify-between rounded-box border border-line bg-base-200 p-5 transition hover:bg-base-300\"><div><div class=\"text-sm font-medium text-base-content group-hover:text-accent transition-colors\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/projects.templ`, Line: 39, Col: 100}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/projects.templ`, Line: 40, Col: 108}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -130,7 +130,7 @@ func projectsContent(projects []store.Project, errMsg string) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(p.Slug)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/projects.templ`, Line: 40, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/projects.templ`, Line: 41, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {

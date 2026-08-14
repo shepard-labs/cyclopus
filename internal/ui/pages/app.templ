@@ -13,7 +13,7 @@ templ AppOverview(app store.App, project store.Project, prodEnv *store.Environme
 
 templ appOverviewContent(app store.App, project store.Project, prodEnv *store.Environment, prodAlias *store.Alias, prodRelease *store.Release, previews []store.Environment) {
 	<div class="space-y-6">
-		<div class="flex items-center gap-2 text-sm text-base-content/65">
+		<div class="flex items-center gap-2 text-xs text-base-content/65">
 			<a href="/projects" class="hover:text-accent">Projects</a>
 			<span>/</span>
 			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
@@ -22,14 +22,14 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 		</div>
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-3">
-				<h1 class="text-xl font-semibold text-base-content">{ app.Name }</h1>
+				<h1 class="text-lg/7 font-semibold text-base-content">{ app.Name }</h1>
 				@components.RuntimeClassBadge(app.RuntimeClass)
 			</div>
-			<a href={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-base-content/20">Settings</a>
+			<a href={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">Settings</a>
 		</div>
-		<section id="production-card" class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+		<section id="production-card" class="rounded-box border border-line bg-base-200 p-6">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Production</h2>
+				<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80">Production</h2>
 				if prodEnv != nil {
 					@components.EnvLifecycleBadge(prodEnv.LifecycleStatus)
 				}
@@ -62,7 +62,7 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 						<div
 							id="prod-status"
 							role="status"
-							class="flex items-center gap-2 rounded-box border border-primary/30 bg-primary/10 p-4 text-sm text-primary animate-pulse"
+							class="flex items-center gap-2 rounded-box border border-line bg-base-300 p-4 text-sm text-primary animate-pulse"
 							hx-get={ "/environments/" + prodEnv.ID + "/status-fragment" }
 							hx-trigger="every 3s"
 							hx-swap="outerHTML"
@@ -73,14 +73,14 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 						</div>
 					}
 					<div class="flex items-center gap-2 pt-2">
-						<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-base-content/20">View releases</a>
+						<a href={ templ.SafeURL("/environments/" + prodEnv.ID) } class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">View releases</a>
 					</div>
 				</div>
 			}
 		</section>
-		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+		<section class="rounded-box border border-line bg-base-200 p-6">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-base-content/80">Preview environments</h2>
+				<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80">Preview environments</h2>
 				<span class="text-xs text-base-content/50">{ fmt.Sprintf("%d / %d", len(previews), app.MaxPreviewEnvironments) }</span>
 			</div>
 			if len(previews) == 0 {
@@ -88,14 +88,14 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-base-content/50 border-b border-base-300">
+						<tr class="border-b border-line text-xs text-base-content/50">
 							<th class="text-left py-2">Branch</th>
 							<th class="text-left py-2">Hostname</th>
 							<th class="text-left py-2">Status</th>
 							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-base-300">
+					<tbody class="divide-y divide-line">
 						for _, env := range previews {
 							<tr class="text-base-content/80">
 								<td class="py-2 font-mono text-xs">{ env.Branch }</td>
@@ -108,7 +108,7 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 								</td>
 								<td class="py-2">@components.EnvLifecycleBadge(env.LifecycleStatus)</td>
 								<td class="py-2 text-right">
-									<a href={ templ.SafeURL("/environments/" + env.ID) } class="rounded-field px-2 py-1 text-xs font-semibold hover:bg-base-200">View</a>
+							<a href={ templ.SafeURL("/environments/" + env.ID) } class="rounded-field px-2 py-1 text-sm font-medium hover:bg-base-300">View</a>
 								</td>
 							</tr>
 						}
@@ -116,9 +116,9 @@ templ appOverviewContent(app store.App, project store.Project, prodEnv *store.En
 				</table>
 			}
 		</section>
-		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
-			<h2 class="text-sm font-semibold text-base-content/80 mb-3">App configuration</h2>
-			<div class="grid grid-cols-2 gap-4 text-sm">
+		<section class="rounded-box border border-line bg-base-200 p-6">
+			<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-3">App configuration</h2>
+			<div class="grid grid-cols-2 gap-4 text-xs">
 				<div class="space-y-2">
 					<div class="flex justify-between"><span class="text-base-content/50">Container port</span><span class="font-mono">{ fmt.Sprintf("%d", app.ContainerPort) }</span></div>
 					<div class="flex justify-between"><span class="text-base-content/50">Health check</span><span class="font-mono">{ app.HealthCheckPath }</span></div>

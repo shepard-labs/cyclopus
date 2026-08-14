@@ -9,8 +9,10 @@ import (
 	"github.com/a-h/templ"
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/avatar"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui/pages"
+	adminpages "github.com/shepard-labs/cyclopus/internal/ui/pages/admin"
 	settingspages "github.com/shepard-labs/cyclopus/internal/ui/pages/settings"
 )
 
@@ -32,22 +34,64 @@ func requirePageContracts(t testing.TB, output string, contracts ...string) {
 	}
 }
 
-func TestThemeSettingsRendersAllEightPresets(t *testing.T) {
+func TestThemeSettingsBuildsAccessibleControlsFromRegistry(t *testing.T) {
 	output := renderPage(t, settingspages.Theme(store.User{}, store.Organization{}, nil))
-	requirePageContracts(t, output, `href="/settings/theme"`)
+	requirePageContracts(t, output,
+		`href="/settings/theme"`,
+		`var themes=window.cyclopusTheme.themes`,
+		`Object.keys(themes).forEach`,
+		`b.type='button'`,
+		`b.setAttribute('role','button')`,
+		`b.setAttribute('aria-pressed','false')`,
+		`b.setAttribute('aria-label','Use '+t.label+' theme')`,
+		`b.className='group rounded-box border border-line bg-base-300 p-4 text-left outline-none transition hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 aria-pressed:border-primary aria-pressed:ring-2 aria-pressed:ring-primary/20'`,
+		`window.cyclopusTheme.apply(name)`,
+		`window.cyclopusTheme.sync()`,
+		`border-line`,
+		`bg-base-200`,
+		`bg-base-300`,
+		`text-lg/7 font-semibold`,
+		`rounded-box border border-line bg-base-300`,
+		`shadow-auth-glow`,
+	)
+	if strings.Contains(output, `data-theme-name="`) {
+		t.Fatalf("theme metadata is duplicated in server-rendered controls:\n%s", output)
+	}
+}
 
-	for _, preset := range []string{"obsidian", "mono", "ember", "graphite", "terminal", "paper", "console", "solar"} {
-		t.Run(preset, func(t *testing.T) {
-			requirePageContracts(t, output,
-				`id="theme-`+preset+`" type="button" data-theme-name="`+preset+`" aria-pressed="false"`,
-			)
-		})
-	}
-	if got := strings.Count(output, `data-theme-name="`); got != 8 {
-		t.Fatalf("theme preset control count = %d, want 8", got)
-	}
-	if got := strings.Count(output, `aria-pressed="false"`); got != 8 {
-		t.Fatalf("theme aria-pressed count = %d, want 8", got)
+func TestUserAvatarOptionsPreserveCheckedStyleAndExposeKeyboardFocus(t *testing.T) {
+	output := renderPage(t, settingspages.User(
+		store.User{AvatarKey: avatar.DefaultKey}, store.Organization{}, nil, "", "", "",
+	))
+	requirePageContracts(t, output,
+		`<label class="cursor-pointer rounded-box border border-line bg-base-300 p-2 has-checked:border-primary has-checked:ring-2 has-checked:ring-primary/20 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-base-content"><input type="radio" name="avatar_key" value="`+avatar.DefaultKey+`" checked required class="sr-only"><img src="`+avatar.URL(avatar.DefaultKey)+`" alt="Avatar option `+avatar.DefaultKey+`" class="size-12 rounded-full"></label>`,
+	)
+}
+
+func TestLogsUseThemeNativeSurfacesAndTypography(t *testing.T) {
+	output := renderPage(t, pages.Logs(
+		store.App{ID: "app-1", ProjectID: "project-1", Name: "API"},
+		store.Project{ID: "project-1", Name: "Platform"},
+		[]observability.LogEntry{{Body: "started", Severity: observability.SeverityInfo}},
+		"next", "env-1", "", store.User{}, store.Organization{}, nil,
+	))
+	requirePageContracts(t, output,
+		`text-xs text-base-content/65`,
+		`text-lg/7 font-semibold`,
+		`bg-base-300`,
+		`bg-base-200`,
+		`border-line`,
+		`font-mono text-xs/5`,
+		`text-base-content`,
+		`size-1.5 shrink-0 rounded-full bg-info`,
+		`focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100`,
+		`text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100">Search`,
+		`text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300" hx-get=`,
+	)
+	for _, prohibited := range []string{"bg-[#09090b]", "text-zinc-", "border-white", "ring-white", "border-zinc"} {
+		if strings.Contains(output, prohibited) {
+			t.Errorf("logs contain fixed palette class %q", prohibited)
+		}
 	}
 }
 
@@ -61,7 +105,7 @@ func TestPageHTMXContracts(t *testing.T) {
 			nil, nil, nil, store.User{}, store.Organization{}, nil,
 		))
 		requirePageContracts(t, output,
-			`<body class="min-h-full bg-base-200 font-sans text-base-content" hx-boost="true">`,
+			`<body class="min-h-full bg-base-100 font-sans text-base-content antialiased" hx-boost="true">`,
 			`hx-get="/environments/env-1/status-fragment"`,
 			`hx-trigger="every 3s"`,
 			`hx-target="#prod-status"`,
@@ -116,4 +160,147 @@ func TestPageHTMXContracts(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestAuthPagesUseCompactTypographyAndLayeredSurfaces(t *testing.T) {
+	pagesUnderTest := map[string]templ.Component{
+		"login":     pages.Login("Invalid credentials"),
+		"bootstrap": pages.Bootstrap("Invalid bootstrap token"),
+	}
+
+	for name, page := range pagesUnderTest {
+		t.Run(name, func(t *testing.T) {
+			output := renderPage(t, page)
+			requirePageContracts(t, output,
+				`bg-base-100`,
+				`rounded-box border border-line bg-base-200 p-6 shadow-auth-glow`,
+				`text-xl font-medium`,
+				`text-lg/7 font-medium`,
+				`block text-xs font-medium`,
+				`rounded-field border border-line bg-base-300`,
+				`text-sm font-medium`,
+				`focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200`,
+			)
+			for _, prohibited := range []string{"text-2xl", "focus-visible:ring-primary", "bg-base-100 px-3 py-2"} {
+				if strings.Contains(output, prohibited) {
+					t.Errorf("auth page contains outdated class %q", prohibited)
+				}
+			}
+		})
+	}
+}
+
+func TestSettingsAndAdminPagesUseAlignedPageLocalDesignSystem(t *testing.T) {
+	pagesUnderTest := map[string]templ.Component{
+		"app settings": pages.AppSettings(
+			store.App{ID: "app-1", Name: "API", RuntimeClass: "gvisor"},
+			store.Project{ID: "project-1", Name: "Platform"},
+			store.User{}, store.Organization{}, nil, "",
+		),
+		"user": settingspages.User(
+			store.User{Email: "operator@example.com"}, store.Organization{}, nil, "", "", "",
+		),
+		"git connections": settingspages.GitConnections(
+			[]store.GitConnection{{ID: "connection-1", RepoFullName: "acme/api", DefaultBranch: "main"}},
+			store.User{}, store.Organization{}, nil, "",
+		),
+		"registries": settingspages.Registries(
+			[]store.Registry{{ID: "registry-1", Provider: "ghcr", RegistryURL: "ghcr.io"}},
+			store.User{}, store.Organization{}, nil, "",
+		),
+		"webhooks": settingspages.Webhooks(
+			[]store.Webhook{{ID: "webhook-1", TargetURL: "https://example.com/hooks/cyclopus"}},
+			store.User{}, store.Organization{}, nil, "",
+		),
+		"tokens": settingspages.Tokens(
+			[]store.APIToken{{ID: "token-1", Name: "Deploy", Scopes: []string{"deploy:app-1"}}}, "secret-token",
+			store.User{}, store.Organization{}, nil, "",
+		),
+		"audit": settingspages.AuditLog(
+			[]store.AuditEventRecord{{Action: "app.updated", TargetType: "app", TargetID: "app-12345678"}}, "next",
+			store.User{}, store.Organization{}, nil,
+		),
+		"reconcile": adminpages.Reconcile(
+			[]store.ReconciliationRun{{ID: "run-12345678", ScopeKind: "organization", Status: "completed", DryRun: true}},
+			store.User{}, store.Organization{}, nil,
+		),
+	}
+
+	for name, page := range pagesUnderTest {
+		t.Run(name, func(t *testing.T) {
+			output := renderPage(t, page)
+			requirePageContracts(t, output,
+				`text-lg/7 font-semibold`,
+				`rounded-box border border-line bg-base-200`,
+			)
+			for _, prohibited := range []string{
+				`text-xl font-semibold`,
+				`rounded-box bg-base-100`,
+				`border-base-300`,
+				`divide-base-300`,
+				`bg-base-100 px-3 py-2 text-sm ring-1`,
+			} {
+				if strings.Contains(output, prohibited) {
+					t.Errorf("page contains outdated design-system contract %q", prohibited)
+				}
+			}
+		})
+	}
+}
+
+func TestCorePagesUseAlignedPageLocalDesignSystem(t *testing.T) {
+	releaseID := "release-1"
+	pagesUnderTest := map[string]templ.Component{
+		"projects": pages.Projects(
+			[]store.Project{{ID: "project-1", Name: "Platform", Slug: "platform"}},
+			store.Organization{}, store.User{}, nil, "",
+		),
+		"project": pages.ProjectDetail(
+			store.Project{ID: "project-1", Name: "Platform"},
+			[]store.App{{ID: "app-1", Name: "API", HostnameLabel: "api", ContainerPort: 8080, RuntimeClass: "runc"}},
+			store.User{}, store.Organization{}, nil, "",
+		),
+		"app": pages.AppOverview(
+			store.App{ID: "app-1", Name: "API", MaxPreviewEnvironments: 5},
+			store.Project{ID: "project-1", Name: "Platform"},
+			&store.Environment{ID: "env-1", Branch: "main", LifecycleStatus: "active", InProgressReleaseID: &releaseID},
+			nil, nil,
+			[]store.Environment{{ID: "env-2", Branch: "feature/one", LifecycleStatus: "active"}},
+			store.User{}, store.Organization{}, nil,
+		),
+		"environment": pages.EnvironmentDetail(
+			store.Environment{ID: "env-1", Branch: "main", LifecycleStatus: "active"},
+			store.App{ID: "app-1", Name: "API"},
+			store.Project{ID: "project-1", Name: "Platform"},
+			[]store.Release{{ImmutableReleaseSnapshot: store.ImmutableReleaseSnapshot{ID: "release-1", Kind: "deploy", ImageRef: "ghcr.io/acme/api:latest"}, Status: "live"}},
+			nil, nil, nil, store.EnvironmentVariableRevision{}, store.User{}, store.Organization{}, nil,
+		),
+	}
+
+	for name, page := range pagesUnderTest {
+		t.Run(name, func(t *testing.T) {
+			output := renderPage(t, page)
+			requirePageContracts(t, output,
+				`text-lg/7 font-semibold`,
+				`rounded-box border border-line bg-base-200`,
+			)
+			for _, prohibited := range []string{
+				`text-xl font-semibold`,
+				`rounded-box bg-base-100`,
+				`border-base-300`,
+				`divide-base-300`,
+			} {
+				if strings.Contains(output, prohibited) {
+					t.Errorf("page contains outdated design-system contract %q", prohibited)
+				}
+			}
+		})
+	}
+
+	environment := renderPage(t, pages.EnvironmentDetail(
+		store.Environment{ID: "env-1", Branch: "main", LifecycleStatus: "active"},
+		store.App{ID: "app-1", Name: "API"}, store.Project{ID: "project-1", Name: "Platform"},
+		nil, nil, nil, nil, store.EnvironmentVariableRevision{}, store.User{}, store.Organization{}, nil,
+	))
+	requirePageContracts(t, environment, `<h1 class="text-lg/7 font-semibold text-base-content">main</h1>`)
 }

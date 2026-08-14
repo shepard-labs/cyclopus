@@ -7,36 +7,63 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ AppSettings(app store.App, project store.Project, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) { @components.Page("Settings — "+app.Name, user, org, flash, "/projects", appSettingsContent(app, project, errMsg)) }
-
-templ settingInput(id, name, label, typ, value, min, max, pattern, placeholder string, required bool) {
-	<div><label for={ id } class="block text-sm font-medium">{ label }</label><input id={ id } name={ name } type={ typ } value={ value } min={ min } max={ max } pattern={ pattern } placeholder={ placeholder } required?={ required } class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
+templ AppSettings(app store.App, project store.Project, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
+	@components.Page("Settings — "+app.Name, user, org, flash, "/projects", appSettingsContent(app, project, errMsg))
 }
 
-templ settingsCard(title string) { <section class="space-y-4 rounded-box bg-base-100 p-6 ring-1 ring-base-content/10"><h2 class="text-sm font-semibold text-base-content/80">{ title }</h2>{ children... }</section> }
+templ settingInput(id, name, label, typ, value, min, max, pattern, placeholder string, required bool) {
+	<div><label for={ id } class="block text-xs font-medium">{ label }</label><input id={ id } name={ name } type={ typ } value={ value } min={ min } max={ max } pattern={ pattern } placeholder={ placeholder } required?={ required } class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
+}
+
+templ settingsCard(title string) {
+	<section class="space-y-4 rounded-box border border-line bg-base-200 p-6"><h2 class="text-sm font-semibold">{ title }</h2>{ children... }
+</section>
+}
 
 templ appSettingsContent(app store.App, project store.Project, errMsg string) {
 	<div class="max-w-2xl space-y-6">
-		<div class="flex items-center gap-2 text-sm text-base-content/65"><a href="/projects" class="hover:text-primary">Projects</a><span>/</span><a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-primary">{ project.Name }</a><span>/</span><a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-primary">{ app.Name }</a><span>/</span><span>Settings</span></div>
-		<h1 class="text-xl font-semibold">{ app.Name } — Settings</h1>
+		<div class="flex items-center gap-2 text-xs text-base-content/65"><a href="/projects" class="hover:text-primary">Projects</a><span>/</span><a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-primary">{ project.Name }</a><span>/</span><a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-primary">{ app.Name }</a><span>/</span><span>Settings</span></div>
+		<h1 class="text-lg/7 font-semibold">{ app.Name } — Settings</h1>
 		if errMsg != "" {
 			@components.Alert("error", errMsg)
 		}
 		<form method="POST" action={ templ.SafeURL("/apps/" + app.ID + "/settings") } class="space-y-6">
 			@settingsCard("Identity") {
-				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-name", "name", "Name", "text", app.Name, "", "", "", "", true)@settingInput("s-hostname", "hostname_label", "Hostname label", "text", app.HostnameLabel, "", "", "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", "", true)</div>
-				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-port", "container_port", "Container port", "number", fmt.Sprintf("%d", app.ContainerPort), "1", "65535", "", "", true)@settingInput("s-health", "health_check_path", "Health check path", "text", app.HealthCheckPath, "", "", "", "", true)</div>
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-name", "name", "Name", "text", app.Name, "", "", "", "", true)
+@settingInput("s-hostname", "hostname_label", "Hostname label", "text", app.HostnameLabel, "", "", "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", "", true)
+</div>
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-port", "container_port", "Container port", "number", fmt.Sprintf("%d", app.ContainerPort), "1", "65535", "", "", true)
+@settingInput("s-health", "health_check_path", "Health check path", "text", app.HealthCheckPath, "", "", "", "", true)
+</div>
 				@settingInput("s-ci", "ci_workflow_id", "CI workflow ID (GitHub Actions)", "text", strptr(app.CIWorkflowID), "", "", "", "deploy.yml", false)
 				@settingInput("s-image-repo", "image_repository", "Image repository", "text", strptr(app.ImageRepository), "", "", "", "ghcr.io/org/repo", false)
 			}
 			@settingsCard("Scaling (production only)") {
-				@components.Select("s-scaling", "scaling_mode", "Scaling mode", app.ScalingMode, []components.SelectOption{{Value:"hpa",Label:"HPA (default)"},{Value:"keda_cron",Label:"KEDA cron (opt-in)"},{Value:"keda_http",Label:"KEDA HTTP (beta, opt-in)"}}, true)
-				<div class="grid gap-4 sm:grid-cols-3">@settingInput("s-min", "min_replicas", "Min replicas", "number", fmt.Sprintf("%d", app.MinReplicas), "0", "", "", "", false)@settingInput("s-max", "max_replicas", "Max replicas", "number", fmt.Sprintf("%d", app.MaxReplicas), "1", "", "", "", false)@settingInput("s-cpu-target", "hpa_target_cpu_percent", "HPA CPU target %", "number", fmt.Sprintf("%d", app.HPATargetCPUPercent), "1", "100", "", "", false)</div>
+				@components.Select("s-scaling", "scaling_mode", "Scaling mode", app.ScalingMode, []components.SelectOption{{Value: "hpa", Label: "HPA (default)"}, {Value: "keda_cron", Label: "KEDA cron (opt-in)"}, {Value: "keda_http", Label: "KEDA HTTP (beta, opt-in)"}}, true)
+				<div class="grid gap-4 sm:grid-cols-3">@settingInput("s-min", "min_replicas", "Min replicas", "number", fmt.Sprintf("%d", app.MinReplicas), "0", "", "", "", false)
+@settingInput("s-max", "max_replicas", "Max replicas", "number", fmt.Sprintf("%d", app.MaxReplicas), "1", "", "", "", false)
+@settingInput("s-cpu-target", "hpa_target_cpu_percent", "HPA CPU target %", "number", fmt.Sprintf("%d", app.HPATargetCPUPercent), "1", "100", "", "", false)
+</div>
 			}
-			@settingsCard("Resources") { <div class="grid gap-4 sm:grid-cols-2">@settingInput("s-cpureq", "cpu_request_millicores", "CPU request (millicores)", "number", fmt.Sprintf("%d", app.CPURequestMillicores), "1", "", "", "", false)@settingInput("s-cpulim", "cpu_limit_millicores", "CPU limit (millicores)", "number", fmt.Sprintf("%d", app.CPULimitMillicores), "1", "", "", "", false)@settingInput("s-memreq", "memory_request_mib", "Memory request (MiB)", "number", fmt.Sprintf("%d", app.MemoryRequestMiB), "1", "", "", "", false)@settingInput("s-memlim", "memory_limit_mib", "Memory limit (MiB)", "number", fmt.Sprintf("%d", app.MemoryLimitMiB), "1", "", "", "", false)</div> }
-			@settingsCard("Preview environments") { <label class="flex items-center gap-3 text-sm"><input id="s-previews" type="checkbox" name="previews_enabled" checked?={ app.PreviewsEnabled } class="size-4 rounded border-base-content/30 text-primary"/>Enable preview environments</label><div class="grid gap-4 sm:grid-cols-2">@settingInput("s-maxprev", "max_preview_environments", "Max previews", "number", fmt.Sprintf("%d", app.MaxPreviewEnvironments), "0", "", "", "", false)@settingInput("s-previdlettl", "preview_idle_ttl_hours", "Idle TTL (hours)", "number", fmt.Sprintf("%d", app.PreviewIdleTTLHours), "1", "", "", "", false)</div> }
-			@settingsCard("Deploy behavior") { <div class="grid gap-4 sm:grid-cols-2">@settingInput("s-timeout", "deploy_timeout_seconds", "Deploy timeout (seconds)", "number", fmt.Sprintf("%d", app.DeployTimeoutSeconds), "1", "", "", "", false)@settingInput("s-retention", "release_retention_count", "Release retention count", "number", fmt.Sprintf("%d", app.ReleaseRetentionCount), "1", "", "", "", false)</div> }
-			<div class="flex gap-3"><button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content">Save settings</button><a href={ templ.SafeURL("/apps/" + app.ID) } class="rounded-field px-4 py-2 text-sm font-semibold ring-1 ring-base-content/20">Cancel</a></div>
+			@settingsCard("Resources") {
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-cpureq", "cpu_request_millicores", "CPU request (millicores)", "number", fmt.Sprintf("%d", app.CPURequestMillicores), "1", "", "", "", false)
+@settingInput("s-cpulim", "cpu_limit_millicores", "CPU limit (millicores)", "number", fmt.Sprintf("%d", app.CPULimitMillicores), "1", "", "", "", false)
+@settingInput("s-memreq", "memory_request_mib", "Memory request (MiB)", "number", fmt.Sprintf("%d", app.MemoryRequestMiB), "1", "", "", "", false)
+@settingInput("s-memlim", "memory_limit_mib", "Memory limit (MiB)", "number", fmt.Sprintf("%d", app.MemoryLimitMiB), "1", "", "", "", false)
+</div>
+			}
+			@settingsCard("Preview environments") {
+				<label class="flex items-center gap-3 text-sm font-medium"><input id="s-previews" type="checkbox" name="previews_enabled" checked?={ app.PreviewsEnabled } class="size-4 rounded-field border-line bg-base-300 text-primary"/>Enable preview environments</label>
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-maxprev", "max_preview_environments", "Max previews", "number", fmt.Sprintf("%d", app.MaxPreviewEnvironments), "0", "", "", "", false)
+@settingInput("s-previdlettl", "preview_idle_ttl_hours", "Idle TTL (hours)", "number", fmt.Sprintf("%d", app.PreviewIdleTTLHours), "1", "", "", "", false)
+</div>
+			}
+			@settingsCard("Deploy behavior") {
+				<div class="grid gap-4 sm:grid-cols-2">@settingInput("s-timeout", "deploy_timeout_seconds", "Deploy timeout (seconds)", "number", fmt.Sprintf("%d", app.DeployTimeoutSeconds), "1", "", "", "", false)
+@settingInput("s-retention", "release_retention_count", "Release retention count", "number", fmt.Sprintf("%d", app.ReleaseRetentionCount), "1", "", "", "", false)
+</div>
+			}
+			<div class="flex gap-3"><button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Save settings</button><a href={ templ.SafeURL("/apps/" + app.ID) } class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Cancel</a></div>
 		</form>
 	</div>
 }

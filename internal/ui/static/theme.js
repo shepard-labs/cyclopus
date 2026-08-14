@@ -9,6 +9,7 @@
       vars: {
         '--color-base-100': '#0A0A0B', '--color-base-200': '#111113', '--color-base-300': '#18181B',
         '--color-base-content': '#FAFAFA',
+		'--color-line': 'rgba(255,255,255,0.06)',
         '--color-primary': '#2DD4BF', '--color-primary-content': '#04211D',
         '--color-secondary': '#18181B', '--color-secondary-content': '#FAFAFA',
         '--color-accent': '#5EEAD4',
@@ -18,8 +19,9 @@
         '--color-warning': '#FBBF24', '--color-warning-content': '#451A03',
         '--color-error': '#FB7185', '--color-error-content': '#450A0A',
         '--radius-selector': '0.25rem', '--radius-field': '6px', '--radius-box': '8px',
-        '--shadow': 'rgb(0 0 0 / 40%)',
-        '--font-sans': "'Space Grotesk'", '--font-mono': "'JetBrains Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 40%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.40), 0 0 0 1px rgba(45,212,191,0.35), 0 0 40px -10px rgba(45,212,191,0.25)',
+		'--font-sans': "'Space Grotesk', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     mono: {
@@ -28,7 +30,8 @@
       vars: {
         '--color-base-100': '#000000', '--color-base-200': '#0A0A0A', '--color-base-300': '#171717',
         '--color-base-content': '#FFFFFF',
-        '--color-primary': '#3B82F6', '--color-primary-content': '#FFFFFF',
+		'--color-line': 'rgba(255,255,255,0.10)',
+        '--color-primary': '#3B82F6', '--color-primary-content': '#000000',
         '--color-secondary': '#171717', '--color-secondary-content': '#FFFFFF',
         '--color-accent': '#60A5FA',
         '--color-neutral': '#A3A3A3', '--color-neutral-content': '#000000',
@@ -37,8 +40,9 @@
         '--color-warning': '#F59E0B', '--color-warning-content': '#451A03',
         '--color-error': '#EF4444', '--color-error-content': '#FFFFFF',
         '--radius-selector': '0px', '--radius-field': '0px', '--radius-box': '0px',
-        '--shadow': 'rgb(0 0 0 / 40%)',
-        '--font-sans': "'Inter'", '--font-mono': "'JetBrains Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 40%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.40), 0 0 0 1px rgba(59,130,246,0.35), 0 0 40px -10px rgba(59,130,246,0.25)',
+		'--font-sans': "'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     ember: {
@@ -47,6 +51,7 @@
       vars: {
         '--color-base-100': '#1C1917', '--color-base-200': '#292524', '--color-base-300': '#44403C',
         '--color-base-content': '#FAFAF9',
+		'--color-line': 'rgba(250,250,249,0.08)',
         '--color-primary': '#FB923C', '--color-primary-content': '#431407',
         '--color-secondary': '#292524', '--color-secondary-content': '#FAFAF9',
         '--color-accent': '#FDBA74',
@@ -56,8 +61,9 @@
         '--color-warning': '#FBBF24', '--color-warning-content': '#451A03',
         '--color-error': '#FB7185', '--color-error-content': '#450A0A',
         '--radius-selector': '0.25rem', '--radius-field': '8px', '--radius-box': '12px',
-        '--shadow': 'rgb(0 0 0 / 40%)',
-        '--font-sans': "'Outfit'", '--font-mono': "'JetBrains Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 40%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.40), 0 0 0 1px rgba(251,146,60,0.35), 0 0 40px -10px rgba(251,146,60,0.25)',
+		'--font-sans': "'Outfit', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     graphite: {
@@ -66,6 +72,7 @@
       vars: {
         '--color-base-100': '#101012', '--color-base-200': '#17171A', '--color-base-300': '#1F1F23',
         '--color-base-content': '#F4F4F5',
+		'--color-line': 'rgba(255,255,255,0.07)',
         '--color-primary': '#5E6AD2', '--color-primary-content': '#FFFFFF',
         '--color-secondary': '#1F1F23', '--color-secondary-content': '#F4F4F5',
         '--color-accent': '#8B93E8',
@@ -75,8 +82,9 @@
         '--color-warning': '#E5C07B', '--color-warning-content': '#3A2A05',
         '--color-error': '#E5534B', '--color-error-content': '#FFFFFF',
         '--radius-selector': '4px', '--radius-field': '5px', '--radius-box': '6px',
-        '--shadow': 'rgb(0 0 0 / 40%)',
-        '--font-sans': "'Inter'", '--font-mono': "'IBM Plex Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 40%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.40), 0 0 0 1px rgba(94,106,210,0.35), 0 0 40px -10px rgba(94,106,210,0.25)',
+		'--font-sans': "'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     terminal: {
@@ -85,6 +93,7 @@
       vars: {
         '--color-base-100': '#0C0C0C', '--color-base-200': '#111111', '--color-base-300': '#1A1A1A',
         '--color-base-content': '#EDEDED',
+		'--color-line': 'rgba(255,255,255,0.12)',
         '--color-primary': '#00DC82', '--color-primary-content': '#052E16',
         '--color-secondary': '#1A1A1A', '--color-secondary-content': '#EDEDED',
         '--color-accent': '#5CFFC0',
@@ -94,8 +103,9 @@
         '--color-warning': '#FBBF24', '--color-warning-content': '#451A03',
         '--color-error': '#FF5F56', '--color-error-content': '#FFFFFF',
         '--radius-selector': '0px', '--radius-field': '0px', '--radius-box': '0px',
-        '--shadow': 'rgb(0 0 0 / 40%)',
-        '--font-sans': "'JetBrains Mono'", '--font-mono': "'JetBrains Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 40%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.40), 0 0 0 1px rgba(0,220,130,0.35), 0 0 40px -10px rgba(0,220,130,0.25)',
+		'--font-sans': "'JetBrains Mono', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     paper: {
@@ -104,7 +114,8 @@
       vars: {
         '--color-base-100': '#FAFAF9', '--color-base-200': '#FFFFFF', '--color-base-300': '#F5F5F4',
         '--color-base-content': '#1C1917',
-        '--color-primary': '#0D9488', '--color-primary-content': '#FFFFFF',
+		'--color-line': 'rgba(28,25,23,0.08)',
+        '--color-primary': '#0D9488', '--color-primary-content': '#1C1917',
         '--color-secondary': '#F5F5F4', '--color-secondary-content': '#1C1917',
         '--color-accent': '#0D9488',
         '--color-neutral': '#57534E', '--color-neutral-content': '#FAFAF9',
@@ -113,8 +124,9 @@
         '--color-warning': '#D97706', '--color-warning-content': '#FFFFFF',
         '--color-error': '#E11D48', '--color-error-content': '#FFFFFF',
         '--radius-selector': '0.25rem', '--radius-field': '7px', '--radius-box': '10px',
-        '--shadow': 'rgb(0 0 0 / 18%)',
-        '--font-sans': "'Space Grotesk'", '--font-mono': "'JetBrains Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 18%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.18), 0 0 0 1px rgba(13,148,136,0.35), 0 0 40px -10px rgba(13,148,136,0.25)',
+		'--font-sans': "'Space Grotesk', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     console: {
@@ -123,6 +135,7 @@
       vars: {
         '--color-base-100': '#F1F3F4', '--color-base-200': '#FFFFFF', '--color-base-300': '#E8EAED',
         '--color-base-content': '#202124',
+		'--color-line': 'rgba(32,33,36,0.10)',
         '--color-primary': '#1A73E8', '--color-primary-content': '#FFFFFF',
         '--color-secondary': '#E8EAED', '--color-secondary-content': '#202124',
         '--color-accent': '#1A73E8',
@@ -132,8 +145,9 @@
         '--color-warning': '#F9AB00', '--color-warning-content': '#202124',
         '--color-error': '#D93025', '--color-error-content': '#FFFFFF',
         '--radius-selector': '4px', '--radius-field': '4px', '--radius-box': '6px',
-        '--shadow': 'rgb(0 0 0 / 18%)',
-        '--font-sans': "'Inter'", '--font-mono': "'IBM Plex Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 18%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.18), 0 0 0 1px rgba(26,115,232,0.35), 0 0 40px -10px rgba(26,115,232,0.25)',
+		'--font-sans': "'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     },
     solar: {
@@ -142,7 +156,8 @@
       vars: {
         '--color-base-100': '#FDF6E3', '--color-base-200': '#F5EFDC', '--color-base-300': '#EEE8D5',
         '--color-base-content': '#073642',
-        '--color-primary': '#2AA198', '--color-primary-content': '#FDF6E3',
+		'--color-line': 'rgba(7,54,66,0.10)',
+        '--color-primary': '#2AA198', '--color-primary-content': '#002B36',
         '--color-secondary': '#EEE8D5', '--color-secondary-content': '#073642',
         '--color-accent': '#2AA198',
         '--color-neutral': '#586E75', '--color-neutral-content': '#FDF6E3',
@@ -151,8 +166,9 @@
         '--color-warning': '#B58900', '--color-warning-content': '#FDF6E3',
         '--color-error': '#DC322F', '--color-error-content': '#FDF6E3',
         '--radius-selector': '0.25rem', '--radius-field': '6px', '--radius-box': '8px',
-        '--shadow': 'rgb(0 0 0 / 18%)',
-        '--font-sans': "'Outfit'", '--font-mono': "'JetBrains Mono'"
+		'--shadow': '0 8px 30px rgb(0 0 0 / 18%)',
+		'--shadow-auth-glow': '0 8px 30px rgba(0,0,0,0.18), 0 0 0 1px rgba(42,161,152,0.35), 0 0 40px -10px rgba(42,161,152,0.25)',
+		'--font-sans': "'Outfit', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'", '--font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
       }
     }
   };
@@ -180,12 +196,14 @@
     '--tw-color-warning-content': '--color-warning-content',
     '--tw-color-error': '--color-error',
     '--tw-color-error-content': '--color-error-content',
+	'--tw-color-line': '--color-line',
     '--tw-radius-selector': '--radius-selector',
     '--tw-radius-field': '--radius-field',
     '--tw-radius-box': '--radius-box',
     '--tw-font-sans': '--font-sans',
     '--tw-font-mono': '--font-mono',
-    '--tw-shadow-theme': '--shadow'
+	'--tw-shadow-theme': '--shadow',
+	'--tw-shadow-auth-glow': '--shadow-auth-glow'
   };
 
   function storageGet(key) {

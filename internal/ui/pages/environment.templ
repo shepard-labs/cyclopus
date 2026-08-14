@@ -36,7 +36,7 @@ templ envDetailContent(
 	envVars store.EnvironmentVariableRevision,
 ) {
 	<div class="space-y-6">
-		<div class="flex items-center gap-2 text-sm text-base-content/65">
+		<div class="flex items-center gap-2 text-xs text-base-content/65">
 			<a href="/projects" class="hover:text-accent">Projects</a>
 			<span>/</span>
 			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
@@ -46,14 +46,14 @@ templ envDetailContent(
 			<span class="text-base-content">{ env.Branch }</span>
 		</div>
 		<div class="flex items-center gap-3">
-			<h1 class="text-xl font-semibold text-base-content font-mono">{ env.Branch }</h1>
+			<h1 class="text-lg/7 font-semibold text-base-content">{ env.Branch }</h1>
 			@components.EnvLifecycleBadge(env.LifecycleStatus)
 			if env.TornDownAt != nil {
 				<span class="text-xs text-base-content/50">torn down { relTime(*env.TornDownAt) }</span>
 			}
 		</div>
 		if alias != nil && alias.Hostname != "" {
-			<section class="flex items-center justify-between rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+			<section class="flex items-center justify-between rounded-box border border-line bg-base-200 p-6">
 				<div>
 					<span class="text-xs text-base-content/50 block mb-1">Live URL</span>
 					<a href={ templ.SafeURL("https://" + alias.Hostname) } target="_blank" rel="noopener" class="font-mono text-primary hover:text-accent">
@@ -62,19 +62,19 @@ templ envDetailContent(
 				</div>
 			</section>
 		} else if env.PlannedHostname != nil {
-			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+			<section class="rounded-box border border-line bg-base-200 p-6">
 				<span class="text-xs text-base-content/50 block mb-1">Planned hostname (cert pending)</span>
 				<span class="font-mono text-base-content/80">{ strptr(env.PlannedHostname) }</span>
 			</section>
 		}
-		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
-			<h2 class="text-sm font-semibold text-base-content/80 mb-4">Releases</h2>
+		<section class="rounded-box border border-line bg-base-200 p-6">
+			<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-4">Releases</h2>
 			if len(releases) == 0 {
 				<p class="text-sm text-base-content/65">No releases yet.</p>
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-base-content/50 border-b border-base-300">
+						<tr class="border-b border-line text-xs text-base-content/50">
 							<th class="text-left py-2 pr-4">ID</th>
 							<th class="text-left py-2 pr-4">Status</th>
 							<th class="text-left py-2 pr-4">Kind</th>
@@ -84,7 +84,7 @@ templ envDetailContent(
 							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-base-300">
+					<tbody class="divide-y divide-line">
 						for _, r := range releases {
 							<tr class="text-base-content/80">
 								<td class="py-2 pr-4 font-mono text-xs text-base-content/65">{ shortID(r.ID) }</td>
@@ -103,7 +103,7 @@ templ envDetailContent(
 									if r.Status != "live" && r.Status != "deploying" && r.Status != "pending" {
 										<form method="POST" action={ templ.SafeURL("/environments/" + env.ID + "/rollback") }>
 											<input type="hidden" name="release_id" value={ r.ID }/>
-										<button type="submit" class="rounded-field px-2 py-1 text-xs font-semibold hover:bg-base-200"
+										<button type="submit" class="rounded-field px-2 py-1 text-sm font-medium hover:bg-base-300"
 											onclick="return confirm('Roll back to release '+ this.form.release_id.value.substring(0,8) + '?')"
 										>
 											Rollback
@@ -118,36 +118,36 @@ templ envDetailContent(
 			}
 		</section>
 		<div class="grid grid-cols-1 gap-4">
-			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
-				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Environment variables</h2>
+			<section class="rounded-box border border-line bg-base-200 p-6">
+				<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-3">Environment variables</h2>
 				if len(envVars.Variables) == 0 {
 					<p class="text-sm text-base-content/65">No environment variables set.</p>
 				} else {
 					<div class="text-xs text-base-content/50 mb-2">Revision { fmt.Sprintf("%d", envVars.Revision) } · { len(envVars.Variables) } variables</div>
 					<div class="space-y-1">
 						for _, v := range envVars.Variables {
-							<div class="flex items-center justify-between py-1 border-b border-base-300 last:border-0">
-								<span class="font-mono text-sm text-base-content/80">{ v.Key }</span>
+							<div class="flex items-center justify-between border-b border-line bg-base-300 px-3 py-2 last:border-0">
+								<span class="font-mono text-xs text-base-content/80">{ v.Key }</span>
 								<span class="text-xs text-base-content/35">••••••••</span>
 							</div>
 						}
 					</div>
 				}
 			</section>
-			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
-				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Certificates</h2>
+			<section class="rounded-box border border-line bg-base-200 p-6">
+				<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-3">Certificates</h2>
 				if len(certs) == 0 {
 					<p class="text-sm text-base-content/65">No certificates found.</p>
 				} else {
 					<table class="table-auto w-full text-sm">
 						<thead>
-							<tr class="text-xs text-base-content/50 border-b border-base-300">
+							<tr class="border-b border-line text-xs text-base-content/50">
 								<th class="text-left py-2">Hostname</th>
 								<th class="text-left py-2">Status</th>
 								<th class="text-left py-2">Expires</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-base-300">
+						<tbody class="divide-y divide-line">
 							for _, cert := range certs {
 								<tr class="text-base-content/80">
 									<td class="py-2 font-mono text-xs">{ cert.Hostname }</td>
@@ -171,20 +171,20 @@ templ envDetailContent(
 					</table>
 				}
 			</section>
-			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
-				<h2 class="text-sm font-semibold text-base-content/80 mb-3">Custom domains</h2>
+			<section class="rounded-box border border-line bg-base-200 p-6">
+				<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-3">Custom domains</h2>
 				if len(domains) == 0 {
 					<p class="text-sm text-base-content/65 mb-4">No custom domains configured.</p>
 				} else {
 					<table class="table-auto w-full text-sm mb-4">
 						<thead>
-							<tr class="text-xs text-base-content/50 border-b border-base-300">
+							<tr class="border-b border-line text-xs text-base-content/50">
 								<th class="text-left py-2">Hostname</th>
 								<th class="text-left py-2">Method</th>
 								<th class="text-left py-2">Verified</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-base-300">
+						<tbody class="divide-y divide-line">
 							for _, d := range domains {
 								<tr class="text-base-content/80">
 									<td class="py-2 font-mono text-xs">{ d.Hostname }</td>

@@ -13,39 +13,39 @@ templ GitConnections(connections []store.GitConnection, user store.User, org sto
 
 templ gitConnectionsContent(connections []store.GitConnection, org store.Organization, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
-		<h1 class="text-xl font-semibold">Git Connections</h1>
-		<section class="space-y-4 rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+		<h1 class="text-lg/7 font-semibold">Git Connections</h1>
+		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6">
 			<h2 class="text-sm font-semibold text-base-content/80">Add GitHub App connection</h2>
 			if errMsg != "" {
 				@components.Alert("error", errMsg)
 			}
 			<form method="POST" action="/settings/git-connections" class="space-y-4">
-				<div class="grid grid-cols-2 gap-4">
+				<div class="grid gap-4 sm:grid-cols-2">
 					<div>
-						<div><label for="gc-repo" class="block text-sm font-medium">Repository (owner/repo)</label><input type="text" id="gc-repo" name="repo_full_name" required placeholder="acme/api" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
+						<div><label for="gc-repo" class="block text-xs font-medium">Repository (owner/repo)</label><input type="text" id="gc-repo" name="repo_full_name" required placeholder="acme/api" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
 					</div>
 					<div>
-						<div><label for="gc-installation" class="block text-sm font-medium">GitHub App Installation ID</label><input type="number" id="gc-installation" name="installation_id" required placeholder="12345678" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
-					</div>
-				</div>
-				<div class="grid grid-cols-2 gap-4">
-					<div>
-						<div><label for="gc-branch" class="block text-sm font-medium">Default branch</label><input type="text" id="gc-branch" name="default_branch" value="main" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/></div>
-					</div>
-					<div>
-						<label for="gc-secret">Webhook secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-						<input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value" class="mt-2 block w-full rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/>
+						<div><label for="gc-installation" class="block text-xs font-medium">GitHub App Installation ID</label><input type="number" id="gc-installation" name="installation_id" required placeholder="12345678" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
 					</div>
 				</div>
-				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content">Add connection</button>
+				<div class="grid gap-4 sm:grid-cols-2">
+					<div>
+						<div><label for="gc-branch" class="block text-xs font-medium">Default branch</label><input type="text" id="gc-branch" name="default_branch" value="main" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/></div>
+					</div>
+					<div>
+						<label for="gc-secret" class="block text-xs font-medium">Webhook secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
+					<input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200"/>
+					</div>
+				</div>
+				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Add connection</button>
 			</form>
 		</section>
 		if len(connections) > 0 {
-			<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+			<section class="rounded-box border border-line bg-base-200 p-6">
 				<h2 class="text-sm font-semibold text-base-content/80 mb-4">Connections</h2>
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-base-content/50 border-b border-base-300">
+						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
 							<th class="text-left py-2">Repository</th>
 							<th class="text-left py-2">Branch</th>
 							<th class="text-left py-2">Installation</th>
@@ -53,16 +53,16 @@ templ gitConnectionsContent(connections []store.GitConnection, org store.Organiz
 							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-base-300">
+					<tbody class="divide-y divide-line">
 						for _, gc := range connections {
-							<tr class="text-base-content/80">
+							<tr class="bg-base-300/40 text-base-content/80">
 								<td class="py-2 font-mono text-xs">{ gc.RepoFullName }</td>
 								<td class="py-2 text-xs text-base-content/65">{ gc.DefaultBranch }</td>
 								<td class="py-2 text-xs text-base-content/65 font-mono">{ fmt.Sprintf("%d", gc.InstallationID) }</td>
 								<td class="py-2 text-xs text-base-content/50">{ relTimeSettings(gc.CreatedAt) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/git-connections/" + gc.ID + "/delete") } onsubmit="return confirm('Delete this connection?')">
-										<button type="submit" class="rounded-field px-3 py-1.5 text-xs font-semibold text-error ring-1 ring-error/30 hover:bg-error/10">Delete</button>
+									<button type="submit" class="rounded-field border border-error/30 px-3 py-2 text-sm font-medium text-base-content hover:bg-error/10">Delete</button>
 									</form>
 								</td>
 							</tr>

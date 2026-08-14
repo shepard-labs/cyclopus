@@ -66,7 +66,7 @@ func logsContent(app store.App, project store.Project, entries []observability.L
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-4 h-full flex flex-col\"><div class=\"flex items-center gap-2 text-sm text-base-content/65\"><a href=\"/projects\" class=\"hover:text-accent\">Projects</a> <span>/</span> <a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-4 h-full flex flex-col\"><div class=\"flex items-center gap-2 text-xs text-base-content/65\"><a href=\"/projects\" class=\"hover:text-accent\">Projects</a> <span>/</span> <a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -118,7 +118,7 @@ func logsContent(app store.App, project store.Project, entries []observability.L
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</a> <span>/</span> <span class=\"text-base-content\">Logs</span></div><div class=\"flex items-center gap-3\"><h1 class=\"text-xl font-semibold\">Logs</h1><form method=\"GET\" action=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</a> <span>/</span> <span class=\"text-base-content\">Logs</span></div><div class=\"flex items-center gap-3\"><h1 class=\"text-lg/7 font-semibold\">Logs</h1><form method=\"GET\" action=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -167,7 +167,7 @@ func logsContent(app store.App, project store.Project, entries []observability.L
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" placeholder=\"Filter logs…\" class=\"w-64 rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"> <button type=\"submit\" class=\"rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-base-content/20\">Search</button></form></div><div class=\"flex flex-1 flex-col overflow-hidden rounded-box bg-[#09090b] text-zinc-100 ring-1 ring-base-content/10\"><div id=\"log-entries\" class=\"flex-1 overflow-y-auto p-4 font-mono text-xs leading-6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" placeholder=\"Filter logs…\" class=\"w-64 rounded-field bg-base-300 px-3 py-2 text-sm ring-1 ring-line outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100\"> <button type=\"submit\" class=\"rounded-field bg-base-300 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100\">Search</button></form></div><div class=\"flex flex-1 flex-col overflow-hidden rounded-box bg-base-200 ring-1 ring-line shadow-theme\"><div id=\"log-entries\" class=\"flex-1 overflow-y-auto p-4 font-mono text-xs/5\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -216,7 +216,7 @@ func LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCur
 			return templ_7745c5c3_Err
 		}
 		for _, e := range entries {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div class=\"flex gap-3 border-b border-white/5 py-0.5 last:border-0\"><span class=\"text-base-content/35 flex-shrink-0\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div class=\"flex gap-3 border-b border-line py-0.5 last:border-0\"><span class=\"text-base-content/35 flex-shrink-0\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -229,16 +229,16 @@ func LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCur
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> <span class=\"inline-flex w-14 flex-shrink-0 items-center justify-end gap-1.5 text-xs font-mono text-base-content\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var12 = []any{logSeverityClass(e.Severity) + " flex-shrink-0 w-12 text-right uppercase text-xs font-mono"}
+			var templ_7745c5c3_Var12 = []any{"size-1.5 shrink-0 rounded-full " + logSeverityClass(e.Severity)}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var12...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span aria-hidden=\"true\" class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -251,20 +251,20 @@ func LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCur
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\"></span><span class=\"uppercase\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(shortSeverity(e.Severity))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/logs.templ`, Line: 53, Col: 139}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/logs.templ`, Line: 53, Col: 276}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span> <span class=\"text-base-content/80 break-all\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span></span> <span class=\"text-base-content/80 break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -283,7 +283,7 @@ func LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCur
 			}
 		}
 		if nextCursor != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div class=\"log-load-more p-3 border-t border-base-300\"><button type=\"button\" class=\"flex w-full items-center justify-center gap-2 rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-white/20\" hx-get=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div class=\"log-load-more border-t border-line bg-base-300 p-3\"><button type=\"button\" class=\"flex w-full items-center justify-center gap-2 rounded-field bg-base-200 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -296,7 +296,7 @@ func LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCur
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-target=\"closest .log-load-more\" hx-swap=\"outerHTML\" hx-indicator=\"find .load-more-spinner\">Load older entries <span role=\"status\" aria-live=\"polite\" class=\"load-more-spinner htmx-indicator inline-flex items-center gap-2 text-xs font-normal text-zinc-300\"><span class=\"size-4 animate-spin rounded-full border-2 border-zinc-500 border-t-zinc-100\" aria-hidden=\"true\"></span><span>Loading…</span></span></button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-target=\"closest .log-load-more\" hx-swap=\"outerHTML\" hx-indicator=\"find .load-more-spinner\">Load older entries <span role=\"status\" aria-live=\"polite\" class=\"load-more-spinner htmx-indicator inline-flex items-center gap-2 text-xs font-normal text-base-content/65\"><span class=\"size-4 animate-spin rounded-full border-2 border-line border-t-primary\" aria-hidden=\"true\"></span><span>Loading…</span></span></button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -323,15 +323,15 @@ func logsNextURL(appID string, cursor string, envID string, query string) templ.
 func logSeverityClass(sev observability.Severity) string {
 	switch sev {
 	case observability.SeverityError, observability.SeverityFatal:
-		return "text-error"
+		return "bg-error"
 	case observability.SeverityWarn:
-		return "text-warning"
+		return "bg-warning"
 	case observability.SeverityInfo:
-		return "text-info"
+		return "bg-info"
 	case observability.SeverityDebug, observability.SeverityTrace:
-		return "text-base-content/50"
+		return "bg-base-content/50"
 	default:
-		return "text-base-content/65"
+		return "bg-base-content/65"
 	}
 }
 

@@ -29,7 +29,7 @@ func Badge(kind, text string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		var templ_7745c5c3_Var2 = []any{"inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset " + badgeTone(kind)}
+		var templ_7745c5c3_Var2 = []any{"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium " + badgeTone(kind)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -54,7 +54,7 @@ func Badge(kind, text string) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(text)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/badge.templ`, Line: 3, Col: 170}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/badge.templ`, Line: 3, Col: 153}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -71,15 +71,92 @@ func Badge(kind, text string) templ.Component {
 func badgeTone(kind string) string {
 	switch kind {
 	case "success":
-		return "bg-success/10 text-success ring-success/20"
+		return "border-success/20 bg-success/10 text-base-content"
 	case "warning":
-		return "bg-warning/10 text-warning ring-warning/20"
+		return "border-warning/20 bg-warning/10 text-base-content"
 	case "error", "danger":
-		return "bg-error/10 text-error ring-error/20"
+		return "border-error/20 bg-error/10 text-base-content"
 	case "primary", "brand", "info":
-		return "bg-primary/10 text-primary ring-primary/20"
+		return "border-primary/20 bg-primary/10 text-base-content"
 	default:
-		return "bg-base-200 text-base-content/70 ring-base-content/10"
+		return "border-line bg-base-300 text-base-content/70"
+	}
+}
+
+func OperationalStatus(kind, label string) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var5 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var5 == nil {
+			templ_7745c5c3_Var5 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<span class=\"inline-flex items-center gap-1.5 text-xs font-medium\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var6 = []any{"size-1.5 shrink-0 rounded-full " + statusDotTone(kind)}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var6...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<span aria-hidden=\"true\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var7 string
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var6).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/badge.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"></span> <span>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(label)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/badge.templ`, Line: 10, Col: 15}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</span></span>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func statusDotTone(kind string) string {
+	switch kind {
+	case "success":
+		return "bg-success"
+	case "warning":
+		return "bg-warning"
+	case "error", "danger":
+		return "bg-error"
+	default:
+		return "bg-base-content/40"
 	}
 }
 
@@ -101,39 +178,39 @@ func ReleaseStatusBadge(status string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var5 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var5 == nil {
-			templ_7745c5c3_Var5 = templ.NopComponent
+		templ_7745c5c3_Var9 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var9 == nil {
+			templ_7745c5c3_Var9 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		switch status {
 		case "live":
-			templ_7745c5c3_Err = Badge("success", "Live").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("success", "Live").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "deploying":
-			templ_7745c5c3_Err = Badge("primary", "Deploying").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Deploying").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "pending":
-			templ_7745c5c3_Err = Badge("warning", "Pending").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Pending").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "failed":
-			templ_7745c5c3_Err = Badge("error", "Failed").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("error", "Failed").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "superseded":
-			templ_7745c5c3_Err = Badge("neutral", "Superseded").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("neutral", "Superseded").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		default:
-			templ_7745c5c3_Err = Badge("neutral", status).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("neutral", status).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -160,44 +237,44 @@ func EnvLifecycleBadge(status string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var6 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var6 == nil {
-			templ_7745c5c3_Var6 = templ.NopComponent
+		templ_7745c5c3_Var10 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var10 == nil {
+			templ_7745c5c3_Var10 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		switch status {
 		case "ready":
-			templ_7745c5c3_Err = Badge("success", "Ready").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("success", "Ready").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "torn_down":
-			templ_7745c5c3_Err = Badge("neutral", "Torn Down").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("neutral", "Torn Down").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "failed":
-			templ_7745c5c3_Err = Badge("error", "Failed").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("error", "Failed").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "policy_blocked":
-			templ_7745c5c3_Err = Badge("warning", "Policy Blocked").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Policy Blocked").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "reserved":
-			templ_7745c5c3_Err = Badge("warning", "Provisioning").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Provisioning").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "teardown_requested":
-			templ_7745c5c3_Err = Badge("warning", "Tearing Down").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Tearing Down").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		default:
-			templ_7745c5c3_Err = Badge("neutral", status).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("neutral", status).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -223,9 +300,9 @@ func RuntimeClassBadge(runtimeClass string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var7 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var7 == nil {
-			templ_7745c5c3_Var7 = templ.NopComponent
+		templ_7745c5c3_Var11 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var11 == nil {
+			templ_7745c5c3_Var11 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if runtimeClass == "runc" {
@@ -256,39 +333,39 @@ func OperationStatusBadge(status string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var8 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var8 == nil {
-			templ_7745c5c3_Var8 = templ.NopComponent
+		templ_7745c5c3_Var12 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var12 == nil {
+			templ_7745c5c3_Var12 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		switch status {
 		case "completed", "succeeded":
-			templ_7745c5c3_Err = Badge("success", "Succeeded").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("success", "Succeeded").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "leased", "running":
-			templ_7745c5c3_Err = Badge("primary", "Running").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Running").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "queued", "accepted":
-			templ_7745c5c3_Err = Badge("warning", "Queued").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("warning", "Queued").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "failed":
-			templ_7745c5c3_Err = Badge("error", "Failed").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("error", "Failed").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "cancelled":
-			templ_7745c5c3_Err = Badge("neutral", "Cancelled").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("neutral", "Cancelled").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		default:
-			templ_7745c5c3_Err = Badge("neutral", status).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = OperationalStatus("neutral", status).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

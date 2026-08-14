@@ -18,12 +18,12 @@ templ Page(title string, user store.User, org store.Organization, flash *ui.Flas
 			<script src="/static/htmx.min.js" defer></script>
 			<script type="module" src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1"></script>
 		</head>
-		<body class="min-h-full bg-base-200 font-sans text-base-content" hx-boost="true">
+		<body class="min-h-full bg-base-100 font-sans text-base-content antialiased" hx-boost="true">
 			@Sidebar(org, user, currentPath)
-			<div class="min-w-0 lg:pl-72">
-				<header class="sticky top-0 z-30 flex h-16 items-center border-b border-base-300 bg-base-100 px-4 sm:px-6 lg:px-8">
+			<div class="min-w-0 lg:pl-56">
+				<header class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-200 px-4 sm:px-6 lg:px-8">
 					@MobileNavTrigger()
-					<span class="text-sm font-semibold text-base-content/70">{ title }</span>
+					<span class="text-sm font-medium text-base-content/70">{ title }</span>
 				</header>
 				<main class="p-4 sm:p-6 lg:p-8">
 					if flash != nil {
@@ -49,7 +49,7 @@ templ AuthPage(title string) {
 			<script src="/static/htmx.min.js" defer></script>
 			<script type="module" src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1"></script>
 		</head>
-		<body class="flex min-h-full items-center justify-center bg-base-200 p-6 font-sans text-base-content">
+		<body class="flex min-h-full items-center justify-center bg-base-100 p-6 font-sans text-base-content antialiased">
 			{ children... }
 		</body>
 	</html>

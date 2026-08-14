@@ -65,7 +65,7 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-center gap-2 text-sm text-base-content/65\"><a href=\"/projects\" class=\"hover:text-accent\">Projects</a> <span>/</span> <a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-center gap-2 text-xs text-base-content/65\"><a href=\"/projects\" class=\"hover:text-accent\">Projects</a> <span>/</span> <a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -104,14 +104,14 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</span></div><div class=\"flex items-center justify-between\"><div class=\"flex items-center gap-3\"><h1 class=\"text-xl font-semibold text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</span></div><div class=\"flex items-center justify-between\"><div class=\"flex items-center gap-3\"><h1 class=\"text-lg/7 font-semibold text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(app.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app.templ`, Line: 25, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app.templ`, Line: 25, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
@@ -138,7 +138,7 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-base-content/20\">Settings</a></div><section id=\"production-card\" class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><div class=\"flex items-center justify-between mb-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Production</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium\">Settings</a></div><section id=\"production-card\" class=\"rounded-box border border-line bg-base-200 p-6\"><div class=\"flex items-center justify-between mb-4\"><h2 class=\"text-xs font-semibold uppercase tracking-wider text-base-content/80\">Production</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -253,7 +253,7 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 				}
 			}
 			if prodEnv.InProgressReleaseID != nil {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div id=\"prod-status\" role=\"status\" class=\"flex items-center gap-2 rounded-box border border-primary/30 bg-primary/10 p-4 text-sm text-primary animate-pulse\" hx-get=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div id=\"prod-status\" role=\"status\" class=\"flex items-center gap-2 rounded-box border border-line bg-base-300 p-4 text-sm text-primary animate-pulse\" hx-get=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -292,12 +292,12 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-base-content/20\">View releases</a></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium\">View releases</a></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</section><section class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><div class=\"flex items-center justify-between mb-4\"><h2 class=\"text-sm font-semibold text-base-content/80\">Preview environments</h2><span class=\"text-xs text-base-content/50\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</section><section class=\"rounded-box border border-line bg-base-200 p-6\"><div class=\"flex items-center justify-between mb-4\"><h2 class=\"text-xs font-semibold uppercase tracking-wider text-base-content/80\">Preview environments</h2><span class=\"text-xs text-base-content/50\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -320,7 +320,7 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2\">Branch</th><th class=\"text-left py-2\">Hostname</th><th class=\"text-left py-2\">Status</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<table class=\"table-auto w-full text-sm\"><thead><tr class=\"border-b border-line text-xs text-base-content/50\"><th class=\"text-left py-2\">Branch</th><th class=\"text-left py-2\">Hostname</th><th class=\"text-left py-2\">Status</th><th class=\"text-right py-2\">Actions</th></tr></thead> <tbody class=\"divide-y divide-line\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -394,13 +394,13 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 				var templ_7745c5c3_Var19 templ.SafeURL
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/environments/" + env.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app.templ`, Line: 111, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/app.templ`, Line: 111, Col: 57}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" class=\"rounded-field px-2 py-1 text-xs font-semibold hover:bg-base-200\">View</a></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" class=\"rounded-field px-2 py-1 text-sm font-medium hover:bg-base-300\">View</a></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -410,7 +410,7 @@ func appOverviewContent(app store.App, project store.Project, prodEnv *store.Env
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</section><section class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-3\">App configuration</h2><div class=\"grid grid-cols-2 gap-4 text-sm\"><div class=\"space-y-2\"><div class=\"flex justify-between\"><span class=\"text-base-content/50\">Container port</span><span class=\"font-mono\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</section><section class=\"rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-3\">App configuration</h2><div class=\"grid grid-cols-2 gap-4 text-xs\"><div class=\"space-y-2\"><div class=\"flex justify-between\"><span class=\"text-base-content/50\">Container port</span><span class=\"font-mono\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

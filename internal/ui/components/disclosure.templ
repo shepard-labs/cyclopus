@@ -3,8 +3,8 @@ package components
 import "fmt"
 
 templ Disclosure(id, label string, expanded bool) {
-	<div>
-		<button id={ id + "-trigger" } type="button" command="--toggle" commandfor={ id } aria-controls={ id } aria-expanded={ fmt.Sprintf("%t", expanded) } class="flex w-full items-center justify-between py-3 text-left text-sm font-semibold">{ label }@IconChevronDown("size-5")</button>
+	<div class="border-b border-line">
+		<button id={ id + "-trigger" } type="button" command="--toggle" commandfor={ id } aria-controls={ id } aria-expanded={ fmt.Sprintf("%t", expanded) } class="flex w-full items-center justify-between py-3 text-left text-sm font-medium">{ label }@IconChevronDown("size-5")</button>
 		<el-disclosure id={ id } hidden?={ !expanded } class="block pb-4 text-sm text-base-content/70">{ children... }</el-disclosure>
 	</div>
 }

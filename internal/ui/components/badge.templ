@@ -1,25 +1,34 @@
 package components
 
-templ Badge(kind, text string) { <span class={ "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset " + badgeTone(kind) }>{ text }</span> }
+templ Badge(kind, text string) { <span class={ "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium " + badgeTone(kind) }>{ text }</span> }
 
-func badgeTone(kind string) string { switch kind { case "success": return "bg-success/10 text-success ring-success/20"; case "warning": return "bg-warning/10 text-warning ring-warning/20"; case "error", "danger": return "bg-error/10 text-error ring-error/20"; case "primary", "brand", "info": return "bg-primary/10 text-primary ring-primary/20"; default: return "bg-base-200 text-base-content/70 ring-base-content/10" } }
+func badgeTone(kind string) string { switch kind { case "success": return "border-success/20 bg-success/10 text-base-content"; case "warning": return "border-warning/20 bg-warning/10 text-base-content"; case "error", "danger": return "border-error/20 bg-error/10 text-base-content"; case "primary", "brand", "info": return "border-primary/20 bg-primary/10 text-base-content"; default: return "border-line bg-base-300 text-base-content/70" } }
+
+templ OperationalStatus(kind, label string) {
+	<span class="inline-flex items-center gap-1.5 text-xs font-medium">
+		<span aria-hidden="true" class={ "size-1.5 shrink-0 rounded-full " + statusDotTone(kind) }></span>
+		<span>{ label }</span>
+	</span>
+}
+
+func statusDotTone(kind string) string { switch kind { case "success": return "bg-success"; case "warning": return "bg-warning"; case "error", "danger": return "bg-error"; default: return "bg-base-content/40" } }
 
 // ReleaseStatusBadge renders a colored badge for a release status string
 // (store value: pending/deploying/live/failed/superseded).
 templ ReleaseStatusBadge(status string) {
 	switch status {
 		case "live":
-			@Badge("success", "Live")
+			@OperationalStatus("success", "Live")
 		case "deploying":
-			@Badge("primary", "Deploying")
+			@OperationalStatus("warning", "Deploying")
 		case "pending":
-			@Badge("warning", "Pending")
+			@OperationalStatus("warning", "Pending")
 		case "failed":
-			@Badge("error", "Failed")
+			@OperationalStatus("error", "Failed")
 		case "superseded":
-			@Badge("neutral", "Superseded")
+			@OperationalStatus("neutral", "Superseded")
 		default:
-			@Badge("neutral", status)
+			@OperationalStatus("neutral", status)
 	}
 }
 
@@ -28,19 +37,19 @@ templ ReleaseStatusBadge(status string) {
 templ EnvLifecycleBadge(status string) {
 	switch status {
 		case "ready":
-			@Badge("success", "Ready")
+			@OperationalStatus("success", "Ready")
 		case "torn_down":
-			@Badge("neutral", "Torn Down")
+			@OperationalStatus("neutral", "Torn Down")
 		case "failed":
-			@Badge("error", "Failed")
+			@OperationalStatus("error", "Failed")
 		case "policy_blocked":
-			@Badge("warning", "Policy Blocked")
+			@OperationalStatus("warning", "Policy Blocked")
 		case "reserved":
-			@Badge("warning", "Provisioning")
+			@OperationalStatus("warning", "Provisioning")
 		case "teardown_requested":
-			@Badge("warning", "Tearing Down")
+			@OperationalStatus("warning", "Tearing Down")
 		default:
-			@Badge("neutral", status)
+			@OperationalStatus("neutral", status)
 	}
 }
 
@@ -56,16 +65,16 @@ templ RuntimeClassBadge(runtimeClass string) {
 templ OperationStatusBadge(status string) {
 	switch status {
 		case "completed", "succeeded":
-			@Badge("success", "Succeeded")
+			@OperationalStatus("success", "Succeeded")
 		case "leased", "running":
-			@Badge("primary", "Running")
+			@OperationalStatus("warning", "Running")
 		case "queued", "accepted":
-			@Badge("warning", "Queued")
+			@OperationalStatus("warning", "Queued")
 		case "failed":
-			@Badge("error", "Failed")
+			@OperationalStatus("error", "Failed")
 		case "cancelled":
-			@Badge("neutral", "Cancelled")
+			@OperationalStatus("neutral", "Cancelled")
 		default:
-			@Badge("neutral", status)
+			@OperationalStatus("neutral", status)
 	}
 }

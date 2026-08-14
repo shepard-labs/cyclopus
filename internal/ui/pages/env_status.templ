@@ -12,7 +12,7 @@ templ EnvStatusFragment(env store.Environment, alias *store.Alias, release *stor
 		<div
 			id="prod-status"
 			role="status"
-			class="flex items-center gap-2 rounded-box border border-primary/30 bg-primary/10 p-4 text-sm text-primary animate-pulse"
+			class="flex items-center gap-2 rounded-box border border-line bg-base-300 p-4 text-sm text-primary animate-pulse"
 			hx-get={ "/environments/" + env.ID + "/status-fragment" }
 			hx-trigger="every 3s"
 			hx-swap="outerHTML"

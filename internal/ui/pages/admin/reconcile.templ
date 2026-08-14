@@ -14,29 +14,29 @@ templ Reconcile(runs []store.ReconciliationRun, user store.User, org store.Organ
 templ reconcileContent(runs []store.ReconciliationRun, org store.Organization) {
 	<div class="space-y-6 max-w-4xl">
 		<div>
-			<h1 class="text-xl font-semibold">Reconciliation</h1>
-			<p class="text-sm text-base-content/65 mt-1">Regenerate Kubernetes objects from Postgres state. Dry-run is the default.</p>
+			<h1 class="text-lg/7 font-semibold">Reconciliation</h1>
+			<p class="mt-1 text-xs text-base-content/65">Regenerate Kubernetes objects from Postgres state. Dry-run is the default.</p>
 		</div>
-		<section class="space-y-4 rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6">
 			<h2 class="text-sm font-semibold text-base-content/80">Start reconciliation</h2>
-			<form method="POST" action="/admin/reconcile" class="flex items-center gap-4">
+			<form method="POST" action="/admin/reconcile" class="flex flex-wrap items-center gap-4">
 				<div class="flex items-center gap-2">
-					<label class="flex items-center gap-2 text-sm"><input type="checkbox" id="dry-run" name="dry_run" value="true" checked class="size-4 rounded border-base-content/30 text-primary"/>Dry run <span class="text-base-content/50">(report changes without applying)</span></label>
+					<label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" id="dry-run" name="dry_run" value="true" checked class="size-4 rounded-field border-line bg-base-300 text-primary"/>Dry run <span class="text-xs font-normal text-base-content/50">(report changes without applying)</span></label>
 				</div>
 				<div class="flex items-center gap-2">
-					<label class="flex items-center gap-2 text-sm"><input type="checkbox" id="prune" name="prune" value="true" class="size-4 rounded border-base-content/30 text-primary"/>Prune orphaned objects</label>
+					<label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" id="prune" name="prune" value="true" class="size-4 rounded-field border-line bg-base-300 text-primary"/>Prune orphaned objects</label>
 				</div>
-				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content">Run reconciliation</button>
+				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Run reconciliation</button>
 			</form>
 		</section>
-		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+		<section class="rounded-box border border-line bg-base-200 p-6">
 			<h2 class="text-sm font-semibold text-base-content/80 mb-4">Recent runs</h2>
 			if len(runs) == 0 {
 				<p class="text-sm text-base-content/65">No reconciliation runs yet.</p>
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-base-content/50 border-b border-base-300">
+						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
 							<th class="text-left py-2 pr-4">ID</th>
 							<th class="text-left py-2 pr-4">Status</th>
 							<th class="text-left py-2 pr-4">Scope</th>
@@ -45,9 +45,9 @@ templ reconcileContent(runs []store.ReconciliationRun, org store.Organization) {
 							<th class="text-left py-2">Started</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-base-300">
+					<tbody class="divide-y divide-line">
 						for _, r := range runs {
-							<tr class="text-base-content/80">
+							<tr class="bg-base-300/40 text-base-content/80">
 								<td class="py-2 pr-4 font-mono text-xs text-base-content/65">{ r.ID[:8] }</td>
 								<td class="py-2 pr-4">@components.OperationStatusBadge(r.Status)</td>
 								<td class="py-2 pr-4 text-xs text-base-content/65">{ r.ScopeKind }</td>

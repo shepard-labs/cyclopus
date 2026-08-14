@@ -37,7 +37,7 @@ func EnvStatusFragment(env store.Environment, alias *store.Alias, release *store
 		}
 		ctx = templ.ClearChildren(ctx)
 		if env.InProgressReleaseID != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"prod-status\" role=\"status\" class=\"flex items-center gap-2 rounded-box border border-primary/30 bg-primary/10 p-4 text-sm text-primary animate-pulse\" hx-get=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"prod-status\" role=\"status\" class=\"flex items-center gap-2 rounded-box border border-line bg-base-300 p-4 text-sm text-primary animate-pulse\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

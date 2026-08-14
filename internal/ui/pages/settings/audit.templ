@@ -12,14 +12,14 @@ templ AuditLog(events []store.AuditEventRecord, nextPageToken string, user store
 
 templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 	<div class="space-y-6 max-w-5xl">
-		<h1 class="text-xl font-semibold">Audit Log</h1>
-		<section class="rounded-box bg-base-100 p-6 ring-1 ring-base-content/10">
+		<h1 class="text-lg/7 font-semibold">Audit Log</h1>
+		<section class="rounded-box border border-line bg-base-200 p-6">
 			if len(events) == 0 {
 				<p class="text-sm text-base-content/65 text-center py-8">No audit events.</p>
 			} else {
 				<table class="table-auto w-full text-sm">
 					<thead>
-						<tr class="text-xs text-base-content/50 border-b border-base-300">
+						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
 							<th class="text-left py-2 pr-4">Time</th>
 							<th class="text-left py-2 pr-4">Actor</th>
 							<th class="text-left py-2 pr-4">Action</th>
@@ -27,9 +27,9 @@ templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 							<th class="text-left py-2">Target ID</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-base-300">
+					<tbody class="divide-y divide-line">
 						for _, e := range events {
-							<tr class="text-base-content/80">
+							<tr class="bg-base-300/40 text-base-content/80">
 								<td class="py-2 pr-4 text-xs text-base-content/50 whitespace-nowrap">{ e.CreatedAt.Format("2006-01-02 15:04:05") }</td>
 								<td class="py-2 pr-4 text-xs font-mono text-base-content/65">
 									if e.ActorUserID != nil {
@@ -46,8 +46,8 @@ templ auditLogContent(events []store.AuditEventRecord, nextPageToken string) {
 					</tbody>
 				</table>
 				if nextPageToken != "" {
-					<div class="p-3 border-t border-base-300 text-center">
-						<a href={ templ.SafeURL("/settings/audit?page_token=" + nextPageToken) } class="rounded-field px-3 py-1.5 text-xs font-semibold ring-1 ring-base-content/20">Load more</a>
+					<div class="border-t border-line p-3 text-center">
+						<a href={ templ.SafeURL("/settings/audit?page_token=" + nextPageToken) } class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">Load more</a>
 					</div>
 				}
 			}

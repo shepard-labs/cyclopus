@@ -65,7 +65,7 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-center gap-2 text-sm text-base-content/65\"><a href=\"/projects\" class=\"hover:text-accent\">Projects</a> <span>/</span> <span class=\"text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-center gap-2 text-xs text-base-content/65\"><a href=\"/projects\" class=\"hover:text-accent\">Projects</a> <span>/</span> <span class=\"text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -78,20 +78,20 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</span></div><div class=\"flex items-center justify-between\"><h1 class=\"text-xl font-semibold text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</span></div><div class=\"flex items-center justify-between\"><h1 class=\"text-lg/7 font-semibold text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 22, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 22, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</h1></div><div class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\"><h2 class=\"text-sm font-semibold text-base-content/80 mb-4\">New application</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</h1></div><div class=\"rounded-box border border-line bg-base-200 p-6\"><h2 class=\"text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-4\">New application</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -122,7 +122,7 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"space-y-3\"><div class=\"grid grid-cols-2 gap-3\"><div><label for=\"app-name\" class=\"block text-sm font-medium\">Name</label><input type=\"text\" id=\"app-name\" name=\"name\" required placeholder=\"api\" class=\"mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20\"></div><div><label for=\"app-slug\" class=\"block text-sm font-medium\">Slug</label><input type=\"text\" id=\"app-slug\" name=\"slug\" required placeholder=\"api\" pattern=\"[a-z0-9-]+\" class=\"mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20\"></div></div><div class=\"grid grid-cols-2 gap-3\"><div><label for=\"app-hostname\" class=\"block text-sm font-medium\">Hostname label</label><input type=\"text\" id=\"app-hostname\" name=\"hostname_label\" required placeholder=\"api\" pattern=\"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\" class=\"mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20\"></div><div><label for=\"app-port\" class=\"block text-sm font-medium\">Container port</label><input type=\"number\" id=\"app-port\" name=\"container_port\" value=\"8080\" min=\"1\" max=\"65535\" class=\"mt-2 w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20\"></div></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-semibold text-primary-content\">Create application</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"space-y-3\"><div class=\"grid grid-cols-2 gap-3\"><div><label for=\"app-name\" class=\"block text-xs font-medium\">Name</label><input type=\"text\" id=\"app-name\" name=\"name\" required placeholder=\"api\" class=\"mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm\"></div><div><label for=\"app-slug\" class=\"block text-xs font-medium\">Slug</label><input type=\"text\" id=\"app-slug\" name=\"slug\" required placeholder=\"api\" pattern=\"[a-z0-9-]+\" class=\"mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm\"></div></div><div class=\"grid grid-cols-2 gap-3\"><div><label for=\"app-hostname\" class=\"block text-xs font-medium\">Hostname label</label><input type=\"text\" id=\"app-hostname\" name=\"hostname_label\" required placeholder=\"api\" pattern=\"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\" class=\"mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm\"></div><div><label for=\"app-port\" class=\"block text-xs font-medium\">Container port</label><input type=\"number\" id=\"app-port\" name=\"container_port\" value=\"8080\" min=\"1\" max=\"65535\" class=\"mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm\"></div></div><button type=\"submit\" class=\"rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content\">Create application</button></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -150,14 +150,14 @@ func projectDetailContent(project store.Project, apps []store.App, errMsg string
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" class=\"group flex items-center justify-between rounded-box bg-base-100 p-5 ring-1 ring-base-content/10 transition hover:ring-primary/40\"><div class=\"flex items-center gap-3 min-w-0\"><div class=\"min-w-0\"><div class=\"font-medium text-base-content group-hover:text-accent transition-colors\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" class=\"group flex items-center justify-between rounded-box border border-line bg-base-200 p-5 transition hover:bg-base-300\"><div class=\"flex items-center gap-3 min-w-0\"><div class=\"min-w-0\"><div class=\"text-sm font-medium text-base-content group-hover:text-accent transition-colors\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(a.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 49, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/project.templ`, Line: 49, Col: 109}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {

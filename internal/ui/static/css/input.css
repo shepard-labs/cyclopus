@@ -22,12 +22,14 @@
   --color-warning-content: var(--tw-color-warning-content);
   --color-error: var(--tw-color-error);
   --color-error-content: var(--tw-color-error-content);
+	--color-line: var(--tw-color-line);
   --radius-selector: var(--tw-radius-selector);
   --radius-field: var(--tw-radius-field);
   --radius-box: var(--tw-radius-box);
   --font-sans: var(--tw-font-sans);
   --font-mono: var(--tw-font-mono);
   --shadow-theme: var(--tw-shadow-theme);
+	--shadow-auth-glow: var(--tw-shadow-auth-glow);
 }
 
 @font-face {

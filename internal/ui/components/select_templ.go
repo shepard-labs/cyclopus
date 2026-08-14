@@ -60,7 +60,7 @@ func Select(id, name, label, value string, options []SelectOption, required bool
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"block text-sm font-medium text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"block text-xs font-medium text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -174,7 +174,7 @@ func Select(id, name, label, value string, options []SelectOption, required bool
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"grid w-full cursor-default grid-cols-1 rounded-field bg-base-100 py-2 pr-10 pl-3 text-left text-sm text-base-content ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"><el-selectedcontent id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"grid w-full cursor-default grid-cols-1 rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-left text-sm font-medium text-base-content outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"><el-selectedcontent id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -221,7 +221,7 @@ func Select(id, name, label, value string, options []SelectOption, required bool
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" role=\"listbox\" anchor=\"bottom start\" popover class=\"max-h-60 w-(--button-width) overflow-auto rounded-box bg-base-100 p-1 shadow-xl ring-1 ring-base-content/10 transition transition-discrete data-closed:scale-95 data-closed:opacity-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" role=\"listbox\" anchor=\"bottom start\" popover class=\"max-h-60 w-(--button-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete data-closed:scale-95 data-closed:opacity-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -239,7 +239,7 @@ func Select(id, name, label, value string, options []SelectOption, required bool
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" class=\"group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-semibold\"><span class=\"block flex-1 truncate\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" class=\"group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-medium\"><span class=\"block flex-1 truncate\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

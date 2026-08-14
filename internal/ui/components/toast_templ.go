@@ -29,7 +29,7 @@ func Toast(id, kind, message string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		var templ_7745c5c3_Var2 = []any{"pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-box bg-base-100 p-4 shadow-xl ring-1 ring-base-content/10 transition duration-300 data-[leaving=true]:translate-x-4 data-[leaving=true]:opacity-0 " + alertTone(kind)}
+		var templ_7745c5c3_Var2 = []any{"pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-box border border-line bg-base-300 p-4 shadow-theme transition duration-300 data-[leaving=true]:translate-x-4 data-[leaving=true]:opacity-0 " + alertTone(kind)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -101,7 +101,7 @@ func Toast(id, kind, message string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</p><button type=\"button\" aria-label=\"Dismiss notification\" onclick=\"this.parentElement.dataset.leaving='true';setTimeout(()=>this.parentElement.remove(),300)\" class=\"rounded p-0.5\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</p><button type=\"button\" aria-label=\"Dismiss notification\" onclick=\"this.parentElement.dataset.leaving='true';setTimeout(()=>this.parentElement.remove(),300)\" class=\"rounded-field p-0.5\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

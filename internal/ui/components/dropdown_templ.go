@@ -55,14 +55,14 @@ func Dropdown(triggerID, menuID, label string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"inline-flex items-center gap-2 rounded-field px-3 py-2 text-sm font-semibold text-base-content hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-primary\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"inline-flex items-center gap-2 rounded-field px-3 py-2 text-sm font-medium text-base-content outline-none hover:bg-base-300 focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/dropdown.templ`, Line: 5, Col: 269}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/dropdown.templ`, Line: 5, Col: 342}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -85,7 +85,7 @@ func Dropdown(triggerID, menuID, label string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" role=\"menu\" anchor=\"bottom end\" popover class=\"w-56 origin-top-right rounded-box bg-base-100 p-1 shadow-xl ring-1 ring-base-content/10 transition transition-discrete data-closed:scale-95 data-closed:opacity-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" role=\"menu\" anchor=\"bottom end\" popover class=\"w-56 origin-top-right rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete data-closed:scale-95 data-closed:opacity-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -135,14 +135,14 @@ func DropdownItem(href, label string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" role=\"menuitem\" class=\"flex rounded-field px-3 py-2 text-sm text-base-content/75 focus:bg-base-200 focus:text-base-content focus:outline-none\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" role=\"menuitem\" class=\"flex rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-base-200 focus:text-base-content focus:outline-none\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/dropdown.templ`, Line: 10, Col: 223}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/dropdown.templ`, Line: 10, Col: 235}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {

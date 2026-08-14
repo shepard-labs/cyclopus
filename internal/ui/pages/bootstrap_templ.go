@@ -43,7 +43,7 @@ func Bootstrap(errMsg string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-sm\"><div class=\"text-center mb-8\"><div class=\"inline-flex items-center gap-2 mb-4\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"w-full max-w-sm\"><div class=\"mb-8 text-center\"><div class=\"mb-4 inline-flex items-center gap-2\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -51,7 +51,7 @@ func Bootstrap(errMsg string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<span class=\"text-2xl font-bold\">Cyclopus</span></div><h1 class=\"text-xl font-semibold text-base-content\">Claim your Cyclopus install</h1><p class=\"mt-2 text-sm text-base-content/65\">Create the first administrator account.</p></div><div class=\"rounded-box bg-base-100 p-6 shadow-theme ring-1 ring-base-content/10\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<span class=\"text-xl font-medium\">Cyclopus</span></div><h1 class=\"text-lg/7 font-medium text-base-content\">Claim your Cyclopus install</h1><p class=\"mt-2 text-sm text-base-content/65\">Create the first administrator account.</p></div><div class=\"rounded-box border border-line bg-base-200 p-6 shadow-auth-glow\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -69,7 +69,7 @@ func Bootstrap(errMsg string) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<form method=\"POST\" action=\"/bootstrap\" class=\"space-y-4\"><div><label for=\"email\" class=\"block text-sm font-medium\">Email address</label><input type=\"email\" id=\"email\" name=\"email\" required placeholder=\"admin@example.com\" class=\"mt-2 block w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"></div><div><label for=\"password\" class=\"block text-sm font-medium\">Password</label><input type=\"password\" id=\"password\" name=\"password\" required placeholder=\"••••••••\" minlength=\"8\" class=\"mt-2 block w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"></div><div><label for=\"bootstrap_token\" class=\"block text-sm font-medium\">Bootstrap token</label><input type=\"password\" id=\"bootstrap_token\" name=\"bootstrap_token\" required placeholder=\"Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET\" class=\"mt-2 block w-full rounded-field px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary\"> <span class=\"text-xs text-base-content/50 mt-1\">Must match the <code class=\"text-base-content/65\">CYCLOPUS_AUTH_BOOTSTRAP_SECRET</code> the server was started with.</span></div><button type=\"submit\" class=\"mt-2 w-full rounded-field bg-primary px-3 py-2 text-sm font-semibold text-primary-content\">Create account</button></form></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<form method=\"POST\" action=\"/bootstrap\" class=\"space-y-4\"><div><label for=\"email\" class=\"block text-xs font-medium\">Email address</label><input type=\"email\" id=\"email\" name=\"email\" required placeholder=\"admin@example.com\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div><div><label for=\"password\" class=\"block text-xs font-medium\">Password</label><input type=\"password\" id=\"password\" name=\"password\" required placeholder=\"••••••••\" minlength=\"8\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"></div><div><label for=\"bootstrap_token\" class=\"block text-xs font-medium\">Bootstrap token</label><input type=\"password\" id=\"bootstrap_token\" name=\"bootstrap_token\" required placeholder=\"Value of CYCLOPUS_AUTH_BOOTSTRAP_SECRET\" class=\"mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200\"> <span class=\"mt-1 text-xs text-base-content/50\">Must match the <code class=\"text-base-content/65\">CYCLOPUS_AUTH_BOOTSTRAP_SECRET</code> the server was started with.</span></div><button type=\"submit\" class=\"mt-2 w-full rounded-field bg-primary px-3 py-2 text-sm font-medium text-primary-content\">Create account</button></form></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

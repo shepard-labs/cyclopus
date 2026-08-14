@@ -64,7 +64,7 @@ func auditLogContent(events []store.AuditEventRecord, nextPageToken string) temp
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-5xl\"><h1 class=\"text-xl font-semibold\">Audit Log</h1><section class=\"rounded-box bg-base-100 p-6 ring-1 ring-base-content/10\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6 max-w-5xl\"><h1 class=\"text-lg/7 font-semibold\">Audit Log</h1><section class=\"rounded-box border border-line bg-base-200 p-6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -74,12 +74,12 @@ func auditLogContent(events []store.AuditEventRecord, nextPageToken string) temp
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<table class=\"table-auto w-full text-sm\"><thead><tr class=\"text-xs text-base-content/50 border-b border-base-300\"><th class=\"text-left py-2 pr-4\">Time</th><th class=\"text-left py-2 pr-4\">Actor</th><th class=\"text-left py-2 pr-4\">Action</th><th class=\"text-left py-2 pr-4\">Target type</th><th class=\"text-left py-2\">Target ID</th></tr></thead> <tbody class=\"divide-y divide-base-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<table class=\"table-auto w-full text-sm\"><thead><tr class=\"border-b border-line text-xs uppercase tracking-wider text-base-content/50\"><th class=\"text-left py-2 pr-4\">Time</th><th class=\"text-left py-2 pr-4\">Actor</th><th class=\"text-left py-2 pr-4\">Action</th><th class=\"text-left py-2 pr-4\">Target type</th><th class=\"text-left py-2\">Target ID</th></tr></thead> <tbody class=\"divide-y divide-line\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, e := range events {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<tr class=\"text-base-content/80\"><td class=\"py-2 pr-4 text-xs text-base-content/50 whitespace-nowrap\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<tr class=\"bg-base-300/40 text-base-content/80\"><td class=\"py-2 pr-4 text-xs text-base-content/50 whitespace-nowrap\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -161,7 +161,7 @@ func auditLogContent(events []store.AuditEventRecord, nextPageToken string) temp
 				return templ_7745c5c3_Err
 			}
 			if nextPageToken != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"p-3 border-t border-base-300 text-center\"><a href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"border-t border-line p-3 text-center\"><a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -174,7 +174,7 @@ func auditLogContent(events []store.AuditEventRecord, nextPageToken string) temp
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"rounded-field px-3 py-1.5 text-xs font-semibold ring-1 ring-base-content/20\">Load more</a></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium\">Load more</a></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

@@ -14,7 +14,7 @@ templ Logs(app store.App, project store.Project, entries []observability.LogEntr
 
 templ logsContent(app store.App, project store.Project, entries []observability.LogEntry, nextCursor string, envID string, query string) {
 	<div class="space-y-4 h-full flex flex-col">
-		<div class="flex items-center gap-2 text-sm text-base-content/65">
+		<div class="flex items-center gap-2 text-xs text-base-content/65">
 			<a href="/projects" class="hover:text-accent">Projects</a>
 			<span>/</span>
 			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
@@ -24,17 +24,17 @@ templ logsContent(app store.App, project store.Project, entries []observability.
 			<span class="text-base-content">Logs</span>
 		</div>
 		<div class="flex items-center gap-3">
-			<h1 class="text-xl font-semibold">Logs</h1>
+			<h1 class="text-lg/7 font-semibold">Logs</h1>
 			<form method="GET" action={ templ.SafeURL("/apps/" + app.ID + "/logs") } class="flex items-center gap-2 ml-auto">
 				if envID != "" {
 					<input type="hidden" name="env" value={ envID }/>
 				}
-				<label for="log-query" class="sr-only">Filter logs</label><input id="log-query" type="text" name="q" value={ query } placeholder="Filter logs…" class="w-64 rounded-field bg-base-100 px-3 py-2 text-sm ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary"/>
-				<button type="submit" class="rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-base-content/20">Search</button>
+				<label for="log-query" class="sr-only">Filter logs</label><input id="log-query" type="text" name="q" value={ query } placeholder="Filter logs…" class="w-64 rounded-field bg-base-300 px-3 py-2 text-sm ring-1 ring-line outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100"/>
+				<button type="submit" class="rounded-field bg-base-300 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100">Search</button>
 			</form>
 		</div>
-		<div class="flex flex-1 flex-col overflow-hidden rounded-box bg-[#09090b] text-zinc-100 ring-1 ring-base-content/10">
-			<div id="log-entries" class="flex-1 overflow-y-auto p-4 font-mono text-xs leading-6">
+		<div class="flex flex-1 flex-col overflow-hidden rounded-box bg-base-200 ring-1 ring-line shadow-theme">
+			<div id="log-entries" class="flex-1 overflow-y-auto p-4 font-mono text-xs/5">
 				if len(entries) == 0 && nextCursor == "" {
 					<div class="text-base-content/50 text-center py-8">No log entries found.</div>
 				} else {
@@ -48,22 +48,22 @@ templ logsContent(app store.App, project store.Project, entries []observability.
 templ LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCursor string, envID string, query string) {
 	<div class="log-entries-fragment contents">
 		for _, e := range entries {
-			<div class="flex gap-3 border-b border-white/5 py-0.5 last:border-0">
+			<div class="flex gap-3 border-b border-line py-0.5 last:border-0">
 				<span class="text-base-content/35 flex-shrink-0">{ e.Timestamp.Format("15:04:05.000") }</span>
-				<span class={ logSeverityClass(e.Severity) + " flex-shrink-0 w-12 text-right uppercase text-xs font-mono" }>{ shortSeverity(e.Severity) }</span>
+				<span class="inline-flex w-14 flex-shrink-0 items-center justify-end gap-1.5 text-xs font-mono text-base-content"><span aria-hidden="true" class={ "size-1.5 shrink-0 rounded-full " + logSeverityClass(e.Severity) }></span><span class="uppercase">{ shortSeverity(e.Severity) }</span></span>
 				<span class="text-base-content/80 break-all">{ e.Body }</span>
 			</div>
 		}
 		if nextCursor != "" {
-			<div class="log-load-more p-3 border-t border-base-300">
-				<button type="button" class="flex w-full items-center justify-center gap-2 rounded-field px-3 py-2 text-sm font-semibold ring-1 ring-white/20"
+			<div class="log-load-more border-t border-line bg-base-300 p-3">
+				<button type="button" class="flex w-full items-center justify-center gap-2 rounded-field bg-base-200 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300"
 					hx-get={ logsNextURL(appID, nextCursor, envID, query) }
 					hx-target="closest .log-load-more"
 					hx-swap="outerHTML"
 					hx-indicator="find .load-more-spinner"
 				>
 					Load older entries
-					<span role="status" aria-live="polite" class="load-more-spinner htmx-indicator inline-flex items-center gap-2 text-xs font-normal text-zinc-300"><span class="size-4 animate-spin rounded-full border-2 border-zinc-500 border-t-zinc-100" aria-hidden="true"></span><span>Loading…</span></span>
+					<span role="status" aria-live="polite" class="load-more-spinner htmx-indicator inline-flex items-center gap-2 text-xs font-normal text-base-content/65"><span class="size-4 animate-spin rounded-full border-2 border-line border-t-primary" aria-hidden="true"></span><span>Loading…</span></span>
 				</button>
 			</div>
 		}
@@ -84,15 +84,15 @@ func logsNextURL(appID string, cursor string, envID string, query string) templ.
 func logSeverityClass(sev observability.Severity) string {
 	switch sev {
 	case observability.SeverityError, observability.SeverityFatal:
-		return "text-error"
+		return "bg-error"
 	case observability.SeverityWarn:
-		return "text-warning"
+		return "bg-warning"
 	case observability.SeverityInfo:
-		return "text-info"
+		return "bg-info"
 	case observability.SeverityDebug, observability.SeverityTrace:
-		return "text-base-content/50"
+		return "bg-base-content/50"
 	default:
-		return "text-base-content/65"
+		return "bg-base-content/65"
 	}
 }
 

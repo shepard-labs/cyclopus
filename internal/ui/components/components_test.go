@@ -92,6 +92,20 @@ func TestLayoutAssetContract(t *testing.T) {
 				"cdnjs.cloudflare.com/ajax/libs/font-"+"awesome",
 				"wa-",
 			)
+			if name == "application" {
+				requireContains(t, output,
+					`<body class="min-h-full bg-base-100 font-sans text-base-content antialiased" hx-boost="true">`,
+					`class="min-w-0 lg:pl-56"`,
+					`class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-200 px-4 sm:px-6 lg:px-8"`,
+					`class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-200 lg:flex"`,
+					`class="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4"`,
+					`<main class="p-4 sm:p-6 lg:p-8">`,
+					`id="mobile-navigation"`,
+				)
+				requireNotContains(t, output, `lg:pl-72`, `w-72`, `h-16`)
+			} else {
+				requireContains(t, output, `bg-base-100`)
+			}
 		})
 	}
 }
@@ -136,6 +150,11 @@ func TestWrapperMarkupContracts(t *testing.T) {
 
 	requireContains(t, output,
 		`role="alert"`,
+		`border-line bg-base-200`,
+		`rounded-full border px-2 py-0.5 text-xs font-medium`,
+		`size-1.5 shrink-0 rounded-full bg-success`,
+		`size-1.5 shrink-0 rounded-full bg-warning`,
+		`size-1.5 shrink-0 rounded-full bg-base-content/40`,
 		`id="region" value="One" type="text" role="combobox" aria-controls="region-options"`,
 		`<input type="hidden" name="region" value="one">`,
 		`<label for="region"`,
@@ -154,6 +173,7 @@ func TestWrapperMarkupContracts(t *testing.T) {
 		`.toLowerCase().indexOf(query) === -1`,
 		`root.dispatchEvent(new CustomEvent('commandselect'`,
 		`id="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title"`,
+		`<el-dialog-panel class="relative w-full max-w-lg transform overflow-hidden rounded-box border border-line bg-base-300`,
 		`id="confirm-dialog-title"`,
 		`command="close" commandfor="confirm-dialog"`,
 		`id="advanced-trigger" type="button" command="--toggle" commandfor="advanced" aria-controls="advanced" aria-expanded="false"`,
@@ -187,6 +207,17 @@ func TestWrapperMarkupContracts(t *testing.T) {
 		`id="info-tooltip" role="tooltip"`,
 		`<nav aria-label="Primary"`,
 		`aria-current="page"`,
+		`text-sm font-normal bg-primary/10 text-base-content`,
+		`<span class="text-primary"><svg`,
+	)
+	requireContains(t, output,
+		`border border-line bg-base-300`,
+		`rounded-box border border-line bg-base-200`,
+		`text-xs font-medium`,
+		`text-sm font-medium`,
+		`shadow-theme`,
+		`focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200`,
+		`rounded-field px-3 outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200`,
 	)
 
 	if strings.Contains(output, `id="advanced" hidden="false"`) {
@@ -195,6 +226,71 @@ func TestWrapperMarkupContracts(t *testing.T) {
 	if strings.Contains(output, `UNSANDBOXED`) && strings.Count(output, `UNSANDBOXED`) != 1 {
 		t.Error("RuntimeClassBadge must render only for runc")
 	}
+}
+
+func TestAlertsAndBadgesUseReadableTextWithSemanticCues(t *testing.T) {
+	output := renderComponent(t, componentGroup(
+		Alert("success", "Saved"),
+		Alert("warning", "Check this"),
+		Alert("error", "Failed"),
+		Alert("info", "Notice"),
+		Badge("success", "Healthy"),
+		Badge("warning", "Pending"),
+		Badge("error", "Failed"),
+		Badge("info", "Informational"),
+	))
+
+	requireContains(t, output,
+		`border-success/30 bg-success/10`,
+		`border-warning/30 bg-warning/10`,
+		`border-error/30 bg-error/10`,
+		`border-info/30 bg-info/10`,
+		`border-success/20 bg-success/10 text-base-content`,
+		`border-warning/20 bg-warning/10 text-base-content`,
+		`border-error/20 bg-error/10 text-base-content`,
+		`border-primary/20 bg-primary/10 text-base-content`,
+		`text-sm text-base-content shadow-theme`,
+	)
+	requireNotContains(t, output, `text-success`, `text-warning`, `text-error`, `text-info`, `bg-primary text-primary-content`)
+}
+
+func TestOperationalStatusesUseDotAndLabelSemantics(t *testing.T) {
+	tests := []struct {
+		name      string
+		component templ.Component
+		label     string
+		tone      string
+	}{
+		{name: "release live", component: ReleaseStatusBadge("live"), label: "Live", tone: "bg-success"},
+		{name: "release deploying", component: ReleaseStatusBadge("deploying"), label: "Deploying", tone: "bg-warning"},
+		{name: "environment provisioning", component: EnvLifecycleBadge("reserved"), label: "Provisioning", tone: "bg-warning"},
+		{name: "operation running", component: OperationStatusBadge("running"), label: "Running", tone: "bg-warning"},
+		{name: "operation failed", component: OperationStatusBadge("failed"), label: "Failed", tone: "bg-error"},
+		{name: "unknown", component: OperationStatusBadge("mystery"), label: "mystery", tone: "bg-base-content/40"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := renderComponent(t, tt.component)
+			requireContains(t, output,
+				`class="inline-flex items-center gap-1.5 text-xs font-medium"`,
+				`<span aria-hidden="true" class="size-1.5 shrink-0 rounded-full `+tt.tone+`"></span>`,
+				`<span>`+tt.label+`</span>`,
+			)
+			requireNotContains(t, output, `rounded-full border px-2`, `bg-primary`)
+		})
+	}
+}
+
+func TestSharedControlsUseThemeRadiusUtilities(t *testing.T) {
+	output := renderComponent(t, componentGroup(
+		Combobox("combo", "combo", "Combo", "", nil),
+		Select("select", "select", "Select", "", nil, false),
+		withChildren(Dropdown("trigger", "menu", "Actions"), DropdownItem("/", "Home")),
+		withChildren(Dialog("dialog", "Dialog"), markup("Body")),
+	))
+	requireContains(t, output, `rounded-field`, `rounded-box`)
+	requireNotContains(t, output, `rounded-md`, `rounded-lg`, `rounded-xl`, `rounded-2xl`)
 }
 
 func TestElementsWrapperTags(t *testing.T) {
@@ -306,4 +402,9 @@ func TestCommandPaletteTriggerUsesSuppliedVisibleTitle(t *testing.T) {
 		`</svg><span>Deploy commands</span></button>`,
 	)
 	requireNotContains(t, output, `>title </button>`)
+}
+
+func TestCommandPaletteSearchUsesBaseContentFocusIndicator(t *testing.T) {
+	output := renderComponent(t, withChildren(CommandPalette("palette-trigger", "palette-dialog", "Deploy commands"), markup(`<button data-command-value="deploy">Deploy</button>`)))
+	requireContains(t, output, `id="palette-dialog-input" type="search" role="combobox" aria-label="Search commands" aria-autocomplete="list" aria-controls="palette-dialog-listbox" aria-expanded="false" autocomplete="off" class="w-full bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300" placeholder="Type a command…"`)
 }

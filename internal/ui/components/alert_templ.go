@@ -29,7 +29,7 @@ func Alert(kind, message string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		var templ_7745c5c3_Var2 = []any{"flex items-start gap-3 rounded-box border p-4 text-sm " + alertTone(kind)}
+		var templ_7745c5c3_Var2 = []any{"flex items-start gap-3 rounded-box border bg-base-200 p-4 text-sm text-base-content shadow-theme " + alertTone(kind)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -67,7 +67,7 @@ func Alert(kind, message string) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/alert.templ`, Line: 3, Col: 160}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/alert.templ`, Line: 3, Col: 203}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -84,13 +84,13 @@ func Alert(kind, message string) templ.Component {
 func alertTone(kind string) string {
 	switch kind {
 	case "success":
-		return "border-success/30 bg-success/10 text-success"
+		return "border-success/30 bg-success/10"
 	case "error", "danger":
-		return "border-error/30 bg-error/10 text-error"
+		return "border-error/30 bg-error/10"
 	case "warning":
-		return "border-warning/30 bg-warning/10 text-warning"
+		return "border-warning/30 bg-warning/10"
 	default:
-		return "border-info/30 bg-info/10 text-info"
+		return "border-info/30 bg-info/10"
 	}
 }
 

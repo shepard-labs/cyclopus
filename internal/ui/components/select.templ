@@ -4,15 +4,15 @@ type SelectOption struct { Value string; Label string }
 
 templ Select(id, name, label, value string, options []SelectOption, required bool) {
 	<div>
-		<label id={ id + "-label" } for={ id } class="block text-sm font-medium text-base-content">{ label }</label>
+		<label id={ id + "-label" } for={ id } class="block text-xs font-medium text-base-content">{ label }</label>
 		<el-select id={ id } name={ name } value={ value } required?={ required } aria-labelledby={ id + "-label" } class="relative mt-2 block">
-			<button id={ id + "-trigger" } type="button" aria-haspopup="listbox" aria-controls={ id + "-options" } aria-labelledby={ id + "-label " + id + "-selected" } class="grid w-full cursor-default grid-cols-1 rounded-field bg-base-100 py-2 pr-10 pl-3 text-left text-sm text-base-content ring-1 ring-base-content/20 outline-none focus:ring-2 focus:ring-primary">
+			<button id={ id + "-trigger" } type="button" aria-haspopup="listbox" aria-controls={ id + "-options" } aria-labelledby={ id + "-label " + id + "-selected" } class="grid w-full cursor-default grid-cols-1 rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-left text-sm font-medium text-base-content outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200">
 				<el-selectedcontent id={ id + "-selected" } class="col-start-1 row-start-1 truncate">{ selectOptionLabel(value, options) }</el-selectedcontent>
 				@IconChevronDown("pointer-events-none col-start-1 row-start-1 size-4 self-center justify-self-end text-base-content/50")
 			</button>
-			<el-options id={ id + "-options" } role="listbox" anchor="bottom start" popover class="max-h-60 w-(--button-width) overflow-auto rounded-box bg-base-100 p-1 shadow-xl ring-1 ring-base-content/10 transition transition-discrete data-closed:scale-95 data-closed:opacity-0">
+			<el-options id={ id + "-options" } role="listbox" anchor="bottom start" popover class="max-h-60 w-(--button-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete data-closed:scale-95 data-closed:opacity-0">
 				for _, option := range options {
-					<el-option value={ option.Value } class="group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-semibold">
+					<el-option value={ option.Value } class="group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-medium">
 						<span class="block flex-1 truncate">{ option.Label }</span>
 						<span class="ml-3 hidden group-aria-selected/option:block in-[el-selectedcontent]:hidden">@IconCheck("size-4")</span>
 					</el-option>

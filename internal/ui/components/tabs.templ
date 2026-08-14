@@ -6,7 +6,7 @@ type TabItem struct { ID string; Label string; Content templ.Component }
 
 templ Tabs(id string, tabs []TabItem, active int) {
 	<el-tab-group>
-		<el-tab-list id={ id } role="tablist" class="flex gap-6 border-b border-base-300">
+		<el-tab-list id={ id } role="tablist" class="flex gap-6 border-b border-line">
 			for i, tab := range tabs {
 				<button type="button" role="tab" id={ tab.ID + "-tab" } aria-controls={ tab.ID + "-panel" } aria-selected={ fmt.Sprintf("%t", i == active) } class="border-b-2 px-1 py-3 text-sm font-medium aria-selected:border-primary aria-selected:text-primary">{ tab.Label }</button>
 			}
