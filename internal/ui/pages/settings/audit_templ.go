@@ -79,7 +79,7 @@ func auditLogContent(events []store.AuditEventRecord, nextPageToken string) temp
 				return templ_7745c5c3_Err
 			}
 			for _, e := range events {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<tr class=\"bg-base-300/40 text-base-content/80\"><td class=\"py-2 pr-4 text-xs text-base-content/50 whitespace-nowrap\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<tr class=\"bg-base-200 text-base-content/80\"><td class=\"py-2 pr-4 text-xs text-base-content/50 whitespace-nowrap\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

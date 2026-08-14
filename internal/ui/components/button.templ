@@ -1,0 +1,66 @@
+package components
+
+type ButtonType string
+
+const (
+	ButtonTypeSubmit ButtonType = "submit"
+	ButtonTypeButton ButtonType = "button"
+	ButtonTypeReset  ButtonType = "reset"
+)
+
+type ButtonVariant string
+
+const (
+	ButtonVariantPrimary   ButtonVariant = "primary"
+	ButtonVariantSecondary ButtonVariant = "secondary"
+	ButtonVariantDanger    ButtonVariant = "danger"
+)
+
+type ButtonProps struct {
+	Variant  ButtonVariant
+	Type     ButtonType
+	Disabled bool
+	Class    string
+}
+
+func buttonClasses(variant ButtonVariant, customClass string) string {
+	base := ""
+	switch variant {
+	case ButtonVariantSecondary:
+		base = "cursor-pointer rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium text-base-content hover:bg-base-200"
+	case ButtonVariantDanger:
+		base = "cursor-pointer rounded-field border border-error/30 px-3 py-2 text-sm font-medium text-base-content hover:bg-error/10"
+	default: // primary
+		base = "cursor-pointer rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+	}
+	if customClass != "" {
+		return base + " " + customClass
+	}
+	return base
+}
+
+func buttonTypeAttr(t ButtonType) string {
+	if t == "" {
+		return "button"
+	}
+	return string(t)
+}
+
+templ Button(props ButtonProps) {
+	<button
+		type={ buttonTypeAttr(props.Type) }
+		disabled?={ props.Disabled }
+		class={ buttonClasses(props.Variant, props.Class) }
+	>
+		{ children... }
+	</button>
+}
+
+templ ButtonLink(variant ButtonVariant, href string, text string) {
+	<a
+		href={ templ.SafeURL(href) }
+		class={ buttonClasses(variant, "") }
+	>
+		{ text }
+	</a>
+}

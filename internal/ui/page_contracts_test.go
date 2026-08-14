@@ -44,7 +44,7 @@ func TestThemeSettingsBuildsAccessibleControlsFromRegistry(t *testing.T) {
 		`b.setAttribute('role','button')`,
 		`b.setAttribute('aria-pressed','false')`,
 		`b.setAttribute('aria-label','Use '+t.label+' theme')`,
-		`b.className='group rounded-box border border-line bg-base-300 p-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 aria-pressed:border-primary'`,
+		`b.className='group cursor-pointer rounded-box border border-line bg-base-300 p-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 aria-pressed:border-primary'`,
 		`window.cyclopusTheme.apply(name)`,
 		`window.cyclopusTheme.sync()`,
 		`border-line`,
@@ -62,7 +62,7 @@ func TestUserAvatarOptionsPreserveCheckedStyleAndExposeKeyboardFocus(t *testing.
 		store.User{AvatarKey: avatar.DefaultKey}, store.Organization{}, nil, "", "", "",
 	))
 	requirePageContracts(t, output,
-		`<label class="cursor-pointer rounded-box border border-line bg-base-300 p-2 has-checked:border-primary has-checked:ring-2 has-checked:ring-primary/20 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-base-content"><input type="radio" name="avatar_key" value="`+avatar.DefaultKey+`" checked required class="sr-only"><img src="`+avatar.URL(avatar.DefaultKey)+`" alt="Avatar option `+avatar.DefaultKey+`" class="size-12 rounded-full"></label>`,
+		`<label class="group relative flex cursor-pointer items-center justify-center rounded-full p-1 outline-none transition has-focus-visible:ring-2 has-focus-visible:ring-base-content has-focus-visible:ring-offset-2 has-focus-visible:ring-offset-base-200"><input type="radio" name="avatar_key" value="`+avatar.DefaultKey+`" checked required class="peer sr-only"><img src="`+avatar.URL(avatar.DefaultKey)+`" alt="Avatar option `+avatar.DefaultKey+`" class="size-14 rounded-full opacity-70 transition group-hover:scale-110 group-hover:opacity-100 peer-checked:opacity-100 peer-checked:ring-2 peer-checked:ring-primary"></label>`,
 	)
 }
 
@@ -82,7 +82,7 @@ func TestLogsUseThemeNativeSurfacesAndTypography(t *testing.T) {
 		`text-base-content`,
 		`size-1.5 shrink-0 rounded-full bg-info`,
 		`focus:border-primary focus-visible:ring-1 focus-visible:ring-primary`,
-		`text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100">Search`,
+		`cursor-pointer rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium text-base-content hover:bg-base-200">Search`,
 		`text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300" hx-get=`,
 	)
 	for _, prohibited := range []string{"bg-[#09090b]", "text-zinc-", "border-white", "ring-white", "border-zinc"} {

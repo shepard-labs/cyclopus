@@ -13,28 +13,31 @@ templ Webhooks(webhooks []store.Webhook, user store.User, org store.Organization
 
 templ webhooksContent(webhooks []store.Webhook, errMsg string) {
 	<div class="space-y-6 max-w-3xl">
-		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6">
-			<h2 class="text-sm font-semibold text-base-content/80">Add endpoint</h2>
+		@components.SectionCard("Add endpoint") {
 			if errMsg != "" {
 				@components.Alert("error", errMsg)
 			}
 			<form method="POST" action="/settings/webhooks" class="space-y-4">
 				<div>
-					<div><label for="wh-url" class="block text-xs font-medium">Target URL</label><input type="url" id="wh-url" name="target_url" required placeholder="https://example.com/hooks/cyclopus" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
+					@components.FormField("wh-url", "target_url", "Target URL", "url", "", "https://example.com/hooks/cyclopus", true)
 				</div>
 				<div>
-					<label for="wh-secret" class="block text-xs font-medium">Signing secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span></label>
-					<input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
+					<label for="wh-secret" class="block text-xs font-medium text-base-content/80 mb-1.5">Signing secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span> <span class="text-error" aria-hidden="true">*</span></label>
+					<input type="text" id="wh-secret" name="secret_ref" required placeholder="k8s-secret://cyclopus/webhook-signing#value" class="block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 				</div>
 				<div>
-					<label for="wh-events" class="block text-xs font-medium">Events <span class="text-base-content/50 font-normal">(comma-separated, empty = all)</span></label>
-					<input type="text" id="wh-events" name="events" placeholder="deploy.succeeded,deploy.failed" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
+					@components.FormField("wh-events", "events", "Events", "text", "", "deploy.succeeded,deploy.failed", false)
 				</div>
-				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Add webhook</button>
+				@components.Button(components.ButtonProps{
+					Type:    components.ButtonTypeSubmit,
+					Variant: components.ButtonVariantPrimary,
+				}) {
+					Add webhook
+				}
 			</form>
-		</section>
+		}
 		if len(webhooks) > 0 {
-			<section class="rounded-box border border-line bg-base-200 p-6">
+			@components.Card("") {
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
@@ -58,14 +61,19 @@ templ webhooksContent(webhooks []store.Webhook, errMsg string) {
 								<td class="py-2 text-xs text-base-content/65">{ fmt.Sprintf("%d", w.ConsecutiveFailures) }</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/webhooks/" + w.ID + "/delete") } onsubmit="return confirm('Delete this webhook?')">
-									<button type="submit" class="rounded-field border border-error/30 px-3 py-2 text-sm font-medium text-base-content hover:bg-error/10">Delete</button>
+										@components.Button(components.ButtonProps{
+											Type:    components.ButtonTypeSubmit,
+											Variant: components.ButtonVariantDanger,
+										}) {
+											Delete
+										}
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</section>
+			}
 		}
 	</div>
 }

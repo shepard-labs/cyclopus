@@ -12,18 +12,31 @@ templ Projects(projects []store.Project, org store.Organization, user store.User
 
 templ projectsContent(projects []store.Project, errMsg string) {
 	<div class="space-y-6">
-		<div class="rounded-box border border-line bg-base-200 p-6">
-			<h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/80 mb-4">New project</h2>
+		@components.Card("New project") {
 			if errMsg != "" {
-				<div class="mb-4">@components.Alert("error", errMsg)
-</div>
+				<div class="mb-4">@components.Alert("error", errMsg)</div>
 			}
 			<form method="POST" action="/projects" class="flex items-end gap-3">
-				<div class="flex-1"><label for="proj-name" class="block text-xs font-medium">Name</label><input type="text" id="proj-name" name="name" required placeholder="My Project" class="mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
-				<div class="flex-1"><label for="proj-slug" class="block text-xs font-medium">Slug</label><input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" class="mt-2 w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
-				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Create</button>
+				<div class="flex-1">
+					@components.FormField("proj-name", "name", "Name", "text", "", "My Project", true)
+				</div>
+				<div class="flex-1">
+					<div class="flex flex-col gap-1.5">
+						<label for="proj-slug" class="text-xs font-medium text-base-content/80">
+							Slug
+							<span class="text-error" aria-hidden="true">*</span>
+						</label>
+						<input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
+					</div>
+				</div>
+				@components.Button(components.ButtonProps{
+					Type:    components.ButtonTypeSubmit,
+					Variant: components.ButtonVariantPrimary,
+				}) {
+					Create
+				}
 			</form>
-		</div>
+		}
 		if len(projects) == 0 {
 			@components.EmptyState("No projects yet", "Create your first project above.")
 		} else {

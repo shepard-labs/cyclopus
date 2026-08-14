@@ -1,6 +1,6 @@
 package components
 
 templ Tooltip(triggerID, tooltipID, label string) {
-	<button id={ triggerID } type="button" interestfor={ tooltipID } aria-describedby={ tooltipID } class="rounded-field outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200">{ children... }</button>
+	<button id={ triggerID } type="button" interestfor={ tooltipID } aria-describedby={ tooltipID } class="cursor-pointer rounded-field outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200">{ children... }</button>
 	<el-popover id={ tooltipID } role="tooltip" popover="hint" anchor={ triggerID } class="rounded-field border border-line bg-base-300 px-2 py-1 text-xs text-base-content shadow-theme transition-discrete data-closed:opacity-0">{ label }</el-popover>
 }

@@ -62,7 +62,7 @@ func Dropdown(triggerID, menuID, label string, leading templcomponent.Component)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"group flex w-full items-center gap-3 rounded-field px-2 py-2 text-sm font-normal text-base-content/70 outline-none transition hover:bg-base-300 hover:text-base-content aria-expanded:bg-base-300 aria-expanded:text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"group flex w-full cursor-pointer items-center gap-3 rounded-field px-2 py-2 text-sm font-normal text-base-content/70 outline-none transition hover:bg-base-300 hover:text-base-content aria-expanded:bg-base-300 aria-expanded:text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

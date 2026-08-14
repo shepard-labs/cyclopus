@@ -96,10 +96,11 @@ func TestLayoutAssetContract(t *testing.T) {
 				requireContains(t, output,
 					`<body class="min-h-full bg-base-100 font-sans text-base-content antialiased" hx-boost="true">`,
 					`class="min-w-0 lg:pl-56"`,
-					`class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-100 px-4 sm:px-6 lg:px-8"`,
+					`class="sticky top-0 z-30 border-b border-line bg-base-100"`,
+					`class="relative mx-auto flex h-14 max-w-5xl items-center justify-center px-4 sm:px-6 lg:px-8"`,
 					`class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-100 lg:flex"`,
 					`class="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4"`,
-					`<main class="p-4 sm:p-6 lg:p-8">`,
+					`<main class="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">`,
 					`id="mobile-navigation"`,
 				)
 				requireNotContains(t, output, `lg:pl-72`, `w-72`, `h-16`)
@@ -173,7 +174,7 @@ func TestWrapperMarkupContracts(t *testing.T) {
 		`.toLowerCase().indexOf(query) === -1`,
 		`root.dispatchEvent(new CustomEvent('commandselect'`,
 		`id="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title"`,
-		`<el-dialog-panel class="relative w-full max-w-lg transform overflow-hidden rounded-box border border-line bg-base-300`,
+		`<el-dialog-panel class="relative w-full max-w-lg transform overflow-hidden rounded-box border border-line bg-base-200 p-6 text-left text-base-content shadow-theme transition data-closed:translate-y-4 data-closed:opacity-0 data-closed:sm:scale-95"`,
 		`id="confirm-dialog-title"`,
 		`command="close" commandfor="confirm-dialog"`,
 		`id="advanced-trigger" type="button" command="--toggle" commandfor="advanced" aria-controls="advanced" aria-expanded="false"`,
@@ -407,4 +408,248 @@ func TestCommandPaletteTriggerUsesSuppliedVisibleTitle(t *testing.T) {
 func TestCommandPaletteSearchUsesBaseContentFocusIndicator(t *testing.T) {
 	output := renderComponent(t, withChildren(CommandPalette("palette-trigger", "palette-dialog", "Deploy commands"), markup(`<button data-command-value="deploy">Deploy</button>`)))
 	requireContains(t, output, `id="palette-dialog-input" type="search" role="combobox" aria-label="Search commands" aria-autocomplete="list" aria-controls="palette-dialog-listbox" aria-expanded="false" autocomplete="off" class="w-full bg-transparent text-sm outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300" placeholder="Type a command…"`)
+}
+
+func TestButtonVariantsAndTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		component   templ.Component
+		wantContain []string
+		wantAbsent  []string
+	}{
+		{
+			name: "primary submit button",
+			component: withChildren(Button(ButtonProps{
+				Variant: ButtonVariantPrimary,
+				Type:    ButtonTypeSubmit,
+			}), markup("Save")),
+			wantContain: []string{
+				`<button`,
+				`type="submit"`,
+				`bg-primary`,
+				`text-primary-content`,
+				`Save`,
+			},
+			wantAbsent: []string{`disabled?`, `disabled=""`, `disabled `},
+		},
+		{
+			name: "secondary default type button",
+			component: withChildren(Button(ButtonProps{
+				Variant: ButtonVariantSecondary,
+			}), markup("Cancel")),
+			wantContain: []string{
+				`<button`,
+				`type="button"`,
+				`border-line`,
+				`bg-base-300`,
+				`Cancel`,
+			},
+			wantAbsent: []string{`disabled?`, `disabled=""`, `disabled `},
+		},
+		{
+			name: "danger reset disabled button with custom class",
+			component: withChildren(Button(ButtonProps{
+				Variant:  ButtonVariantDanger,
+				Type:     ButtonTypeReset,
+				Disabled: true,
+				Class:    "w-full",
+			}), markup("Delete")),
+			wantContain: []string{
+				`<button`,
+				`type="reset"`,
+				`border-error/30`,
+				`hover:bg-error/10`,
+				` disabled`,
+				`w-full`,
+				`Delete`,
+			},
+		},
+		{
+			name:      "button link",
+			component: ButtonLink(ButtonVariantSecondary, "/settings", "Settings"),
+			wantContain: []string{
+				`<a`,
+				`href="/settings"`,
+				`border-line`,
+				`Settings`,
+			},
+			wantAbsent: []string{`<button`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := renderComponent(t, tt.component)
+			requireContains(t, output, tt.wantContain...)
+			if len(tt.wantAbsent) > 0 {
+				requireNotContains(t, output, tt.wantAbsent...)
+			}
+		})
+	}
+}
+
+func TestBreadcrumbs(t *testing.T) {
+	t.Run("renders multiple items links and active leaf", func(t *testing.T) {
+		items := []BreadcrumbItem{
+			{Label: "Home", Href: "/"},
+			{Label: "Projects", Href: "/projects"},
+			{Label: "Settings", Href: "/projects/settings"},
+		}
+		output := renderComponent(t, Breadcrumbs(items))
+		requireContains(t, output,
+			`<nav aria-label="Breadcrumb" class="flex">`,
+			`<ol role="list" class="flex items-center gap-2 text-xs text-base-content/65">`,
+			`<span class="text-base-content/40">/</span>`,
+			`href="/"`,
+			`href="/projects"`,
+			`aria-current="page"`,
+			`<span aria-current="page" class="text-base-content font-medium">Settings</span>`,
+		)
+		requireNotContains(t, output, `href="/projects/settings"`)
+	})
+
+	t.Run("single item without separator", func(t *testing.T) {
+		items := []BreadcrumbItem{
+			{Label: "Dashboard", Href: "/"},
+		}
+		output := renderComponent(t, Breadcrumbs(items))
+		requireContains(t, output,
+			`aria-current="page"`,
+			`Dashboard`,
+		)
+		requireNotContains(t, output, `<span class="text-base-content/40">/</span>`, `href="/"`)
+	})
+
+	t.Run("empty items", func(t *testing.T) {
+		output := renderComponent(t, Breadcrumbs(nil))
+		requireContains(t, output,
+			`<nav aria-label="Breadcrumb" class="flex">`,
+			`<ol role="list" class="flex items-center gap-2 text-xs text-base-content/65"></ol>`,
+		)
+	})
+}
+
+func TestCardComponents(t *testing.T) {
+	t.Run("Card with title and content", func(t *testing.T) {
+		output := renderComponent(t, withChildren(Card("Project Details"), markup("<p>Card body content</p>")))
+		requireContains(t, output,
+			`class="rounded-box border border-line bg-base-200 p-6"`,
+			`<h2 class="text-sm font-semibold text-base-content/80 mb-4">Project Details</h2>`,
+			`<p>Card body content</p>`,
+		)
+	})
+
+	t.Run("Card without title", func(t *testing.T) {
+		output := renderComponent(t, withChildren(Card(""), markup("<p>Only content</p>")))
+		requireContains(t, output,
+			`class="rounded-box border border-line bg-base-200 p-6"`,
+			`<p>Only content</p>`,
+		)
+		requireNotContains(t, output, `<h2`)
+	})
+
+	t.Run("SectionCard with title and content", func(t *testing.T) {
+		output := renderComponent(t, withChildren(SectionCard("Section Title"), markup("<span>Section body</span>")))
+		requireContains(t, output,
+			`class="rounded-box border border-line bg-base-200 p-6"`,
+			`<h2 class="text-sm font-semibold text-base-content/80 mb-4">Section Title</h2>`,
+			`<span>Section body</span>`,
+		)
+	})
+
+	t.Run("CardWithHeader", func(t *testing.T) {
+		output := renderComponent(t, withChildren(CardWithHeader("Config", "Manage your settings"), markup("<p>Body</p>")))
+		requireContains(t, output,
+			`<h2 class="text-sm font-semibold text-base-content/80">Config</h2>`,
+			`<p class="mt-1 text-xs text-base-content/65">Manage your settings</p>`,
+			`<p>Body</p>`,
+		)
+	})
+}
+
+func TestFormFieldAndInput(t *testing.T) {
+	t.Run("FormField standard rendering", func(t *testing.T) {
+		output := renderComponent(t, FormField("username", "username", "User Name", "text", "admin", "Enter username", true))
+		requireContains(t, output,
+			`for="username"`,
+			`User Name`,
+			`<span class="text-error" aria-hidden="true">*</span>`,
+			`id="username"`,
+			`name="username"`,
+			`type="text"`,
+			`value="admin"`,
+			`placeholder="Enter username"`,
+			`required`,
+		)
+	})
+
+	t.Run("FormFieldWithOptions with hint without error", func(t *testing.T) {
+		output := renderComponent(t, FormFieldWithOptions(FormFieldProps{
+			ID:          "token",
+			Name:        "token",
+			Label:       "API Token",
+			Type:        "password",
+			Value:       "secret",
+			Placeholder: "tok_...",
+			Required:    false,
+			Hint:        "Must be at least 32 characters.",
+		}))
+		requireContains(t, output,
+			`for="token"`,
+			`API Token`,
+			`type="password"`,
+			`value="secret"`,
+			`placeholder="tok_..."`,
+			`aria-describedby="token-hint"`,
+			`id="token-hint" class="text-xs text-base-content/60">Must be at least 32 characters.</p>`,
+		)
+		requireNotContains(t, output, `required`, `aria-invalid="true"`, `*</span>`)
+	})
+
+	t.Run("FormFieldWithOptions with error taking precedence over hint", func(t *testing.T) {
+		output := renderComponent(t, FormFieldWithOptions(FormFieldProps{
+			ID:       "email",
+			Name:     "email",
+			Label:    "Email",
+			Type:     "",
+			Value:    "bad-email",
+			Required: true,
+			Hint:     "We will send a code.",
+			Error:    "Invalid email address",
+			Disabled: true,
+		}))
+		requireContains(t, output,
+			`type="text"`,
+			`value="bad-email"`,
+			`aria-invalid="true"`,
+			`aria-describedby="email-error"`,
+			`id="email-error" class="text-xs text-error">Invalid email address</p>`,
+			` disabled`,
+			`required`,
+		)
+		requireNotContains(t, output, `id="email-hint"`, `We will send a code.`)
+	})
+
+	t.Run("Input standalone component", func(t *testing.T) {
+		output := renderComponent(t, Input("search-input", "q", "search", "term", "Search...", false))
+		requireContains(t, output,
+			`id="search-input"`,
+			`name="q"`,
+			`type="search"`,
+			`value="term"`,
+			`placeholder="Search..."`,
+			`class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"`,
+		)
+		requireNotContains(t, output, `required`, `<label`, `<p`)
+	})
+
+	t.Run("Input with empty type defaults to text", func(t *testing.T) {
+		output := renderComponent(t, Input("plain", "plain", "", "", "", true))
+		requireContains(t, output,
+			`id="plain"`,
+			`name="plain"`,
+			`type="text"`,
+			`required`,
+		)
+	})
 }

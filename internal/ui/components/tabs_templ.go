@@ -94,14 +94,14 @@ func Tabs(id string, tabs []TabItem, active int) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" class=\"border-b-2 px-1 py-3 text-sm font-medium aria-selected:border-primary aria-selected:text-primary\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" class=\"cursor-pointer border-b-2 px-1 py-3 text-sm font-medium aria-selected:border-primary aria-selected:text-primary\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(tab.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/tabs.templ`, Line: 11, Col: 261}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/components/tabs.templ`, Line: 11, Col: 276}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {

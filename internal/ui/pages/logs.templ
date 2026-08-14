@@ -14,22 +14,25 @@ templ Logs(app store.App, project store.Project, entries []observability.LogEntr
 
 templ logsContent(app store.App, project store.Project, entries []observability.LogEntry, nextCursor string, envID string, query string) {
 	<div class="space-y-4 h-full flex flex-col">
-		<div class="flex items-center gap-2 text-xs text-base-content/65">
-			<a href="/projects" class="hover:text-accent">Projects</a>
-			<span>/</span>
-			<a href={ templ.SafeURL("/projects/" + project.ID) } class="hover:text-accent">{ project.Name }</a>
-			<span>/</span>
-			<a href={ templ.SafeURL("/apps/" + app.ID) } class="hover:text-accent">{ app.Name }</a>
-			<span>/</span>
-			<span class="text-base-content">Logs</span>
-		</div>
+		@components.Breadcrumbs([]components.BreadcrumbItem{
+			{Label: "Projects", Href: "/projects"},
+			{Label: project.Name, Href: "/projects/" + project.ID},
+			{Label: app.Name, Href: "/apps/" + app.ID},
+			{Label: "Logs"},
+		})
 		<div class="flex items-center gap-3">
 			<form method="GET" action={ templ.SafeURL("/apps/" + app.ID + "/logs") } class="flex items-center gap-2 ml-auto">
 				if envID != "" {
 					<input type="hidden" name="env" value={ envID }/>
 				}
-				<label for="log-query" class="sr-only">Filter logs</label><input id="log-query" type="text" name="q" value={ query } placeholder="Filter logs…" class="w-64 rounded-field bg-base-300 px-3 py-2 text-sm ring-1 ring-line outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
-				<button type="submit" class="rounded-field bg-base-300 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-100">Search</button>
+				<label for="log-query" class="sr-only">Filter logs</label>
+				<input id="log-query" type="text" name="q" value={ query } placeholder="Filter logs…" class="w-64 rounded-field bg-base-300 px-3 py-2 text-sm ring-1 ring-line outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
+				@components.Button(components.ButtonProps{
+					Type:    components.ButtonTypeSubmit,
+					Variant: components.ButtonVariantSecondary,
+				}) {
+					Search
+				}
 			</form>
 		</div>
 		<div class="flex flex-1 flex-col overflow-hidden rounded-box bg-base-200 ring-1 ring-line shadow-theme">
@@ -55,7 +58,7 @@ templ LogsEntriesFragment(appID string, entries []observability.LogEntry, nextCu
 		}
 		if nextCursor != "" {
 			<div class="log-load-more border-t border-line bg-base-300 p-3">
-				<button type="button" class="flex w-full items-center justify-center gap-2 rounded-field bg-base-200 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300"
+				<button type="button" class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-field bg-base-200 px-3 py-2 text-sm font-medium ring-1 ring-line outline-none focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-300"
 					hx-get={ logsNextURL(appID, nextCursor, envID, query) }
 					hx-target="closest .log-load-more"
 					hx-swap="outerHTML"

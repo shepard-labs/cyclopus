@@ -5,7 +5,7 @@ package components
 // falls back to trimmed option text when omitted.
 templ CommandPalette(triggerID, dialogID, title string) {
 	<div data-command-palette>
-		<button id={ triggerID } type="button" command="show-modal" commandfor={ dialogID } aria-controls={ dialogID } class="inline-flex items-center gap-2 rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">@IconMagnifyingGlass("size-4")<span>{ title }</span></button>
+		<button id={ triggerID } type="button" command="show-modal" commandfor={ dialogID } aria-controls={ dialogID } class="inline-flex cursor-pointer items-center gap-2 rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium">@IconMagnifyingGlass("size-4")<span>{ title }</span></button>
 		@Dialog(dialogID, title) {
 			<div role="search" class="flex items-center gap-2 border-b border-line pb-3">
 				@IconMagnifyingGlass("size-5 text-base-content/50")

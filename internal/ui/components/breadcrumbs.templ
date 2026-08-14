@@ -1,0 +1,39 @@
+package components
+
+type BreadcrumbItem struct {
+	Label string
+	Href  string
+}
+
+templ Breadcrumbs(items []BreadcrumbItem) {
+	<nav aria-label="Breadcrumb" class="flex">
+		<ol role="list" class="flex items-center gap-2 text-xs text-base-content/65">
+			for i, item := range items {
+				if i > 0 {
+					<li aria-hidden="true" class="select-none">
+						<span class="text-base-content/40">/</span>
+					</li>
+				}
+				<li>
+					if item.Href != "" && i < len(items)-1 {
+						<a
+							href={ templ.SafeURL(item.Href) }
+							class="hover:text-primary transition-colors"
+						>
+							{ item.Label }
+						</a>
+					} else {
+						<span
+							if i == len(items)-1 {
+								aria-current="page"
+								class="text-base-content font-medium"
+							}
+						>
+							{ item.Label }
+						</span>
+					}
+				</li>
+			}
+		</ol>
+	</nav>
+}

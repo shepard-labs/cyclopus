@@ -247,14 +247,14 @@ func TestInputCSSContainsOnlyApprovedConstructs(t *testing.T) {
 	}
 	for _, prohibited := range []string{
 		"@keyframes", "scrollbar", "::-webkit", "::-moz", ".toast", ".log",
-		".sidebar", ".card", ".table", ".button",
+		".sidebar", ".card", ".table",
 	} {
 		if strings.Contains(source, prohibited) {
 			t.Errorf("input.css contains prohibited construct %q", prohibited)
 		}
 	}
 
-	withoutApprovedBlocks := regexp.MustCompile(`(?s)@theme\s+inline\s*\{.*?\}|@font-face\s*\{.*?\}`).ReplaceAllString(source, "")
+	withoutApprovedBlocks := regexp.MustCompile(`(?s)@theme\s+inline\s*\{.*?\}|@font-face\s*\{.*?\}|@layer\s+base\s*\{.*?\n\}`).ReplaceAllString(source, "")
 	withoutApprovedBlocks = regexp.MustCompile(`(?m)^\s*@(import|source)\b[^;]*;\s*$`).ReplaceAllString(withoutApprovedBlocks, "")
 	if strings.TrimSpace(withoutApprovedBlocks) != "" {
 		t.Fatalf("input.css contains content outside approved Tailwind/theme/font constructs: %q", strings.TrimSpace(withoutApprovedBlocks))

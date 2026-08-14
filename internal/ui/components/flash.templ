@@ -4,7 +4,31 @@ import "github.com/shepard-labs/cyclopus/internal/ui"
 
 templ Flash(f *ui.FlashMessage) {
 	if f != nil {
-		<div id="flash-region" class="fixed top-4 right-4 z-50" aria-live="polite">@Toast("flash-message", f.Kind, f.Message)</div>
-		<script>setTimeout(function(){var n=document.getElementById('flash-message');if(n){n.dataset.leaving='true';setTimeout(function(){n.remove()},300)}},5000)</script>
+		<div id="flash-region" class="fixed bottom-4 right-4 z-50 transition-all duration-300 ease-out" aria-live="polite">@Toast("flash-message", f.Kind, f.Message)</div>
+		<script>
+			(function(){
+				var toast = document.getElementById('flash-message');
+				if (!toast) return;
+				toast.style.transform = 'translateX(100%)';
+				toast.style.opacity = '0';
+				requestAnimationFrame(function(){
+					requestAnimationFrame(function(){
+						toast.style.transform = 'translateX(0)';
+						toast.style.opacity = '1';
+					});
+				});
+				setTimeout(function(){
+					if(toast){
+						toast.dataset.leaving='true';
+						toast.style.transform = 'translateX(100%)';
+						toast.style.opacity = '0';
+						setTimeout(function(){toast.remove()},300);
+					}
+				},5000);
+			})();
+		</script>
 	}
 }
+
+
+

@@ -34,7 +34,7 @@ func Sidebar(org store.Organization, user store.User, currentPath string) templ.
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<el-dialog><dialog id=\"mobile-navigation\" aria-labelledby=\"mobile-navigation-title\" class=\"backdrop:bg-transparent lg:hidden\"><el-dialog-backdrop class=\"fixed inset-0 backdrop-blur-sm transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200\"></el-dialog-backdrop><div tabindex=\"0\" class=\"fixed inset-0 flex focus:outline-none\"><el-dialog-panel class=\"group/dialog-panel relative mr-16 flex w-full max-w-xs flex-1 transform transition duration-300 ease-in-out data-closed:-translate-x-full\"><div class=\"absolute top-0 left-full flex w-16 justify-center pt-5 duration-300 group-data-closed/dialog-panel:opacity-0\"><button type=\"button\" command=\"close\" commandfor=\"mobile-navigation\" class=\"rounded-field p-2 text-base-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-100\"><span class=\"sr-only\">Close navigation</span>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<el-dialog><dialog id=\"mobile-navigation\" aria-labelledby=\"mobile-navigation-title\" class=\"backdrop:bg-transparent lg:hidden\"><el-dialog-backdrop class=\"fixed inset-0 backdrop-blur-sm transition-opacity data-closed:opacity-0 data-enter:duration-300 data-leave:duration-200\"></el-dialog-backdrop><div tabindex=\"0\" class=\"fixed inset-0 flex focus:outline-none\"><el-dialog-panel class=\"group/dialog-panel relative mr-16 flex w-full max-w-xs flex-1 transform transition duration-300 ease-in-out data-closed:-translate-x-full\"><div class=\"absolute top-0 left-full flex w-16 justify-center pt-5 duration-300 group-data-closed/dialog-panel:opacity-0\"><button type=\"button\" command=\"close\" commandfor=\"mobile-navigation\" class=\"cursor-pointer rounded-field p-2 text-base-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-100\"><span class=\"sr-only\">Close navigation</span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -87,7 +87,7 @@ func MobileNavTrigger() templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<button type=\"button\" command=\"show-modal\" commandfor=\"mobile-navigation\" aria-controls=\"mobile-navigation\" class=\"mr-4 -ml-2 rounded-field p-2 text-base-content/70 outline-none hover:bg-base-300 hover:text-base-content focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 lg:hidden\"><span class=\"sr-only\">Open navigation</span>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<button type=\"button\" command=\"show-modal\" commandfor=\"mobile-navigation\" aria-controls=\"mobile-navigation\" class=\"mr-4 -ml-2 cursor-pointer rounded-field p-2 text-base-content/70 outline-none hover:bg-base-300 hover:text-base-content focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 lg:hidden\"><span class=\"sr-only\">Open navigation</span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

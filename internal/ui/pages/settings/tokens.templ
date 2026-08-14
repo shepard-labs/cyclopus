@@ -19,26 +19,29 @@ templ tokensContent(tokens []store.APIToken, createdToken string, errMsg string)
 				<code class="block break-all rounded-field border border-success/20 bg-base-300 p-3 font-mono text-xs text-base-content">{ createdToken }</code>
 			</div>
 		}
-		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6">
-			<h2 class="text-sm font-semibold text-base-content/80">Create token</h2>
+		@components.SectionCard("Create token") {
 			if errMsg != "" {
 				@components.Alert("error", errMsg)
 			}
 			<form method="POST" action="/settings/tokens" class="space-y-4">
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div>
-						<div><label for="tok-name" class="block text-xs font-medium">Name</label><input type="text" id="tok-name" name="name" required placeholder="CI deploy token" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/></div>
+						@components.FormField("tok-name", "name", "Name", "text", "", "CI deploy token", true)
 					</div>
 					<div>
-						<label for="tok-scopes" class="block text-xs font-medium">Scopes <span class="text-base-content/50 font-normal">(comma-separated)</span></label>
-						<input type="text" id="tok-scopes" name="scopes" placeholder="deploy:app-id" class="mt-2 block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
+						@components.FormField("tok-scopes", "scopes", "Scopes", "text", "", "deploy:app-id", false)
 					</div>
 				</div>
-				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Create token</button>
+				@components.Button(components.ButtonProps{
+					Type:    components.ButtonTypeSubmit,
+					Variant: components.ButtonVariantPrimary,
+				}) {
+					Create token
+				}
 			</form>
-		</section>
+		}
 		if len(tokens) > 0 {
-			<section class="rounded-box border border-line bg-base-200 p-6">
+			@components.Card("") {
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
@@ -62,14 +65,19 @@ templ tokensContent(tokens []store.APIToken, createdToken string, errMsg string)
 								</td>
 								<td class="py-2 text-right">
 									<form method="POST" action={ templ.SafeURL("/settings/tokens/" + t.ID + "/revoke") } onsubmit="return confirm('Revoke this token?')">
-									<button type="submit" class="rounded-field border border-error/30 px-3 py-2 text-sm font-medium text-base-content hover:bg-error/10">Revoke</button>
+										@components.Button(components.ButtonProps{
+											Type:    components.ButtonTypeSubmit,
+											Variant: components.ButtonVariantDanger,
+										}) {
+											Revoke
+										}
 									</form>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
-			</section>
+			}
 		}
 	</div>
 }

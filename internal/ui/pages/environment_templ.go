@@ -360,7 +360,7 @@ func envDetailContent(
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\"> <button type=\"submit\" class=\"rounded-field px-2 py-1 text-sm font-medium hover:bg-base-300\" onclick=\"return confirm('Roll back to release '+ this.form.release_id.value.substring(0,8) + '?')\">Rollback</button></form>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\"> <button type=\"submit\" class=\"cursor-pointer rounded-field px-2 py-1 text-sm font-medium hover:bg-base-300\" onclick=\"return confirm('Roll back to release '+ this.form.release_id.value.substring(0,8) + '?')\">Rollback</button></form>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

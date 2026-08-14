@@ -12,7 +12,7 @@ templ Sidebar(org store.Organization, user store.User, currentPath string) {
 			<div tabindex="0" class="fixed inset-0 flex focus:outline-none">
 				<el-dialog-panel class="group/dialog-panel relative mr-16 flex w-full max-w-xs flex-1 transform transition duration-300 ease-in-out data-closed:-translate-x-full">
 					<div class="absolute top-0 left-full flex w-16 justify-center pt-5 duration-300 group-data-closed/dialog-panel:opacity-0">
-						<button type="button" command="close" commandfor="mobile-navigation" class="rounded-field p-2 text-base-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-100"><span class="sr-only">Close navigation</span>@IconXMark("size-6")</button>
+						<button type="button" command="close" commandfor="mobile-navigation" class="cursor-pointer rounded-field p-2 text-base-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-100"><span class="sr-only">Close navigation</span>@IconXMark("size-6")</button>
 					</div>
 					<div class="flex grow flex-col overflow-y-auto border-r border-line bg-base-100">
 						@sidebarContent(org, user, currentPath, "mobile-navigation-title", "mobile-account-trigger", "mobile-account-menu")
@@ -27,7 +27,7 @@ templ Sidebar(org store.Organization, user store.User, currentPath string) {
 }
 
 templ MobileNavTrigger() {
-	<button type="button" command="show-modal" commandfor="mobile-navigation" aria-controls="mobile-navigation" class="mr-4 -ml-2 rounded-field p-2 text-base-content/70 outline-none hover:bg-base-300 hover:text-base-content focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 lg:hidden">
+	<button type="button" command="show-modal" commandfor="mobile-navigation" aria-controls="mobile-navigation" class="mr-4 -ml-2 cursor-pointer rounded-field p-2 text-base-content/70 outline-none hover:bg-base-300 hover:text-base-content focus-visible:ring-2 focus-visible:ring-base-content focus-visible:ring-offset-2 focus-visible:ring-offset-base-200 lg:hidden">
 		<span class="sr-only">Open navigation</span>
 		@Icon("size-6") { <path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path> }
 	</button>

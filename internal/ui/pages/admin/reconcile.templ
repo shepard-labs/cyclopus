@@ -13,8 +13,7 @@ templ Reconcile(runs []store.ReconciliationRun, user store.User, org store.Organ
 
 templ reconcileContent(runs []store.ReconciliationRun, org store.Organization) {
 	<div class="space-y-6 max-w-4xl">
-		<section class="space-y-4 rounded-box border border-line bg-base-200 p-6">
-			<h2 class="text-sm font-semibold text-base-content/80">Start reconciliation</h2>
+		@components.SectionCard("Start reconciliation") {
 			<form method="POST" action="/admin/reconcile" class="flex flex-wrap items-center gap-4">
 				<div class="flex items-center gap-2">
 					<label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" id="dry-run" name="dry_run" value="true" checked class="size-4 rounded-field border-line bg-base-300 text-primary"/>Dry run <span class="text-xs font-normal text-base-content/50">(report changes without applying)</span></label>
@@ -22,11 +21,15 @@ templ reconcileContent(runs []store.ReconciliationRun, org store.Organization) {
 				<div class="flex items-center gap-2">
 					<label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" id="prune" name="prune" value="true" class="size-4 rounded-field border-line bg-base-300 text-primary"/>Prune orphaned objects</label>
 				</div>
-				<button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Run reconciliation</button>
+				@components.Button(components.ButtonProps{
+					Type:    components.ButtonTypeSubmit,
+					Variant: components.ButtonVariantPrimary,
+				}) {
+					Run reconciliation
+				}
 			</form>
-		</section>
-		<section class="rounded-box border border-line bg-base-200 p-6">
-			<h2 class="text-sm font-semibold text-base-content/80 mb-4">Recent runs</h2>
+		}
+		@components.Card("Recent runs") {
 			if len(runs) == 0 {
 				<p class="text-sm text-base-content/65">No reconciliation runs yet.</p>
 			} else {
@@ -61,6 +64,6 @@ templ reconcileContent(runs []store.ReconciliationRun, org store.Organization) {
 					</tbody>
 				</table>
 			}
-		</section>
+		}
 	</div>
 }

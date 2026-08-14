@@ -174,7 +174,7 @@ func Select(id, name, label, value string, options []SelectOption, required bool
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"grid w-full cursor-default grid-cols-1 rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-left text-sm font-medium text-base-content outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"><el-selectedcontent id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"grid w-full cursor-pointer grid-cols-1 rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-left text-sm font-medium text-base-content outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary\"><el-selectedcontent id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

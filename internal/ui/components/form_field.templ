@@ -1,0 +1,83 @@
+package components
+
+type FormFieldProps struct {
+	ID          string
+	Name        string
+	Label       string
+	Type        string
+	Value       string
+	Placeholder string
+	Required    bool
+	Hint        string
+	Error       string
+	Disabled    bool
+	Class       string
+}
+
+func inputTypeAttr(t string) string {
+	if t == "" {
+		return "text"
+	}
+	return t
+}
+
+templ FormField(id, name, label, typ, value, placeholder string, required bool) {
+	@FormFieldWithOptions(FormFieldProps{
+		ID:          id,
+		Name:        name,
+		Label:       label,
+		Type:        typ,
+		Value:       value,
+		Placeholder: placeholder,
+		Required:    required,
+	})
+}
+
+templ FormFieldWithOptions(props FormFieldProps) {
+	<div class={ "flex flex-col gap-1.5", props.Class }>
+		if props.Label != "" {
+			<label
+				for={ props.ID }
+				class="text-xs font-medium text-base-content/80"
+			>
+				{ props.Label }
+				if props.Required {
+					<span class="text-error" aria-hidden="true">*</span>
+				}
+			</label>
+		}
+		<input
+			id={ props.ID }
+			name={ props.Name }
+			type={ inputTypeAttr(props.Type) }
+			value={ props.Value }
+			placeholder={ props.Placeholder }
+			required?={ props.Required }
+			disabled?={ props.Disabled }
+			if props.Error != "" {
+				aria-invalid="true"
+				aria-describedby={ props.ID + "-error" }
+			} else if props.Hint != "" {
+				aria-describedby={ props.ID + "-hint" }
+			}
+			class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"
+		/>
+		if props.Error != "" {
+			<p id={ props.ID + "-error" } class="text-xs text-error">{ props.Error }</p>
+		} else if props.Hint != "" {
+			<p id={ props.ID + "-hint" } class="text-xs text-base-content/60">{ props.Hint }</p>
+		}
+	</div>
+}
+
+templ Input(id, name, typ, value, placeholder string, required bool) {
+	<input
+		id={ id }
+		name={ name }
+		type={ inputTypeAttr(typ) }
+		value={ value }
+		placeholder={ placeholder }
+		required?={ required }
+		class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"
+	/>
+}

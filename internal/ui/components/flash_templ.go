@@ -32,7 +32,7 @@ func Flash(f *ui.FlashMessage) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		if f != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"flash-region\" class=\"fixed top-4 right-4 z-50\" aria-live=\"polite\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"flash-region\" class=\"fixed bottom-4 right-4 z-50 transition-all duration-300 ease-out\" aria-live=\"polite\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -40,7 +40,7 @@ func Flash(f *ui.FlashMessage) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div><script>setTimeout(function(){var n=document.getElementById('flash-message');if(n){n.dataset.leaving='true';setTimeout(function(){n.remove()},300)}},5000)</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div><script>\n\t\t\t(function(){\n\t\t\t\tvar toast = document.getElementById('flash-message');\n\t\t\t\tif (!toast) return;\n\t\t\t\ttoast.style.transform = 'translateX(100%)';\n\t\t\t\ttoast.style.opacity = '0';\n\t\t\t\trequestAnimationFrame(function(){\n\t\t\t\t\trequestAnimationFrame(function(){\n\t\t\t\t\t\ttoast.style.transform = 'translateX(0)';\n\t\t\t\t\t\ttoast.style.opacity = '1';\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\tsetTimeout(function(){\n\t\t\t\t\tif(toast){\n\t\t\t\t\t\ttoast.dataset.leaving='true';\n\t\t\t\t\t\ttoast.style.transform = 'translateX(100%)';\n\t\t\t\t\t\ttoast.style.opacity = '0';\n\t\t\t\t\t\tsetTimeout(function(){toast.remove()},300);\n\t\t\t\t\t}\n\t\t\t\t},5000);\n\t\t\t})();\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

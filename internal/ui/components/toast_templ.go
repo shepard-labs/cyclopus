@@ -55,7 +55,7 @@ func Toast(id, kind, message string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-box border border-primary/30 bg-primary/10 p-4 text-base-content shadow-theme transition duration-300 data-[leaving=true]:translate-x-4 data-[leaving=true]:opacity-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"pointer-events-auto relative flex w-full max-w-sm items-start gap-3 overflow-hidden rounded-box border border-primary/30 bg-primary/10 p-4 text-base-content shadow-theme transition-all duration-300 ease-out data-[leaving=true]:translate-x-full data-[leaving=true]:opacity-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -83,7 +83,7 @@ func Toast(id, kind, message string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</p><button type=\"button\" aria-label=\"Dismiss notification\" onclick=\"this.parentElement.dataset.leaving='true';setTimeout(()=>this.parentElement.remove(),300)\" class=\"cursor-pointer rounded-field p-0.5 text-base-content/60 hover:text-base-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</p><button type=\"button\" aria-label=\"Dismiss notification\" onclick=\"var p=this.closest('[role=alert],[role=status]');if(p){p.dataset.leaving='true';p.style.transform='translateX(100%)';p.style.opacity='0';setTimeout(()=>p.remove(),300)}\" class=\"cursor-pointer rounded-field p-0.5 text-base-content/60 hover:text-base-content\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

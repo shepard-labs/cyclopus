@@ -1,0 +1,32 @@
+package components
+
+templ Card(title string) {
+	<div class="rounded-box border border-line bg-base-200 p-6">
+		if title != "" {
+			<h2 class="text-sm font-semibold text-base-content/80 mb-4">{ title }</h2>
+		}
+		{ children... }
+	</div>
+}
+
+templ SectionCard(title string) {
+	@Card(title) {
+		{ children... }
+	}
+}
+
+templ CardWithHeader(title string, description string) {
+	<div class="rounded-box border border-line bg-base-200 p-6">
+		if title != "" || description != "" {
+			<div class="mb-4">
+				if title != "" {
+					<h2 class="text-sm font-semibold text-base-content/80">{ title }</h2>
+				}
+				if description != "" {
+					<p class="mt-1 text-xs text-base-content/65">{ description }</p>
+				}
+			</div>
+		}
+		{ children... }
+	</div>
+}
