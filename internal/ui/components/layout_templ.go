@@ -134,7 +134,7 @@ func AuthPage(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " — Cyclopus</title><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"/static/css/output.css\"><script src=\"/static/htmx.min.js\" defer></script><script type=\"module\" src=\"https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1\"></script></head><body class=\"flex min-h-full items-center justify-center bg-base-100 p-6 font-sans text-base-content antialiased\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " — Cyclopus</title><script src=\"/static/theme.js\"></script><link rel=\"stylesheet\" href=\"/static/css/output.css\"><script src=\"/static/htmx.min.js\" defer></script><script type=\"module\" src=\"https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1\"></script></head><body class=\"flex min-h-screen items-center justify-center bg-base-100 p-6 font-sans text-base-content antialiased\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
