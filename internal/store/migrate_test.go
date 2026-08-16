@@ -17,8 +17,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir() error = %v", err)
 	}
-	if len(entries) != 3 || entries[0].Name() != "000001_foundation.up.sql" || entries[1].Name() != "000002_user_profiles.up.sql" || entries[2].Name() != "000003_avatar_key_format.up.sql" {
-		t.Fatalf("embedded migrations = %v, want baseline and user profile migrations", entries)
+	if len(entries) != 4 || entries[0].Name() != "000001_foundation.up.sql" || entries[1].Name() != "000002_user_profiles.up.sql" || entries[2].Name() != "000003_avatar_key_format.up.sql" || entries[3].Name() != "000004_self_hosted_github_import_epoch.up.sql" {
+		t.Fatalf("embedded migrations = %v, want migrations 000001 through 000004", entries)
 	}
 	contents, err := fs.ReadFile(Migrations, "migrations/000001_foundation.up.sql")
 	if err != nil {

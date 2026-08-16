@@ -37,50 +37,17 @@ func TestRegistryStoreCRUDIntegration(t *testing.T) {
 	seedTenant(t, pool, tenantTwo())
 	ctx := context.Background()
 
-	secretRef := "k8s-secret://cyclopus/registry-creds#dockerconfigjson"
-	created, err := dataStore.CreateRegistry(ctx, SaveRegistryParams{
-		Registry:    Registry{ID: registryOneID, OrgID: orgOneID, Provider: "ghcr", RegistryURL: "ghcr.io/acme", CredentialSecretRef: secretRef},
-		Idempotency: idempotencyClaimHelper(t, dataStore, orgOneID, "registry.create", "create-1"),
-		Audit:       testAudit("00000000-0000-0000-0000-0000000000f5", "registry.created", registryOneID),
-	})
-	if err != nil || created.ID != registryOneID || created.CredentialSecretRef != secretRef {
-		t.Fatalf("CreateRegistry() = %+v, %v", created, err)
-	}
-
-	// A duplicate (org_id, registry_url) violates the UNIQUE constraint.
-	if _, err := dataStore.CreateRegistry(ctx, SaveRegistryParams{
-		Registry:    Registry{ID: registryTwoID, OrgID: orgOneID, Provider: "gcr", RegistryURL: "ghcr.io/acme", CredentialSecretRef: secretRef},
-		Idempotency: idempotencyClaimHelper(t, dataStore, orgOneID, "registry.create", "create-dup"),
-		Audit:       testAudit("00000000-0000-0000-0000-0000000000f6", "registry.created", registryTwoID),
-	}); !errors.Is(err, ErrAlreadyExists) {
-		t.Fatalf("CreateRegistry(duplicate url) error = %v, want ErrAlreadyExists", err)
-	}
-
-	fetched, err := dataStore.GetRegistry(ctx, orgOneID, registryOneID)
-	if err != nil || fetched.Provider != "ghcr" || fetched.RegistryURL != "ghcr.io/acme" {
-		t.Fatalf("GetRegistry() = %+v, %v", fetched, err)
-	}
-	// Org scoping: another org cannot read this registry.
-	if _, err := dataStore.GetRegistry(ctx, orgTwoID, registryOneID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetRegistry(other org) error = %v, want ErrNotFound", err)
-	}
-
 	listed, err := dataStore.ListRegistries(ctx, orgOneID)
-	if err != nil || len(listed) != 1 || listed[0].ID != registryOneID {
-		t.Fatalf("ListRegistries() = %+v, %v", listed, err)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("ListRegistries() = %+v, %v, want empty", listed, err)
 	}
 	// Org scoping on List: org two sees none of org one's registries.
 	if other, err := dataStore.ListRegistries(ctx, orgTwoID); err != nil || len(other) != 0 {
 		t.Fatalf("ListRegistries(other org) = %+v, %v, want empty", other, err)
 	}
 
-	if err := dataStore.DeleteRegistry(ctx, orgOneID, registryOneID,
-		idempotencyClaimHelper(t, dataStore, orgOneID, "registry.delete", "delete-1"),
-		testAudit("00000000-0000-0000-0000-0000000000f7", "registry.deleted", registryOneID)); err != nil {
-		t.Fatalf("DeleteRegistry() error = %v", err)
-	}
-	if _, err := dataStore.GetRegistry(ctx, orgOneID, registryOneID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetRegistry() after delete error = %v, want ErrNotFound", err)
+	if _, err := dataStore.CreateRegistry(ctx, SaveRegistryParams{}); !errors.Is(err, ErrFailedPrecondition) {
+		t.Fatalf("CreateRegistry() error = %v, want ErrFailedPrecondition", err)
 	}
 }
 
@@ -93,17 +60,14 @@ func TestRegistryStoreDeleteRestrictedIntegration(t *testing.T) {
 	seedTenant(t, pool, tenantOne())
 	ctx := context.Background()
 
-	secretRef := "k8s-secret://cyclopus/registry-creds#dockerconfigjson"
-	if _, err := dataStore.CreateRegistry(ctx, SaveRegistryParams{
-		Registry:    Registry{ID: registryOneID, OrgID: orgOneID, Provider: "ghcr", RegistryURL: "ghcr.io/acme", CredentialSecretRef: secretRef},
-		Idempotency: idempotencyClaimHelper(t, dataStore, orgOneID, "registry.create", "create-restrict"),
-		Audit:       testAudit("00000000-0000-0000-0000-0000000000f8", "registry.created", registryOneID),
-	}); err != nil {
-		t.Fatalf("CreateRegistry() error = %v", err)
+	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,active_generation,
+		active_credential_secret_ref,state,reconciliation_generation) VALUES($1,$2,'ghcr','ghcr.io',1,$3,'ready',1)`,
+		registryOneID, orgOneID, "k8s-secret://cyclopus/registry-creds#dockerconfigjson"); err != nil {
+		t.Fatalf("seed registry: %v", err)
 	}
 
 	// Point an app at the registry so the FK RESTRICT applies on delete.
-	if _, err := pool.Exec(ctx, `UPDATE apps SET registry_id=$1, image_repository='acme/app' WHERE org_id=$2 AND id=$3`,
+	if _, err := pool.Exec(ctx, `UPDATE apps SET registry_id=$1, image_repository='ghcr.io/acme/app',image_visibility='private' WHERE org_id=$2 AND id=$3`,
 		registryOneID, orgOneID, appOneID); err != nil {
 		t.Fatalf("attach registry to app: %v", err)
 	}

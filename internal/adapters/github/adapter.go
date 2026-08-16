@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	gh "github.com/google/go-github/v88/github"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 const maxCorrelationPages = 10
 
 type OrchestrationStore interface {
-	BeginDispatchReconciliation(context.Context, string, string, string, time.Duration) error
-	RecordDispatchedRun(context.Context, string, string, string, string, int64, string, time.Duration) error
+	BeginDispatchReconciliation(context.Context, string, string, string, string, string, string, time.Duration) error
+	RecordDispatchedRun(context.Context, string, string, string, string, int64, string, string, time.Duration) error
 	ContinueDispatchReconciliation(context.Context, string, string, string, time.Duration) error
 	ContinueRunReconciliation(context.Context, string, string, string, string, *string, time.Duration) error
 	ResolveOrchestration(context.Context, store.ResolveOrchestrationParams) (store.OrchestrationJob, error)
@@ -62,7 +62,22 @@ func (a *Adapter) Dispatch(ctx context.Context, job *store.GitHubRecoveryJob) er
 	if err != nil {
 		return permanentJobError("github_repository_invalid", err)
 	}
-	if err := a.store.BeginDispatchReconciliation(ctx, job.OrgID, job.ID, a.config.Owner, a.config.DispatchObservationInterval); err != nil {
+	requestCtx, cancel := context.WithTimeout(ctx, a.config.RequestTimeout)
+	ref, _, err := client.Git.GetRef(requestCtx, owner, repository, normalizeRefForAPI(job.GitRef))
+	cancel()
+	if err != nil {
+		return classifyError("resolve dispatch ref", err)
+	}
+	requestCtx, cancel = context.WithTimeout(ctx, a.config.RequestTimeout)
+	workflowFile, _, _, err := client.Repositories.GetContents(requestCtx, owner, repository, job.WorkflowID, &gh.RepositoryContentGetOptions{Ref: job.GitRef})
+	cancel()
+	if err != nil {
+		return classifyError("resolve workflow revision", err)
+	}
+	if workflowFile == nil || workflowFile.GetPath() == "" || workflowFile.GetSHA() == "" {
+		return permanentJobError("github_workflow_invalid", fmt.Errorf("GitHub workflow %q did not resolve to a file", job.WorkflowID))
+	}
+	if err := a.store.BeginDispatchReconciliation(ctx, job.OrgID, job.ID, a.config.Owner, ref.GetObject().GetSHA(), workflowFile.GetPath(), workflowFile.GetSHA(), a.config.DispatchObservationInterval); err != nil {
 		return fmt.Errorf("begin GitHub dispatch reconciliation: %w", err)
 	}
 	request := gh.CreateWorkflowDispatchEventRequest{
@@ -72,7 +87,7 @@ func (a *Adapter) Dispatch(ctx context.Context, job *store.GitHubRecoveryJob) er
 			"commit_sha":           job.CommitSHA,
 		},
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, a.config.RequestTimeout)
+	requestCtx, cancel = context.WithTimeout(ctx, a.config.RequestTimeout)
 	defer cancel()
 	_, _, err = client.Actions.CreateWorkflowDispatchEventByFileName(requestCtx, owner, repository, job.WorkflowID, request)
 	if err != nil {
@@ -140,7 +155,7 @@ func (a *Adapter) reconcileUncorrelated(ctx context.Context, client *gh.Client, 
 	if len(matches) == 1 {
 		run := matches[0]
 		return a.store.RecordDispatchedRun(ctx, job.OrgID, job.ID, a.config.Owner,
-			"cyclopus:"+job.ID, run.GetID(), normalizeNonterminalStatus(run.GetStatus()), a.config.RunPollInterval)
+			"cyclopus:"+job.ID, run.GetID(), normalizeNonterminalStatus(run.GetStatus()), run.GetHeadSHA(), a.config.RunPollInterval)
 	}
 	if !a.config.Now().Before(*job.DispatchDeadlineAt) {
 		return a.resolveMissingRun(ctx, job)
@@ -231,7 +246,7 @@ func listMatchingRuns(ctx context.Context, client *gh.Client, owner, repository 
 		}
 		for _, run := range runs.WorkflowRuns {
 			if run.GetEvent() == "workflow_dispatch" && run.GetDisplayTitle() == wantedTitle &&
-				run.GetHeadSHA() == job.CommitSHA && run.GetHeadBranch() == normalizeGitRef(job.GitRef) &&
+				run.GetHeadSHA() == job.DispatchRefObservedSHA && run.GetHeadBranch() == normalizeGitRef(job.GitRef) &&
 				run.GetHeadRepository().GetFullName() == job.RepositoryFullName &&
 				run.CreatedAt != nil && !run.CreatedAt.Time.UTC().Truncate(time.Second).Before(dispatchedAt) {
 				matches = append(matches, run)
@@ -244,6 +259,14 @@ func listMatchingRuns(ctx context.Context, client *gh.Client, owner, repository 
 
 func normalizeGitRef(ref string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/tags/")
+}
+
+func normalizeRefForAPI(ref string) string {
+	ref = strings.TrimPrefix(ref, "refs/")
+	if strings.HasPrefix(ref, "heads/") || strings.HasPrefix(ref, "tags/") {
+		return ref
+	}
+	return "heads/" + ref
 }
 
 func permanentJobError(code string, err error) error {
@@ -280,7 +303,7 @@ func normalizeNonterminalStatus(status string) string {
 
 func isSupportedConclusion(conclusion string) bool {
 	switch conclusion {
-	case "success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required", "stale", "startup_failure":
+	case "success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required", "stale":
 		return true
 	default:
 		return false

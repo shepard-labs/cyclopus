@@ -66,7 +66,7 @@ func (s *Store) ClaimEnvironmentLifecycleJob(ctx context.Context, orgID, owner s
 			  AND (job.kind<>'teardown' OR (environment.in_progress_release_id IS NULL AND NOT EXISTS (
 			    SELECT 1 FROM orchestration_jobs orchestration WHERE orchestration.org_id=job.org_id
 			      AND orchestration.environment_id=job.environment_id
-			      AND orchestration.status IN ('leased','dispatch_reconciling','dispatched')
+			      AND orchestration.status IN ('leased','dispatch_reconciling','dispatched','resolving_image','deploying')
 			  )))
 			ORDER BY CASE job.kind WHEN 'teardown' THEN 0 ELSE 1 END,job.created_at,job.id
 			FOR UPDATE OF job SKIP LOCKED LIMIT 1
@@ -92,11 +92,11 @@ func (s *Store) ClaimEnvironmentLifecycleJob(ctx context.Context, orgID, owner s
 
 func appSelectColumns(alias string) string {
 	return alias + `.id::text,` + alias + `.org_id::text,` + alias + `.project_id::text,` + alias + `.name,` + alias + `.slug,` + alias + `.hostname_label,
-		` + alias + `.registry_id::text,registry.registry_url,` + alias + `.image_repository,` + alias + `.container_port,` + alias + `.health_check_path,` + alias + `.scaling_mode,
+		` + alias + `.registry_id::text,registry.registry_host,` + alias + `.image_repository,` + alias + `.container_port,` + alias + `.health_check_path,` + alias + `.scaling_mode,
 		` + alias + `.min_replicas,` + alias + `.max_replicas,` + alias + `.hpa_target_cpu_percent,` + alias + `.keda_cron_schedules,` + alias + `.keda_http_target_pending_requests,
 		` + alias + `.cpu_request_millicores,` + alias + `.cpu_limit_millicores,
 		` + alias + `.memory_request_mib,` + alias + `.memory_limit_mib,` + alias + `.previews_enabled,` + alias + `.max_preview_environments,` + alias + `.preview_idle_ttl_hours,
-		` + alias + `.deploy_timeout_seconds,` + alias + `.release_retention_count,` + alias + `.runtime_class,` + alias + `.ci_workflow_id,` + alias + `.created_at,` + alias + `.deleted_at`
+		` + alias + `.deploy_timeout_seconds,` + alias + `.release_retention_count,` + alias + `.runtime_class,` + alias + `.github_workflow_path,` + alias + `.production_branch,` + alias + `.annotation_policy,` + alias + `.image_visibility,` + alias + `.desired_generation,` + alias + `.cleanup_state,` + alias + `.created_at,` + alias + `.deleted_at`
 }
 
 func scanLifecycleJob(row rowScanner, job *EnvironmentLifecycleJob) error {
@@ -112,7 +112,9 @@ func scanLifecycleJob(row rowScanner, job *EnvironmentLifecycleJob) error {
 		&job.App.CPURequestMillicores, &job.App.CPULimitMillicores,
 		&job.App.MemoryRequestMiB, &job.App.MemoryLimitMiB, &job.App.PreviewsEnabled,
 		&job.App.MaxPreviewEnvironments, &job.App.PreviewIdleTTLHours, &job.App.DeployTimeoutSeconds,
-		&job.App.ReleaseRetentionCount, &job.App.RuntimeClass, &job.App.CIWorkflowID, &job.App.CreatedAt, &job.App.DeletedAt)
+		&job.App.ReleaseRetentionCount, &job.App.RuntimeClass, &job.App.GitHubWorkflowPath, &job.App.ProductionBranch,
+		&job.App.AnnotationPolicy, &job.App.ImageVisibility, &job.App.DesiredGeneration, &job.App.CleanupState,
+		&job.App.CreatedAt, &job.App.DeletedAt)
 	if err != nil {
 		return err
 	}
@@ -209,8 +211,9 @@ func (s *Store) RescheduleEnvironmentLifecycle(ctx context.Context, job Environm
 			_, err = tx.Exec(ctx, `UPDATE environments SET lifecycle_status='failed',lifecycle_error_code=$3,
 				lifecycle_error_message=$4 WHERE org_id=$1 AND id=$2 AND lifecycle_status<>'torn_down'`, job.OrgID, job.EnvironmentID, code, message)
 			if err == nil && job.Kind == "provision" {
-				_, err = tx.Exec(ctx, `UPDATE orchestration_jobs SET status='failed',pending_commit_sha=NULL,
-					pending_idempotency_key=NULL,terminal_error_code='environment_provision_failed',
+				_, err = tx.Exec(ctx, `UPDATE orchestration_jobs SET status='failed',pending_github_workflow_path=NULL,
+					pending_workflow_revision=NULL,pending_dispatch_ref=NULL,pending_checkout_sha=NULL,
+					pending_desired_generation=NULL,pending_idempotency_key=NULL,terminal_error_code='environment_provision_failed',
 					terminal_error_message=$3,terminal_at=now(),updated_at=now()
 					WHERE org_id=$1 AND environment_id=$2 AND status='queued'`, job.OrgID, job.EnvironmentID, message)
 			}
@@ -223,7 +226,7 @@ func (s *Store) CompleteEnvironmentTeardown(ctx context.Context, job Environment
 	return s.withTx(ctx, func(tx pgx.Tx) error {
 		var active bool
 		if err := tx.QueryRow(ctx, `SELECT in_progress_release_id IS NOT NULL OR EXISTS(SELECT 1 FROM orchestration_jobs
-			WHERE org_id=$1 AND environment_id=$2 AND status IN ('leased','dispatch_reconciling','dispatched'))
+			WHERE org_id=$1 AND environment_id=$2 AND status IN ('leased','dispatch_reconciling','dispatched','resolving_image','deploying'))
 			FROM environments WHERE org_id=$1 AND id=$2 FOR UPDATE`, job.OrgID, job.EnvironmentID).Scan(&active); err != nil {
 			return err
 		}
@@ -265,7 +268,7 @@ func (s *Store) RequestIdlePreviewTeardown(ctx context.Context, candidate IdlePr
 			  <= now()-make_interval(hours=>app.preview_idle_ttl_hours)
 			  AND environment.in_progress_release_id IS NULL
 			  AND NOT EXISTS (SELECT 1 FROM orchestration_jobs orchestration WHERE orchestration.org_id=environment.org_id
-			    AND orchestration.environment_id=environment.id AND orchestration.status IN ('leased','dispatch_reconciling','dispatched'))
+			    AND orchestration.environment_id=environment.id AND orchestration.status IN ('leased','dispatch_reconciling','dispatched','resolving_image','deploying'))
 			FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
 			WHERE environment.org_id=$1 AND environment.id=$2 AND environment.kind='preview'
 			  AND environment.lifecycle_status IN ('reserved','policy_blocked','ready','failed') FOR UPDATE OF environment,app`,
@@ -279,14 +282,20 @@ func (s *Store) RequestIdlePreviewTeardown(ctx context.Context, candidate IdlePr
 			return nil
 		}
 		if _, err := tx.Exec(ctx, `UPDATE environments SET lifecycle_status='teardown_requested',
-			lifecycle_reason='idle_expired',teardown_requested_at=COALESCE(teardown_requested_at,now()),pending_commit_sha=NULL
+			lifecycle_reason='idle_expired',teardown_requested_at=COALESCE(teardown_requested_at,now()),pending_commit_sha=NULL,
+			desired_generation=desired_generation+1
 			WHERE org_id=$1 AND id=$2`, candidate.OrgID, candidate.EnvironmentID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET status='cancelled',pending_commit_sha=NULL,
-			pending_idempotency_key=NULL,terminal_error_code='environment_idle_expired',
-			terminal_error_message='preview idle TTL expired',terminal_at=now(),updated_at=now()
-			WHERE org_id=$1 AND environment_id=$2 AND status='queued'`, candidate.OrgID, candidate.EnvironmentID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET status='cancelled',pending_github_workflow_path=NULL,
+			pending_workflow_revision=NULL,pending_dispatch_ref=NULL,pending_checkout_sha=NULL,
+			pending_desired_generation=NULL,pending_idempotency_key=NULL,lease_owner=NULL,lease_expires_at=NULL,
+			reconcile_after=NULL,reconciliation_owner=NULL,reconciliation_lease_expires_at=NULL,
+			deployment_claim_owner=NULL,deployment_claim_expires_at=NULL,cancellation_state='requested',
+			cancellation_requested_at=COALESCE(cancellation_requested_at,now()),
+			deployment_state=CASE WHEN deployment_state IN ('ready','claimed','applying') THEN 'cancelled' ELSE deployment_state END,
+			terminal_error_code='environment_idle_expired',terminal_error_message='preview idle TTL expired',terminal_at=now(),updated_at=now()
+			WHERE org_id=$1 AND environment_id=$2 AND status IN ('queued','leased','dispatch_reconciling','dispatched','resolving_image','deploying')`, candidate.OrgID, candidate.EnvironmentID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE environment_lifecycle_jobs SET status='failed',completed_at=now(),

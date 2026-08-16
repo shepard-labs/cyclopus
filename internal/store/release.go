@@ -21,6 +21,9 @@ type FinalizeReleaseResult struct {
 func (s *Store) FinalizeReleaseLive(ctx context.Context, params FinalizeReleaseParams) (FinalizeReleaseResult, error) {
 	var result FinalizeReleaseResult
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := ensurePendingCommitCanonical(ctx, tx, params.Lease); err != nil {
+			return err
+		}
 		before, err := lockOwnedDeployLease(ctx, tx, params.Lease)
 		if err != nil {
 			return err
@@ -71,11 +74,6 @@ func (s *Store) FinalizeReleaseLive(ctx context.Context, params FinalizeReleaseP
 		if err := takePendingAndReleaseLease(ctx, tx, params.Lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if result.PendingCommitSHA != nil && !teardownRequested(ctx, tx, params.Lease) {
-			if err := promotePendingCommit(ctx, tx, params.Lease, *result.PendingCommitSHA); err != nil {
-				return err
-			}
-		}
 		after, _ := json.Marshal(map[string]any{"status": "live", "hostname": params.Hostname})
 		if err := insertAuditEvent(ctx, tx, params.Lease.OrgID, params.Audit,
 			"release.finalized_live", "release", params.Lease.ReleaseID, before, after); err != nil {
@@ -94,6 +92,9 @@ func (s *Store) FinalizeReleaseLive(ctx context.Context, params FinalizeReleaseP
 func (s *Store) AdoptRecoveredReleaseLive(ctx context.Context, lease DeployLease) (FinalizeReleaseResult, error) {
 	var result FinalizeReleaseResult
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := ensurePendingCommitCanonical(ctx, tx, lease); err != nil {
+			return err
+		}
 		before, err := lockOwnedDeployLease(ctx, tx, lease)
 		if err != nil {
 			return err
@@ -138,11 +139,6 @@ func (s *Store) AdoptRecoveredReleaseLive(ctx context.Context, lease DeployLease
 		if err := takePendingAndReleaseLease(ctx, tx, lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if result.PendingCommitSHA != nil && !teardownRequested(ctx, tx, lease) {
-			if err := promotePendingCommit(ctx, tx, lease, *result.PendingCommitSHA); err != nil {
-				return err
-			}
-		}
 		after, _ := json.Marshal(map[string]any{"status": "live", "recovery": "late_ready_adopted"})
 		_, err = tx.Exec(ctx, `INSERT INTO audit_events
 			(id, org_id, action, target_type, target_id, before, after)
@@ -178,6 +174,9 @@ func (s *Store) FinalizeRecoveredReleaseFailed(ctx context.Context, lease Deploy
 func (s *Store) finalizeReleaseFailed(ctx context.Context, params FailReleaseParams, recovery bool) (FinalizeReleaseResult, error) {
 	var result FinalizeReleaseResult
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := ensurePendingCommitCanonical(ctx, tx, params.Lease); err != nil {
+			return err
+		}
 		before, err := lockOwnedDeployLease(ctx, tx, params.Lease)
 		if err != nil {
 			return err
@@ -214,11 +213,6 @@ func (s *Store) finalizeReleaseFailed(ctx context.Context, params FailReleasePar
 		if err := takePendingAndReleaseLease(ctx, tx, params.Lease, &result.PendingCommitSHA); err != nil {
 			return err
 		}
-		if result.PendingCommitSHA != nil && !teardownRequested(ctx, tx, params.Lease) {
-			if err := promotePendingCommit(ctx, tx, params.Lease, *result.PendingCommitSHA); err != nil {
-				return err
-			}
-		}
 		after, _ := json.Marshal(map[string]any{"status": "failed", "failure_reason": params.FailureReason})
 		if recovery {
 			_, err = tx.Exec(ctx, `INSERT INTO audit_events
@@ -238,36 +232,48 @@ func (s *Store) finalizeReleaseFailed(ctx context.Context, params FailReleasePar
 	return result, err
 }
 
-func promotePendingCommit(ctx context.Context, tx pgx.Tx, lease DeployLease, commitSHA string) error {
-	var jobID string
-	err := tx.QueryRow(ctx, `
-		WITH source AS (
-			SELECT repository_id, workflow_id, git_ref
-			FROM orchestration_jobs
-			WHERE org_id = $1 AND environment_id = $2
-			ORDER BY created_at DESC, id DESC LIMIT 1
-		), inserted AS (
-			INSERT INTO orchestration_jobs (
-				id, org_id, repository_id, workflow_id, git_ref, environment_id,
-				commit_sha, idempotency_key, status
-			)
-			SELECT uuidv7(), $1, repository_id, workflow_id, git_ref, $2, $3,
-				'recovery:' || $4 || ':' || $3, 'queued' FROM source
-			ON CONFLICT (org_id, repository_id, workflow_id, git_ref, environment_id)
-				WHERE status IN ('queued', 'leased', 'dispatch_reconciling', 'dispatched')
-			DO UPDATE SET
-				commit_sha = CASE WHEN orchestration_jobs.status = 'queued' THEN EXCLUDED.commit_sha ELSE orchestration_jobs.commit_sha END,
-				idempotency_key = CASE WHEN orchestration_jobs.status = 'queued' THEN EXCLUDED.idempotency_key ELSE orchestration_jobs.idempotency_key END,
-				pending_commit_sha = CASE WHEN orchestration_jobs.status = 'queued' THEN NULL ELSE EXCLUDED.commit_sha END,
-				pending_idempotency_key = CASE WHEN orchestration_jobs.status = 'queued' THEN NULL ELSE EXCLUDED.idempotency_key END,
-				updated_at = now()
-			RETURNING id::text
-		)
-		SELECT id FROM inserted`, lease.OrgID, lease.EnvironmentID, commitSHA, lease.ReleaseID).Scan(&jobID)
+func ensurePendingCommitCanonical(ctx context.Context, tx pgx.Tx, lease DeployLease) error {
+	var commitSHA *string
+	var lifecycleStatus string
+	if err := tx.QueryRow(ctx, `SELECT pending_commit_sha,lifecycle_status FROM environments
+		WHERE org_id=$1 AND id=$2`, lease.OrgID, lease.EnvironmentID).Scan(&commitSHA, &lifecycleStatus); err != nil {
+		return fmt.Errorf("read pending commit: %w", err)
+	}
+	if commitSHA == nil || lifecycleStatus == "teardown_requested" || lifecycleStatus == "torn_down" || lifecycleStatus == "failed" {
+		return nil
+	}
+	var canonical bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM orchestration_push_requests request
+		JOIN environments environment ON environment.org_id=request.org_id AND environment.id=request.environment_id
+		WHERE request.org_id=$1 AND request.environment_id=$2 AND request.desired_checkout_sha=$3
+		AND request.accepted_generation=environment.desired_generation)`, lease.OrgID, lease.EnvironmentID, *commitSHA).Scan(&canonical); err != nil {
+		return fmt.Errorf("check pending commit orchestration: %w", err)
+	}
+	if canonical {
+		return nil
+	}
+	var params EnqueueOrchestrationParams
+	var pendingIdempotencyKey *string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(pending_github_workflow_path,github_workflow_path),
+		COALESCE(pending_workflow_revision,workflow_revision),COALESCE(pending_dispatch_ref,dispatch_ref),
+		pending_idempotency_key
+		FROM orchestration_jobs WHERE org_id=$1 AND environment_id=$2
+		ORDER BY created_at DESC,id DESC LIMIT 1`, lease.OrgID, lease.EnvironmentID).Scan(
+		&params.WorkflowID, &params.WorkflowRevision, &params.GitRef, &pendingIdempotencyKey)
 	if err == pgx.ErrNoRows {
 		return fmt.Errorf("promote pending commit: %w: no orchestration route for environment", ErrConflict)
 	}
 	if err != nil {
+		return fmt.Errorf("promote pending commit: %w", err)
+	}
+	params.OrgID = lease.OrgID
+	params.EnvironmentID = lease.EnvironmentID
+	params.CommitSHA = *commitSHA
+	params.IdempotencyKey = "recovery:" + lease.ReleaseID + ":" + *commitSHA
+	if pendingIdempotencyKey != nil {
+		params.IdempotencyKey = *pendingIdempotencyKey
+	}
+	if _, err := enqueueOrCoalesceOrchestrationTx(ctx, tx, params); err != nil {
 		return fmt.Errorf("promote pending commit: %w", err)
 	}
 	return nil

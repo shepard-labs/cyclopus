@@ -43,12 +43,15 @@ func (s *Store) AcceptPreviewPush(ctx context.Context, params PreviewPushParams)
 		if result.Disposition != "" {
 			return nil
 		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1380270412))`, params.OrgID); err != nil {
+			return err
+		}
 		var enabled bool
 		var cap int
-		var repositoryID, workflowID *string
-		var defaultBranch *string
+		var repositoryID *string
+		var workflowID, defaultBranch *string
 		if err := tx.QueryRow(ctx, `SELECT app.previews_enabled,app.max_preview_environments,
-			project.git_connection_id::text,app.ci_workflow_id,git.default_branch FROM apps app
+			git.github_repository_id::text,app.github_workflow_path,app.production_branch FROM apps app
 			JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
 			LEFT JOIN git_connections git ON git.org_id=project.org_id AND git.id=project.git_connection_id
 			JOIN orgs org ON org.id=app.org_id
@@ -122,19 +125,21 @@ func (s *Store) AcceptPreviewPush(ctx context.Context, params PreviewPushParams)
 		if lifecycleStatus == "teardown_requested" || lifecycleStatus == "torn_down" || lifecycleStatus == "failed" {
 			return ErrConflict
 		}
+		jobParams := EnqueueOrchestrationParams{OrgID: params.OrgID,
+			RepositoryID: *repositoryID, WorkflowID: *workflowID, GitRef: "refs/heads/" + params.Branch,
+			EnvironmentID: environmentID, CommitSHA: params.CommitSHA, IdempotencyKey: params.IdempotencyKey}
+		job, err := enqueueOrCoalesceOrchestrationTx(ctx, tx, jobParams)
+		if err != nil {
+			return err
+		}
 		if activeRelease != nil {
 			if _, err := tx.Exec(ctx, `UPDATE environments SET pending_commit_sha=$3
-				WHERE org_id=$1 AND id=$2`, params.OrgID, environmentID, params.CommitSHA); err != nil {
+					WHERE org_id=$1 AND id=$2 AND desired_generation=$4`, params.OrgID, environmentID,
+				params.CommitSHA, job.AcceptedGeneration); err != nil {
 				return err
 			}
 			result.Disposition = "coalesced"
 		} else {
-			jobParams := EnqueueOrchestrationParams{ID: params.OrchestrationJobID, OrgID: params.OrgID,
-				RepositoryID: *repositoryID, WorkflowID: *workflowID, GitRef: "refs/heads/" + params.Branch,
-				EnvironmentID: environmentID, CommitSHA: params.CommitSHA, IdempotencyKey: params.IdempotencyKey}
-			if _, err := enqueueOrCoalesceOrchestrationTx(ctx, tx, jobParams); err != nil {
-				return err
-			}
 			if created {
 				result.Disposition = "reserved"
 			} else {
@@ -198,19 +203,21 @@ func (s *Store) RequestPreviewTeardown(ctx context.Context, params PreviewTeardo
 			return mapMutationError("lock preview teardown", err)
 		}
 		if _, err := tx.Exec(ctx, `UPDATE environments SET lifecycle_status='teardown_requested',
-			lifecycle_reason=$3,teardown_requested_at=COALESCE(teardown_requested_at,now()),pending_commit_sha=NULL
+			lifecycle_reason=$3,teardown_requested_at=COALESCE(teardown_requested_at,now()),pending_commit_sha=NULL,
+			desired_generation=desired_generation+1
 			WHERE org_id=$1 AND id=$2`, params.OrgID, environmentID, params.Reason); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET
-			status=CASE WHEN status IN ('queued','leased') THEN 'cancelled' ELSE status END,
-			pending_commit_sha=NULL,pending_idempotency_key=NULL,
-			lease_owner=CASE WHEN status IN ('queued','leased') THEN NULL ELSE lease_owner END,
-			lease_expires_at=CASE WHEN status IN ('queued','leased') THEN NULL ELSE lease_expires_at END,
-			terminal_error_code=CASE WHEN status IN ('queued','leased') THEN 'environment_teardown_requested' ELSE terminal_error_code END,
-			terminal_error_message=CASE WHEN status IN ('queued','leased') THEN 'preview teardown was requested' ELSE terminal_error_message END,
-			terminal_at=CASE WHEN status IN ('queued','leased') THEN now() ELSE terminal_at END,updated_at=now()
-			WHERE org_id=$1 AND environment_id=$2 AND status IN ('queued','leased','dispatch_reconciling','dispatched')`, params.OrgID, environmentID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET status='cancelled',
+			pending_github_workflow_path=NULL,pending_workflow_revision=NULL,pending_dispatch_ref=NULL,
+			pending_checkout_sha=NULL,pending_desired_generation=NULL,pending_idempotency_key=NULL,
+			lease_owner=NULL,lease_expires_at=NULL,reconcile_after=NULL,reconciliation_owner=NULL,reconciliation_lease_expires_at=NULL,
+			deployment_claim_owner=NULL,deployment_claim_expires_at=NULL,cancellation_state='requested',
+			cancellation_requested_at=COALESCE(cancellation_requested_at,now()),
+			deployment_state=CASE WHEN deployment_state IN ('ready','claimed','applying') THEN 'cancelled' ELSE deployment_state END,
+			terminal_error_code='environment_teardown_requested',terminal_error_message='preview teardown was requested',
+			terminal_at=now(),updated_at=now()
+			WHERE org_id=$1 AND environment_id=$2 AND status IN ('queued','leased','dispatch_reconciling','dispatched','resolving_image','deploying')`, params.OrgID, environmentID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE environment_lifecycle_jobs SET status='failed',completed_at=now(),

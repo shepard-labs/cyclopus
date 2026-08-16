@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 const (
@@ -90,12 +90,13 @@ func seedCapTenant(t *testing.T, pool *pgxpool.Pool) {
 	}{
 		{`INSERT INTO orgs (id, name, slug) VALUES ($1, 'Cap Org', 'cap-org')`, []any{capOrgID}},
 		{`INSERT INTO users (id, org_id, email, github_user_id) VALUES ($1, $2, 'cap@example.com', 424242)`, []any{capUserID, capOrgID}},
-		{`INSERT INTO git_connections (id, org_id, installation_id, repo_full_name, webhook_secret_ref)
-			VALUES ($1, $2, 4242, 'acme/cap', 'k8s-secret://cyclopus/github#webhook')`, []any{capRepoID, capOrgID}},
+		{`INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(4242,$1,4243,'acme','Organization','selected','active',1,1)`, []any{capOrgID}},
+		{`INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(4244,$1,4242,'cap-node','acme','cap','acme/cap','private','main','active',1,1)`, []any{capOrgID}},
+		{`INSERT INTO git_connections (id,org_id,github_repository_id) VALUES($1,$2,4244)`, []any{capRepoID, capOrgID}},
 		{`INSERT INTO projects (id, org_id, name, slug, git_connection_id)
 			VALUES ($1, $2, 'Cap Project', 'cap-project', $3)`, []any{capProjectID, capOrgID, capRepoID}},
-		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, ci_workflow_id, max_preview_environments, deploy_timeout_seconds)
-			VALUES ($1, $2, $3, 'Cap App', 'cap-app', 'cap-host', 'deploy.yml', 1, 60)`, []any{capAppID, capOrgID, capProjectID}},
+		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label,image_repository,github_workflow_path,production_branch,max_preview_environments,deploy_timeout_seconds)
+			VALUES ($1, $2, $3, 'Cap App', 'cap-app', 'cap-host','ghcr.io/acme/cap','.github/workflows/deploy.yml','main',1,60)`, []any{capAppID, capOrgID, capProjectID}},
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s.query, s.args...); err != nil {

@@ -195,9 +195,11 @@ func TestPostgres18Migrations(t *testing.T) {
 			t.Fatal("cross-org project git connection succeeded")
 		}
 		if _, err := db.Exec(context.Background(), `
-			INSERT INTO orchestration_jobs (org_id, repository_id, workflow_id, git_ref, environment_id, commit_sha, idempotency_key)
-			VALUES ($1, $2, 'deploy.yml', 'refs/heads/main', $3, repeat('a', 40), 'cross-org')`,
-			ids.org, other.repository, ids.environment); err == nil {
+			INSERT INTO orchestration_jobs (org_id,app_id,environment_id,github_repository_id,github_workflow_path,
+				workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key)
+			SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),
+				'refs/heads/main',repeat('a',40),1,'cross-org' FROM git_connections connection WHERE connection.id=$4`,
+			ids.org, ids.app, ids.environment, other.repository); err == nil {
 			t.Fatal("cross-org orchestration job succeeded")
 		}
 	})
@@ -249,18 +251,22 @@ func TestPostgres18Migrations(t *testing.T) {
 
 		var status string
 		if err := db.QueryRow(context.Background(), `
-			INSERT INTO orchestration_jobs (org_id, repository_id, workflow_id, git_ref, environment_id, commit_sha, idempotency_key)
-			VALUES ($1, $2, 'deploy.yml', 'refs/heads/main', $3, repeat('b', 40), 'same-key')
-			RETURNING status`, ids.org, ids.repository, ids.environment).Scan(&status); err != nil {
+			INSERT INTO orchestration_jobs (org_id,app_id,environment_id,github_repository_id,github_workflow_path,
+				workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key)
+			SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('b',40),
+				'refs/heads/main',repeat('b',40),1,'same-key' FROM git_connections connection WHERE connection.id=$4
+			RETURNING status`, ids.org, ids.app, ids.environment, ids.repository).Scan(&status); err != nil {
 			t.Fatal(err)
 		}
 		if status != "queued" {
 			t.Fatalf("orchestration status = %q, want queued", status)
 		}
 		if _, err := db.Exec(context.Background(), `
-			INSERT INTO orchestration_jobs (org_id, repository_id, workflow_id, git_ref, environment_id, commit_sha, idempotency_key)
-			VALUES ($1, $2, 'deploy.yml', 'refs/heads/main', $3, repeat('c', 40), 'same-key')`,
-			other.org, other.repository, other.environment); err != nil {
+			INSERT INTO orchestration_jobs (org_id,app_id,environment_id,github_repository_id,github_workflow_path,
+				workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key)
+			SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('c',40),
+				'refs/heads/main',repeat('c',40),1,'same-key' FROM git_connections connection WHERE connection.id=$4`,
+			other.org, other.app, other.environment, other.repository); err != nil {
 			t.Fatalf("same orchestration key in another tenant failed: %v", err)
 		}
 	})
@@ -378,9 +384,11 @@ func seedTenantGraph(t *testing.T, db *pgx.Conn, prefix, branch, previewSlug, na
 		dest  *string
 	}{
 		{"INSERT INTO orgs(name, slug) VALUES ($1, $2) RETURNING id", []any{prefix + " Org", prefix + "-org"}, &org},
-		{"INSERT INTO git_connections(org_id, installation_id, repo_full_name, webhook_secret_ref) VALUES ($1, $2, $3, 'k8s-secret://cyclopus/github#webhook') RETURNING id", []any{&org, int64(len(prefix) + 100), "acme/" + prefix}, &repository},
+		{"INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,$2,$3,'acme','Organization','selected','active',1,1) RETURNING github_installation_id::text", []any{int64(len(prefix) + 100), &org, int64(len(prefix) + 1000)}, new(string)},
+		{"INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,$2,$3,$4,'acme',$5,$6,'private','main','active',1,1) RETURNING github_repository_id::text", []any{int64(len(prefix) + 10000), &org, int64(len(prefix) + 100), "node-" + prefix, prefix, "acme/" + prefix}, new(string)},
+		{"INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,$2) RETURNING id", []any{&org, int64(len(prefix) + 10000)}, &repository},
 		{"INSERT INTO projects(org_id, name, slug, git_connection_id) VALUES ($1, $2, $3, $4) RETURNING id", []any{&org, prefix + " Project", prefix + "-project", &repository}, &project},
-		{"INSERT INTO apps(org_id, project_id, name, slug, hostname_label) VALUES ($1, $2, $3, $4, $5) RETURNING id", []any{&org, &project, prefix + " App", prefix + "-app", prefix + "-app"}, &app},
+		{"INSERT INTO apps(org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$2,$3,$4,$5,$6,'.github/workflows/deploy.yml','main') RETURNING id", []any{&org, &project, prefix + " App", prefix + "-app", prefix + "-app", "ghcr.io/acme/" + prefix}, &app},
 		{"INSERT INTO environments(org_id, app_id, branch, kind, preview_slug, namespace, planned_hostname) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id", []any{&org, &app, branch, kind, preview, namespace, prefix + ".example.test"}, &environment},
 	}
 	for _, item := range queries {

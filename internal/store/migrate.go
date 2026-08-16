@@ -17,6 +17,11 @@ import (
 
 const migrationLockID int64 = 0x4359434c4f505553
 
+const (
+	SchemaEpoch       = "self_hosted_github_import_v1"
+	SchemaFingerprint = "95e56712029f59eb49b6b0bd939cfbb2dc62360772731fabec7bf2cb2d7d290e"
+)
+
 type MigrationConfig struct {
 	URL         string
 	LockTimeout time.Duration
@@ -83,7 +88,25 @@ func Migrate(ctx context.Context, cfg MigrationConfig) error {
 	defer m.Close()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("apply migrations: %w", err)
+		return fmt.Errorf("apply migrations: database is old, missing, or partially applied; back up the database and apply all migrations through 000004 before starting Cyclopus: %w", err)
+	}
+	return ValidateSchemaEpoch(ctx, conn)
+}
+
+type schemaEpochQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// ValidateSchemaEpoch prevents a binary built for the replacement persistence
+// model from starting against an old or partially-applied alpha schema.
+func ValidateSchemaEpoch(ctx context.Context, db schemaEpochQuerier) error {
+	var epoch, fingerprint string
+	err := db.QueryRowContext(ctx, `SELECT epoch, fingerprint FROM schema_epoch WHERE singleton = true`).Scan(&epoch, &fingerprint)
+	if err != nil {
+		return fmt.Errorf("validate schema epoch: database is missing or only partially applied migration 000004; back up the database and apply all migrations before starting Cyclopus: %w", err)
+	}
+	if epoch != SchemaEpoch || fingerprint != SchemaFingerprint {
+		return fmt.Errorf("validate schema epoch: database epoch %q does not match required epoch %q; back up the database and apply migration 000004 with this binary", epoch, SchemaEpoch)
 	}
 	return nil
 }

@@ -10,13 +10,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	gh "github.com/google/go-github/v88/github"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 func TestDispatchPersistsReconciliationBeforeRequest(t *testing.T) {
 	storeFake := &fakeStore{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widget/git/ref/heads/main" {
+			writeJSON(t, writer, `{"ref":"refs/heads/main","object":{"sha":"`+strings.Repeat("b", 40)+`"}}`)
+			return
+		}
+		if request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widget/contents/build.yml" {
+			writeJSON(t, writer, `{"type":"file","path":".github/workflows/build.yml","sha":"`+strings.Repeat("c", 40)+`"}`)
+			return
+		}
 		if storeFake.beginCalls != 1 {
 			t.Fatal("workflow dispatched before reconciliation was persisted")
 		}
@@ -45,6 +53,9 @@ func TestDispatchPersistsReconciliationBeforeRequest(t *testing.T) {
 	if storeFake.beginCalls != 1 {
 		t.Fatalf("begin calls = %d", storeFake.beginCalls)
 	}
+	if storeFake.beginRefSHA != strings.Repeat("b", 40) || storeFake.beginWorkflowPath != ".github/workflows/build.yml" || storeFake.beginWorkflowRevision != strings.Repeat("c", 40) {
+		t.Fatalf("observed dispatch evidence = %q/%q/%q", storeFake.beginRefSHA, storeFake.beginWorkflowPath, storeFake.beginWorkflowRevision)
+	}
 }
 
 func TestReconcileDispatchCorrelatesExactRunAcrossPages(t *testing.T) {
@@ -62,7 +73,7 @@ func TestReconcileDispatchCorrelatesExactRunAcrossPages(t *testing.T) {
 			writeJSON(t, writer, `{"total_count":2,"workflow_runs":[{"id":1,"event":"workflow_dispatch","display_title":"cyclopus:job-one-extra","status":"queued","head_sha":"`+strings.Repeat("a", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"}]}`)
 			return
 		}
-		writeJSON(t, writer, `{"total_count":2,"workflow_runs":[{"id":99,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"in_progress","head_sha":"`+strings.Repeat("a", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"}]}`)
+		writeJSON(t, writer, `{"total_count":2,"workflow_runs":[{"id":99,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"in_progress","head_sha":"`+strings.Repeat("b", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"}]}`)
 	}))
 	defer server.Close()
 
@@ -73,8 +84,8 @@ func TestReconcileDispatchCorrelatesExactRunAcrossPages(t *testing.T) {
 	if err := adapter.ReconcileDispatch(context.Background(), job); err != nil {
 		t.Fatalf("ReconcileDispatch() error = %v", err)
 	}
-	if storeFake.recordRunID != 99 || storeFake.recordStatus != "in_progress" {
-		t.Fatalf("recorded run = %d/%s", storeFake.recordRunID, storeFake.recordStatus)
+	if storeFake.recordRunID != 99 || storeFake.recordStatus != "in_progress" || storeFake.recordHeadSHA != strings.Repeat("b", 40) {
+		t.Fatalf("recorded run = %d/%s/%s", storeFake.recordRunID, storeFake.recordStatus, storeFake.recordHeadSHA)
 	}
 }
 
@@ -154,8 +165,8 @@ func TestReconcileDispatchReschedulesDuplicateExactMatches(t *testing.T) {
 	now := time.Now().UTC()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(t, writer, `{"total_count":2,"workflow_runs":[`+
-			`{"id":1,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"queued","head_sha":"`+strings.Repeat("a", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"},`+
-			`{"id":2,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"queued","head_sha":"`+strings.Repeat("a", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"}]}`)
+			`{"id":1,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"queued","head_sha":"`+strings.Repeat("b", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"},`+
+			`{"id":2,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"queued","head_sha":"`+strings.Repeat("b", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"}]}`)
 	}))
 	defer server.Close()
 
@@ -192,7 +203,6 @@ func TestReconcileRunStatesAndConclusions(t *testing.T) {
 		{name: "timed out", status: "completed", conclusion: "timed_out", wantResult: "timed_out"},
 		{name: "action required", status: "completed", conclusion: "action_required", wantResult: "action_required"},
 		{name: "stale", status: "completed", conclusion: "stale", wantResult: "stale"},
-		{name: "startup failure", status: "completed", conclusion: "startup_failure", wantResult: "startup_failure"},
 		{name: "unsupported", status: "completed", conclusion: "new_conclusion", wantResult: "failure"},
 	}
 	for _, test := range tests {
@@ -319,7 +329,15 @@ func TestReconcileClassifiesGitHubErrors(t *testing.T) {
 
 func TestDispatchHangingServerTimesOutAfterReconciliationBegins(t *testing.T) {
 	storeFake := &fakeStore{}
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/repos/acme/widget/git/ref/heads/main" {
+			writeJSON(t, writer, `{"ref":"refs/heads/main","object":{"sha":"`+strings.Repeat("b", 40)+`"}}`)
+			return
+		}
+		if request.URL.Path == "/repos/acme/widget/contents/build.yml" {
+			writeJSON(t, writer, `{"type":"file","path":".github/workflows/build.yml","sha":"`+strings.Repeat("c", 40)+`"}`)
+			return
+		}
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -365,22 +383,30 @@ func (f staticFactory) Client(int64) (*gh.Client, error) { return f.client, nil 
 
 type fakeStore struct {
 	beginCalls            int
+	beginRefSHA           string
+	beginWorkflowPath     string
+	beginWorkflowRevision string
 	continueDispatchCalls int
 	continueRunStatus     string
 	recordRunID           int64
 	recordStatus          string
+	recordHeadSHA         string
 	resolveCalls          int
 	resolve               store.ResolveOrchestrationParams
 }
 
-func (f *fakeStore) BeginDispatchReconciliation(context.Context, string, string, string, time.Duration) error {
+func (f *fakeStore) BeginDispatchReconciliation(_ context.Context, _, _, _, refSHA, workflowPath, workflowRevision string, _ time.Duration) error {
 	f.beginCalls++
+	f.beginRefSHA = refSHA
+	f.beginWorkflowPath = workflowPath
+	f.beginWorkflowRevision = workflowRevision
 	return nil
 }
 
-func (f *fakeStore) RecordDispatchedRun(_ context.Context, _, _, _, _ string, runID int64, status string, _ time.Duration) error {
+func (f *fakeStore) RecordDispatchedRun(_ context.Context, _, _, _, _ string, runID int64, status, headSHA string, _ time.Duration) error {
 	f.recordRunID = runID
 	f.recordStatus = status
+	f.recordHeadSHA = headSHA
 	return nil
 }
 
@@ -404,7 +430,7 @@ func testJob() *store.GitHubRecoveryJob {
 	return &store.GitHubRecoveryJob{
 		ID: "job-one", OrgID: "org-one", Status: "dispatch_reconciling", WorkflowID: "build.yml",
 		InstallationID: 42, RepositoryFullName: "acme/widget", GitRef: "refs/heads/main",
-		CommitSHA: strings.Repeat("a", 40),
+		CommitSHA: strings.Repeat("a", 40), DispatchRefObservedSHA: strings.Repeat("b", 40),
 	}
 }
 

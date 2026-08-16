@@ -446,6 +446,24 @@ func (s *Store) ReleaseDeployLease(ctx context.Context, lease DeployLease, audit
 
 func (s *Store) SetPendingCommitSHA(ctx context.Context, lease DeployLease, commitSHA string) error {
 	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var params EnqueueOrchestrationParams
+		if err := tx.QueryRow(ctx, `SELECT github_workflow_path,workflow_revision,dispatch_ref
+			FROM orchestration_jobs WHERE org_id=$1 AND environment_id=$2
+			ORDER BY created_at DESC,id DESC LIMIT 1`, lease.OrgID, lease.EnvironmentID).Scan(
+			&params.WorkflowID, &params.WorkflowRevision, &params.GitRef); err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("set pending commit SHA: %w: no orchestration route for environment", ErrConflict)
+			}
+			return fmt.Errorf("set pending commit SHA: %w", err)
+		}
+		params.OrgID = lease.OrgID
+		params.EnvironmentID = lease.EnvironmentID
+		params.CommitSHA = commitSHA
+		params.IdempotencyKey = "deploy-pending:" + lease.ReleaseID + ":" + commitSHA
+		job, err := enqueueOrCoalesceOrchestrationTx(ctx, tx, params)
+		if err != nil {
+			return fmt.Errorf("set pending commit SHA: %w", err)
+		}
 		commandTag, err := tx.Exec(ctx, `
 			UPDATE environments AS environment
 			SET pending_commit_sha = $5
@@ -457,8 +475,9 @@ func (s *Store) SetPendingCommitSHA(ctx context.Context, lease DeployLease, comm
 			  AND org.id = environment.org_id
 			  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
 			  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
-			  AND environment.lock_acquired_at > now() - make_interval(secs => app.deploy_timeout_seconds)`,
-			lease.OrgID, lease.EnvironmentID, lease.ReleaseID, lease.Fence, commitSHA)
+			  AND environment.lock_acquired_at > now() - make_interval(secs => app.deploy_timeout_seconds)
+			  AND environment.desired_generation = $6`,
+			lease.OrgID, lease.EnvironmentID, lease.ReleaseID, lease.Fence, commitSHA, job.AcceptedGeneration)
 		if err != nil {
 			return fmt.Errorf("set pending commit SHA: %w", err)
 		}

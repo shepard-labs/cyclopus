@@ -2,18 +2,20 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // Registry is one row of the registries table: an OCI image registry an app
 // pulls images from (§6). CredentialSecretRef is a k8s-secret://…#… REFERENCE
 // to the pull credential — the raw credential is never stored in Postgres.
 type Registry struct {
-	ID, OrgID, Provider, RegistryURL, CredentialSecretRef string
-	CreatedAt                                             time.Time
+	ID, OrgID, Provider, RegistryHost, State, Checkpoint string
+	RegistryURL                                          string
+	ActiveGeneration, ReconciliationGeneration           int64
+	HasActiveCredential, HasPendingCredential            bool
+	PendingGeneration                                    *int64
+	FailureCode, FailureMessage                          *string
+	CreatedAt, UpdatedAt                                 time.Time
 }
 
 type SaveRegistryParams struct {
@@ -22,10 +24,18 @@ type SaveRegistryParams struct {
 	Audit       *AuditEvent
 }
 
-const registrySelect = `SELECT id::text,org_id::text,provider,registry_url,credential_secret_ref,created_at FROM registries`
+const registrySelect = `SELECT id::text,org_id::text,provider,registry_host,state,COALESCE(checkpoint,''),active_generation,
+	active_credential_secret_ref IS NOT NULL,pending_generation,pending_credential_secret_ref IS NOT NULL,
+	reconciliation_generation,failure_code,failure_message,created_at,updated_at FROM registries`
 
 func scanRegistry(row rowScanner, value *Registry) error {
-	return row.Scan(&value.ID, &value.OrgID, &value.Provider, &value.RegistryURL, &value.CredentialSecretRef, &value.CreatedAt)
+	if err := row.Scan(&value.ID, &value.OrgID, &value.Provider, &value.RegistryHost, &value.State, &value.Checkpoint,
+		&value.ActiveGeneration, &value.HasActiveCredential, &value.PendingGeneration, &value.HasPendingCredential,
+		&value.ReconciliationGeneration, &value.FailureCode, &value.FailureMessage, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		return err
+	}
+	value.RegistryURL = value.RegistryHost
+	return nil
 }
 
 // CreateRegistry inserts a registry, guarding that the actor's org exists so a
@@ -33,21 +43,7 @@ func scanRegistry(row rowScanner, value *Registry) error {
 // duplicate (org_id, registry_url) maps to ErrAlreadyExists and a CHECK
 // violation (bad provider/url/secret_ref shape) maps to ErrInvalidArgument.
 func (s *Store) CreateRegistry(ctx context.Context, p SaveRegistryParams) (Registry, error) {
-	var value Registry
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		if err := scanRegistry(tx.QueryRow(ctx, `INSERT INTO registries(id,org_id,provider,registry_url,credential_secret_ref)
-			SELECT $1,$2,$3,$4,$5 WHERE EXISTS(SELECT 1 FROM orgs WHERE id=$2)
-			RETURNING id::text,org_id::text,provider,registry_url,credential_secret_ref,created_at`,
-			p.Registry.ID, p.Registry.OrgID, p.Registry.Provider, p.Registry.RegistryURL, p.Registry.CredentialSecretRef), &value); err != nil {
-			return mapMutationError("create registry", err)
-		}
-		if err := finishAcceptedMutation(ctx, tx, value.OrgID, "registry", value.ID, &p.Idempotency); err != nil {
-			return err
-		}
-		after, _ := json.Marshal(value)
-		return insertAuditEvent(ctx, tx, value.OrgID, p.Audit, "registry.created", "registry", value.ID, nil, after)
-	})
-	return value, err
+	return Registry{}, ErrFailedPrecondition
 }
 
 // DeleteRegistry removes a registry org-scoped. Because apps.registry_id
@@ -55,19 +51,7 @@ func (s *Store) CreateRegistry(ctx context.Context, p SaveRegistryParams) (Regis
 // by an app raises a foreign-key violation; mapMutationError classifies that as
 // ErrFailedPrecondition (409) rather than a bare 500.
 func (s *Store) DeleteRegistry(ctx context.Context, orgID, id string, idem CompleteIdempotencyParams, audit *AuditEvent) error {
-	return s.withTx(ctx, func(tx pgx.Tx) error {
-		var before json.RawMessage
-		if err := tx.QueryRow(ctx, `SELECT to_jsonb(registries) FROM registries WHERE org_id=$1 AND id=$2 FOR UPDATE`, orgID, id).Scan(&before); err != nil {
-			return mapMutationError("lock registry", err)
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM registries WHERE org_id=$1 AND id=$2`, orgID, id); err != nil {
-			return mapMutationError("delete registry", err)
-		}
-		if err := completeIdempotency(ctx, tx, idem); err != nil {
-			return err
-		}
-		return insertAuditEvent(ctx, tx, orgID, audit, "registry.deleted", "registry", id, before, nil)
-	})
+	return ErrFailedPrecondition
 }
 
 func (s *Store) GetRegistry(ctx context.Context, orgID, id string) (Registry, error) {

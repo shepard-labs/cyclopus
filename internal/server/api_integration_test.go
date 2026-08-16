@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -414,7 +414,7 @@ func apiSearchPathURL(t *testing.T, databaseURL, schema string) string {
 func (f apiFixture) insertRegistry(t *testing.T, orgID string) string {
 	t.Helper()
 	var id string
-	err := f.pool.QueryRow(t.Context(), `INSERT INTO registries (org_id,provider,registry_url,credential_secret_ref) VALUES ($1,'ghcr','https://ghcr.io','k8s-secret://cyclopus/registry#password') RETURNING id::text`, orgID).Scan(&id)
+	err := f.pool.QueryRow(t.Context(), `INSERT INTO registries (org_id,provider,registry_host,active_generation,active_credential_secret_ref,state,reconciliation_generation) VALUES ($1,'ghcr','ghcr.io',1,'k8s-secret://cyclopus/registry#password','ready',1) RETURNING id::text`, orgID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}

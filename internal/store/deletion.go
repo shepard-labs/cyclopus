@@ -45,6 +45,9 @@ func (s *Store) tombstone(ctx context.Context, params TombstoneParams, table, ta
 		return fmt.Errorf("%w: external credential revocation must be confirmed", ErrInvalidArgument)
 	}
 	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := lockOrganizationTombstoneBoundary(ctx, tx, params.OrgID); err != nil {
+			return err
+		}
 		query := fmt.Sprintf(`SELECT jsonb_build_object('id', id, 'deleted_at', deleted_at)
 			FROM %s WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 			AND %s FOR UPDATE`, pgx.Identifier{table}.Sanitize(), teardownPredicate)
@@ -75,4 +78,11 @@ func (s *Store) tombstone(ctx context.Context, params TombstoneParams, table, ta
 		return insertAuditEvent(ctx, tx, params.OrgID, params.Audit, action, targetType,
 			params.ID, before, after)
 	})
+}
+
+func lockOrganizationTombstoneBoundary(ctx context.Context, tx pgx.Tx, orgID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1380270412))`, orgID); err != nil {
+		return fmt.Errorf("lock organization tombstone boundary: %w", err)
+	}
+	return nil
 }

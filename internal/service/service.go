@@ -377,7 +377,8 @@ func (s *Service) DeleteProject(ctx context.Context, actor ActorContext, key, id
 
 type AppInput struct {
 	ProjectID, Name, Slug, HostnameLabel                                                     string
-	RegistryID, ImageRepository, CIWorkflowID                                                *string
+	RegistryID, ImageRepository, CIWorkflowID, GitHubWorkflowPath                            *string
+	ProductionBranch                                                                         string
 	ContainerPort                                                                            int
 	HealthCheckPath, ScalingMode                                                             string
 	MinReplicas, MaxReplicas, HPATargetCPUPercent                                            int
@@ -550,7 +551,21 @@ func (s *Service) deleteResource(ctx context.Context, actor ActorContext, key, i
 	return response, mapError(err)
 }
 func appValue(orgID, id string, i AppInput, runtimeClass string) store.App {
-	return store.App{ID: id, OrgID: orgID, ProjectID: i.ProjectID, Name: i.Name, Slug: i.Slug, HostnameLabel: i.HostnameLabel, RegistryID: i.RegistryID, ImageRepository: i.ImageRepository, CIWorkflowID: i.CIWorkflowID, ContainerPort: i.ContainerPort, HealthCheckPath: i.HealthCheckPath, ScalingMode: i.ScalingMode, MinReplicas: i.MinReplicas, MaxReplicas: i.MaxReplicas, HPATargetCPUPercent: i.HPATargetCPUPercent, KEDACronSchedules: i.KEDACronSchedules, KEDAHTTPTargetPendingRequests: i.KEDAHTTPTargetPendingRequests, CPURequestMillicores: i.CPURequestMillicores, CPULimitMillicores: i.CPULimitMillicores, MemoryRequestMiB: i.MemoryRequestMiB, MemoryLimitMiB: i.MemoryLimitMiB, PreviewsEnabled: i.PreviewsEnabled, MaxPreviewEnvironments: i.MaxPreviewEnvironments, PreviewIdleTTLHours: i.PreviewIdleTTLHours, DeployTimeoutSeconds: i.DeployTimeoutSeconds, ReleaseRetentionCount: i.ReleaseRetentionCount, RuntimeClass: runtimeClass}
+	workflowPath := ""
+	if i.GitHubWorkflowPath != nil {
+		workflowPath = *i.GitHubWorkflowPath
+	} else if i.CIWorkflowID != nil {
+		workflowPath = *i.CIWorkflowID
+	}
+	branch := i.ProductionBranch
+	if branch == "" {
+		branch = "main"
+	}
+	visibility := "public"
+	if i.RegistryID != nil {
+		visibility = "private"
+	}
+	return store.App{ID: id, OrgID: orgID, ProjectID: i.ProjectID, Name: i.Name, Slug: i.Slug, HostnameLabel: i.HostnameLabel, RegistryID: i.RegistryID, ImageRepository: i.ImageRepository, GitHubWorkflowPath: workflowPath, ProductionBranch: branch, AnnotationPolicy: "validate_if_present", ImageVisibility: visibility, ContainerPort: i.ContainerPort, HealthCheckPath: i.HealthCheckPath, ScalingMode: i.ScalingMode, MinReplicas: i.MinReplicas, MaxReplicas: i.MaxReplicas, HPATargetCPUPercent: i.HPATargetCPUPercent, KEDACronSchedules: i.KEDACronSchedules, KEDAHTTPTargetPendingRequests: i.KEDAHTTPTargetPendingRequests, CPURequestMillicores: i.CPURequestMillicores, CPULimitMillicores: i.CPULimitMillicores, MemoryRequestMiB: i.MemoryRequestMiB, MemoryLimitMiB: i.MemoryLimitMiB, PreviewsEnabled: i.PreviewsEnabled, MaxPreviewEnvironments: i.MaxPreviewEnvironments, PreviewIdleTTLHours: i.PreviewIdleTTLHours, DeployTimeoutSeconds: i.DeployTimeoutSeconds, ReleaseRetentionCount: i.ReleaseRetentionCount, RuntimeClass: runtimeClass}
 }
 
 type AcceptedOperation struct {
@@ -900,6 +915,16 @@ func validateApp(i AppInput, runtimeClass string) error {
 		return ErrInvalidArgument
 	}
 	if (i.RegistryID == nil) != (i.ImageRepository == nil) {
+		return ErrInvalidArgument
+	}
+	workflowPath := i.GitHubWorkflowPath
+	if workflowPath == nil {
+		workflowPath = i.CIWorkflowID
+	}
+	if workflowPath == nil || !regexp.MustCompile(`^\.github/workflows/[^/\s]+\.(yml|yaml)$`).MatchString(*workflowPath) || len(*workflowPath) > 255 {
+		return ErrInvalidArgument
+	}
+	if strings.TrimSpace(i.ProductionBranch) == "" || strings.TrimSpace(i.ProductionBranch) != i.ProductionBranch || len(i.ProductionBranch) > 255 {
 		return ErrInvalidArgument
 	}
 	return nil

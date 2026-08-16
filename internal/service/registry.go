@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/shepard-labs/cyclopus/internal/secretref"
@@ -46,34 +45,14 @@ func (s *Service) CreateRegistry(ctx context.Context, actor ActorContext, key st
 	if err := validateRegistry(input); err != nil {
 		return store.Registry{}, err
 	}
-	var replay store.Registry
-	claimed, err := s.claim(ctx, actor, "registry.create", key, input, &replay)
-	if err != nil || !claimed {
-		return replay, err
-	}
-	value := store.Registry{ID: newID(), OrgID: actor.OrgID, Provider: input.Provider, RegistryURL: input.RegistryURL, CredentialSecretRef: input.CredentialSecretRef}
-	body, _ := json.Marshal(value)
-	idem := s.completion(actor, "registry.create", key, input, body, 201)
-	value, err = s.store.CreateRegistry(ctx, store.SaveRegistryParams{Registry: value, Idempotency: idem, Audit: audit(actor)})
-	return value, mapError(err)
+	return store.Registry{}, store.ErrFailedPrecondition
 }
 
 func (s *Service) DeleteRegistry(ctx context.Context, actor ActorContext, key, id string) error {
 	if err := validateActor(actor); err != nil {
 		return err
 	}
-	if err := validateHostnameID(id); err != nil {
-		return err
-	}
-	request := struct{ ID string }{id}
-	var replay struct{}
-	claimed, err := s.claim(ctx, actor, "registry.delete", key, request, &replay)
-	if err != nil || !claimed {
-		return err
-	}
-	idem := s.completion(actor, "registry.delete", key, request, json.RawMessage(`{}`), 200)
-	idem.OrgID = actor.OrgID
-	return mapError(s.store.DeleteRegistry(ctx, actor.OrgID, id, idem, audit(actor)))
+	return store.ErrFailedPrecondition
 }
 
 // validateRegistry enforces the registries invariants in the service layer: a

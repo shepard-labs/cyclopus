@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
 const (
@@ -33,15 +33,15 @@ func seedTelemetryTenants(t *testing.T, pool *pgxpool.Pool) {
 		{`INSERT INTO orgs (id, name, slug) VALUES ($1, 'Tel Org', 'tel-org')`, []any{telOrgID}},
 		{`INSERT INTO users (id, org_id, email, github_user_id) VALUES ($1, $2, 'tel@example.com', 515151)`, []any{telUserID, telOrgID}},
 		{`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $2, 'Tel Project', 'tel-project')`, []any{telProjectID, telOrgID}},
-		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, ci_workflow_id)
-			VALUES ($1, $2, $3, 'Tel App', 'tel-app', 'tel-host', 'deploy.yml')`, []any{telAppID, telOrgID, telProjectID}},
+		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label,image_repository,github_workflow_path,production_branch)
+			VALUES ($1, $2, $3, 'Tel App', 'tel-app', 'tel-host','ghcr.io/acme/tel-app','.github/workflows/deploy.yml','main')`, []any{telAppID, telOrgID, telProjectID}},
 		{`INSERT INTO environments (id, org_id, app_id, branch, kind, namespace, lifecycle_status)
 			VALUES ($1, $2, $3, 'main', 'production', 'tel-app-production', 'ready')`, []any{telEnvID, telOrgID, telAppID}},
 		// A second org with its own app/environment used for cross-tenant probes.
 		{`INSERT INTO orgs (id, name, slug) VALUES ($1, 'Other Org', 'other-org')`, []any{otherOrgID}},
 		{`INSERT INTO projects (id, org_id, name, slug) VALUES ($1, $2, 'Other Project', 'other-project')`, []any{otherProjectID, otherOrgID}},
-		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, ci_workflow_id)
-			VALUES ($1, $2, $3, 'Other App', 'other-app', 'other-host', 'deploy.yml')`, []any{otherAppID, otherOrgID, otherProjectID}},
+		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label,image_repository,github_workflow_path,production_branch)
+			VALUES ($1, $2, $3, 'Other App', 'other-app', 'other-host','ghcr.io/acme/other-app','.github/workflows/deploy.yml','main')`, []any{otherAppID, otherOrgID, otherProjectID}},
 		{`INSERT INTO environments (id, org_id, app_id, branch, kind, namespace, lifecycle_status)
 			VALUES ($1, $2, $3, 'main', 'production', 'other-app-production', 'ready')`, []any{otherEnvID, otherOrgID, otherAppID}},
 	}

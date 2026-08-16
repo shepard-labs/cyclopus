@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -55,35 +54,14 @@ func (s *Service) CreateGitConnection(ctx context.Context, actor ActorContext, k
 	if err := validateGitConnection(input); err != nil {
 		return store.GitConnection{}, err
 	}
-	var replay store.GitConnection
-	claimed, err := s.claim(ctx, actor, "git_connection.create", key, input, &replay)
-	if err != nil || !claimed {
-		return replay, err
-	}
-	value := store.GitConnection{ID: newID(), OrgID: actor.OrgID, Provider: input.Provider, InstallationID: input.InstallationID,
-		RepoFullName: input.RepoFullName, DefaultBranch: input.DefaultBranch, WebhookSecretRef: input.WebhookSecretRef}
-	body, _ := json.Marshal(value)
-	idem := s.completion(actor, "git_connection.create", key, input, body, 201)
-	value, err = s.store.CreateGitConnection(ctx, store.SaveGitConnectionParams{GitConnection: value, Idempotency: idem, Audit: audit(actor)})
-	return value, mapError(err)
+	return store.GitConnection{}, store.ErrFailedPrecondition
 }
 
 func (s *Service) DeleteGitConnection(ctx context.Context, actor ActorContext, key, id string) error {
 	if err := validateActor(actor); err != nil {
 		return err
 	}
-	if err := validateHostnameID(id); err != nil {
-		return err
-	}
-	request := struct{ ID string }{id}
-	var replay struct{}
-	claimed, err := s.claim(ctx, actor, "git_connection.delete", key, request, &replay)
-	if err != nil || !claimed {
-		return err
-	}
-	idem := s.completion(actor, "git_connection.delete", key, request, json.RawMessage(`{}`), 200)
-	idem.OrgID = actor.OrgID
-	return mapError(s.store.DeleteGitConnection(ctx, actor.OrgID, id, idem, audit(actor)))
+	return store.ErrFailedPrecondition
 }
 
 // normalizeGitConnectionInput applies the table defaults so a caller can omit

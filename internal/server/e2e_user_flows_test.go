@@ -156,13 +156,14 @@ func finalizeReleaseLive(t *testing.T, fixture apiFixture, dataStore *store.Stor
 func seedGitIntegration(t *testing.T, fixture apiFixture, orgID, projectID string, appIDs ...string) {
 	t.Helper()
 	var gitID string
-	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO git_connections (org_id, provider, installation_id, repo_full_name, default_branch, webhook_secret_ref)
-		VALUES ($1,'github',12345,'acme/api','main','k8s-secret://cyclopus/gh#webhook') RETURNING id::text`, orgID).Scan(&gitID); err != nil {
+	mustExec(t, fixture.pool, `INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(12345,$1,12346,'acme','Organization','selected','active',1,1)`, orgID)
+	mustExec(t, fixture.pool, `INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(12347,$1,12345,'api-node','acme','api','acme/api','private','main','active',1,1)`, orgID)
+	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,12347) RETURNING id::text`, orgID).Scan(&gitID); err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=$2 WHERE id=$1`, projectID, gitID)
 	for _, appID := range appIDs {
-		mustExec(t, fixture.pool, `UPDATE apps SET ci_workflow_id='build.yml' WHERE id=$1`, appID)
+		mustExec(t, fixture.pool, `UPDATE apps SET github_workflow_path='.github/workflows/build.yml',production_branch='main' WHERE id=$1`, appID)
 	}
 }
 
@@ -614,14 +615,15 @@ func TestE2EApplications(t *testing.T) {
 			t.Fatalf("CreateApplication() = %+v", app)
 		}
 		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM apps WHERE id=$1 AND org_id=$2 AND project_id=$3
-			AND name='API' AND slug='api' AND hostname_label='api' AND registry_id=$4 AND image_repository='acme/api'
+			AND name='API' AND slug='api' AND hostname_label='api' AND registry_id=$4 AND image_repository='ghcr.io/acme/api'
 			AND container_port=8080 AND health_check_path='/healthz' AND scaling_mode='hpa'
 			AND min_replicas=1 AND max_replicas=3 AND hpa_target_cpu_percent=70
 			AND cpu_request_millicores=100 AND cpu_limit_millicores=1000
 			AND memory_request_mib=128 AND memory_limit_mib=512
 			AND previews_enabled AND max_preview_environments=10 AND preview_idle_ttl_hours=168
 			AND deploy_timeout_seconds=600 AND release_retention_count=5 AND runtime_class='gvisor'
-			AND ci_workflow_id IS NULL AND deleted_at IS NULL AND external_credentials_revoked_at IS NULL`,
+			AND github_workflow_path='.github/workflows/build.yml' AND production_branch='main'
+			AND deleted_at IS NULL AND external_credentials_revoked_at IS NULL`,
 			appID, clients.orgID, project.GetProject().GetId(), registryID); count != 1 {
 			t.Fatalf("apps row mismatch, count = %d", count)
 		}
@@ -797,7 +799,7 @@ func TestE2EPreviewLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustExec(t, fixture.pool, `UPDATE apps SET ci_workflow_id='build.yml' WHERE id=$1`, appCapped.GetApplication().GetId())
+		mustExec(t, fixture.pool, `UPDATE apps SET github_workflow_path='.github/workflows/build.yml' WHERE id=$1`, appCapped.GetApplication().GetId())
 		if _, err := clients.environment.AcceptPreviewPush(sessionCtx, &cyclopusv1.PreviewPushRequest{
 			ApplicationId: appCapped.GetApplication().GetId(), Branch: "cap-a",
 			CommitSha: strings.Repeat("e", 40), IdempotencyKey: "push-5",

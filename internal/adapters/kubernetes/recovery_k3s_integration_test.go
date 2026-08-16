@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/store"
-	"github.com/shepard-labs/cyclopus/internal/worker"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/worker"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,9 +65,9 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 		failedRevisionID   = "10000000-0000-0000-0000-000000000009"
 	)
 	seedK3sRecoveryScope(t, pool, orgID, projectID, appID, environmentID, repositoryID, namespace)
-	recoveryImage := os.Getenv("CYCLOPUS_DEPLOY_TEST_IMAGE")
-	if recoveryImage == "" {
-		t.Fatal("CYCLOPUS_DEPLOY_TEST_IMAGE is required for live recovery readiness")
+	recoveryImage, imageRepository, _ := deployTestImage(t)
+	if _, err := pool.Exec(ctx, `UPDATE apps SET image_repository=$1 WHERE id=$2`, imageRepository, appID); err != nil {
+		t.Fatal(err)
 	}
 
 	immutable := true
@@ -108,7 +108,7 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 	_ = waitForK3sDeploymentReady(t, ctx, client, namespace, created.Name)
 
 	failed := previous.DeepCopy()
-	failed.Spec.Template.Spec.Containers[0].Image = "registry.invalid/cyclopus/recovery:not-found"
+	failed.Spec.Template.Spec.Containers[0].Image = imageRepository + "@sha256:" + strings.Repeat("f", 64)
 	failedSecretName := store.EnvDestinationSecretName("app", failedRevisionID)
 	failed.Spec.Template.Spec.Containers[0].EnvFrom[0].SecretRef.Name = failedSecretName
 	failed.Annotations[ReleaseAnnotation] = failedID
@@ -220,7 +220,7 @@ func TestRecoveryWorkerK3sPostgresIntegration(t *testing.T) {
 		t.Fatalf("recovered environment lease=%v revision=%s", inProgress, currentRevision)
 	}
 	var queuedStatus, queuedCommit string
-	if err := pool.QueryRow(ctx, `SELECT status,commit_sha FROM orchestration_jobs WHERE environment_id=$1 AND status='queued' ORDER BY created_at DESC,id DESC LIMIT 1`, environmentID).Scan(&queuedStatus, &queuedCommit); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT status,desired_checkout_sha FROM orchestration_jobs WHERE environment_id=$1 AND status='queued' ORDER BY created_at DESC,id DESC LIMIT 1`, environmentID).Scan(&queuedStatus, &queuedCommit); err != nil {
 		t.Fatalf("read promoted queued orchestration job: %v", err)
 	}
 	if queuedStatus != "queued" || queuedCommit != fmt.Sprintf("%040d", 2) {
@@ -250,7 +250,7 @@ func TestRecoveryWorkerUsesRenewedFenceForErrorPersistence(t *testing.T) {
 			releaseID := "20000000-0000-0000-0004-" + suffix
 			repositoryID := "20000000-0000-0000-0005-" + suffix
 			seedK3sRecoveryScope(t, pool, orgID, projectID, appID, environmentID, repositoryID, "recovery-fence")
-			deployment := testDeployment("registry.example.test/app@sha256:" + strings.Repeat("a", 64))
+			deployment := testDeployment("ghcr.io/cyclopus/recovery@sha256:" + strings.Repeat("a", 64))
 			deployment.Namespace = "recovery-fence"
 			snapshot, err := EncodeDeploymentSnapshot(deployment)
 			if err != nil {
@@ -410,11 +410,12 @@ func seedK3sRecoveryScope(t *testing.T, pool *pgxpool.Pool, orgID, projectID, ap
 		args  []any
 	}{
 		{`INSERT INTO orgs (id, name, slug) VALUES ($1, 'Recovery Org', 'recovery-org')`, []any{orgID}},
-		{`INSERT INTO git_connections (id, org_id, installation_id, repo_full_name, webhook_secret_ref)
-			VALUES ($1, $2, 1, 'cyclopus/recovery', 'k8s-secret://cyclopus/github#webhook')`, []any{repositoryID, orgID}},
+		{`INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(4001,$1,4002,'cyclopus','Organization','selected','active',1,1)`, []any{orgID}},
+		{`INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(4003,$1,4001,$2,'cyclopus','recovery','cyclopus/recovery','public','main','active',1,1)`, []any{orgID, "recovery-node-" + environmentID}},
+		{`INSERT INTO git_connections (id,org_id,github_repository_id) VALUES ($1,$2,4003)`, []any{repositoryID, orgID}},
 		{`INSERT INTO projects (id, org_id, name, slug, git_connection_id) VALUES ($1, $2, 'Recovery', 'recovery', $3)`, []any{projectID, orgID, repositoryID}},
-		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, deploy_timeout_seconds)
-			VALUES ($1, $2, $3, 'Recovery', 'recovery', 'recovery-host', 1)`, []any{appID, orgID, projectID}},
+		{`INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,deploy_timeout_seconds)
+			VALUES ($1,$2,$3,'Recovery','recovery','recovery-host','ghcr.io/cyclopus/recovery','.github/workflows/deploy.yml','main',1)`, []any{appID, orgID, projectID}},
 		{`INSERT INTO environments (id, org_id, app_id, branch, kind, namespace, planned_hostname)
 			VALUES ($1, $2, $3, 'main', 'production', $4, 'recovery.example.test')`, []any{environmentID, orgID, appID, namespace}},
 	}
@@ -438,7 +439,11 @@ func seedK3sRecoveryReleases(t *testing.T, pool *pgxpool.Pool, orgID, environmen
 		orgID, environmentID, previousRevisionID, failedRevisionID); err != nil {
 		t.Fatal(err)
 	}
-	image := "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64)
+	var imageRepository string
+	if err := pool.QueryRow(ctx, `SELECT image_repository FROM apps app JOIN environments environment ON environment.app_id=app.id WHERE environment.id=$1`, environmentID).Scan(&imageRepository); err != nil {
+		t.Fatal(err)
+	}
+	image := imageRepository + "@sha256:" + strings.Repeat("a", 64)
 	if _, err := pool.Exec(ctx, `INSERT INTO releases
 		(id, org_id, environment_id, image_ref, git_commit_sha, kind, env_var_revision_id, config_snapshot, config_hash, status)
 		VALUES ($1, $2, $3, $4, $5, 'env_change', $6, $7, $8, 'live'),
@@ -451,9 +456,21 @@ func seedK3sRecoveryReleases(t *testing.T, pool *pgxpool.Pool, orgID, environmen
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO orchestration_jobs
-		(org_id, repository_id, workflow_id, git_ref, environment_id, commit_sha, idempotency_key, status)
-		VALUES ($1, $2, 'deploy.yml', 'refs/heads/main', $3, $4, 'completed-route', 'completed')`,
-		orgID, repositoryID, environmentID, fmt.Sprintf("%040d", 1)); err != nil {
+		(org_id,app_id,environment_id,github_repository_id,github_workflow_path,workflow_revision,dispatch_ref,
+		dispatch_ref_observed_sha,desired_checkout_sha,desired_generation,idempotency_key,status,dispatch_requested_at,
+		dispatch_ambiguity_state,github_dispatch_identity,github_run_id,github_run_head_sha,github_run_status,
+		github_run_conclusion,github_status_observed_at,oci_resolution_state,image_tag_ref,resolved_image_digest,
+		immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state,release_id,terminal_at)
+		SELECT $1,app.id,$3,connection.github_repository_id,app.github_workflow_path,$4,'refs/heads/main',$4,$4,
+			app.desired_generation,'completed-route','completed',now(),'matched','cyclopus:completed-route',4004,$4,
+			'completed','success',now(),'resolved',app.image_repository||':'||$4,'sha256:'||repeat('a',64),
+			app.image_repository||'@sha256:'||repeat('a',64),'application/vnd.oci.image.manifest.v1+json',now(),
+			'live',$5,now()
+		FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
+		JOIN git_connections connection ON connection.org_id=project.org_id AND connection.id=project.git_connection_id
+		WHERE environment.org_id=$1 AND environment.id=$3`, orgID, repositoryID, environmentID,
+		fmt.Sprintf("%040d", 1), previousID); err != nil {
 		t.Fatal(err)
 	}
 }
