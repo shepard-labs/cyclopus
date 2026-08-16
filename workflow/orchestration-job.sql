@@ -135,16 +135,17 @@ CREATE UNIQUE INDEX orchestration_jobs_github_run
     WHERE github_run_id IS NOT NULL;
 
 -- The implementation trigger uses the same generation rule as this contract:
--- current pending work must equal both target generations; an already-active
+-- current pending work must equal the target environment generation; an already-active
 -- observed attempt may retain its captured generation; artifact/deployment
 -- evidence, pending promotion, and completion require the current generation.
 -- Terminal/cancellation transitions are intentionally exempt from that CAS.
 
 -- The sole enqueue/coalescing primitive acquires the organization tombstone
 -- advisory lock before target rows, validates active repository/workflow scope,
--- records durable request identity before advancing coherent app/environment
--- generations, and returns the resulting job plus request-specific disposition.
--- Exact replays return the recorded result without advancing either generation;
+-- records durable request identity before advancing the environment generation,
+-- and returns the complete resulting job projection plus request-specific
+-- disposition without requiring a same-statement join to the inserted row.
+-- Exact replays return the recorded result without advancing the generation;
 -- conflicting reuse of a key is rejected. A first push creates fresh queued work;
 -- every later active push preserves the captured attempt and replaces only pending.
 -- The function has a migration-captured trusted search_path, uses explicitly
@@ -360,10 +361,8 @@ WITH terminal_evidence AS (
        AND status IN ('dispatch_reconciling', 'dispatched')
         AND reconciliation_owner = $3
         AND reconciliation_lease_expires_at > now()
-        AND (pending_desired_generation IS NULL OR (
-            pending_desired_generation = (SELECT desired_generation FROM apps WHERE org_id = $1 AND id = orchestration_jobs.app_id)
-            AND pending_desired_generation = (SELECT desired_generation FROM environments WHERE org_id = $1 AND id = orchestration_jobs.environment_id)
-        ))
+        AND (pending_desired_generation IS NULL OR
+            pending_desired_generation = (SELECT desired_generation FROM environments WHERE org_id = $1 AND id = orchestration_jobs.environment_id))
         AND (
             (status = 'dispatched' AND github_run_id IS NOT NULL
              AND $4 = 'completed'
@@ -455,7 +454,6 @@ UPDATE orchestration_jobs
    AND status = 'resolving_image'
    AND github_run_status = 'completed'
    AND github_run_conclusion = 'success'
-   AND desired_generation = (SELECT desired_generation FROM apps WHERE org_id = $1 AND id = orchestration_jobs.app_id)
    AND desired_generation = (SELECT desired_generation FROM environments WHERE org_id = $1 AND id = orchestration_jobs.environment_id);
 
 -- Bind deployment to a release carrying the same immutable image and commit.
@@ -468,7 +466,6 @@ UPDATE orchestration_jobs AS job
    AND job.id = $2
    AND job.status = 'deploying'
     AND job.deployment_state IN ('ready', 'claimed')
-    AND job.desired_generation = (SELECT desired_generation FROM apps WHERE org_id = job.org_id AND id = job.app_id)
     AND job.desired_generation = (SELECT desired_generation FROM environments WHERE org_id = job.org_id AND id = job.environment_id)
    AND release.org_id = job.org_id
    AND release.environment_id = job.environment_id
@@ -488,7 +485,6 @@ UPDATE orchestration_jobs AS job
    AND job.id = $2
    AND job.status = 'deploying'
     AND job.release_id = release.id
-    AND job.desired_generation = (SELECT desired_generation FROM apps WHERE org_id = job.org_id AND id = job.app_id)
     AND job.desired_generation = (SELECT desired_generation FROM environments WHERE org_id = job.org_id AND id = job.environment_id)
    AND release.org_id = job.org_id
    AND release.environment_id = job.environment_id
@@ -527,7 +523,7 @@ UPDATE orchestration_jobs
     AND status IN ('queued', 'leased', 'dispatch_reconciling', 'dispatched', 'resolving_image', 'deploying');
 
 -- enforce_tombstone_readiness() is replaced after the epoch schema exists.
--- Organization/project/app tombstones advance affected app/environment fences,
+-- Organization/project/app tombstones advance affected environment fences,
 -- cancel all six active orchestration states, clear orchestration,
 -- reconciliation, deployment, and environment deploy claims, and retain the
 -- immutable evidence above. It references no alpha pending SHA columns.

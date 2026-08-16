@@ -70,7 +70,10 @@ func (s *Store) ListOrchestrationOrgIDs(ctx context.Context) ([]string, error) {
 }
 
 func (s *Store) listOrchestrationOrgIDs(ctx context.Context, predicate string) ([]string, error) {
-	rows, err := s.db.Query(ctx, `SELECT DISTINCT org_id::text FROM orchestration_jobs WHERE `+predicate+` ORDER BY org_id::text`)
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT job.org_id::text FROM orchestration_jobs job
+		JOIN environments environment ON environment.org_id=job.org_id AND environment.id=job.environment_id
+		WHERE (`+predicate+`) AND environment.lifecycle_status NOT IN ('policy_blocked','teardown_requested','torn_down','failed')
+		ORDER BY job.org_id::text`)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +124,7 @@ func enqueueOrCoalesceOrchestrationTx(ctx context.Context, tx pgx.Tx, params Enq
 		}
 		return job, fmt.Errorf("resolve orchestration target: %w", err)
 	}
-	if (params.RepositoryID != "" && params.RepositoryID != connectionID) ||
+	if (params.RepositoryID != "" && params.RepositoryID != connectionID && params.RepositoryID != fmt.Sprint(repositoryID)) ||
 		(params.WorkflowID != "" && params.WorkflowID != workflowPath) {
 		return job, fmt.Errorf("resolve orchestration target: %w", ErrFailedPrecondition)
 	}
@@ -132,11 +135,10 @@ func enqueueOrCoalesceOrchestrationTx(ctx context.Context, tx pgx.Tx, params Enq
 	err = scanEnqueuedPush(tx.QueryRow(ctx, `SELECT result.orchestration_job_id::text,result.org_id::text,result.app_id::text,
 		result.environment_id::text,result.github_repository_id::text,result.github_workflow_path,result.workflow_revision,
 		result.dispatch_ref,result.desired_checkout_sha,result.desired_generation,result.idempotency_key,
-		job.pending_github_workflow_path,job.pending_workflow_revision,job.pending_dispatch_ref,
+		result.pending_github_workflow_path,result.pending_workflow_revision,result.pending_dispatch_ref,
 		result.pending_checkout_sha,result.pending_desired_generation,result.pending_idempotency_key,
 		result.orchestration_status,result.accepted_generation,result.enqueue_result
-		FROM enqueue_orchestration_push($1,$2,$3,$4,$5,$6,$7,$8,$9) result
-		JOIN orchestration_jobs job ON job.org_id=result.org_id AND job.id=result.orchestration_job_id`, params.OrgID, appID,
+		FROM enqueue_orchestration_push($1,$2,$3,$4,$5,$6,$7,$8,$9) result`, params.OrgID, appID,
 		params.EnvironmentID, repositoryID, workflowPath, workflowRevision, params.GitRef, params.CommitSHA,
 		params.IdempotencyKey), &job)
 	if err != nil {
@@ -199,6 +201,7 @@ func (s *Store) ClaimDispatchReconciliation(ctx context.Context, orgID, owner st
 
 func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDuration time.Duration, reconciliation bool) (*OrchestrationJob, error) {
 	var job OrchestrationJob
+	var dispatchRefObservedSHA *string
 	statusPredicate := `job.status='queued' OR (job.status='leased' AND job.lease_expires_at<=now())`
 	assignment := `status='leased',lease_owner=$2,lease_expires_at=now()+make_interval(secs=>$3),
 		dispatch_requested_at=NULL,dispatch_ref_observed_sha=NULL,dispatch_ambiguity_state='none',reconcile_after=NULL,
@@ -221,9 +224,10 @@ func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDu
 			JOIN github_installations installation ON installation.org_id=repository.org_id AND installation.github_installation_id=repository.github_installation_id
 			JOIN environments environment ON environment.org_id=job.org_id AND environment.id=job.environment_id
 			JOIN apps app ON app.org_id=job.org_id AND app.id=job.app_id
-			WHERE job.org_id=$1 AND (`+statusPredicate+`) AND environment.torn_down_at IS NULL
-			AND app.deleted_at IS NULL AND repository.access_state='active' AND installation.access_state='active'
-			AND job.desired_generation=app.desired_generation AND job.desired_generation=environment.desired_generation
+				WHERE job.org_id=$1 AND (`+statusPredicate+`) AND environment.torn_down_at IS NULL
+				AND environment.lifecycle_status NOT IN ('policy_blocked','teardown_requested','torn_down','failed')
+				AND app.deleted_at IS NULL AND repository.access_state='active' AND installation.access_state='active'
+				AND (job.desired_generation=environment.desired_generation OR job.pending_desired_generation=environment.desired_generation)
 			ORDER BY job.created_at,job.id FOR UPDATE OF job SKIP LOCKED LIMIT 1)
 			UPDATE orchestration_jobs job SET `+assignment+`,updated_at=now() FROM candidate WHERE job.id=candidate.id
 			RETURNING job.id::text,job.org_id::text,job.idempotency_key,job.github_repository_id::text,
@@ -238,7 +242,7 @@ func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDu
 			&job.DesiredGeneration, &job.PendingWorkflowID, &job.PendingWorkflowRevision, &job.PendingGitRef,
 			&job.PendingCommitSHA, &job.PendingDesiredGeneration,
 			&job.PendingIdempotencyKey, &job.Status, &job.LeaseExpiresAt, &job.DispatchRequestedAt,
-			&job.DispatchRefObservedSHA, &job.DispatchDeadlineAt, &job.RunDeadlineAt, &job.GitHubRunID, &job.ReconciliationLeaseEnd,
+			&dispatchRefObservedSHA, &job.DispatchDeadlineAt, &job.RunDeadlineAt, &job.GitHubRunID, &job.ReconciliationLeaseEnd,
 			&job.InstallationID, &job.RepositoryFullName, &job.Attempt)
 	})
 	if err == pgx.ErrNoRows {
@@ -246,6 +250,9 @@ func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDu
 	}
 	if err != nil {
 		return nil, err
+	}
+	if dispatchRefObservedSHA != nil {
+		job.DispatchRefObservedSHA = *dispatchRefObservedSHA
 	}
 	return &job, nil
 }
@@ -369,14 +376,14 @@ func (s *Store) ResolveOrchestration(ctx context.Context, params ResolveOrchestr
 	err := s.db.QueryRow(ctx, `WITH terminal_evidence AS (INSERT INTO orchestration_job_run_evidence(
 		orchestration_job_id,attempt,github_run_id,github_run_status,github_run_conclusion,observed_head_sha,observed_at,
 		terminal_error_code,terminal_error_message,terminal_at)
-		SELECT id,attempt,github_run_id,$4,NULLIF($5,''),github_run_head_sha,now(),$6,$7,now()
+		SELECT id,attempt,github_run_id,$4,NULLIF($5,''),github_run_head_sha,now(),$6::text,$7::text,now()
 		FROM orchestration_jobs WHERE org_id=$1 AND id=$2 AND status IN ('dispatch_reconciling','dispatched')
 		AND reconciliation_owner=$3 AND reconciliation_lease_expires_at>now()
-		AND (pending_desired_generation IS NULL OR (pending_desired_generation=(SELECT desired_generation FROM apps WHERE org_id=$1 AND id=orchestration_jobs.app_id)
-		AND pending_desired_generation=(SELECT desired_generation FROM environments WHERE org_id=$1 AND id=orchestration_jobs.environment_id)))
-		AND ((status='dispatched' AND github_run_id IS NOT NULL AND $4='completed' AND $5 IN ('success','failure','cancelled','timed_out','action_required','neutral','skipped','stale') AND $6 IS NULL)
-		OR (status='dispatch_reconciling' AND github_run_id IS NULL AND dispatch_deadline_at<=now() AND $4='completed' AND $5='' AND $6 IN ('github_run_missing','github_run_ambiguous'))
-		OR (status='dispatched' AND github_run_id IS NOT NULL AND run_deadline_at<=now() AND $4 IN ('queued','in_progress') AND $5='' AND $6='github_run_timed_out'))
+		AND (pending_desired_generation IS NULL OR pending_desired_generation=(SELECT desired_generation FROM environments
+		WHERE org_id=$1 AND id=orchestration_jobs.environment_id))
+		AND ((status='dispatched' AND github_run_id IS NOT NULL AND $4='completed' AND $5 IN ('success','failure','cancelled','timed_out','action_required','neutral','skipped','stale') AND $6::text IS NULL)
+		OR (status='dispatch_reconciling' AND github_run_id IS NULL AND dispatch_deadline_at<=now() AND $4='completed' AND $5='' AND $6::text IN ('github_run_missing','github_run_ambiguous'))
+		OR (status='dispatched' AND github_run_id IS NOT NULL AND run_deadline_at<=now() AND $4 IN ('queued','in_progress') AND $5='' AND $6::text='github_run_timed_out'))
 		RETURNING orchestration_job_id)
 		UPDATE orchestration_jobs job SET status=CASE WHEN pending_checkout_sha IS NOT NULL THEN 'queued'
 		WHEN $5='success' THEN 'resolving_image' ELSE 'failed' END,
@@ -412,8 +419,8 @@ func (s *Store) ResolveOrchestration(ctx context.Context, params ResolveOrchestr
 		deployment_state=CASE WHEN pending_checkout_sha IS NOT NULL THEN 'not_started' ELSE deployment_state END,
 		deployment_claim_owner=NULL,deployment_claim_expires_at=NULL,
 		release_id=CASE WHEN pending_checkout_sha IS NOT NULL THEN NULL ELSE release_id END,
-		terminal_error_code=CASE WHEN pending_checkout_sha IS NOT NULL THEN NULL ELSE $6 END,
-		terminal_error_message=CASE WHEN pending_checkout_sha IS NOT NULL THEN NULL ELSE $7 END,
+		terminal_error_code=CASE WHEN pending_checkout_sha IS NOT NULL THEN NULL ELSE $6::text END,
+		terminal_error_message=CASE WHEN pending_checkout_sha IS NOT NULL THEN NULL ELSE $7::text END,
 		terminal_at=CASE WHEN pending_checkout_sha IS NULL AND $5<>'success' THEN now() ELSE NULL END,
 		attempt=attempt+CASE WHEN pending_checkout_sha IS NOT NULL THEN 1 ELSE 0 END,updated_at=now()
 		FROM terminal_evidence WHERE job.id=terminal_evidence.orchestration_job_id

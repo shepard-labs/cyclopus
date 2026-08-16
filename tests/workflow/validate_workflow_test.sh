@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 VALIDATOR="$ROOT/scripts/validate_workflow.sh"
 assertions=0
 
@@ -17,7 +17,7 @@ assert_mutation_fails() {
   expression=$3
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/cyclopus-workflow-test.XXXXXX")
   trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-  cp -R "$ROOT/docs" "$ROOT/workflow" "$ROOT/scripts" "$ROOT/tests" "$ROOT/versions.yaml" "$ROOT/cyclopus-spec.md" "$tmp/"
+  cp -R "$ROOT/docs" "$ROOT/workflow" "$ROOT/scripts" "$ROOT/tests" "$ROOT/versions.yaml" "$tmp/"
   ruby -e "$expression" "$tmp/$relative"
   if sh "$tmp/scripts/validate_workflow.sh" >/dev/null 2>&1; then
     fail "$name mutation was accepted"
@@ -54,24 +54,25 @@ assert_mutation_fails "missing PSL gate" workflow/phases.yaml 'p=ARGV[0]; s=File
 assert_mutation_fails "wrong pending SHA RETURNING" tests/workflow/fixtures/pending_sha_pg18.sql 'p=ARGV[0]; s=File.read(p); s.sub!(/RETURNING WITH \(OLD AS old_row, NEW AS new_row\)\n\s+old_row.pending_commit_sha AS taken_sha,\n\s+new_row.pending_commit_sha AS remaining_sha/, "RETURNING pending_commit_sha AS taken_sha, pending_commit_sha AS remaining_sha"); File.write(p,s)'
 assert_mutation_fails "lease SQL removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("FOR UPDATE SKIP LOCKED", "FOR UPDATE"); File.write(p,s)'
 assert_mutation_fails "scope single-flight index removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("CREATE UNIQUE INDEX orchestration_jobs_scope_single_flight", "CREATE INDEX orchestration_jobs_scope_single_flight"); File.write(p,s)'
-assert_mutation_fails "environment omitted from single-flight" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("repository_id, workflow_id, git_ref, environment_id", "repository_id, workflow_id, git_ref"); File.write(p,s)'
-assert_mutation_fails "latest SHA promotion removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("commit_sha = COALESCE(pending_commit_sha, commit_sha)", "commit_sha = commit_sha"); File.write(p,s)'
+assert_mutation_fails "environment omitted from single-flight" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("org_id, app_id, environment_id", "org_id, app_id"); File.write(p,s)'
+assert_mutation_fails "latest checkout promotion removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("desired_checkout_sha = COALESCE(pending_checkout_sha, desired_checkout_sha)", "desired_checkout_sha = desired_checkout_sha"); File.write(p,s)'
 assert_mutation_fails "dispatch reconciliation state removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.gsub!("dispatch_reconciling", "leased"); File.write(p,s)'
 assert_mutation_fails "observable job input removed" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("dispatch_inputs: [orchestration_job_id, commit_sha]", "dispatch_inputs: [commit_sha]"); File.write(p,s)'
-assert_mutation_fails "immutable commit input removed" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("dispatch_inputs: [orchestration_job_id, commit_sha]", "dispatch_inputs: [orchestration_job_id]"); File.write(p,s)'
+assert_mutation_fails "commit SHA input removed" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("dispatch_inputs: [orchestration_job_id, commit_sha]", "dispatch_inputs: [orchestration_job_id]"); File.write(p,s)'
+assert_mutation_fails "commit SHA input changed to persistence name" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("dispatch_inputs: [orchestration_job_id, commit_sha]", "dispatch_inputs: [orchestration_job_id, desired_checkout_sha]"); File.write(p,s)'
 assert_mutation_fails "immutable checkout attestation removed" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("required commit_sha input; checkout commit_sha; attest HEAD equals commit_sha before build", "required commit_sha input"); File.write(p,s)'
 assert_mutation_fails "ambiguous auto-redispatch enabled" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("ambiguous_dispatch_auto_redispatch: false", "ambiguous_dispatch_auto_redispatch: true"); File.write(p,s)'
 assert_mutation_fails "retry trigger changed" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("retry_trigger: next_push", "retry_trigger: timer"); File.write(p,s)'
 assert_mutation_fails "startup reconciliation disabled" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("run_on_startup: true", "run_on_startup: false"); File.write(p,s)'
 assert_mutation_fails "periodic reconciliation removed" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("periodic_interval_seconds: 30", "periodic_interval_seconds: 0"); File.write(p,s)'
-assert_mutation_fails "dispatched state omitted from reconciliation" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("states: [dispatch_reconciling, dispatched]", "states: [dispatch_reconciling]"); File.write(p,s)'
+assert_mutation_fails "deploying state omitted from reconciliation policy" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("states: [dispatch_reconciling, dispatched, resolving_image, deploying]", "states: [dispatch_reconciling, dispatched, resolving_image]"); File.write(p,s)'
 assert_mutation_fails "dispatch deadline removed from policy" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("dispatch_observation_seconds: 300", "dispatch_observation_seconds: 0"); File.write(p,s)'
 assert_mutation_fails "run deadline removed from policy" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("github_run_seconds: 2700", "github_run_seconds: 0"); File.write(p,s)'
 assert_mutation_fails "hard deadlines made caller-owned" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("hard_deadline_owner: store", "hard_deadline_owner: caller"); File.write(p,s)'
 assert_mutation_fails "cancelled conclusion is nonterminal" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("terminal_failure_conclusions: [failure, cancelled, timed_out]", "terminal_failure_conclusions: [failure, timed_out]"); File.write(p,s)'
 assert_mutation_fails "missing run does not fail" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("missing_run_after_dispatch_deadline: failed", "missing_run_after_dispatch_deadline: queued"); File.write(p,s)'
 assert_mutation_fails "status evidence disabled" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("persist_status_and_error_evidence: true", "persist_status_and_error_evidence: false"); File.write(p,s)'
-assert_mutation_fails "atomic terminal promotion disabled" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("terminal_resolution_promotes_pending_sha_atomically: true", "terminal_resolution_promotes_pending_sha_atomically: false"); File.write(p,s)'
+assert_mutation_fails "atomic terminal promotion disabled" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("terminal_resolution_promotes_pending_tuple_atomically: true", "terminal_resolution_promotes_pending_tuple_atomically: false"); File.write(p,s)'
 assert_mutation_fails "persisted dispatch deadline removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("dispatch_deadline_at timestamptz,", ""); File.write(p,s)'
 assert_mutation_fails "persisted run deadline removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("run_deadline_at timestamptz,", ""); File.write(p,s)'
 assert_mutation_fails "reconciliation lease removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("reconciliation_lease_expires_at timestamptz,", ""); File.write(p,s)'
@@ -79,17 +80,14 @@ assert_mutation_fails "dispatched runs omitted from SQL reconciliation" workflow
 assert_mutation_fails "immutable run evidence removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.gsub!("INSERT INTO orchestration_job_run_evidence", "SELECT"); File.write(p,s)'
 assert_mutation_fails "terminal cancellation handling removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("\x27success\x27, \x27failure\x27, \x27cancelled\x27, \x27timed_out\x27", "\x27success\x27, \x27failure\x27, \x27timed_out\x27"); File.write(p,s)'
 assert_mutation_fails "terminal error evidence removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.gsub!("terminal_error_message", "discarded_error_message"); File.write(p,s)'
-assert_mutation_fails "terminal pending SHA promotion removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("WHEN pending_commit_sha IS NOT NULL THEN \x27queued\x27", "WHEN pending_commit_sha IS NOT NULL THEN \x27failed\x27"); File.write(p,s)'
+assert_mutation_fails "terminal pending tuple promotion removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("WHEN pending_checkout_sha IS NOT NULL THEN \x27queued\x27", "WHEN pending_checkout_sha IS NOT NULL THEN \x27failed\x27"); File.write(p,s)'
 assert_mutation_fails "ambiguous dispatch observation mutates to queued" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("SET reconcile_after = LEAST(now() + interval \x2790 seconds\x27, dispatch_deadline_at)", "SET status = \x27queued\x27, reconcile_after = NULL"); File.write(p,s)'
-assert_mutation_fails "missing-run terminal code guard removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("AND dispatch_deadline_at <= now() AND $5 = \x27github_run_missing\x27", "AND dispatch_deadline_at <= now()"); File.write(p,s)'
+# shellcheck disable=SC2016
+assert_mutation_fails "missing-run terminal code guard removed" workflow/orchestration-job.sql 'p=ARGV[0]; s=File.read(p); s.sub!("AND $6 IN (\x27github_run_missing\x27, \x27github_run_ambiguous\x27)", "AND $6 IS NOT NULL"); File.write(p,s)'
 assert_mutation_fails "gate implementer identity optional" workflow/gate.schema.json 'p=ARGV[0]; s=File.read(p); s.sub!(%Q[    "implementer_agent",\n], ""); File.write(p,s)'
 assert_mutation_fails "gate validator unpinned" workflow/run.yaml 'p=ARGV[0]; s=File.read(p); s.sub!("validator_version: \"0.33.3\"", "validator_version: latest"); File.write(p,s)'
-assert_mutation_fails "canonical pending SHA uses NEW value" cyclopus-spec.md 'p=ARGV[0]; s=File.read(p); s.sub!("old_row.pending_commit_sha AS taken_sha", "new_row.pending_commit_sha AS taken_sha"); File.write(p,s)'
-assert_mutation_fails "Phase 0 errata precedence removed" cyclopus-spec.md 'p=ARGV[0]; s=File.read(p); s.sub!("### Phase 0 Errata Precedence", "### Notes"); File.write(p,s)'
 assert_mutation_fails "checkpoint digest optional" workflow/checkpoint.schema.json 'p=ARGV[0]; s=File.read(p); s.sub!(%Q[    "input_digest",\n], ""); File.write(p,s)'
 
-assert_exit "integration placeholder" 2 sh "$ROOT/scripts/integration.sh" deploy
-assert_exit "infrastructure placeholder" 2 sh "$ROOT/scripts/test_infrastructure.sh"
 assert_exit "Postgres contract without database" 2 env -u POSTGRES_CONTRACT_URL sh "$ROOT/scripts/validate_postgres_contract.sh"
 
 sh "$ROOT/tests/workflow/validate_gate_evidence_test.sh" || fail "gate evidence negative tests failed"

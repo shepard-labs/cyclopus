@@ -208,7 +208,7 @@ func TestPreviewActiveDeployPushUsesCanonicalGenerationAndIdempotencyIntegration
 		&environmentGeneration, &pendingSHA, &pendingKey, &acceptedGeneration); err != nil {
 		t.Fatal(err)
 	}
-	if acceptedGeneration != firstGeneration+1 || appGeneration != acceptedGeneration || environmentGeneration != acceptedGeneration ||
+	if acceptedGeneration != firstGeneration+1 || appGeneration != 1 || environmentGeneration != acceptedGeneration ||
 		pendingSHA != params.CommitSHA || pendingKey != params.IdempotencyKey {
 		t.Fatalf("canonical preview generation = first:%d accepted:%d app:%d environment:%d pending:%s/%s",
 			firstGeneration, acceptedGeneration, appGeneration, environmentGeneration, pendingSHA, pendingKey)
@@ -431,6 +431,8 @@ func TestIdempotencyCleanupAndSecretConstraintsIntegration(t *testing.T) {
 func TestDeployLeaseRequiresDedicatedFencedRecoveryIntegration(t *testing.T) {
 	store, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000024", commitSHA('1'), "expired-finalize-route")
 	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	seedRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "pending")
 	ctx := context.Background()
@@ -459,8 +461,6 @@ func TestDeployLeaseRequiresDedicatedFencedRecoveryIntegration(t *testing.T) {
 	if err := store.SetPendingCommitSHA(ctx, recovery, commitSHA('b')); err != nil {
 		t.Fatal(err)
 	}
-	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
-		"00000000-0000-0000-0000-000000000024", commitSHA('1'), "expired-finalize-route")
 	result, err := store.FinalizeReleaseFailed(ctx, FailReleaseParams{
 		Lease: recovery, FailureReason: "orphaned deploy",
 		Audit: testAudit("00000000-0000-0000-0000-000000000023", "deploy.lease_swept", releaseOneID),
@@ -711,6 +711,8 @@ func TestRecoveryScanClaimsWithoutFinalizingExternalCompensationIntegration(t *t
 func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t *testing.T) {
 	store, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000032", commitSHA('1'), "live-finalize-route")
 	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "live")
 	seedRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "deploying")
 	if _, err := pool.Exec(context.Background(), `INSERT INTO aliases
@@ -725,8 +727,6 @@ func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t 
 	if err := store.SetPendingCommitSHA(context.Background(), lease, commitSHA('c')); err != nil {
 		t.Fatal(err)
 	}
-	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
-		"00000000-0000-0000-0000-000000000032", commitSHA('1'), "live-finalize-route")
 	result, err := store.FinalizeReleaseLive(context.Background(), FinalizeReleaseParams{
 		Lease: lease, Hostname: "new.example.test",
 		Audit: testAudit("00000000-0000-0000-0000-000000000031", "deploy.succeeded", releaseTwoID),
@@ -805,7 +805,8 @@ func TestFinalizeReleaseLegacyPendingPreservesWorkflowRevisionAndCanonicalGenera
 	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('2')); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test"}); err != nil {
+	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test",
+		Audit: testAudit("00000000-0000-0000-0000-000000000082", "deploy.succeeded", releaseOneID)}); err != nil {
 		t.Fatal(err)
 	}
 	var checkoutSHA, workflowRevision, key string
@@ -867,10 +868,11 @@ func TestFinalizeReleasePromotionFailureRollsBackReleaseAliasAndLeaseIntegration
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('4')); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('4')); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test"}); !errors.Is(err, ErrConflict) {
+	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test",
+		Audit: testAudit("00000000-0000-0000-0000-000000000085", "deploy.succeeded", releaseOneID)}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("promotion failure=%v", err)
 	}
 	var status, owner, pending string
@@ -1037,6 +1039,8 @@ func TestAdoptRecoveredReleaseUpdatesAliasFromPlannedHostnameAtomicallyIntegrati
 func TestQuarantineDeployRecoveryPersistsFailureAndPreservesOwnershipIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedCompletedOrchestrationRoute(t, dataStore, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000084", commitSHA('1'), "quarantine-route")
 	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
@@ -1193,7 +1197,7 @@ func TestOrchestrationReplayConflictDeadlineReconciliationAndTenantFilteringInte
 		Scan(&appGeneration, &environmentGeneration); err != nil {
 		t.Fatal(err)
 	}
-	if appGeneration != *coalesced.PendingDesiredGeneration || environmentGeneration != appGeneration {
+	if appGeneration != 1 || environmentGeneration != *coalesced.PendingDesiredGeneration {
 		t.Fatalf("target generations = app:%d environment:%d pending:%d", appGeneration, environmentGeneration, *coalesced.PendingDesiredGeneration)
 	}
 	time.Sleep(5 * time.Millisecond)
@@ -1208,12 +1212,33 @@ func TestOrchestrationReplayConflictDeadlineReconciliationAndTenantFilteringInte
 	if err != nil || resolved.Status != "queued" || resolved.CommitSHA != commitSHA('4') || resolved.PendingCommitSHA != nil {
 		t.Fatalf("terminal promotion = %+v, %v", resolved, err)
 	}
-	if resolved.DesiredGeneration != appGeneration {
-		t.Fatalf("promoted generation = %d, want %d", resolved.DesiredGeneration, appGeneration)
+	if resolved.DesiredGeneration != environmentGeneration {
+		t.Fatalf("promoted generation = %d, want %d", resolved.DesiredGeneration, environmentGeneration)
 	}
 	assertCount(t, pool, "orchestration_job_run_evidence", 2)
 	if _, err := store.ClaimOrchestration(ctx, orgTwoID, "other-worker", time.Minute); err != nil {
 		t.Fatalf("other tenant claim: %v", err)
+	}
+}
+
+func TestFreshOrchestrationEnqueueReturnsInsertedJobIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	params := orchestrationParams(orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000081", commitSHA('8'), "fresh-enqueue-result")
+
+	job, err := dataStore.EnqueueOrCoalesceOrchestration(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ID == "" || job.OrgID != orgOneID || job.AppID != appOneID || job.EnvironmentID != environmentOneID ||
+		job.RepositoryID != "2001" || job.WorkflowID != ".github/workflows/deploy.yml" ||
+		job.WorkflowRevision != params.CommitSHA || job.GitRef != params.GitRef || job.CommitSHA != params.CommitSHA ||
+		job.DesiredGeneration != 2 || job.AcceptedGeneration != 2 || job.IdempotencyKey != params.IdempotencyKey ||
+		job.Status != "queued" || job.EnqueueResult != "queued" || job.PendingWorkflowID != nil ||
+		job.PendingWorkflowRevision != nil || job.PendingGitRef != nil || job.PendingCommitSHA != nil ||
+		job.PendingDesiredGeneration != nil || job.PendingIdempotencyKey != nil {
+		t.Fatalf("fresh enqueue returned incomplete job: %+v", job)
 	}
 }
 
@@ -1229,7 +1254,7 @@ func TestOrchestrationHistoricalRetryCannotOverwriteNewerQueuedCommitIntegration
 		t.Fatal(err)
 	}
 	newerJob, err := store.EnqueueOrCoalesceOrchestration(ctx, newer)
-	if err != nil || newerJob.CommitSHA != newer.CommitSHA {
+	if err != nil || newerJob.PendingCommitSHA == nil || *newerJob.PendingCommitSHA != newer.CommitSHA {
 		t.Fatalf("newer enqueue = %+v, %v", newerJob, err)
 	}
 	replay, err := store.EnqueueOrCoalesceOrchestration(ctx, first)
@@ -1241,7 +1266,7 @@ func TestOrchestrationHistoricalRetryCannotOverwriteNewerQueuedCommitIntegration
 		WHERE org_id = $1 AND id = $2`, orgOneID, newerJob.ID).Scan(&currentSHA, &currentKey); err != nil {
 		t.Fatal(err)
 	}
-	if currentSHA != newer.CommitSHA || currentKey != newer.IdempotencyKey {
+	if currentSHA != first.CommitSHA || currentKey != first.IdempotencyKey {
 		t.Fatalf("current orchestration was overwritten: %s/%s", currentSHA, currentKey)
 	}
 	assertCount(t, pool, "orchestration_jobs", 1)
@@ -1278,7 +1303,7 @@ func TestOrchestrationMissingRunResolvesTerminalAfterDeadlineIntegration(t *test
 	code := "github_run_missing"
 	message := "no correlated run became observable before the dispatch deadline"
 	resolved, err := store.ResolveOrchestration(ctx, ResolveOrchestrationParams{
-		OrgID: orgOneID, JobID: reconcile.ID, Owner: "reconciler", RunStatus: "missing",
+		OrgID: orgOneID, JobID: reconcile.ID, Owner: "reconciler", RunStatus: "completed",
 		TerminalCode: &code, TerminalMessage: &message,
 	})
 	if err != nil || resolved.Status != "failed" {
@@ -1643,6 +1668,7 @@ func TestTombstoneWaitsForOrganizationBoundaryLockIntegration(t *testing.T) {
 	go func() {
 		done <- dataStore.TombstoneApp(context.Background(), TombstoneParams{
 			OrgID: orgOneID, ID: appOneID, ExternalCredentialsRevoked: true,
+			Audit: testAudit("00000000-0000-0000-0000-000000000077", "app.tombstoned", appOneID),
 		})
 	}()
 	select {
@@ -2155,6 +2181,8 @@ func TestProjectAndAppCreateUpdateAreTenantScopedIntegration(t *testing.T) {
 	}
 	app, err := dataStore.CreateApp(ctx, SaveAppParams{App: App{ID: appID, OrgID: orgOneID,
 		ProjectID: projectID, Name: "Created App", Slug: "created-app", HostnameLabel: "created-app",
+		ImageRepository: stringPointer("ghcr.io/acme/created-app"), GitHubWorkflowPath: ".github/workflows/deploy.yml",
+		ProductionBranch: "main", AnnotationPolicy: "validate_if_present", ImageVisibility: "public",
 		ContainerPort: 8080, HealthCheckPath: "/", ScalingMode: "hpa", MinReplicas: 1, MaxReplicas: 3,
 		HPATargetCPUPercent: 70, CPURequestMillicores: 100, CPULimitMillicores: 1000,
 		MemoryRequestMiB: 128, MemoryLimitMiB: 512, PreviewsEnabled: true,
@@ -2180,6 +2208,9 @@ func TestCreateProductionEnvironmentReservesAndQueuesProvisionIntegration(t *tes
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
 	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `UPDATE environments SET torn_down_at=now() WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
 	environmentID := "00000000-0000-0000-0000-000000000041"
 	environment, err := dataStore.CreateProductionEnvironment(ctx, CreateProductionEnvironmentParams{
 		ID: environmentID, OrgID: orgOneID, AppID: appOneID, Branch: "release",
@@ -2215,6 +2246,9 @@ func TestClaimEnvironmentLifecycleJobReturnsProductionKindAndPlannedHostnameInte
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
 	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `UPDATE environments SET torn_down_at=now() WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
 	environmentID := "00000000-0000-0000-0000-000000000041"
 	if _, err := dataStore.CreateProductionEnvironment(ctx, CreateProductionEnvironmentParams{
 		ID: environmentID, OrgID: orgOneID, AppID: appOneID, Branch: "release",
@@ -2242,10 +2276,20 @@ func TestRequestPreviewTeardownByIDCoversProductionIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
 	ctx := context.Background()
+	job, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID,
+		repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000043",
+		commitSHA('4'), "production-teardown-active"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generationBefore int64
+	if err := pool.QueryRow(ctx, `SELECT desired_generation FROM environments WHERE id=$1`, environmentOneID).Scan(&generationBefore); err != nil {
+		t.Fatal(err)
+	}
 	environment, err := dataStore.RequestPreviewTeardown(ctx, PreviewTeardownParams{
 		OrgID: orgOneID, AppID: appOneID, Branch: "main", EnvironmentID: environmentOneID,
 		IdempotencyKey: "production-teardown", EventKind: "teardown", Reason: "app_decommission",
-		Audit: testAudit("00000000-0000-0000-0000-000000000043", "ignored", environmentOneID),
+		Audit: testAudit("00000000-0000-0000-0000-000000000047", "ignored", environmentOneID),
 	})
 	if err != nil {
 		t.Fatalf("RequestPreviewTeardown() production environment error = %v", err)
@@ -2253,13 +2297,86 @@ func TestRequestPreviewTeardownByIDCoversProductionIntegration(t *testing.T) {
 	if environment.ID != environmentOneID || environment.LifecycleStatus != "teardown_requested" {
 		t.Fatalf("RequestPreviewTeardown() = %+v", environment)
 	}
-	var kind, status, reason string
-	if err := pool.QueryRow(ctx, `SELECT kind,status,reason FROM environment_lifecycle_jobs
-		WHERE org_id=$1 AND environment_id=$2 AND kind='teardown'`, orgOneID, environmentOneID).Scan(&kind, &status, &reason); err != nil {
+	var kind, status, reason, jobStatus, terminalCode string
+	var terminalAt *time.Time
+	var generationAfter int64
+	if err := pool.QueryRow(ctx, `SELECT lifecycle.kind,lifecycle.status,lifecycle.reason,
+		job.status,job.terminal_error_code,job.terminal_at,environment.desired_generation
+		FROM environment_lifecycle_jobs lifecycle
+		JOIN environments environment ON environment.id=lifecycle.environment_id
+		JOIN orchestration_jobs job ON job.id=$3
+		WHERE lifecycle.org_id=$1 AND lifecycle.environment_id=$2 AND lifecycle.kind='teardown'`,
+		orgOneID, environmentOneID, job.ID).Scan(&kind, &status, &reason, &jobStatus, &terminalCode, &terminalAt, &generationAfter); err != nil {
 		t.Fatal(err)
 	}
-	if status != "queued" || reason != "app_decommission" {
-		t.Fatalf("teardown job status=%q reason=%q, want queued/app_decommission", status, reason)
+	if status != "queued" || reason != "app_decommission" || generationAfter != generationBefore+1 ||
+		jobStatus != "cancelled" || terminalCode != "environment_teardown_requested" || terminalAt == nil {
+		t.Fatalf("teardown state lifecycle=%s/%s generation=%d->%d orchestration=%s/%s/%v",
+			status, reason, generationBefore, generationAfter, jobStatus, terminalCode, terminalAt)
+	}
+}
+
+func TestRequestPreviewTeardownFencesEveryActiveOrchestrationStateIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := t.Context()
+	activeStates := []string{"queued", "leased", "dispatch_reconciling", "dispatched", "resolving_image", "deploying"}
+	for index, activeState := range activeStates {
+		branch := "feature/teardown-" + activeState
+		push, err := dataStore.AcceptPreviewPush(ctx, previewPushParams("teardown-"+activeState, branch, commitSHA(byte('1'+index))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		jobID := ""
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM orchestration_jobs WHERE environment_id=$1`, push.Environment.ID).Scan(&jobID); err != nil {
+			t.Fatal(err)
+		}
+		switch activeState {
+		case "leased":
+			_, err = pool.Exec(ctx, `UPDATE orchestration_jobs SET status='leased',lease_owner='teardown-worker',
+				lease_expires_at=now()+interval '5 minutes' WHERE id=$1`, jobID)
+		case "dispatch_reconciling":
+			_, err = pool.Exec(ctx, `UPDATE orchestration_jobs SET status='dispatch_reconciling',attempt=1,
+				dispatch_requested_at=now(),dispatch_ref_observed_sha=desired_checkout_sha,
+				dispatch_ambiguity_state='possible',reconcile_after=now()+interval '30 seconds',
+				dispatch_deadline_at=now()+interval '5 minutes' WHERE id=$1`, jobID)
+		case "dispatched":
+			_, err = pool.Exec(ctx, `UPDATE orchestration_jobs SET status='dispatched',attempt=1,
+				dispatch_requested_at=now(),dispatch_ref_observed_sha=desired_checkout_sha,
+				dispatch_ambiguity_state='matched',github_dispatch_identity='cyclopus:'||id,
+				github_run_id=$2,github_run_status='in_progress',run_deadline_at=now()+interval '45 minutes' WHERE id=$1`, jobID, 9000+index)
+		case "resolving_image":
+			_, err = pool.Exec(ctx, `UPDATE orchestration_jobs SET status='resolving_image',attempt=1,
+				github_run_status='completed',github_run_conclusion='success',github_run_head_sha=desired_checkout_sha WHERE id=$1`, jobID)
+		case "deploying":
+			_, err = pool.Exec(ctx, `UPDATE orchestration_jobs job SET status='deploying',attempt=1,
+				github_run_status='completed',github_run_conclusion='success',github_run_head_sha=desired_checkout_sha,
+				image_tag_ref=app.image_repository||':'||desired_checkout_sha,resolved_image_digest='sha256:'||repeat('9',64),
+				immutable_image_ref=app.image_repository||'@sha256:'||repeat('9',64),
+				oci_media_type='application/vnd.oci.image.manifest.v1+json',oci_resolution_state='resolved',
+				oci_resolved_at=now(),deployment_state='ready' FROM apps app WHERE job.id=$1 AND app.id=job.app_id`, jobID)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		environment, err := dataStore.RequestPreviewTeardown(ctx, PreviewTeardownParams{
+			OrgID: orgOneID, AppID: appOneID, EnvironmentID: push.Environment.ID,
+			IdempotencyKey: "teardown-request-" + activeState, EventKind: "teardown", Reason: "state_coverage",
+			Audit: testAudit(fmt.Sprintf("00000000-0000-0000-0000-%012d", 900+index), "ignored", push.Environment.ID),
+		})
+		if err != nil || environment.LifecycleStatus != "teardown_requested" {
+			t.Fatalf("teardown %s = %+v, %v", activeState, environment, err)
+		}
+		var generation int64
+		var status, code string
+		if err := pool.QueryRow(ctx, `SELECT environment.desired_generation,job.status,job.terminal_error_code
+			FROM environments environment JOIN orchestration_jobs job ON job.environment_id=environment.id
+			WHERE environment.id=$1`, push.Environment.ID).Scan(&generation, &status, &code); err != nil {
+			t.Fatal(err)
+		}
+		if generation != 3 || status != "cancelled" || code != "environment_teardown_requested" {
+			t.Fatalf("teardown %s state = generation:%d status:%s code:%s", activeState, generation, status, code)
+		}
 	}
 }
 
@@ -2456,7 +2573,7 @@ func seedCompletedOrchestrationRoute(t *testing.T, dataStore *Store, pool *pgxpo
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE orchestration_jobs SET status='failed',terminal_error_code='fixture_terminal',terminal_at=now()
-		WHERE org_id=$1 AND environment_id=$2 AND id=$3`, orgID, environmentID, id); err != nil {
+		WHERE org_id=$1 AND environment_id=$2 AND idempotency_key=$3`, orgID, environmentID, key); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2527,7 +2644,7 @@ func prepareDispatchedRecoveryJob(t *testing.T, store *Store, pool *pgxpool.Pool
 		t.Fatal(err)
 	}
 	if err := store.RecordDispatchedRun(ctx, orgOneID, job.ID, "reconciler",
-		"cyclopus:"+job.ID, 1000+int64(job.ID[len(job.ID)-1]), "in_progress", commitSHA('a'), time.Hour); err != nil {
+		"cyclopus:"+job.ID, 12345, "in_progress", commitSHA('a'), time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET reconcile_after = now() - interval '1 second'

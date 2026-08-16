@@ -214,6 +214,8 @@ ALTER TABLE apps
     ADD COLUMN production_branch text NOT NULL CHECK (btrim(production_branch) <> '' AND octet_length(production_branch) <= 255),
     ADD COLUMN annotation_policy text NOT NULL DEFAULT 'validate_if_present' CHECK (annotation_policy IN ('validate_if_present')),
     ADD COLUMN image_visibility text NOT NULL DEFAULT 'public' CHECK (image_visibility IN ('public', 'private')),
+    -- Compatibility metadata only. Deployment fencing is environment-scoped;
+    -- no orchestration or deployment gate may compare against this value.
     ADD COLUMN desired_generation bigint NOT NULL DEFAULT 1 CHECK (desired_generation > 0),
     ADD COLUMN cleanup_state text NOT NULL DEFAULT 'active' CHECK (cleanup_state IN ('active', 'cleanup_requested', 'cleaning', 'cleanup_failed', 'cleaned')),
     ADD COLUMN cleanup_checkpoint text CHECK (cleanup_checkpoint IS NULL OR octet_length(cleanup_checkpoint) <= 200),
@@ -426,7 +428,6 @@ LANGUAGE plpgsql AS $$
 DECLARE
     expected_repository text;
     target_repository_id bigint;
-    target_generation bigint;
     environment_generation bigint;
     release_image_ref text;
     release_commit_sha text;
@@ -451,8 +452,8 @@ BEGIN
         NEW.pending_workflow_revision := NULL;
         NEW.pending_dispatch_ref := NULL;
     END IF;
-    SELECT app.image_repository, connection.github_repository_id, app.desired_generation, environment.desired_generation
-      INTO expected_repository, target_repository_id, target_generation, environment_generation
+    SELECT app.image_repository, connection.github_repository_id, environment.desired_generation
+      INTO expected_repository, target_repository_id, environment_generation
       FROM apps app
       JOIN projects project ON project.org_id = app.org_id AND project.id = app.project_id
       JOIN git_connections connection ON connection.org_id = project.org_id AND connection.id = project.git_connection_id
@@ -462,7 +463,7 @@ BEGIN
         RAISE EXCEPTION 'orchestration target does not match app project repository' USING ERRCODE = 'check_violation';
     END IF;
     IF NEW.pending_desired_generation IS NOT NULL
-       AND (NEW.pending_desired_generation <> target_generation OR NEW.pending_desired_generation <> environment_generation) THEN
+       AND NEW.pending_desired_generation <> environment_generation THEN
         RAISE EXCEPTION 'pending orchestration desired generation is stale' USING ERRCODE = 'check_violation';
     END IF;
     IF (CASE WHEN TG_OP = 'INSERT' THEN true ELSE
@@ -479,7 +480,7 @@ BEGIN
             ))
             OR (NEW.status = 'completed' AND OLD.status <> 'completed')
         END)
-       AND (NEW.desired_generation <> target_generation OR NEW.desired_generation <> environment_generation) THEN
+       AND NEW.desired_generation <> environment_generation THEN
         RAISE EXCEPTION 'orchestration desired generation is stale' USING ERRCODE = 'check_violation';
     END IF;
     IF NEW.image_tag_ref IS NOT NULL AND NEW.image_tag_ref IS DISTINCT FROM expected_repository || ':' || NEW.desired_checkout_sha THEN
@@ -587,15 +588,15 @@ CREATE FUNCTION enqueue_orchestration_push(
     orchestration_job_id uuid, org_id uuid, app_id uuid, environment_id uuid,
     github_repository_id bigint, github_workflow_path text, workflow_revision text,
     dispatch_ref text, desired_checkout_sha text, desired_generation bigint,
-    idempotency_key text, pending_checkout_sha text, pending_desired_generation bigint,
+    idempotency_key text, pending_github_workflow_path text,
+    pending_workflow_revision text, pending_dispatch_ref text,
+    pending_checkout_sha text, pending_desired_generation bigint,
     pending_idempotency_key text, orchestration_status text,
     accepted_generation bigint, enqueue_result text
 )
 LANGUAGE plpgsql
-SET search_path FROM CURRENT
 AS $$
 DECLARE
-    app_generation bigint;
     environment_generation bigint;
     target_project_id uuid;
     target_connection_id uuid;
@@ -643,7 +644,7 @@ BEGIN
     IF NOT FOUND OR target_connection_id IS NULL THEN
         RAISE EXCEPTION 'orchestration project scope is inactive' USING ERRCODE = 'foreign_key_violation';
     END IF;
-    SELECT app.desired_generation INTO app_generation FROM apps app
+    PERFORM 1 FROM apps app
      WHERE app.org_id = target_org_id AND app.id = target_app_id AND app.project_id = target_project_id
        AND app.deleted_at IS NULL AND app.github_workflow_path = target_workflow_path FOR UPDATE;
     IF NOT FOUND THEN
@@ -656,10 +657,6 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'orchestration environment scope is inactive' USING ERRCODE = 'foreign_key_violation';
     END IF;
-    IF app_generation <> environment_generation THEN
-        RAISE EXCEPTION 'application and environment desired generations are incoherent' USING ERRCODE = 'foreign_key_violation';
-    END IF;
-
     SELECT connection.github_repository_id INTO request_repository_id FROM git_connections connection
      WHERE connection.org_id = target_org_id AND connection.id = target_connection_id
        AND connection.state = 'active' AND connection.access_state = 'active' FOR KEY SHARE;
@@ -687,11 +684,11 @@ BEGIN
        AND job.status IN ('queued', 'leased', 'dispatch_reconciling', 'dispatched', 'resolving_image', 'deploying')
      FOR UPDATE;
 
-    IF app_generation = 9223372036854775807 THEN
+    IF environment_generation = 9223372036854775807 THEN
         RAISE EXCEPTION 'orchestration desired generation cannot exceed bigint maximum' USING ERRCODE = 'check_violation';
     END IF;
     request_job_id := COALESCE(active_job_id, uuidv7());
-    request_generation := app_generation + 1;
+    request_generation := environment_generation + 1;
     request_result := CASE WHEN active_job_id IS NULL THEN 'queued' ELSE 'pending' END;
     INSERT INTO orchestration_push_requests (
         org_id, idempotency_key, app_id, environment_id, github_repository_id,
@@ -726,24 +723,20 @@ BEGIN
         RETURN QUERY
         SELECT job.id, job.org_id, job.app_id, job.environment_id, job.github_repository_id,
                job.github_workflow_path, job.workflow_revision, job.dispatch_ref,
-               job.desired_checkout_sha, job.desired_generation, job.idempotency_key,
-               job.pending_checkout_sha, job.pending_desired_generation,
+                job.desired_checkout_sha, job.desired_generation, job.idempotency_key,
+                job.pending_github_workflow_path, job.pending_workflow_revision,
+                job.pending_dispatch_ref,
+                job.pending_checkout_sha, job.pending_desired_generation,
                job.pending_idempotency_key, job.status, request_generation, request_result
           FROM orchestration_jobs job WHERE job.org_id = target_org_id AND job.id = request_job_id;
         RETURN;
     END IF;
 
-    app_generation := request_generation;
-    UPDATE apps app SET desired_generation = app_generation
-     WHERE app.org_id = target_org_id AND app.id = target_app_id
-       AND app.desired_generation = app_generation - 1;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'application desired generation changed while enqueueing' USING ERRCODE = 'serialization_failure';
-    END IF;
-    UPDATE environments environment SET desired_generation = app_generation
+    environment_generation := request_generation;
+    UPDATE environments environment SET desired_generation = environment_generation
      WHERE environment.org_id = target_org_id AND environment.app_id = target_app_id
-       AND environment.id = target_environment_id
-       AND environment.desired_generation = app_generation - 1;
+        AND environment.id = target_environment_id
+        AND environment.desired_generation = environment_generation - 1;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'environment desired generation changed while enqueueing' USING ERRCODE = 'serialization_failure';
     END IF;
@@ -755,7 +748,7 @@ BEGIN
         ) VALUES (
             request_job_id, target_org_id, target_app_id, target_environment_id, target_repository_id,
             target_workflow_path, target_workflow_revision, target_dispatch_ref,
-            target_checkout_sha, app_generation, target_idempotency_key
+            target_checkout_sha, environment_generation, target_idempotency_key
         );
     ELSE
         UPDATE orchestration_jobs job SET
@@ -764,7 +757,7 @@ BEGIN
             pending_workflow_revision = target_workflow_revision,
             pending_dispatch_ref = target_dispatch_ref,
             pending_checkout_sha = target_checkout_sha,
-            pending_desired_generation = app_generation,
+            pending_desired_generation = environment_generation,
             pending_idempotency_key = target_idempotency_key,
             updated_at = now()
          WHERE job.org_id = target_org_id AND job.id = active_job_id;
@@ -773,29 +766,54 @@ BEGIN
     RETURN QUERY
     SELECT job.id, job.org_id, job.app_id, job.environment_id, job.github_repository_id,
            job.github_workflow_path, job.workflow_revision, job.dispatch_ref,
-           job.desired_checkout_sha, job.desired_generation, job.idempotency_key,
-           job.pending_checkout_sha, job.pending_desired_generation,
+            job.desired_checkout_sha, job.desired_generation, job.idempotency_key,
+            job.pending_github_workflow_path, job.pending_workflow_revision,
+            job.pending_dispatch_ref,
+            job.pending_checkout_sha, job.pending_desired_generation,
            job.pending_idempotency_key, job.status, request_generation, request_result
       FROM orchestration_jobs job WHERE job.org_id = target_org_id AND job.id = request_job_id;
+END;
+$$;
+
+-- Pin the function to the exact schema that owns the application tables. Tests
+-- deliberately migrate into a dynamically named schema, so neither a hard-coded
+-- schema nor the caller's search_path is safe.
+DO $$
+DECLARE
+    application_schema name;
+BEGIN
+    SELECT namespace.nspname INTO STRICT application_schema
+      FROM pg_catalog.pg_class relation
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+     WHERE relation.oid = 'orchestration_jobs'::regclass;
+    EXECUTE pg_catalog.format(
+        'ALTER FUNCTION %I.enqueue_orchestration_push(uuid, uuid, uuid, bigint, text, text, text, text, text) SET search_path TO %I, pg_catalog',
+        application_schema, application_schema
+    );
+    EXECUTE pg_catalog.format(
+        'REVOKE EXECUTE ON FUNCTION %I.enqueue_orchestration_push(uuid, uuid, uuid, bigint, text, text, text, text, text) FROM PUBLIC',
+        application_schema
+    );
 END;
 $$;
 
 -- The migration owner (normally the application role) retains owner EXECUTE;
 -- deployments using a distinct application role may grant EXECUTE to that
 -- existing role after role creation, without this migration naming a role.
-REVOKE EXECUTE ON FUNCTION enqueue_orchestration_push(uuid, uuid, uuid, bigint, text, text, text, text, text) FROM PUBLIC;
 DO $$
 DECLARE
+    application_schema name;
     table_owner name;
 BEGIN
-    SELECT owner.rolname INTO table_owner
+    SELECT namespace.nspname, owner.rolname INTO application_schema, table_owner
       FROM pg_catalog.pg_class relation
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
       JOIN pg_catalog.pg_roles owner ON owner.oid = relation.relowner
      WHERE relation.oid = 'orchestration_jobs'::regclass;
     IF table_owner IS DISTINCT FROM current_user THEN
         EXECUTE pg_catalog.format(
             'GRANT EXECUTE ON FUNCTION %I.enqueue_orchestration_push(uuid, uuid, uuid, bigint, text, text, text, text, text) TO %I',
-            current_schema(), table_owner
+            application_schema, table_owner
         );
     END IF;
 END;
@@ -831,7 +849,7 @@ BEGIN
             AND installation.last_api_confirmed_generation = installation.reconciliation_generation
              AND (CASE WHEN TG_OP = 'UPDATE'
                   THEN OLD.status IN ('queued', 'leased', 'dispatch_reconciling', 'dispatched', 'resolving_image', 'deploying')
-                  ELSE NEW.desired_generation = app.desired_generation AND NEW.desired_generation = environment.desired_generation
+                  ELSE NEW.desired_generation = environment.desired_generation
                   END)
          FOR KEY SHARE OF environment, app, project, connection, repository, installation, org;
         IF NOT FOUND THEN
@@ -873,6 +891,50 @@ CREATE TRIGGER orchestration_jobs_active_scope
 BEFORE INSERT OR UPDATE OF status, org_id, app_id, environment_id, github_repository_id, desired_generation ON orchestration_jobs
 FOR EACH ROW EXECUTE FUNCTION enforce_active_work_scope();
 
+CREATE FUNCTION fence_disconnected_git_connection() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.state = 'active' AND NEW.state = 'disconnected' THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(NEW.org_id::text, 1380270412));
+        UPDATE environments environment
+           SET desired_generation = environment.desired_generation + 1,
+               pending_commit_sha = NULL,
+               in_progress_release_id = NULL,
+               lock_acquired_at = NULL
+          FROM apps app, projects project
+         WHERE project.org_id = NEW.org_id AND project.git_connection_id = NEW.id
+           AND app.org_id = project.org_id AND app.project_id = project.id
+           AND environment.org_id = app.org_id AND environment.app_id = app.id;
+        UPDATE orchestration_jobs job
+           SET status = 'cancelled', pending_github_repository_id = NULL,
+               pending_github_workflow_path = NULL, pending_workflow_revision = NULL,
+               pending_dispatch_ref = NULL, pending_checkout_sha = NULL,
+               pending_desired_generation = NULL, pending_idempotency_key = NULL,
+               lease_owner = NULL, lease_expires_at = NULL, reconcile_after = NULL,
+               dispatch_deadline_at = NULL, run_deadline_at = NULL,
+               reconciliation_owner = NULL, reconciliation_lease_expires_at = NULL,
+               deployment_claim_owner = NULL, deployment_claim_expires_at = NULL,
+               cancellation_state = 'requested',
+               cancellation_requested_at = COALESCE(cancellation_requested_at, now()),
+               deployment_state = CASE WHEN deployment_state IN ('waiting_credential', 'ready', 'claimed', 'applying') THEN 'cancelled' ELSE deployment_state END,
+               terminal_error_code = 'git_connection_disconnected',
+               terminal_error_message = 'Git connection was disconnected',
+               terminal_at = now(), updated_at = now()
+          FROM environments environment, apps app, projects project
+         WHERE project.org_id = NEW.org_id AND project.git_connection_id = NEW.id
+           AND app.org_id = project.org_id AND app.project_id = project.id
+           AND environment.org_id = app.org_id AND environment.app_id = app.id
+           AND job.org_id = environment.org_id AND job.environment_id = environment.id
+           AND job.status IN ('queued', 'leased', 'dispatch_reconciling', 'dispatched', 'resolving_image', 'deploying');
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER git_connections_disconnect_fence
+BEFORE UPDATE OF state ON git_connections
+FOR EACH ROW EXECUTE FUNCTION fence_disconnected_git_connection();
+
 CREATE OR REPLACE FUNCTION enforce_tombstone_readiness() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -883,7 +945,15 @@ BEGIN
         IF NEW.external_credentials_revoked_at IS NULL THEN
             RAISE EXCEPTION 'external credential revocation must be confirmed before tombstone' USING ERRCODE = 'check_violation';
         END IF;
-        scope_org_id := CASE WHEN TG_TABLE_NAME = 'orgs' THEN NEW.id ELSE NEW.org_id END;
+        IF TG_TABLE_NAME = 'orgs' THEN
+            scope_org_id := NEW.id;
+        ELSIF TG_TABLE_NAME = 'projects' THEN
+            scope_org_id := NEW.org_id;
+        ELSIF TG_TABLE_NAME = 'apps' THEN
+            scope_org_id := NEW.org_id;
+        ELSE
+            RAISE EXCEPTION 'unsupported tombstone trigger table: %', TG_TABLE_NAME USING ERRCODE = 'check_violation';
+        END IF;
         PERFORM pg_advisory_xact_lock(hashtextextended(scope_org_id::text, 1380270412));
 
         IF TG_TABLE_NAME = 'orgs' THEN
@@ -891,7 +961,6 @@ BEGIN
                 RAISE EXCEPTION 'all descendant environments must be torn down before organization tombstone' USING ERRCODE = 'check_violation';
             END IF;
             SELECT COALESCE(array_agg(id), '{}'::uuid[]) INTO affected_app_ids FROM apps WHERE org_id = NEW.id;
-            UPDATE apps SET desired_generation = desired_generation + 1 WHERE org_id = NEW.id;
             UPDATE environments SET desired_generation = desired_generation + 1,
                 in_progress_release_id = NULL, lock_acquired_at = NULL WHERE org_id = NEW.id;
         ELSIF TG_TABLE_NAME = 'projects' THEN
@@ -900,16 +969,14 @@ BEGIN
                 RAISE EXCEPTION 'all descendant environments must be torn down before project tombstone' USING ERRCODE = 'check_violation';
             END IF;
             SELECT COALESCE(array_agg(id), '{}'::uuid[]) INTO affected_app_ids FROM apps WHERE org_id = NEW.org_id AND project_id = NEW.id;
-            UPDATE apps SET desired_generation = desired_generation + 1 WHERE org_id = NEW.org_id AND project_id = NEW.id;
             UPDATE environments SET desired_generation = desired_generation + 1,
                 in_progress_release_id = NULL, lock_acquired_at = NULL
              WHERE org_id = NEW.org_id AND app_id = ANY (affected_app_ids);
-        ELSE
+        ELSIF TG_TABLE_NAME = 'apps' THEN
             IF EXISTS (SELECT 1 FROM environments WHERE org_id = NEW.org_id AND app_id = NEW.id AND torn_down_at IS NULL) THEN
                 RAISE EXCEPTION 'all descendant environments must be torn down before app tombstone' USING ERRCODE = 'check_violation';
             END IF;
             affected_app_ids := ARRAY[NEW.id];
-            NEW.desired_generation := OLD.desired_generation + 1;
             UPDATE environments SET desired_generation = desired_generation + 1,
                 in_progress_release_id = NULL, lock_acquired_at = NULL
              WHERE org_id = NEW.org_id AND app_id = NEW.id;

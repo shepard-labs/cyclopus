@@ -462,7 +462,7 @@ func seedK3sRecoveryReleases(t *testing.T, pool *pgxpool.Pool, orgID, environmen
 		github_run_conclusion,github_status_observed_at,oci_resolution_state,image_tag_ref,resolved_image_digest,
 		immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state,release_id,terminal_at)
 		SELECT $1,app.id,$3,connection.github_repository_id,app.github_workflow_path,$4,'refs/heads/main',$4,$4,
-			app.desired_generation,'completed-route','completed',now(),'matched','cyclopus:completed-route',4004,$4,
+			environment.desired_generation,'completed-route','completed',now(),'matched','cyclopus:completed-route',4004,$4,
 			'completed','success',now(),'resolved',app.image_repository||':'||$4,'sha256:'||repeat('a',64),
 			app.image_repository||'@sha256:'||repeat('a',64),'application/vnd.oci.image.manifest.v1+json',now(),
 			'live',$5,now()

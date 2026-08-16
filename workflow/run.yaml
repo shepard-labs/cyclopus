@@ -83,9 +83,9 @@ orchestration:
   job_contract: workflow/orchestration-job.sql
   lease_required_before_github_dispatch: true
   lease_ttl_seconds: 120
-  single_flight_scope: [repository, workflow, ref, environment]
-  idempotency_scope: [repository, workflow, ref, environment, commit_sha]
-  latest_sha_coalescing: true
+  single_flight_scope: [app, environment]
+  idempotency_scope: [app, environment, github_repository_id, github_workflow_path, workflow_revision, dispatch_ref, desired_checkout_sha, desired_generation]
+  latest_push_coalescing: true
   persist_observed_run_before_reconciliation_exit: true
   recover_expired_leases_on_startup: true
   dispatch_inputs: [orchestration_job_id, commit_sha]
@@ -98,7 +98,7 @@ orchestration:
     run_on_startup: true
     periodic_interval_seconds: 30
     claim_ttl_seconds: 60
-    states: [dispatch_reconciling, dispatched]
+    states: [dispatch_reconciling, dispatched, resolving_image, deploying]
   timeouts:
     hard_deadline_owner: store
     dispatch_observation_seconds: 300
@@ -108,7 +108,7 @@ orchestration:
   terminal_failure_conclusions: [failure, cancelled, timed_out]
   missing_run_after_dispatch_deadline: failed
   persist_status_and_error_evidence: true
-  terminal_resolution_promotes_pending_sha_atomically: true
+  terminal_resolution_promotes_pending_tuple_atomically: true
 integration_profiles:
   orbstack_ubuntu:
     provider: orbstack

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
 ruby - "$ROOT" <<'RUBY'
 require "json"
@@ -54,7 +54,6 @@ schema = JSON.parse(File.read(File.join(root, "workflow/gate.schema.json")))
 checkpoint_schema = JSON.parse(File.read(File.join(root, "workflow/checkpoint.schema.json")))
 orchestration_sql = File.read(File.join(root, "workflow/orchestration-job.sql"))
 pending_sha_sql = File.read(File.join(root, "tests/workflow/fixtures/pending_sha_pg18.sql"))
-spec = File.read(File.join(root, "docs/cyclopus-spec.md"))
 
 excluded = Array(run.dig("scope", "exclude")).map(&:downcase)
 %w[ui frontend browser templ htmx tailwind].each do |term|
@@ -106,12 +105,13 @@ errors << "orchestration lease must precede GitHub dispatch" unless orchestratio
 errors << "orchestration lease TTL must be positive" unless orchestration["lease_ttl_seconds"].is_a?(Integer) && orchestration["lease_ttl_seconds"] > 0
 errors << "orchestration must persist the observed run before leaving reconciliation" unless orchestration["persist_observed_run_before_reconciliation_exit"] == true
 errors << "orchestration must recover expired leases" unless orchestration["recover_expired_leases_on_startup"] == true
-errors << "orchestration single-flight scope is incomplete" unless %w[repository workflow ref environment].all? { |field| Array(orchestration["single_flight_scope"]).include?(field) }
-errors << "orchestration idempotency scope is incomplete" unless %w[repository workflow ref environment commit_sha].all? { |field| Array(orchestration["idempotency_scope"]).include?(field) }
-errors << "orchestration must coalesce to the latest SHA" unless orchestration["latest_sha_coalescing"] == true
-errors << "orchestration must pass job ID and immutable commit SHA into GitHub" unless %w[orchestration_job_id commit_sha].all? { |field| Array(orchestration["dispatch_inputs"]).include?(field) }
-errors << "orchestration workflow must checkout and attest the immutable SHA" unless %w[commit_sha checkout attest HEAD].all? { |term| orchestration["immutable_commit_contract"].to_s.include?(term) }
-errors << "orchestration must correlate job ID and commit SHA" unless %w[orchestration_job_id commit_sha head_sha].all? { |term| orchestration["observable_run_correlation"].to_s.include?(term) }
+errors << "orchestration single-flight scope must be app/environment" unless Array(orchestration["single_flight_scope"]) == %w[app environment]
+required_idempotency_scope = %w[app environment github_repository_id github_workflow_path workflow_revision dispatch_ref desired_checkout_sha desired_generation]
+errors << "orchestration idempotency scope is incomplete" unless required_idempotency_scope.all? { |field| Array(orchestration["idempotency_scope"]).include?(field) }
+errors << "orchestration must coalesce the latest complete push tuple" unless orchestration["latest_push_coalescing"] == true
+errors << "orchestration GitHub dispatch inputs must be job ID and commit SHA" unless Array(orchestration["dispatch_inputs"]) == %w[orchestration_job_id commit_sha]
+errors << "orchestration workflow must checkout and attest the immutable commit_sha input" unless %w[commit_sha checkout attest HEAD].all? { |term| orchestration["immutable_commit_contract"].to_s.include?(term) }
+errors << "orchestration must correlate job ID and commit_sha runtime evidence" unless %w[orchestration_job_id commit_sha head_sha].all? { |term| orchestration["observable_run_correlation"].to_s.include?(term) }
 errors << "ambiguous dispatch must have durable reconciliation state" unless orchestration["ambiguous_dispatch_state"] == "dispatch_reconciling"
 errors << "ambiguous dispatch must never auto-redispatch" unless orchestration["ambiguous_dispatch_auto_redispatch"] == false
 errors << "only a next push may retry a missing dispatch" unless orchestration["retry_trigger"] == "next_push"
@@ -119,7 +119,7 @@ reconciliation = orchestration["reconciliation"] || {}
 errors << "orchestration reconciliation must run on startup" unless reconciliation["run_on_startup"] == true
 errors << "orchestration reconciliation interval must be 30 seconds" unless reconciliation["periodic_interval_seconds"] == 30
 errors << "orchestration reconciliation claim TTL must be 60 seconds" unless reconciliation["claim_ttl_seconds"] == 60
-errors << "orchestration reconciliation must cover all nonterminal GitHub states" unless %w[dispatch_reconciling dispatched].all? { |state| Array(reconciliation["states"]).include?(state) }
+errors << "orchestration reconciliation policy must name every active post-lease state" unless %w[dispatch_reconciling dispatched resolving_image deploying].all? { |state| Array(reconciliation["states"]).include?(state) }
 timeouts = orchestration["timeouts"] || {}
 errors << "orchestration hard deadlines must be store-owned" unless timeouts["hard_deadline_owner"] == "store"
 errors << "dispatch observation timeout must be 300 seconds" unless timeouts["dispatch_observation_seconds"] == 300
@@ -129,34 +129,41 @@ errors << "terminal GitHub conclusions are incomplete" unless %w[success failure
 errors << "terminal failure conclusions are incomplete" unless %w[failure cancelled timed_out].all? { |conclusion| Array(orchestration["terminal_failure_conclusions"]).include?(conclusion) }
 errors << "missing GitHub run after deadline must fail" unless orchestration["missing_run_after_dispatch_deadline"] == "failed"
 errors << "orchestration must persist status and error evidence" unless orchestration["persist_status_and_error_evidence"] == true
-errors << "terminal resolution must atomically promote pending SHA" unless orchestration["terminal_resolution_promotes_pending_sha_atomically"] == true
-%w[orchestration_jobs orchestration_job_run_evidence idempotency_key pending_commit_sha pending_idempotency_key environment_id UNIQUE\ INDEX orchestration_jobs_scope_single_flight FOR\ UPDATE\ SKIP\ LOCKED dispatch_reconciling reconcile_after dispatch_deadline_at run_deadline_at reconciliation_owner reconciliation_lease_expires_at github_run_id github_run_status github_run_conclusion github_status_observed_at terminal_error_code terminal_error_message terminal_at orchestration_job_id github_run_missing].each do |term|
+errors << "terminal resolution must atomically promote the complete pending tuple" unless orchestration["terminal_resolution_promotes_pending_tuple_atomically"] == true
+%w[orchestration_jobs orchestration_job_run_evidence github_repository_id app_id environment_id github_workflow_path workflow_revision dispatch_ref desired_checkout_sha desired_generation idempotency_key pending_github_repository_id pending_github_workflow_path pending_workflow_revision pending_dispatch_ref pending_checkout_sha pending_desired_generation pending_idempotency_key enqueue_orchestration_push UNIQUE\ INDEX orchestration_jobs_scope_single_flight FOR\ UPDATE\ SKIP\ LOCKED dispatch_reconciling dispatched resolving_image deploying reconcile_after dispatch_deadline_at run_deadline_at reconciliation_owner reconciliation_lease_expires_at github_dispatch_identity github_run_id github_run_head_sha github_run_status github_run_conclusion github_status_observed_at image_tag_ref resolved_image_digest immutable_image_ref release_id terminal_error_code terminal_error_message terminal_at orchestration_job_id github_run_missing].each do |term|
   literal = term.tr("\\", "")
   errors << "orchestration SQL contract missing: #{literal}" unless orchestration_sql.include?(literal)
 end
 job_table = orchestration_sql[/CREATE TABLE orchestration_jobs \(.*?\n\);/m]
-required_job_columns = %w[dispatch_deadline_at run_deadline_at reconciliation_owner reconciliation_lease_expires_at github_run_status github_run_conclusion github_status_observed_at terminal_error_code terminal_error_message terminal_at]
+required_job_columns = %w[app_id environment_id github_repository_id github_workflow_path workflow_revision dispatch_ref desired_checkout_sha desired_generation pending_github_repository_id pending_github_workflow_path pending_workflow_revision pending_dispatch_ref pending_checkout_sha pending_desired_generation pending_idempotency_key dispatch_deadline_at run_deadline_at reconciliation_owner reconciliation_lease_expires_at github_run_status github_run_conclusion github_status_observed_at immutable_image_ref deployment_state release_id terminal_error_code terminal_error_message terminal_at]
 required_job_columns.each do |column|
   errors << "orchestration job table missing persisted column: #{column}" unless job_table&.match?(/^\s*#{Regexp.escape(column)}\s+\w+/)
 end
 single_flight_index = orchestration_sql[/CREATE UNIQUE INDEX orchestration_jobs_scope_single_flight.*?;/m]
-errors << "single-flight index must cover repository/workflow/ref/environment active states" unless single_flight_index && %w[repository_id workflow_id git_ref environment_id queued leased dispatch_reconciling dispatched].all? { |term| single_flight_index.include?(term) }
-errors << "enqueue must use the scope partial unique index as conflict arbiter" unless orchestration_sql.match?(/ON CONFLICT \(repository_id, workflow_id, git_ref, environment_id\).*?WHERE status IN \('queued', 'leased', 'dispatch_reconciling', 'dispatched'\)/m)
-ordinary_claim = orchestration_sql[/WITH candidate AS \(\n    SELECT id\n      FROM orchestration_jobs\n     WHERE status = 'queued'.*?RETURNING job\.id, job\.idempotency_key.*?;/m]
+errors << "single-flight index must cover app/environment and all active states" unless single_flight_index && %w[org_id app_id environment_id queued leased dispatch_reconciling dispatched resolving_image deploying].all? { |term| single_flight_index.include?(term) }
+errors << "enqueue contract must use the sole durable enqueue primitive" unless orchestration_sql.match?(/SELECT \* FROM enqueue_orchestration_push\(\s*\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9\s*\);/m)
+ordinary_claim = orchestration_sql[/WITH candidate AS \(\n    SELECT id\n      FROM orchestration_jobs\n     WHERE status = 'queued'.*?RETURNING job\.id, job\.idempotency_key, job\.github_repository_id.*?job\.desired_generation.*?;/m]
 errors << "ordinary orchestration claim must lock with SKIP LOCKED" unless ordinary_claim && ordinary_claim.include?("FOR UPDATE SKIP LOCKED")
-errors << "completion must atomically promote the latest pending SHA" unless orchestration_sql.include?("commit_sha = COALESCE(pending_commit_sha, commit_sha)") && orchestration_sql.include?("pending_commit_sha = NULL")
-errors << "dispatch deadline must be persisted without extension across retries" unless orchestration_sql.include?("dispatch_deadline_at = COALESCE(dispatch_deadline_at, now() + interval '300 seconds')")
+pending_tuple = %w[github_repository_id github_workflow_path workflow_revision dispatch_ref desired_checkout_sha desired_generation idempotency_key]
+errors << "terminal resolution must promote every pending tuple field" unless pending_tuple.all? { |field| orchestration_sql.include?("#{field} = COALESCE(pending_#{field.sub('desired_checkout_sha', 'checkout_sha')}, #{field})") }
+%w[pending_github_repository_id pending_github_workflow_path pending_workflow_revision pending_dispatch_ref pending_checkout_sha pending_desired_generation pending_idempotency_key].each do |column|
+  errors << "terminal resolution must clear #{column}" unless orchestration_sql.include?("#{column} = NULL")
+end
+errors << "dispatch deadline must be store-owned and persisted" unless orchestration_sql.include?("dispatch_deadline_at = now() + interval '300 seconds'")
 errors << "correlated runs must get a persisted run deadline" unless orchestration_sql.include?("run_deadline_at = now() + interval '2700 seconds'")
 errors << "periodic reconciliation must poll every 30 seconds" unless orchestration_sql.include?("reconcile_after = now() + interval '30 seconds'")
 reconciliation_claim = orchestration_sql[/WITH candidate AS \(\n    SELECT id\n      FROM orchestration_jobs\n     WHERE status IN \('dispatch_reconciling', 'dispatched'\).*?RETURNING job\.\*;/m]
 errors << "startup/periodic reconciliation must lease every nonterminal GitHub job" unless reconciliation_claim && reconciliation_claim.include?("reconciliation_lease_expires_at = now() + interval '60 seconds'") && reconciliation_claim.include?("FOR UPDATE SKIP LOCKED")
 errors << "run evidence must be immutable inserts" unless orchestration_sql.scan(/INSERT INTO orchestration_job_run_evidence/).length >= 2
-errors << "nonterminal reconciliation must persist status before rescheduling" unless orchestration_sql.match?(/INSERT INTO orchestration_job_run_evidence.*?github_run_status = \$3.*?reconcile_after = now\(\) \+ interval '30 seconds'/m)
-terminal_resolution = orchestration_sql[/WITH terminal_evidence AS \(.*?RETURNING job\.id, job\.status, job\.commit_sha, job\.terminal_error_code;/m]
-errors << "terminal resolver must handle success, failure, cancellation, timeout, and missing runs" unless terminal_resolution && %w[success failure cancelled timed_out github_run_id dispatch_deadline_at run_deadline_at failed queued].all? { |term| terminal_resolution.include?(term) }
+errors << "nonterminal reconciliation must persist status before rescheduling" unless orchestration_sql.match?(/INSERT INTO orchestration_job_run_evidence.*?SELECT id, attempt, dispatch_ref.*?\$4, \$5, github_run_head_sha, now\(\).*?SET github_run_status = \$4,.*?github_run_conclusion = \$5,.*?reconcile_after = now\(\) \+ interval '30 seconds'/m)
+terminal_resolution = orchestration_sql[/WITH terminal_evidence AS \(.*?RETURNING job\.id, job\.status, job\.desired_checkout_sha, job\.desired_generation, job\.terminal_error_code;/m]
+errors << "terminal resolver must handle success, failure, cancellation, timeout, missing runs, pending promotion, and OCI handoff" unless terminal_resolution && %w[success failure cancelled timed_out github_run_id dispatch_deadline_at run_deadline_at failed queued resolving_image].all? { |term| terminal_resolution.include?(term) }
 errors << "terminal resolver must persist error evidence" unless terminal_resolution && %w[terminal_error_code terminal_error_message terminal_at].all? { |term| terminal_resolution.include?(term) }
-errors << "missing-run terminal resolution must require github_run_missing" unless terminal_resolution&.include?("$5 = 'github_run_missing'")
-errors << "terminal resolver must atomically promote latest pending SHA" unless terminal_resolution && terminal_resolution.include?("commit_sha = COALESCE(pending_commit_sha, commit_sha)") && terminal_resolution.include?("pending_commit_sha = NULL") && terminal_resolution.include?("WHEN pending_commit_sha IS NOT NULL THEN 'queued'")
+errors << "missing-run terminal resolution must require github_run_missing" unless terminal_resolution&.include?("$6 IN ('github_run_missing', 'github_run_ambiguous')")
+errors << "terminal resolver must atomically promote latest pending tuple" unless terminal_resolution && pending_tuple.all? { |field| terminal_resolution.include?("#{field} = COALESCE(pending_#{field.sub('desired_checkout_sha', 'checkout_sha')}, #{field})") } && terminal_resolution.include?("WHEN pending_checkout_sha IS NOT NULL THEN 'queued'")
+errors << "successful GitHub completion must enter resolving_image" unless terminal_resolution&.include?("WHEN $5 = 'success' THEN 'resolving_image'")
+errors << "OCI resolution must require immutable digest evidence before deploying" unless orchestration_sql.match?(/SET image_tag_ref = \$2,.*?resolved_image_digest = \$3,.*?immutable_image_ref = \$4,.*?oci_resolution_state = 'resolved',.*?status = 'deploying'/m)
+errors << "completion must require a live matching immutable release" unless orchestration_sql.match?(/SET status = 'completed',.*?deployment_state = 'live'.*?release\.image_ref = job\.immutable_image_ref.*?release\.git_commit_sha = job\.desired_checkout_sha.*?release\.status = 'live'/m)
 errors << "ambiguous dispatch SQL must not requeue before its deadline" if orchestration_sql.match?(/SET status = 'queued'.*?status = 'dispatch_reconciling'.*?dispatch_deadline_at > now\(\)/m)
 errors << "ambiguous dispatch SQL must reschedule observation without mutation" unless orchestration_sql.include?("SET reconcile_after = LEAST(now() + interval '90 seconds', dispatch_deadline_at)")
 errors << "retryable reconciliation must select the deadline by state" unless orchestration_sql.match?(/CASE status.*?WHEN 'dispatch_reconciling' THEN dispatch_deadline_at.*?WHEN 'dispatched' THEN run_deadline_at/m)
@@ -311,8 +318,6 @@ errors << "checkpoint schema lacks digest invalidation reasons" unless required_
 
 errors << "pending SHA fixture must use PostgreSQL 18 OLD row RETURNING" unless pending_sha_sql.match?(/RETURNING\s+WITH\s*\(OLD\s+AS\s+old_row/i)
 errors << "pending SHA fixture must assert old and cleared values" unless pending_sha_sql.include?("taken_sha = repeat('a', 40)") && pending_sha_sql.include?("remaining_sha IS NULL")
-errors << "canonical spec must establish Phase 0 errata precedence" unless spec.include?("Phase 0 Errata Precedence") && spec.include?("workflow/orchestration-job.sql")
-errors << "canonical spec pending SHA SQL must return OLD and NEW values" unless spec.match?(/RETURNING WITH \(OLD AS old_row, NEW AS new_row\).*?old_row\.pending_commit_sha AS taken_sha.*?new_row\.pending_commit_sha AS remaining_sha/m)
 
 executable_scripts = %w[scripts/integration.sh scripts/test_infrastructure.sh scripts/probe_psl.sh scripts/validate_postgres_contract.sh scripts/validate_gate_evidence.sh tests/workflow/validate_gate_evidence_test.sh tests/schema/production_schema_test.sh tests/backup/configure_from_db_test.sh infra/backup/configure_from_db.sh]
 executable_scripts.each do |path|

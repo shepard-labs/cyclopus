@@ -297,7 +297,7 @@ func seedK3sCompletedForwardRoute(t *testing.T, pool *pgxpool.Pool, orgID, repos
 		github_run_conclusion,github_status_observed_at,oci_resolution_state,image_tag_ref,resolved_image_digest,
 		immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state,release_id)
 		SELECT $1,$2,app.id,$4,connection.github_repository_id,app.github_workflow_path,$5,'refs/heads/main',$5,$5,
-			app.desired_generation,$6,'deploying',now(),'matched','cyclopus:'||$1,3004,$5,'completed','success',now(),
+			environment.desired_generation,$6,'deploying',now(),'matched','cyclopus:'||$1,3004,$5,'completed','success',now(),
 			'resolved',app.image_repository||':'||$5,$7,app.image_repository||'@'||$7,
 			'application/vnd.oci.image.manifest.v1+json',now(),'applying',release.id
 		FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
