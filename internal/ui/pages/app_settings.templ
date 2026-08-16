@@ -8,17 +8,16 @@ import (
 )
 
 templ AppSettings(app store.App, project store.Project, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
-	@components.Page("Settings — "+app.Name, user, org, flash, "/projects", appSettingsContent(app, project, errMsg))
+	@components.PageWithBreadcrumbs("Settings — "+app.Name, user, org, flash, "/projects", []components.BreadcrumbItem{
+		{Label: "Projects", Href: "/projects"},
+		{Label: project.Name, Href: "/projects/" + project.ID},
+		{Label: app.Name, Href: "/apps/" + app.ID},
+		{Label: "Settings"},
+	}, appSettingsContent(app, project, errMsg))
 }
 
 templ appSettingsContent(app store.App, project store.Project, errMsg string) {
 	<div class="w-full space-y-6">
-		@components.Breadcrumbs([]components.BreadcrumbItem{
-			{Label: "Projects", Href: "/projects"},
-			{Label: project.Name, Href: "/projects/" + project.ID},
-			{Label: app.Name, Href: "/apps/" + app.ID},
-			{Label: "Settings"},
-		})
 		if errMsg != "" {
 			@components.Alert("error", errMsg)
 		}

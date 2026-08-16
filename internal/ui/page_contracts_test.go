@@ -74,7 +74,7 @@ func TestLogsUseThemeNativeSurfacesAndTypography(t *testing.T) {
 		"next", "env-1", "", store.User{}, store.Organization{}, nil,
 	))
 	requirePageContracts(t, output,
-		`text-xs text-base-content/65`,
+		`text-sm text-base-content/65`,
 		`bg-base-300`,
 		`bg-base-200`,
 		`border-line`,
@@ -253,7 +253,7 @@ func TestCorePagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 		),
 		"project": pages.ProjectDetail(
 			store.Project{ID: "project-1", Name: "Platform"},
-			[]store.App{{ID: "app-1", Name: "API", HostnameLabel: "api", ContainerPort: 8080, RuntimeClass: "runc"}},
+			[]store.App{{ID: "app-1", Name: "API", Slug: "api", HostnameLabel: "api", ContainerPort: 8080, RuntimeClass: "runc"}},
 			store.User{}, store.Organization{}, nil, "",
 		),
 		"app": pages.AppOverview(

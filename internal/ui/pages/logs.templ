@@ -9,17 +9,16 @@ import (
 )
 
 templ Logs(app store.App, project store.Project, entries []observability.LogEntry, nextCursor string, envID string, query string, user store.User, org store.Organization, flash *ui.FlashMessage) {
-	@components.Page("Logs — "+app.Name, user, org, flash, "/projects", logsContent(app, project, entries, nextCursor, envID, query))
+	@components.PageWithBreadcrumbs("Logs — "+app.Name, user, org, flash, "/projects", []components.BreadcrumbItem{
+		{Label: "Projects", Href: "/projects"},
+		{Label: project.Name, Href: "/projects/" + project.ID},
+		{Label: app.Name, Href: "/apps/" + app.ID},
+		{Label: "Logs"},
+	}, logsContent(app, project, entries, nextCursor, envID, query))
 }
 
 templ logsContent(app store.App, project store.Project, entries []observability.LogEntry, nextCursor string, envID string, query string) {
 	<div class="space-y-4 h-full flex flex-col">
-		@components.Breadcrumbs([]components.BreadcrumbItem{
-			{Label: "Projects", Href: "/projects"},
-			{Label: project.Name, Href: "/projects/" + project.ID},
-			{Label: app.Name, Href: "/apps/" + app.ID},
-			{Label: "Logs"},
-		})
 		<div class="flex items-center gap-3">
 			<form method="GET" action={ templ.SafeURL("/apps/" + app.ID + "/logs") } class="flex items-center gap-2 ml-auto">
 				if envID != "" {

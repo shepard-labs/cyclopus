@@ -243,8 +243,51 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 	})
 
 	t.Run("project fields", func(t *testing.T) {
-		body := renderComponent(t, context.Background(), pages.Projects(nil, store.Organization{}, store.User{}, nil, ""))
-		assertContainsAll(t, body, `name="name"`, `name="slug"`)
+		body := renderComponent(t, context.Background(), pages.Projects(
+			[]store.Project{{ID: "project-1", Name: "Platform", Slug: "platform-api"}},
+			store.Organization{}, store.User{}, nil, "",
+		))
+		assertContainsAll(t, body,
+			`id="project-search" type="search" aria-label="Search projects"`,
+			`command="show-modal" commandfor="create-project-dialog" aria-controls="create-project-dialog"`,
+			`id="create-project-dialog" role="dialog"`,
+			`name="name"`,
+			`name="slug"`,
+			`data-project-search="Platform platform-api"`,
+			`card.dataset.projectSearch.toLowerCase().indexOf(query) === -1`,
+			`data-project-no-results`,
+		)
+	})
+
+	t.Run("project creation error reopens dialog", func(t *testing.T) {
+		body := renderComponent(t, context.Background(), pages.Projects(nil, store.Organization{}, store.User{}, nil, "create failed"))
+		assertContainsAll(t, body, `create failed`, `document.getElementById('create-project-dialog')`, `dialog.showModal()`)
+	})
+
+	t.Run("application search and creation dialog", func(t *testing.T) {
+		body := renderComponent(t, context.Background(), pages.ProjectDetail(
+			store.Project{ID: "project-1", Name: "Platform"},
+			[]store.App{{ID: "app-1", Name: "API", Slug: "api-service", HostnameLabel: "api", ContainerPort: 8080}},
+			store.User{}, store.Organization{}, nil, "",
+		))
+		assertContainsAll(t, body,
+			`id="application-search" type="search" aria-label="Search applications"`,
+			`command="show-modal" commandfor="create-application-dialog" aria-controls="create-application-dialog"`,
+			`id="create-application-dialog" role="dialog"`,
+			`data-application-search="API api-service api"`,
+			`card.dataset.applicationSearch.toLowerCase().indexOf(query) === -1`,
+			`data-application-no-results`,
+			`name="hostname_label"`,
+			`name="container_port"`,
+		)
+	})
+
+	t.Run("application creation error reopens dialog", func(t *testing.T) {
+		body := renderComponent(t, context.Background(), pages.ProjectDetail(
+			store.Project{ID: "project-1", Name: "Platform"}, nil,
+			store.User{}, store.Organization{}, nil, "create failed",
+		))
+		assertContainsAll(t, body, `create failed`, `document.getElementById('create-application-dialog')`, `dialog.showModal()`)
 	})
 
 	t.Run("user fields preserve current values", func(t *testing.T) {

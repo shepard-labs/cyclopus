@@ -8,28 +8,85 @@ import (
 )
 
 templ ProjectDetail(project store.Project, apps []store.App, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
-	@components.Page("Project — "+project.Name, user, org, flash, "/projects", projectDetailContent(project, apps, errMsg))
+	@components.PageWithBreadcrumbs("Overview", user, org, flash, "/projects", []components.BreadcrumbItem{
+		{Label: "Projects", Href: "/projects"},
+		{Label: project.Name},
+	}, projectDetailContent(project, apps, errMsg))
 }
 
 templ projectDetailContent(project store.Project, apps []store.App, errMsg string) {
 	<div class="space-y-6">
-		@components.Breadcrumbs([]components.BreadcrumbItem{
-			{Label: "Projects", Href: "/projects"},
-			{Label: project.Name},
-		})
-		@components.Card("New application") {
+		<div data-application-browser>
+			<div class="flex items-center gap-3">
+				<div role="search" class="grid min-w-0 grow grid-cols-1">
+					<input id="application-search" type="search" aria-label="Search applications" autocomplete="off" placeholder="Search applications" class="col-start-1 row-start-1 block w-full rounded-field border border-line bg-base-300 py-2 pr-3 pl-10 text-sm font-medium text-base-content outline-none placeholder:text-base-content/45 focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
+					@components.IconMagnifyingGlass("pointer-events-none col-start-1 row-start-1 ml-3 size-4 self-center text-base-content/45")
+				</div>
+				@components.Button(components.ButtonProps{
+					Type:         components.ButtonTypeButton,
+					Variant:      components.ButtonVariantPrimary,
+					Class:        "shrink-0",
+					Command:      "show-modal",
+					CommandFor:   "create-application-dialog",
+					AriaControls: "create-application-dialog",
+				}) {
+					Create application
+				}
+			</div>
+			if len(apps) == 0 {
+				<div class="mt-6">@components.EmptyState("No applications yet", "Create your first application to get started.")</div>
+			} else {
+				<div class="mt-6 grid grid-cols-1 gap-3" data-application-list>
+					for _, a := range apps {
+						<a href={ templ.SafeURL("/apps/" + a.ID) } data-application-card data-application-search={ a.Name + " " + a.Slug + " " + a.HostnameLabel } class="group flex items-center justify-between rounded-box border border-line bg-base-200 p-5 transition hover:bg-base-300">
+							<div class="flex items-center gap-3 min-w-0">
+								<div class="min-w-0">
+									<div class="text-sm font-medium text-base-content group-hover:text-accent transition-colors">{ a.Name }</div>
+									<div class="text-xs text-base-content/50 mt-0.5 font-mono">{ a.HostnameLabel }</div>
+								</div>
+								@components.RuntimeClassBadge(a.RuntimeClass)
+							</div>
+							<div class="flex items-center gap-2 text-base-content/65">
+								<span class="text-xs">{ fmt.Sprintf(":%d", a.ContainerPort) }</span>
+								@components.IconChevronRight("size-4 text-base-content/40")
+							</div>
+						</a>
+					}
+				</div>
+				<div hidden data-application-no-results class="mt-6">@components.EmptyState("No applications found", "Try a different name, slug, or hostname.")</div>
+			}
+			<script>
+				(function () {
+					var root = document.currentScript.parentElement;
+					var input = root.querySelector('#application-search');
+					var cards = Array.prototype.slice.call(root.querySelectorAll('[data-application-card]'));
+					var empty = root.querySelector('[data-application-no-results]');
+					if (!cards.length) return;
+					input.addEventListener('input', function () {
+						var query = input.value.trim().toLowerCase();
+						var visible = 0;
+						cards.forEach(function (card) {
+							card.hidden = card.dataset.applicationSearch.toLowerCase().indexOf(query) === -1;
+							if (!card.hidden) visible++;
+						});
+						empty.hidden = visible !== 0;
+					});
+				})()
+			</script>
+		</div>
+		@components.Dialog("create-application-dialog", "Create application") {
 			if errMsg != "" {
 				<div class="mb-4">@components.Alert("error", errMsg)</div>
 			}
-			<form method="POST" action={ templ.SafeURL("/projects/" + project.ID + "/apps") } class="space-y-3">
-				<div class="grid grid-cols-2 gap-3">
+			<form method="POST" action={ templ.SafeURL("/projects/" + project.ID + "/apps") } class="space-y-4">
+				<div class="grid gap-3 sm:grid-cols-2">
 					@components.FormField("app-name", "name", "Name", "text", "", "api", true)
 					<div>
 						<label for="app-slug" class="text-xs font-medium text-base-content/80 block mb-1.5">Slug <span class="text-error" aria-hidden="true">*</span></label>
 						<input type="text" id="app-slug" name="slug" required placeholder="api" pattern="[a-z0-9-]+" class="w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 					</div>
 				</div>
-				<div class="grid grid-cols-2 gap-3">
+				<div class="grid gap-3 sm:grid-cols-2">
 					<div>
 						<label for="app-hostname" class="text-xs font-medium text-base-content/80 block mb-1.5">Hostname label <span class="text-error" aria-hidden="true">*</span></label>
 						<input type="text" id="app-hostname" name="hostname_label" required placeholder="api" pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" class="w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
@@ -39,34 +96,14 @@ templ projectDetailContent(project store.Project, apps []store.App, errMsg strin
 						<input type="number" id="app-port" name="container_port" value="8080" min="1" max="65535" class="w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 					</div>
 				</div>
-				@components.Button(components.ButtonProps{
-					Type:    components.ButtonTypeSubmit,
-					Variant: components.ButtonVariantPrimary,
-				}) {
-					Create application
-				}
+				<div class="flex justify-end gap-3">
+					@components.Button(components.ButtonProps{Type: components.ButtonTypeButton, Variant: components.ButtonVariantSecondary, Command: "close", CommandFor: "create-application-dialog"}) { Cancel }
+					@components.Button(components.ButtonProps{Type: components.ButtonTypeSubmit, Variant: components.ButtonVariantPrimary}) { Create application }
+				</div>
 			</form>
 		}
-		if len(apps) == 0 {
-			@components.EmptyState("No applications yet", "Create your first application above.")
-		} else {
-			<div class="grid grid-cols-1 gap-3">
-				for _, a := range apps {
-					<a href={ templ.SafeURL("/apps/" + a.ID) } class="group flex items-center justify-between rounded-box border border-line bg-base-200 p-5 transition hover:bg-base-300">
-						<div class="flex items-center gap-3 min-w-0">
-							<div class="min-w-0">
-								<div class="text-sm font-medium text-base-content group-hover:text-accent transition-colors">{ a.Name }</div>
-								<div class="text-xs text-base-content/50 mt-0.5 font-mono">{ a.HostnameLabel }</div>
-							</div>
-							@components.RuntimeClassBadge(a.RuntimeClass)
-						</div>
-						<div class="flex items-center gap-2 text-base-content/65">
-							<span class="text-xs">{ fmt.Sprintf(":%d", a.ContainerPort) }</span>
-							@components.IconChevronRight("size-4 text-base-content/40")
-						</div>
-					</a>
-				}
-			</div>
+		if errMsg != "" {
+			<script>(function(){var dialog=document.getElementById('create-application-dialog');if(dialog){dialog.showModal()}})()</script>
 		}
 	</div>
 }

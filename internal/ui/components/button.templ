@@ -17,10 +17,13 @@ const (
 )
 
 type ButtonProps struct {
-	Variant  ButtonVariant
-	Type     ButtonType
-	Disabled bool
-	Class    string
+	Variant      ButtonVariant
+	Type         ButtonType
+	Disabled     bool
+	Class        string
+	Command      string
+	CommandFor   string
+	AriaControls string
 }
 
 func buttonClasses(variant ButtonVariant, customClass string) string {
@@ -51,6 +54,15 @@ templ Button(props ButtonProps) {
 		type={ buttonTypeAttr(props.Type) }
 		disabled?={ props.Disabled }
 		class={ buttonClasses(props.Variant, props.Class) }
+		if props.Command != "" {
+			command={ props.Command }
+		}
+		if props.CommandFor != "" {
+			commandfor={ props.CommandFor }
+		}
+		if props.AriaControls != "" {
+			aria-controls={ props.AriaControls }
+		}
 	>
 		{ children... }
 	</button>

@@ -68,7 +68,10 @@ func TestLayoutAssetContract(t *testing.T) {
 	user := store.User{Email: "operator@example.test", DisplayName: "Operator"}
 	org := store.Organization{Name: "Example Org"}
 	pages := map[string]templ.Component{
-		"application":    Page("Contracts", user, org, nil, "/projects", markup(`<p id="page-content">content</p>`)),
+		"application": PageWithBreadcrumbs("Contracts", user, org, nil, "/projects", []BreadcrumbItem{
+			{Label: "Projects", Href: "/projects"},
+			{Label: "Contracts"},
+		}, markup(`<p id="page-content">content</p>`)),
 		"authentication": withChildren(AuthPage("Sign in"), markup(`<p id="auth-content">content</p>`)),
 	}
 
@@ -97,7 +100,11 @@ func TestLayoutAssetContract(t *testing.T) {
 					`<body class="min-h-full bg-base-100 font-sans text-base-content antialiased" hx-boost="true">`,
 					`class="min-w-0 lg:pl-56"`,
 					`class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-100"`,
-					`class="relative mx-auto flex h-full w-full max-w-5xl items-center justify-center px-4 sm:px-6 lg:px-8"`,
+					`class="relative mx-auto h-full w-full max-w-5xl px-4 sm:px-6 lg:px-8"`,
+					`class="absolute inset-y-0 left-4 right-1/2 flex min-w-0 items-center pr-8 sm:left-6 lg:left-8"`,
+					`class="absolute left-1/2 top-1/2 max-w-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-sm font-medium text-base-content/70">Contracts</span>`,
+					`<nav aria-label="Breadcrumb" class="min-w-0 overflow-hidden">`,
+					`Projects</a></li><li aria-hidden="true" class="select-none"><span class="text-base-content/40">/</span></li>`,
 					`class="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-base-100 lg:flex"`,
 					`class="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4"`,
 					`<main class="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">`,
@@ -124,6 +131,7 @@ func TestWrapperMarkupContracts(t *testing.T) {
 	output := renderComponent(t, componentGroup(
 		Alert("error", "Alert message"),
 		Badge("success", "Healthy"),
+		withChildren(Button(ButtonProps{Type: ButtonTypeButton, Variant: ButtonVariantPrimary, Command: "show-modal", CommandFor: "confirm-dialog", AriaControls: "confirm-dialog"}), markup(`Open dialog`)),
 		ReleaseStatusBadge("live"),
 		ReleaseStatusBadge("unknown-status"),
 		EnvLifecycleBadge("ready"),
@@ -152,6 +160,7 @@ func TestWrapperMarkupContracts(t *testing.T) {
 	requireContains(t, output,
 		`role="alert"`,
 		`border-line bg-base-200`,
+		`type="button" class="cursor-pointer rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40" command="show-modal" commandfor="confirm-dialog" aria-controls="confirm-dialog">Open dialog</button>`,
 		`rounded-full border px-2 py-0.5 text-xs font-medium`,
 		`size-1.5 shrink-0 rounded-full bg-success`,
 		`size-1.5 shrink-0 rounded-full bg-warning`,
@@ -497,8 +506,8 @@ func TestBreadcrumbs(t *testing.T) {
 		}
 		output := renderComponent(t, Breadcrumbs(items))
 		requireContains(t, output,
-			`<nav aria-label="Breadcrumb" class="flex">`,
-			`<ol role="list" class="flex items-center gap-2 text-xs text-base-content/65">`,
+			`<nav aria-label="Breadcrumb" class="min-w-0 overflow-hidden">`,
+			`<ol role="list" class="flex min-w-0 items-center gap-2 overflow-hidden text-sm text-base-content/65">`,
 			`<span class="text-base-content/40">/</span>`,
 			`href="/"`,
 			`href="/projects"`,
@@ -523,8 +532,8 @@ func TestBreadcrumbs(t *testing.T) {
 	t.Run("empty items", func(t *testing.T) {
 		output := renderComponent(t, Breadcrumbs(nil))
 		requireContains(t, output,
-			`<nav aria-label="Breadcrumb" class="flex">`,
-			`<ol role="list" class="flex items-center gap-2 text-xs text-base-content/65"></ol>`,
+			`<nav aria-label="Breadcrumb" class="min-w-0 overflow-hidden">`,
+			`<ol role="list" class="flex min-w-0 items-center gap-2 overflow-hidden text-sm text-base-content/65"></ol>`,
 		)
 	})
 }

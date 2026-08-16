@@ -34,7 +34,7 @@ func Breadcrumbs(items []BreadcrumbItem) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<nav aria-label=\"Breadcrumb\" class=\"flex\"><ol role=\"list\" class=\"flex items-center gap-2 text-xs text-base-content/65\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<nav aria-label=\"Breadcrumb\" class=\"min-w-0 overflow-hidden\"><ol role=\"list\" class=\"flex min-w-0 items-center gap-2 overflow-hidden text-sm text-base-content/65\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -45,7 +45,7 @@ func Breadcrumbs(items []BreadcrumbItem) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, " <li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, " <li class=\"min-w-0 shrink truncate\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
