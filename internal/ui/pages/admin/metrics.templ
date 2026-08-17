@@ -221,7 +221,7 @@ templ metricsGrid(nodes []observability.NodeSystemDetail, errMessage string) {
 							<h2 class="text-sm font-semibold text-base-content">{ node.Name }</h2>
 							<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Host }</span>
 							if node.Port != "" {
-								<span class="inline-flex items-center rounded-md border border-line bg-base-300/60 px-1.5 py-0.5 font-mono text-xs text-base-content/60">:{ node.Port }</span>
+								<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Port }</span>
 							}
 							if node.Status == "up" || node.Status == "online" {
 								@components.OperationalStatus("success", "Online")

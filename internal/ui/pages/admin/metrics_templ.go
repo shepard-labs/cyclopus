@@ -264,14 +264,14 @@ func metricsGrid(nodes []observability.NodeSystemDetail, errMessage string) temp
 					return templ_7745c5c3_Err
 				}
 				if node.Port != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<span class=\"inline-flex items-center rounded-md border border-line bg-base-300/60 px-1.5 py-0.5 font-mono text-xs text-base-content/60\">:")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<span class=\"inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var13 string
 					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(node.Port)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/metrics.templ`, Line: 224, Col: 157}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/pages/admin/metrics.templ`, Line: 224, Col: 163}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 					if templ_7745c5c3_Err != nil {
