@@ -131,6 +131,7 @@ type HTTP struct {
 	TLSCertFile       string
 	TLSKeyFile        string
 	MaxBodyBytes      int64
+	MaxHeaderBytes    int
 }
 
 type Log struct {
@@ -162,6 +163,14 @@ type Webhook struct {
 	AllowedSecretRefs        []string
 	ReleaseName              string
 	PayloadEncryptionKeyFile string
+	GitHubActiveSecretRef    string
+	GitHubActiveKeyVersion   string
+	GitHubPreviousSecretRef  string
+	GitHubPreviousKeyVersion string
+	GitHubSecretOverlapUntil time.Time
+	GitHubBodyLimit          int64
+	GitHubMaxConcurrent      int
+	GitHubBodyReadTimeout    time.Duration
 }
 
 type Kubernetes struct {
@@ -216,6 +225,15 @@ func Load(args, environ []string) (Config, error) {
 	flags.StringSlice("webhook-allowed-secret-refs", nil, "exact Kubernetes Secret references allowed for webhook signing")
 	flags.String("webhook-release-name", "", "Helm release name that owns webhook signing Secrets")
 	flags.String("webhook-payload-encryption-key-file", "", "path to the GitHub webhook payload encryption keyring file")
+	flags.String("webhook-github-active-secret-ref", "", "secret reference containing the active GitHub webhook HMAC key")
+	flags.String("webhook-github-active-key-version", "", "immutable version label for the active GitHub webhook HMAC key")
+	flags.String("webhook-github-previous-secret-ref", "", "secret reference containing the previous GitHub webhook HMAC key")
+	flags.String("webhook-github-previous-key-version", "", "immutable version label for the previous GitHub webhook HMAC key")
+	flags.String("webhook-github-secret-overlap-until", "", "RFC3339 end of the active/previous GitHub webhook key overlap")
+	flags.Int64("webhook-github-body-limit", 0, "maximum raw GitHub webhook body size")
+	flags.Int("webhook-github-max-concurrent", 0, "maximum concurrent GitHub webhook handlers")
+	flags.Duration("webhook-github-body-read-timeout", 0, "GitHub webhook body read timeout")
+	flags.Int("http-max-header-bytes", 0, "maximum HTTP request header bytes")
 	flags.String("kubeconfig", "", "path to a Kubernetes client configuration file")
 	flags.String("kubernetes-instance-namespace", "", "namespace containing Cyclopus-managed source credentials")
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
@@ -289,6 +307,15 @@ func Load(args, environ []string) (Config, error) {
 		"webhook-allowed-secret-refs":                 "webhook.allowed_secret_refs",
 		"webhook-release-name":                        "webhook.release_name",
 		"webhook-payload-encryption-key-file":         "webhook.payload_encryption_key_file",
+		"webhook-github-active-secret-ref":            "webhook.github_active_secret_ref",
+		"webhook-github-active-key-version":           "webhook.github_active_key_version",
+		"webhook-github-previous-secret-ref":          "webhook.github_previous_secret_ref",
+		"webhook-github-previous-key-version":         "webhook.github_previous_key_version",
+		"webhook-github-secret-overlap-until":         "webhook.github_secret_overlap_until",
+		"webhook-github-body-limit":                   "webhook.github_body_limit",
+		"webhook-github-max-concurrent":               "webhook.github_max_concurrent",
+		"webhook-github-body-read-timeout":            "webhook.github_body_read_timeout",
+		"http-max-header-bytes":                       "http.max_header_bytes",
 		"kubeconfig":                                  "kubernetes.kubeconfig",
 		"kubernetes-instance-namespace":               "kubernetes.instance_namespace",
 		"kubernetes-recovery-poll-interval":           "kubernetes.recovery_poll_interval",
@@ -340,6 +367,7 @@ func Load(args, environ []string) (Config, error) {
 			TLSCertFile:       v.GetString("http.tls_cert_file"),
 			TLSKeyFile:        v.GetString("http.tls_key_file"),
 			MaxBodyBytes:      v.GetInt64("http.max_body_bytes"),
+			MaxHeaderBytes:    v.GetInt("http.max_header_bytes"),
 		},
 		GRPC: GRPC{Address: v.GetString("grpc.address"), TLSCertFile: v.GetString("grpc.tls_cert_file"),
 			TLSKeyFile: v.GetString("grpc.tls_key_file"), MaxBodyBytes: v.GetInt("grpc.max_body_bytes")},
@@ -371,6 +399,13 @@ func Load(args, environ []string) (Config, error) {
 			AllowedSecretRefs:        normalizeSliceValues(v.GetStringSlice("webhook.allowed_secret_refs")),
 			ReleaseName:              strings.TrimSpace(v.GetString("webhook.release_name")),
 			PayloadEncryptionKeyFile: strings.TrimSpace(v.GetString("webhook.payload_encryption_key_file")),
+			GitHubActiveSecretRef:    strings.TrimSpace(v.GetString("webhook.github_active_secret_ref")),
+			GitHubActiveKeyVersion:   strings.TrimSpace(v.GetString("webhook.github_active_key_version")),
+			GitHubPreviousSecretRef:  strings.TrimSpace(v.GetString("webhook.github_previous_secret_ref")),
+			GitHubPreviousKeyVersion: strings.TrimSpace(v.GetString("webhook.github_previous_key_version")),
+			GitHubSecretOverlapUntil: v.GetTime("webhook.github_secret_overlap_until"),
+			GitHubBodyLimit:          v.GetInt64("webhook.github_body_limit"), GitHubMaxConcurrent: v.GetInt("webhook.github_max_concurrent"),
+			GitHubBodyReadTimeout: v.GetDuration("webhook.github_body_read_timeout"),
 		},
 		Kubernetes: Kubernetes{
 			InstanceNamespace:          strings.TrimSpace(v.GetString("kubernetes.instance_namespace")),
@@ -393,6 +428,12 @@ func Load(args, environ []string) (Config, error) {
 		},
 		InsecurePublicListeners: v.GetBool("insecure_public_listeners"),
 	}
+	if cfg.Webhook.GitHubActiveSecretRef == "" {
+		cfg.Webhook.GitHubActiveSecretRef = "k8s-secret://" + cfg.Kubernetes.InstanceNamespace + "/" + secretref.GitHubAppSecretName + "#" + secretref.GitHubWebhookKey
+	}
+	if cfg.Webhook.GitHubActiveKeyVersion == "" {
+		cfg.Webhook.GitHubActiveKeyVersion = "managed"
+	}
 	if normalized, err := normalizeExternalURL(cfg.ExternalURL); err == nil {
 		cfg.ExternalURL = normalized
 	}
@@ -410,6 +451,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.rate_limit_per_minute", 10)
 	v.SetDefault("auth.request_body_bytes", 65536)
 	v.SetDefault("http.max_body_bytes", 1048576)
+	v.SetDefault("http.max_header_bytes", 1048576)
 	v.SetDefault("grpc.max_body_bytes", 1048576)
 	v.SetDefault("http.read_timeout", "15s")
 	v.SetDefault("http.read_header_timeout", "5s")
@@ -428,6 +470,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("github.run_poll_interval", "30s")
 	v.SetDefault("github.request_timeout", "20s")
 	v.SetDefault("github.trusted_hosts", []string{"api.github.com", "uploads.github.com"})
+	v.SetDefault("webhook.github_body_limit", 1048576)
+	v.SetDefault("webhook.github_max_concurrent", 4)
+	v.SetDefault("webhook.github_body_read_timeout", "10s")
 	v.SetDefault("kubernetes.instance_namespace", "default")
 	v.SetDefault("kubernetes.recovery_poll_interval", "2s")
 	v.SetDefault("kubernetes.conflict_retries", 5)
@@ -474,6 +519,15 @@ func environment(environ []string) map[string]string {
 		"WEBHOOK_ALLOWED_SECRET_REFS":                 "webhook.allowed_secret_refs",
 		"WEBHOOK_RELEASE_NAME":                        "webhook.release_name",
 		"WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE":         "webhook.payload_encryption_key_file",
+		"WEBHOOK_GITHUB_ACTIVE_SECRET_REF":            "webhook.github_active_secret_ref",
+		"WEBHOOK_GITHUB_ACTIVE_KEY_VERSION":           "webhook.github_active_key_version",
+		"WEBHOOK_GITHUB_PREVIOUS_SECRET_REF":          "webhook.github_previous_secret_ref",
+		"WEBHOOK_GITHUB_PREVIOUS_KEY_VERSION":         "webhook.github_previous_key_version",
+		"WEBHOOK_GITHUB_SECRET_OVERLAP_UNTIL":         "webhook.github_secret_overlap_until",
+		"WEBHOOK_GITHUB_BODY_LIMIT":                   "webhook.github_body_limit",
+		"WEBHOOK_GITHUB_MAX_CONCURRENT":               "webhook.github_max_concurrent",
+		"WEBHOOK_GITHUB_BODY_READ_TIMEOUT":            "webhook.github_body_read_timeout",
+		"HTTP_MAX_HEADER_BYTES":                       "http.max_header_bytes",
 		"KUBECONFIG":                                  "kubernetes.kubeconfig",
 		"KUBERNETES_INSTANCE_NAMESPACE":               "kubernetes.instance_namespace",
 		"KUBERNETES_RECOVERY_POLL_INTERVAL":           "kubernetes.recovery_poll_interval",
@@ -548,6 +602,9 @@ func (c Config) Validate() error {
 	}
 	if c.HTTP.MaxBodyBytes <= 0 || c.GRPC.MaxBodyBytes <= 0 {
 		errs = append(errs, fmt.Errorf("listener body size limits must be greater than zero"))
+	}
+	if c.HTTP.MaxHeaderBytes <= 0 {
+		errs = append(errs, fmt.Errorf("http.max_header_bytes must be greater than zero"))
 	}
 	if err := validateTLSFiles("http", c.HTTP.TLSCertFile, c.HTTP.TLSKeyFile); err != nil {
 		errs = append(errs, err)
@@ -653,6 +710,21 @@ func (c Config) Validate() error {
 	}
 	if c.Webhook.PayloadEncryptionKeyFile == "" {
 		errs = append(errs, fmt.Errorf("webhook.payload_encryption_key_file is required"))
+	}
+	if c.Webhook.GitHubActiveSecretRef == "" || c.Webhook.GitHubActiveKeyVersion == "" {
+		errs = append(errs, fmt.Errorf("webhook GitHub active secret reference and key version are required"))
+	} else if _, err := secretref.Parse(c.Webhook.GitHubActiveSecretRef); err != nil {
+		errs = append(errs, fmt.Errorf("webhook.github_active_secret_ref must be a valid Kubernetes Secret reference"))
+	}
+	if (c.Webhook.GitHubPreviousSecretRef == "") != (c.Webhook.GitHubPreviousKeyVersion == "") || (c.Webhook.GitHubPreviousSecretRef != "" && c.Webhook.GitHubSecretOverlapUntil.IsZero()) {
+		errs = append(errs, fmt.Errorf("webhook GitHub previous secret requires its version and a bounded overlap end"))
+	} else if c.Webhook.GitHubPreviousSecretRef != "" {
+		if _, err := secretref.Parse(c.Webhook.GitHubPreviousSecretRef); err != nil {
+			errs = append(errs, fmt.Errorf("webhook.github_previous_secret_ref must be a valid Kubernetes Secret reference"))
+		}
+	}
+	if c.Webhook.GitHubBodyLimit <= 0 || c.Webhook.GitHubMaxConcurrent <= 0 || c.Webhook.GitHubMaxConcurrent > 64 || c.Webhook.GitHubBodyReadTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("webhook GitHub ingress limits must be positive and concurrency at most 64"))
 	}
 	if c.Kubernetes.RecoveryPollInterval <= 0 {
 		errs = append(errs, fmt.Errorf("kubernetes.recovery_poll_interval must be greater than zero"))

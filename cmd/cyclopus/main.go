@@ -126,6 +126,7 @@ func run(args, environ []string) error {
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
 	services.GitHubBrowser = server.NewGitHubBrowser(domainService, authenticator, cfg.ExternalURL, []byte(cfg.Auth.TokenPepper))
 	services.UIHandler = server.LoginContinuationMiddleware(uihandler.New(ui.NewBackend(domainService, authService, cfg.Auth.SessionTTL)))
+	services.GitHubWebhook = server.NewGitHubWebhookHandler(cfg.Webhook, secretref.NewKubernetesResolver(kubernetesClient), dataStore)
 	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger, githubOnboarding))
 	if err != nil {
 		return err

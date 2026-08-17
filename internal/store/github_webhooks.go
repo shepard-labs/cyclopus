@@ -163,6 +163,86 @@ type ReceiveGitHubWebhookParams struct {
 	RepositoryID                                                *int64
 }
 
+type GitHubWebhookIdentity struct {
+	OrgID            string
+	InstallationID   *int64
+	RepositoryID     *int64
+	RepositoryNodeID *string
+}
+
+type GitHubWebhookLookupDisposition string
+
+const (
+	GitHubWebhookNotFound GitHubWebhookLookupDisposition = "not_found"
+	GitHubWebhookReplay   GitHubWebhookLookupDisposition = "replay"
+	GitHubWebhookMismatch GitHubWebhookLookupDisposition = "conflict"
+)
+
+type LookupGitHubWebhookParams struct {
+	DeliveryID, Event, Action, PayloadDigest string
+	InstallationID                           *int64
+	RepositoryID                             *int64
+	RepositoryNodeID                         *string
+}
+
+func (s *Store) LookupGitHubWebhook(ctx context.Context, p LookupGitHubWebhookParams) (GitHubWebhookLookupDisposition, GitHubWebhookIdentity, error) {
+	var identity GitHubWebhookIdentity
+	var event, action, payloadDigest string
+	err := s.db.QueryRow(ctx, `SELECT event,action,installation_id,repository_id,repository_node_id,org_id::text,payload_digest
+		FROM github_webhook_deliveries WHERE delivery_id=$1`, p.DeliveryID).Scan(
+		&event, &action, &identity.InstallationID, &identity.RepositoryID, &identity.RepositoryNodeID, &identity.OrgID, &payloadDigest)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return GitHubWebhookNotFound, GitHubWebhookIdentity{}, nil
+	}
+	if err != nil {
+		return "", GitHubWebhookIdentity{}, err
+	}
+	if event != p.Event || action != p.Action || payloadDigest != p.PayloadDigest ||
+		!equalInt64Pointers(identity.InstallationID, p.InstallationID) ||
+		!equalInt64Pointers(identity.RepositoryID, p.RepositoryID) ||
+		!equalStringPointers(identity.RepositoryNodeID, p.RepositoryNodeID) {
+		return GitHubWebhookMismatch, identity, nil
+	}
+	return GitHubWebhookReplay, identity, nil
+}
+
+func (s *Store) ResolveGitHubWebhookIdentity(ctx context.Context, installationID *int64, repositoryID *int64, nodeID *string) (GitHubWebhookIdentity, error) {
+	var value GitHubWebhookIdentity
+	if installationID == nil {
+		rows, err := s.db.Query(ctx, `SELECT DISTINCT org_id::text FROM github_installations WHERE access_state<>'deleted' LIMIT 2`)
+		if err != nil {
+			return value, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			if value.OrgID != "" {
+				return GitHubWebhookIdentity{}, ErrFailedPrecondition
+			}
+			if err := rows.Scan(&value.OrgID); err != nil {
+				return value, err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return value, err
+		}
+		if value.OrgID == "" {
+			return value, ErrNotFound
+		}
+		return value, nil
+	}
+	if repositoryID == nil && nodeID == nil {
+		err := s.db.QueryRow(ctx, `SELECT org_id::text,github_installation_id FROM github_installations WHERE github_installation_id=$1 AND access_state<>'deleted'`, *installationID).Scan(&value.OrgID, &installationID)
+		value.InstallationID = installationID
+		return value, resourceQueryError("resolve github webhook installation", err)
+	}
+	if repositoryID == nil || nodeID == nil {
+		return value, ErrFailedPrecondition
+	}
+	err := s.db.QueryRow(ctx, `SELECT org_id::text,github_installation_id,github_repository_id,node_id FROM github_repositories WHERE github_installation_id=$1 AND github_repository_id=$2 AND node_id=$3 AND access_state<>'removed'`, *installationID, *repositoryID, *nodeID).Scan(&value.OrgID, &installationID, &repositoryID, &nodeID)
+	value.InstallationID, value.RepositoryID, value.RepositoryNodeID = installationID, repositoryID, nodeID
+	return value, resourceQueryError("resolve github webhook repository", err)
+}
+
 func (p ReceiveGitHubWebhookParams) payloadContext() GitHubWebhookPayloadContext {
 	context := GitHubWebhookPayloadContext{DeliveryID: p.DeliveryID, Event: p.Event, Action: p.Action, OrgID: p.OrgID, PayloadDigest: p.PayloadDigest, RepositoryID: p.RepositoryID, RepositoryNodeID: p.RepositoryNodeID}
 	if p.InstallationID != nil {

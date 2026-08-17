@@ -113,6 +113,7 @@ func New(httpConfig config.HTTP, grpcConfig config.GRPC, logger *slog.Logger, re
 		Addr: httpConfig.Address, Handler: handler, ReadTimeout: httpConfig.ReadTimeout,
 		ReadHeaderTimeout: httpConfig.ReadHeaderTimeout, WriteTimeout: httpConfig.WriteTimeout,
 		IdleTimeout: httpConfig.IdleTimeout, ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
+		MaxHeaderBytes: httpConfig.MaxHeaderBytes,
 	}
 	if httpConfig.TLSCertFile != "" {
 		httpServer.TLSConfig = minimumTLSConfig()
@@ -186,6 +187,9 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 	}
 	router := chi.NewRouter()
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { writeStatus(w, http.StatusOK, "ok") })
+	if services.GitHubWebhook != nil {
+		router.Handle("/webhooks/github", services.GitHubWebhook)
+	}
 	router.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := readiness(r.Context()); err != nil {
 			writeStatus(w, http.StatusServiceUnavailable, "unavailable")

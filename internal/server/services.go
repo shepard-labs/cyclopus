@@ -28,6 +28,7 @@ type Services struct {
 	RateLimiter      *authRateLimiter
 	RequestBodyBytes int64
 	GitHubBrowser    http.Handler
+	GitHubWebhook    http.Handler
 }
 
 func DefaultServices() Services {

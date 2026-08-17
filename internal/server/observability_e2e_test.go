@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -52,6 +52,11 @@ func (r *e2eTelemetry) GetTrace(_ context.Context, scope observability.TenantSco
 func (r *e2eTelemetry) GetOperatorMetrics(context.Context) ([]observability.OperatorMetric, error) {
 	r.called = true
 	return []observability.OperatorMetric{{Name: "node-1/cpu.usage", Value: 12.5, Unit: "percent"}}, nil
+}
+
+func (r *e2eTelemetry) GetNodeSystemDetails(context.Context) ([]observability.NodeSystemDetail, error) {
+	r.called = true
+	return nil, nil
 }
 
 func newTelemetryFixture(t *testing.T, telemetry service.TelemetryProvider) apiFixture {

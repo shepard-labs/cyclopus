@@ -109,6 +109,35 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		store.WithGitHubWebhookPayloadCodec(workingCodec)
 	})
 
+	t.Run("pre identity lookup replay conflict and unknown", func(t *testing.T) {
+		clearGitHubWebhookWork(t, pool)
+		p := webhookParams("20000000-0000-0000-0000-000000000087", strings.Repeat("3", 64), `{}`)
+		receiveDelivery(t, store, p)
+		lookup := LookupGitHubWebhookParams{DeliveryID: p.DeliveryID, Event: p.Event, Action: p.Action, PayloadDigest: p.PayloadDigest, InstallationID: p.InstallationID, RepositoryID: p.RepositoryID, RepositoryNodeID: p.RepositoryNodeID}
+		disposition, identity, err := store.LookupGitHubWebhook(t.Context(), lookup)
+		if err != nil || disposition != GitHubWebhookReplay || identity.OrgID != p.OrgID {
+			t.Fatalf("lookup replay = %q %+v, %v", disposition, identity, err)
+		}
+		for _, mutate := range []func(*LookupGitHubWebhookParams){
+			func(v *LookupGitHubWebhookParams) { v.PayloadDigest = strings.Repeat("4", 64) },
+			func(v *LookupGitHubWebhookParams) { v.Event = "issues" },
+			func(v *LookupGitHubWebhookParams) { id := int64(99999); v.InstallationID = &id },
+			func(v *LookupGitHubWebhookParams) { id := int64(99998); v.RepositoryID = &id },
+			func(v *LookupGitHubWebhookParams) { node := "other-tenant-node"; v.RepositoryNodeID = &node },
+		} {
+			mismatch := lookup
+			mutate(&mismatch)
+			if disposition, _, err := store.LookupGitHubWebhook(t.Context(), mismatch); err != nil || disposition != GitHubWebhookMismatch {
+				t.Fatalf("lookup mismatch = %q, %v; params=%+v", disposition, err, mismatch)
+			}
+		}
+		missing := lookup
+		missing.DeliveryID = "20000000-0000-0000-0000-000000000086"
+		if disposition, identity, err := store.LookupGitHubWebhook(t.Context(), missing); err != nil || disposition != GitHubWebhookNotFound || identity != (GitHubWebhookIdentity{}) {
+			t.Fatalf("lookup missing = %q %+v, %v", disposition, identity, err)
+		}
+	})
+
 	t.Run("payload is encrypted and claimed body is exact", func(t *testing.T) {
 		clearGitHubWebhookWork(t, pool)
 		body := []byte(`{"ref":"refs/heads/main","secret":"not plaintext"}`)
