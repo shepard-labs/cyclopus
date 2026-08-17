@@ -337,6 +337,83 @@ func TestIdempotencyLeaseTakeoverReplayConflictAndTenantIsolationIntegration(t *
 	assertCount(t, pool, "audit_events", 2)
 }
 
+func TestIdempotencyTakeoverUsesElapsedWallClockAfterRowLockWaitIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	claim := idempotencyClaim(orgOneID, "owner-one", requestHash("wall-clock"))
+	claim.LeaseDuration = 400 * time.Millisecond
+	claim.Retention = 800 * time.Millisecond
+	claimed, err := dataStore.ClaimIdempotency(t.Context(), claim)
+	if err != nil || claimed.LeaseExpiresAt == nil {
+		t.Fatalf("initial claim = %+v, %v", claimed, err)
+	}
+
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), `SELECT 1 FROM api_idempotency_records WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3 FOR UPDATE`, claim.OrgID, claim.Scope, claim.Key); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan IdempotencyResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		claim.Owner = "owner-two"
+		value, err := dataStore.ClaimIdempotency(context.Background(), claim)
+		result <- value
+		errs <- err
+	}()
+	time.Sleep(550 * time.Millisecond)
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	taken := <-result
+	if err := <-errs; err != nil || taken.Disposition != IdempotencyClaimed || taken.LeaseExpiresAt == nil || !taken.LeaseExpiresAt.After(time.Now()) {
+		t.Fatalf("takeover after lock wait = %+v, %v", taken, err)
+	}
+	var retentionExpiresAt time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT expires_at FROM api_idempotency_records WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3`, claim.OrgID, claim.Scope, claim.Key).Scan(&retentionExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if retentionExpiresAt.Before(time.Now().Add(650 * time.Millisecond)) {
+		t.Fatalf("takeover retention was not extended from wall clock: %s", retentionExpiresAt)
+	}
+}
+
+func TestIdempotencyLeaseExtensionAndNoEarlyStealUseWallClockIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	claim := idempotencyClaim(orgOneID, "owner-one", requestHash("wall-clock-extension"))
+	claim.LeaseDuration = 2 * time.Second
+	claim.Retention = 3 * time.Second
+	claimed, err := dataStore.ClaimIdempotency(t.Context(), claim)
+	if err != nil || claimed.LeaseExpiresAt == nil {
+		t.Fatalf("initial claim = %+v, %v", claimed, err)
+	}
+	beforeRenew := time.Now()
+	claim.LeaseDuration = 4 * time.Second
+	if err := dataStore.RenewIdempotency(t.Context(), claim); err != nil {
+		t.Fatal(err)
+	}
+	var leaseExpiresAt, retentionExpiresAt, updatedAt time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT lease_expires_at,expires_at,updated_at FROM api_idempotency_records WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3`, claim.OrgID, claim.Scope, claim.Key).Scan(&leaseExpiresAt, &retentionExpiresAt, &updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if leaseExpiresAt.Before(beforeRenew.Add(3500*time.Millisecond)) || updatedAt.Before(beforeRenew) {
+		t.Fatalf("renewed lease/updated time = %s/%s, before %s", leaseExpiresAt, updatedAt, beforeRenew)
+	}
+	other := claim
+	other.Owner = "owner-two"
+	inProgress, err := dataStore.ClaimIdempotency(t.Context(), other)
+	if err != nil || inProgress.Disposition != IdempotencyInProgress || inProgress.LeaseExpiresAt == nil || !inProgress.LeaseExpiresAt.Equal(leaseExpiresAt) {
+		t.Fatalf("early takeover = %+v, %v", inProgress, err)
+	}
+	if retentionExpiresAt.Before(claimed.LeaseExpiresAt.Add(-time.Second)) {
+		t.Fatalf("retention unexpectedly shortened: %s", retentionExpiresAt)
+	}
+}
+
 func TestIdempotencyResultResourceAuditAreAtomicIntegration(t *testing.T) {
 	store, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())

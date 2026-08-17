@@ -8,7 +8,7 @@ import (
 type GitConnection struct {
 	ID, OrgID, State, AccessState                  string
 	GitHubRepositoryID, GitHubInstallationID       int64
-	RepositoryNodeID, OwnerLogin                   string
+	RepositoryNodeID, OwnerLogin, InstallationID   string
 	RepositoryName, RepositoryFullName             string
 	RepositoryDefaultBranch, RepositoryAccessState string
 	RepositoryPrivate, RepositoryArchived          bool
@@ -18,15 +18,16 @@ type GitConnection struct {
 }
 
 const gitConnectionSelect = `SELECT connection.id::text,connection.org_id::text,connection.state,connection.access_state,
-		repository.github_repository_id,repository.github_installation_id,repository.owner_login,repository.name,
+		repository.github_repository_id,repository.github_installation_id,installation.id::text,repository.owner_login,repository.name,
 		repository.full_name,repository.node_id,repository.visibility='private',repository.archived,repository.default_branch,
 		repository.access_state,repository.last_reconciled_at,connection.created_at,connection.updated_at,connection.disconnected_at
 	FROM git_connections connection
-	JOIN github_repositories repository ON repository.org_id=connection.org_id AND repository.github_repository_id=connection.github_repository_id`
+	JOIN github_repositories repository ON repository.org_id=connection.org_id AND repository.github_repository_id=connection.github_repository_id
+	JOIN github_installations installation ON installation.org_id=repository.org_id AND installation.github_installation_id=repository.github_installation_id`
 
 func scanGitConnection(row rowScanner, value *GitConnection) error {
 	if err := row.Scan(&value.ID, &value.OrgID, &value.State, &value.AccessState, &value.GitHubRepositoryID,
-		&value.GitHubInstallationID, &value.OwnerLogin, &value.RepositoryName, &value.RepositoryFullName,
+		&value.GitHubInstallationID, &value.InstallationID, &value.OwnerLogin, &value.RepositoryName, &value.RepositoryFullName,
 		&value.RepositoryNodeID, &value.RepositoryPrivate, &value.RepositoryArchived, &value.RepositoryDefaultBranch,
 		&value.RepositoryAccessState, &value.RepositorySyncedAt, &value.CreatedAt, &value.UpdatedAt, &value.DisconnectedAt); err != nil {
 		return err

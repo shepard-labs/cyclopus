@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
@@ -124,7 +126,7 @@ func TestAllInstallationInputsRejectNonPositiveIDs(t *testing.T) {
 	for _, id := range []string{"0", "-1"} {
 		_, getErr := handler.GetGitHubInstallation(ctx, &cyclopusv1.GetGitHubInstallationRequest{InstallationId: id})
 		_, listErr := handler.ListGitHubRepositories(ctx, &cyclopusv1.ListGitHubRepositoriesRequest{InstallationId: id})
-		if status.Code(getErr) != codes.InvalidArgument || status.Code(listErr) != codes.InvalidArgument {
+		if status.Code(getErr) != codes.InvalidArgument || status.Code(listErr) != codes.FailedPrecondition {
 			t.Errorf("installation %s codes = %v, %v", id, status.Code(getErr), status.Code(listErr))
 		}
 	}
@@ -229,6 +231,48 @@ func TestGitHubAppNotConfiguredPlaceholdersUseFailedPrecondition(t *testing.T) {
 				}
 			}
 			t.Fatalf("error %v lacks GITHUB_APP_NOT_CONFIGURED reason", err)
+		})
+	}
+}
+
+func TestListGitHubRepositoryWorkflowsMapsMissingDiscoveryConfiguration(t *testing.T) {
+	handler := &apiHandlers{service: service.New(nil)}
+	_, err := handler.ListGitHubRepositoryWorkflows(authenticatedServerContext(true), &cyclopusv1.ListGitHubRepositoryWorkflowsRequest{RepositoryId: 42})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+	for _, detail := range status.Convert(err).Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetReason() == "GITHUB_APP_NOT_CONFIGURED" {
+			return
+		}
+	}
+	t.Fatalf("error %v lacks GITHUB_APP_NOT_CONFIGURED reason", err)
+}
+
+func TestGitHubDiscoveryTypedErrors(t *testing.T) {
+	for name, test := range map[string]struct {
+		err    error
+		code   codes.Code
+		reason string
+	}{
+		"suspended":  {service.ErrGitHubInstallationSuspended, codes.FailedPrecondition, "GITHUB_INSTALLATION_SUSPENDED"},
+		"deleted":    {service.ErrGitHubInstallationRemoved, codes.FailedPrecondition, "GITHUB_INSTALLATION_ACCESS_REMOVED"},
+		"repository": {service.ErrGitHubRepositoryRemoved, codes.FailedPrecondition, "GITHUB_REPOSITORY_ACCESS_REMOVED"},
+		"workflow":   {service.ErrWorkflowIncompatible, codes.FailedPrecondition, "WORKFLOW_INCOMPATIBLE"},
+		"conflict":   {service.ErrConflict, codes.Aborted, "CONFLICT"},
+		"rate limit": {&service.GitHubAPIError{Status: 403, RetryAfter: 2 * time.Minute, Err: errors.New("rate limited")}, codes.Unavailable, "GITHUB_API_UNAVAILABLE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := githubDiscoveryError(test.err)
+			if status.Code(err) != test.code {
+				t.Fatalf("code = %v", status.Code(err))
+			}
+			for _, detail := range status.Convert(err).Details() {
+				if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetReason() == test.reason {
+					return
+				}
+			}
+			t.Fatalf("error %v lacks %s", err, test.reason)
 		})
 	}
 }

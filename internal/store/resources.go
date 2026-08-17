@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,23 +27,23 @@ type Project struct {
 }
 
 type App struct {
-	ID, OrgID, ProjectID, Name, Slug, HostnameLabel        string
-	RegistryID, RegistryURL, ImageRepository               *string
-	GitHubWorkflowPath, ProductionBranch, AnnotationPolicy string
-	ImageVisibility, CleanupState                          string
-	DesiredGeneration                                      int64
-	ContainerPort                                          int
-	HealthCheckPath, ScalingMode, RuntimeClass             string
-	MinReplicas, MaxReplicas, HPATargetCPUPercent          int
-	KEDACronSchedules                                      []KEDACronSchedule
-	KEDAHTTPTargetPendingRequests                          int
-	CPURequestMillicores, CPULimitMillicores               int
-	MemoryRequestMiB, MemoryLimitMiB                       int
-	PreviewsEnabled                                        bool
-	MaxPreviewEnvironments, PreviewIdleTTLHours            int
-	DeployTimeoutSeconds, ReleaseRetentionCount            int
-	CreatedAt                                              time.Time
-	DeletedAt                                              *time.Time
+	ID, OrgID, ProjectID, Name, Slug, HostnameLabel                                string
+	RegistryID, RegistryURL, ImageRepository                                       *string
+	GitHubWorkflowPath, GitHubWorkflowRevision, ProductionBranch, AnnotationPolicy string
+	ImageVisibility, CleanupState                                                  string
+	DesiredGeneration                                                              int64
+	ContainerPort                                                                  int
+	HealthCheckPath, ScalingMode, RuntimeClass                                     string
+	MinReplicas, MaxReplicas, HPATargetCPUPercent                                  int
+	KEDACronSchedules                                                              []KEDACronSchedule
+	KEDAHTTPTargetPendingRequests                                                  int
+	CPURequestMillicores, CPULimitMillicores                                       int
+	MemoryRequestMiB, MemoryLimitMiB                                               int
+	PreviewsEnabled                                                                bool
+	MaxPreviewEnvironments, PreviewIdleTTLHours                                    int
+	DeployTimeoutSeconds, ReleaseRetentionCount                                    int
+	CreatedAt                                                                      time.Time
+	DeletedAt                                                                      *time.Time
 }
 
 // KEDACronSchedule mirrors one row of apps.keda_cron_schedules: a cron window
@@ -188,7 +190,7 @@ const appSelect = `SELECT app.id::text, app.org_id::text, app.project_id::text, 
 	app.cpu_request_millicores,
 	app.cpu_limit_millicores, app.memory_request_mib, app.memory_limit_mib, app.previews_enabled,
 	app.max_preview_environments, app.preview_idle_ttl_hours, app.deploy_timeout_seconds,
-	app.release_retention_count, app.runtime_class, app.github_workflow_path, app.production_branch, app.annotation_policy,
+	app.release_retention_count, app.runtime_class, app.github_workflow_path, app.github_workflow_revision, app.production_branch, app.annotation_policy,
 	app.image_visibility, app.desired_generation, app.cleanup_state, app.created_at, app.deleted_at FROM apps app
 	LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id`
 
@@ -197,10 +199,12 @@ type rowScanner interface{ Scan(...any) error }
 func scanApp(row rowScanner) (App, error) {
 	var v App
 	var schedules []byte
-	err := row.Scan(&v.ID, &v.OrgID, &v.ProjectID, &v.Name, &v.Slug, &v.HostnameLabel, &v.RegistryID, &v.RegistryURL, &v.ImageRepository, &v.ContainerPort, &v.HealthCheckPath, &v.ScalingMode, &v.MinReplicas, &v.MaxReplicas, &v.HPATargetCPUPercent, &schedules, &v.KEDAHTTPTargetPendingRequests, &v.CPURequestMillicores, &v.CPULimitMillicores, &v.MemoryRequestMiB, &v.MemoryLimitMiB, &v.PreviewsEnabled, &v.MaxPreviewEnvironments, &v.PreviewIdleTTLHours, &v.DeployTimeoutSeconds, &v.ReleaseRetentionCount, &v.RuntimeClass, &v.GitHubWorkflowPath, &v.ProductionBranch, &v.AnnotationPolicy, &v.ImageVisibility, &v.DesiredGeneration, &v.CleanupState, &v.CreatedAt, &v.DeletedAt)
+	var workflowPath, productionBranch sql.NullString
+	err := row.Scan(&v.ID, &v.OrgID, &v.ProjectID, &v.Name, &v.Slug, &v.HostnameLabel, &v.RegistryID, &v.RegistryURL, &v.ImageRepository, &v.ContainerPort, &v.HealthCheckPath, &v.ScalingMode, &v.MinReplicas, &v.MaxReplicas, &v.HPATargetCPUPercent, &schedules, &v.KEDAHTTPTargetPendingRequests, &v.CPURequestMillicores, &v.CPULimitMillicores, &v.MemoryRequestMiB, &v.MemoryLimitMiB, &v.PreviewsEnabled, &v.MaxPreviewEnvironments, &v.PreviewIdleTTLHours, &v.DeployTimeoutSeconds, &v.ReleaseRetentionCount, &v.RuntimeClass, &workflowPath, &v.GitHubWorkflowRevision, &productionBranch, &v.AnnotationPolicy, &v.ImageVisibility, &v.DesiredGeneration, &v.CleanupState, &v.CreatedAt, &v.DeletedAt)
 	if err != nil {
 		return App{}, err
 	}
+	v.GitHubWorkflowPath, v.ProductionBranch = workflowPath.String, productionBranch.String
 	if len(schedules) > 0 {
 		if err := json.Unmarshal(schedules, &v.KEDACronSchedules); err != nil {
 			return App{}, fmt.Errorf("decode app keda cron schedules: %w", err)
@@ -232,6 +236,9 @@ func normalizeAppDefaults(app App) App {
 	if app.KEDAHTTPTargetPendingRequests == 0 {
 		app.KEDAHTTPTargetPendingRequests = defaultKEDAHTTPTargetPendingRequests
 	}
+	if app.GitHubWorkflowRevision == "" {
+		app.GitHubWorkflowRevision = strings.Repeat("0", 40)
+	}
 	return app
 }
 
@@ -247,8 +254,8 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		var before json.RawMessage
 		if create {
-			row := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,github_workflow_path,production_branch,annotation_policy,image_visibility)
-			SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
+			row := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,github_workflow_path,github_workflow_revision,production_branch,annotation_policy,image_visibility)
+			SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
 			var id string
 			if err := row.Scan(&id); err != nil {
 				return mapMutationError("create app", err)
@@ -258,7 +265,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 				return mapMutationError("lock app", err)
 			}
 			args := appArgs(p.App)
-			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,github_workflow_path=$27,production_branch=$28,annotation_policy=$29,image_visibility=$30 WHERE org_id=$2 AND id=$1 AND deleted_at IS NULL RETURNING id::text`, args...)
+			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,github_workflow_path=$27,github_workflow_revision=$28,production_branch=$29,annotation_policy=$30,image_visibility=$31 WHERE org_id=$2 AND id=$1 AND deleted_at IS NULL RETURNING id::text`, args...)
 			var id string
 			if err := row.Scan(&id); err != nil {
 				return mapMutationError("update app", err)
@@ -282,7 +289,11 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 	return value, err
 }
 func appArgs(a App) []any {
-	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, encodeKEDACronSchedules(a.KEDACronSchedules), a.KEDAHTTPTargetPendingRequests, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, a.GitHubWorkflowPath, a.ProductionBranch, a.AnnotationPolicy, a.ImageVisibility}
+	var workflowPath, productionBranch any = a.GitHubWorkflowPath, a.ProductionBranch
+	if a.RegistryID != nil {
+		workflowPath, productionBranch = nil, nil
+	}
+	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, encodeKEDACronSchedules(a.KEDACronSchedules), a.KEDAHTTPTargetPendingRequests, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, workflowPath, a.GitHubWorkflowRevision, productionBranch, a.AnnotationPolicy, a.ImageVisibility}
 }
 
 func (s *Store) ListEnvironmentsByOrg(ctx context.Context, orgID string) ([]Environment, error) {

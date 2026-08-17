@@ -70,7 +70,7 @@ func claimIdempotency(ctx context.Context, tx pgx.Tx, params IdempotencyClaimPar
 				org_id, scope, idempotency_key, request_hash, status,
 				lease_owner, lease_expires_at, expires_at
 			) VALUES ($1, $2, $3, $4, 'in_progress', $5,
-				now() + make_interval(secs => $6), now() + make_interval(secs => $7))
+				clock_timestamp() + make_interval(secs => $6), clock_timestamp() + make_interval(secs => $7))
 			ON CONFLICT (org_id, scope, idempotency_key) DO NOTHING
 			RETURNING true`, params.OrgID, params.Scope, params.Key, params.RequestHash,
 		params.Owner, params.LeaseDuration.Seconds(), params.Retention.Seconds()).Scan(&inserted); err == nil {
@@ -114,10 +114,10 @@ func claimIdempotency(ctx context.Context, tx pgx.Tx, params IdempotencyClaimPar
 
 	commandTag, err := tx.Exec(ctx, `
 			UPDATE api_idempotency_records
-			SET lease_owner = $4, lease_expires_at = now() + make_interval(secs => $5),
-				expires_at = GREATEST(expires_at, now() + make_interval(secs => $6)), updated_at = now()
+			SET lease_owner = $4, lease_expires_at = clock_timestamp() + make_interval(secs => $5),
+				expires_at = GREATEST(expires_at, clock_timestamp() + make_interval(secs => $6)), updated_at = clock_timestamp()
 			WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3
-			  AND status = 'in_progress' AND lease_expires_at <= now()`, params.OrgID,
+			  AND status = 'in_progress' AND lease_expires_at <= clock_timestamp()`, params.OrgID,
 		params.Scope, params.Key, params.Owner, params.LeaseDuration.Seconds(), params.Retention.Seconds())
 	if err != nil {
 		return IdempotencyResult{}, fmt.Errorf("take over stale idempotency record: %w", err)
@@ -142,7 +142,7 @@ func (s *Store) DeleteExpiredIdempotencyRecords(ctx context.Context, limit int) 
 	var deleted int64
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `DELETE FROM api_idempotency_records
-			WHERE id IN (SELECT id FROM api_idempotency_records WHERE expires_at <= now()
+			WHERE id IN (SELECT id FROM api_idempotency_records WHERE expires_at <= clock_timestamp()
 				ORDER BY expires_at, id LIMIT $1 FOR UPDATE SKIP LOCKED)`, limit)
 		if err != nil {
 			return fmt.Errorf("delete expired idempotency records: %w", err)
@@ -159,6 +159,21 @@ func (s *Store) AbandonIdempotency(ctx context.Context, params IdempotencyClaimP
 		  AND status='in_progress' AND lease_owner=$5`, params.OrgID, params.Scope, params.Key, params.RequestHash, params.Owner)
 	if err != nil {
 		return fmt.Errorf("abandon idempotency record: %w", err)
+	}
+	return rowsAffected(tag, ErrLeaseNotOwned)
+}
+
+func (s *Store) RenewIdempotency(ctx context.Context, params IdempotencyClaimParams) error {
+	if err := requirePositiveDuration("idempotency lease duration", params.LeaseDuration); err != nil {
+		return err
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE api_idempotency_records
+		SET lease_expires_at=clock_timestamp()+make_interval(secs => $6),updated_at=clock_timestamp()
+		WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3 AND request_hash=$4
+		  AND status='in_progress' AND lease_owner=$5 AND lease_expires_at>clock_timestamp()`,
+		params.OrgID, params.Scope, params.Key, params.RequestHash, params.Owner, params.LeaseDuration.Seconds())
+	if err != nil {
+		return fmt.Errorf("renew idempotency lease: %w", err)
 	}
 	return rowsAffected(tag, ErrLeaseNotOwned)
 }
@@ -212,10 +227,10 @@ func completeIdempotency(ctx context.Context, tx pgx.Tx, params CompleteIdempote
 			UPDATE api_idempotency_records
 			SET status = $6, response_code = $7, response_body = $8,
 				resource_type = $9, resource_id = $10, error_code = $11,
-				lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+				lease_owner = NULL, lease_expires_at = NULL, updated_at = clock_timestamp()
 			WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3
 			  AND request_hash = $4 AND status = 'in_progress'
-			  AND lease_owner = $5 AND lease_expires_at > now()`, params.OrgID, params.Scope,
+			  AND lease_owner = $5 AND lease_expires_at > clock_timestamp()`, params.OrgID, params.Scope,
 		params.Key, params.RequestHash, params.Owner, params.Status, params.StatusCode,
 		params.Body, params.ResourceType, params.ResourceID, params.ErrorCode)
 	if err != nil {
@@ -237,6 +252,7 @@ func validateIdempotencyResource(ctx context.Context, tx pgx.Tx, orgID string, r
 		"orchestration_job": "orchestration_jobs", "env_var": "env_vars",
 		"api_token": "api_tokens", "webhook": "webhooks", "org": "orgs",
 		"domain": "domains", "registry": "registries", "git_connection": "git_connections",
+		"import_operation": "import_operations",
 	}
 	table, ok := tables[*resourceType]
 	if !ok {

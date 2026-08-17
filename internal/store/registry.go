@@ -2,8 +2,21 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+const (
+	RegistryProviderGHCR = "ghcr"
+	RegistryProviderGCR  = "gcr"
+	RegistryHostGHCR     = "ghcr.io"
+	RegistryHostGCR      = "gcr.io"
+)
+
+func ValidRegistryIdentity(provider, host string) bool {
+	return (provider == RegistryProviderGHCR && host == RegistryHostGHCR) ||
+		(provider == RegistryProviderGCR && host == RegistryHostGCR)
+}
 
 type Registry struct {
 	ID, OrgID, Provider, RegistryHost, State, Checkpoint string
@@ -52,4 +65,37 @@ func (s *Store) ListRegistries(ctx context.Context, orgID string) ([]Registry, e
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+func (s *Store) GetGHCRRegistry(ctx context.Context, orgID string) (Registry, error) {
+	rows, err := s.db.Query(ctx, registrySelect+` WHERE org_id=$1 AND provider=$2 AND registry_host=$3 ORDER BY id LIMIT 2`, orgID, RegistryProviderGHCR, RegistryHostGHCR)
+	if err != nil {
+		return Registry{}, err
+	}
+	defer rows.Close()
+	var values []Registry
+	for rows.Next() {
+		var value Registry
+		if err := scanRegistry(rows, &value); err != nil {
+			return Registry{}, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return Registry{}, err
+	}
+	if len(values) == 0 {
+		return Registry{}, ErrNotFound
+	}
+	if len(values) > 1 {
+		return Registry{}, ErrFailedPrecondition
+	}
+	return values[0], nil
+}
+
+func ValidateRegistry(registry Registry) error {
+	if !ValidRegistryIdentity(registry.Provider, registry.RegistryHost) {
+		return errors.New("store: unsupported or noncanonical registry identity")
+	}
+	return nil
 }

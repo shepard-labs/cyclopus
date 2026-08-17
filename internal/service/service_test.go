@@ -53,6 +53,16 @@ func TestValidateImageRef(t *testing.T) {
 	}
 }
 
+func TestCreateAppRejectsImportOwnedFieldsBeforeStoreAccess(t *testing.T) {
+	workflow, image := ".github/workflows/deploy.yml", "ghcr.io/acme/api"
+	input := DefaultAppInput()
+	input.ProjectID, input.Name, input.Slug, input.HostnameLabel = "project", "API", "api", "api"
+	input.GitHubWorkflowPath, input.ImageRepository, input.ProductionBranch = &workflow, &image, "main"
+	if _, err := New(nil).CreateApp(context.Background(), ActorContext{UserID: "user", OrgID: "org"}, "key", input); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("CreateApp() error = %v, want ErrForbidden", err)
+	}
+}
+
 func TestCreateAppRuntimeClassRequiresOperator(t *testing.T) {
 	input := DefaultAppInput()
 	input.ProjectID = "project"

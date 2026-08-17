@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	"github.com/shepard-labs/cyclopus/internal/service"
@@ -139,40 +141,60 @@ func githubProviderError(err error) error {
 }
 
 func (h *apiHandlers) ListGitHubRepositories(ctx context.Context, req *cyclopusv1.ListGitHubRepositoriesRequest) (*cyclopusv1.ListGitHubRepositoriesResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := boundedPageSize(req.GetPageSize()); err != nil {
+	if h.service == nil {
+		return nil, typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	}
+	size, err := boundedPageSize(req.GetPageSize())
+	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetPageToken()) != "" {
-		return nil, fieldError("page_token", "is not available until GitHub discovery is configured")
+	if err := validateUUID("installation_id", req.GetInstallationId()); err != nil {
+		return nil, err
 	}
-	installationID, err := strconv.ParseInt(req.GetInstallationId(), 10, 64)
-	if err != nil || installationID <= 0 {
-		return nil, fieldError("installation_id", "must be a positive decimal GitHub installation ID")
+	page, err := h.service.ListGitHubRepositories(ctx, actor, req.GetInstallationId(), size, req.GetPageToken())
+	if err != nil {
+		return nil, githubDiscoveryError(err)
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub repository discovery is unavailable until GitHub App setup is configured", "GITHUB_APP_NOT_CONFIGURED")
+	response := &cyclopusv1.ListGitHubRepositoriesResponse{NextPageToken: page.NextPageToken, Repositories: make([]*cyclopusv1.GitHubRepository, 0, len(page.Repositories))}
+	for _, value := range page.Repositories {
+		response.Repositories = append(response.Repositories, githubRepositoryProto(value))
+	}
+	return response, nil
 }
 
 func (h *apiHandlers) ListGitHubRepositoryWorkflows(ctx context.Context, req *cyclopusv1.ListGitHubRepositoryWorkflowsRequest) (*cyclopusv1.ListGitHubRepositoryWorkflowsResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
+	}
+	if h.service == nil {
+		return nil, typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
 	}
 	if req.GetRepositoryId() <= 0 {
 		return nil, fieldError("repository_id", "must be positive")
 	}
-	if _, err := boundedPageSize(req.GetPageSize()); err != nil {
+	size, err := boundedPageSize(req.GetPageSize())
+	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetPageToken()) != "" {
-		return nil, fieldError("page_token", "is not available until GitHub discovery is configured")
+	page, err := h.service.ListGitHubRepositoryWorkflows(ctx, actor, req.GetRepositoryId(), size, req.GetPageToken())
+	if err != nil {
+		return nil, githubDiscoveryError(err)
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub workflow discovery is unavailable until GitHub App setup is configured", "GITHUB_APP_NOT_CONFIGURED")
+	response := &cyclopusv1.ListGitHubRepositoryWorkflowsResponse{NextPageToken: page.NextPageToken, Workflows: make([]*cyclopusv1.GitHubWorkflow, 0, len(page.Workflows))}
+	for _, value := range page.Workflows {
+		response.Workflows = append(response.Workflows, githubWorkflowProto(value))
+	}
+	return response, nil
 }
 
 func (h *apiHandlers) ImportGitRepository(ctx context.Context, req *cyclopusv1.ImportGitRepositoryRequest) (*cyclopusv1.ImportGitRepositoryResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
 	violations := validationViolations{}
@@ -190,7 +212,49 @@ func (h *apiHandlers) ImportGitRepository(ctx context.Context, req *cyclopusv1.I
 	if err := violations.err(); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub repository import is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	app := service.AppInput{ContainerPort: int(req.GetContainerPort()), HealthCheckPath: req.GetHealthCheckPath(), ScalingMode: scalingModeString(req.GetScalingMode()),
+		MinReplicas: int(req.GetMinReplicas()), MaxReplicas: int(req.GetMaxReplicas()), HPATargetCPUPercent: int(req.GetHpaTargetCpuPercent()),
+		KEDACronSchedules: kedaCronSchedulesInput(req.GetKedaCronSchedules()), KEDAHTTPTargetPendingRequests: int(req.GetKedaHttpTargetPendingRequests()),
+		CPURequestMillicores: int(req.GetCpuRequestMillicores()), CPULimitMillicores: int(req.GetCpuLimitMillicores()), MemoryRequestMiB: int(req.GetMemoryRequestMib()), MemoryLimitMiB: int(req.GetMemoryLimitMib()),
+		PreviewsEnabled: req.GetPreviewsEnabled(), MaxPreviewEnvironments: int(req.GetMaxPreviewEnvironments()), PreviewIdleTTLHours: int(req.GetPreviewIdleTtlHours()), DeployTimeoutSeconds: int(req.GetDeployTimeoutSeconds()), ReleaseRetentionCount: int(req.GetReleaseRetentionCount())}
+	if runtime := map[cyclopusv1.RuntimeClass]string{cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR: "gvisor", cyclopusv1.RuntimeClass_RUNTIME_CLASS_RUNC: "runc"}[req.GetRuntimeClass()]; runtime != "" {
+		app.RuntimeClass = &runtime
+	}
+	operation, err := h.service.ImportGitRepository(ctx, actor, service.ImportGitRepositoryInput{RepositoryID: req.GetRepositoryId(), WorkflowPath: req.GetGithubWorkflowPath(), ProjectName: req.GetProjectName(), ProjectSlug: req.GetProjectSlug(), ApplicationName: req.GetApplicationName(), ApplicationSlug: req.GetApplicationSlug(), HostnameLabel: req.GetHostnameLabel(), ProductionBranch: req.GetProductionBranch(), ImageRepository: req.GetImageRepository(), IdempotencyKey: req.GetIdempotencyKey(), App: app, PrivateCredentialRequested: req.GetGhcrCredential() != nil})
+	if err != nil {
+		return nil, githubDiscoveryError(err)
+	}
+	return &cyclopusv1.ImportGitRepositoryResponse{Operation: importOperationProto(operation)}, nil
+}
+
+func githubDiscoveryError(err error) error {
+	var api *service.GitHubAPIError
+	switch {
+	case errors.Is(err, service.ErrGitHubAppNotConfigured):
+		return typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	case errors.Is(err, service.ErrGitHubInstallationSuspended):
+		return typedError(codes.FailedPrecondition, "GitHub installation is suspended", "GITHUB_INSTALLATION_SUSPENDED")
+	case errors.Is(err, service.ErrGitHubInstallationRemoved):
+		return typedError(codes.FailedPrecondition, "GitHub installation access was removed", "GITHUB_INSTALLATION_ACCESS_REMOVED")
+	case errors.Is(err, service.ErrGitHubRepositoryRemoved):
+		return typedError(codes.FailedPrecondition, "GitHub repository access was removed", "GITHUB_REPOSITORY_ACCESS_REMOVED")
+	case errors.Is(err, service.ErrWorkflowIncompatible):
+		return typedError(codes.FailedPrecondition, "GitHub workflow is incompatible", "WORKFLOW_INCOMPATIBLE")
+	case errors.Is(err, service.ErrRegistryAuthRequired):
+		return typedError(codes.FailedPrecondition, "GHCR authentication is required", "REGISTRY_AUTH_REQUIRED")
+	case errors.Is(err, service.ErrConflict):
+		return typedError(codes.Aborted, "idempotency key conflicts with a different import", "CONFLICT")
+	case errors.Is(err, service.ErrInProgress):
+		return typedError(codes.Aborted, "import is already in progress", "CONFLICT")
+	case errors.As(err, &api):
+		message := fmt.Sprintf("GitHub API request failed with status %d", api.Status)
+		if api.RetryAfter > 0 {
+			message += "; retry after " + api.RetryAfter.Round(time.Second).String()
+		}
+		return typedError(codes.Unavailable, message, "GITHUB_API_UNAVAILABLE")
+	default:
+		return rpcError(err)
+	}
 }
 
 func (h *apiHandlers) GetImportOperation(ctx context.Context, req *cyclopusv1.GetImportOperationRequest) (*cyclopusv1.GetImportOperationResponse, error) {
@@ -265,6 +329,23 @@ func githubInstallationProto(v store.GitHubInstallation) *cyclopusv1.GitHubInsta
 		AccountId: v.AccountID, AccountLogin: v.AccountLogin, AccountType: githubAccountType(v.AccountType), RepositorySelection: githubRepositorySelection(v.RepositorySelection),
 		LifecycleStatus: githubInstallationStatus(v.AccessState), SuspendedAt: timeProto(v.SuspendedAt), DeletedAt: timeProto(v.DeletedAt), SyncedAt: timeProto(v.LastReconciledAt),
 		SettingsUrl: "https://github.com/settings/installations/" + strconv.FormatInt(v.GitHubInstallationID, 10), CreatedAt: timestamppb.New(v.CreatedAt), UpdatedAt: timestamppb.New(v.UpdatedAt)}
+}
+
+func githubRepositoryProto(v store.GitHubRepository) *cyclopusv1.GitHubRepository {
+	return &cyclopusv1.GitHubRepository{Id: v.GitHubRepositoryID, InstallationId: v.InstallationID, NodeId: v.NodeID, Owner: v.OwnerLogin, Name: v.Name, FullName: v.FullName,
+		Private: v.Visibility != "public", Archived: v.Archived, DefaultBranch: v.DefaultBranch, AccessStatus: map[string]cyclopusv1.GitHubRepositoryAccessStatus{"active": cyclopusv1.GitHubRepositoryAccessStatus_GITHUB_REPOSITORY_ACCESS_STATUS_ACTIVE, "inaccessible": cyclopusv1.GitHubRepositoryAccessStatus_GITHUB_REPOSITORY_ACCESS_STATUS_INACCESSIBLE, "deleted": cyclopusv1.GitHubRepositoryAccessStatus_GITHUB_REPOSITORY_ACCESS_STATUS_DELETED}[v.AccessState], SyncedAt: timeProto(v.LastReconciledAt)}
+}
+
+func githubWorkflowProto(v service.GitHubWorkflow) *cyclopusv1.GitHubWorkflow {
+	compatibility := cyclopusv1.GitHubWorkflowCompatibility_GITHUB_WORKFLOW_COMPATIBILITY_INCOMPATIBLE
+	if v.Analysis.Compatible {
+		compatibility = cyclopusv1.GitHubWorkflowCompatibility_GITHUB_WORKFLOW_COMPATIBILITY_COMPATIBLE
+	}
+	state := cyclopusv1.GitHubWorkflowState_GITHUB_WORKFLOW_STATE_DISABLED
+	if v.State == "active" {
+		state = cyclopusv1.GitHubWorkflowState_GITHUB_WORKFLOW_STATE_ACTIVE
+	}
+	return &cyclopusv1.GitHubWorkflow{Path: v.Path, Name: v.Name, State: state, Compatibility: compatibility, IncompatibilityReasons: v.Analysis.Reasons}
 }
 
 func importOperationProto(v store.ImportOperation) *cyclopusv1.ImportOperation {

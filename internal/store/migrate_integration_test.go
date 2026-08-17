@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000006 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000009 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 6 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:6 dirty:false", version, dirty)
+		if version != 9 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:9 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -80,7 +80,31 @@ func TestPostgres18Migrations(t *testing.T) {
 		}
 		defer epochDB.Close()
 		if err := ValidateSchemaEpoch(context.Background(), epochDB); err != nil {
-			t.Fatalf("ValidateSchemaEpoch() after 000006: %v", err)
+			t.Fatalf("ValidateSchemaEpoch() after 000009: %v", err)
+		}
+	})
+
+	t.Run("registry identity constraints", func(t *testing.T) {
+		var firstOrg, secondOrg string
+		if err := db.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Registry One','registry-one') RETURNING id::text`).Scan(&firstOrg); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Registry Two','registry-two') RETURNING id::text`).Scan(&secondOrg); err != nil {
+			t.Fatal(err)
+		}
+		insert := `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,$2,$3)`
+		for _, values := range [][]any{{firstOrg, "ghcr", "ghcr.io"}, {secondOrg, "ghcr", "ghcr.io"}, {firstOrg, "gcr", "gcr.io"}} {
+			if _, err := db.Exec(t.Context(), insert, values...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := db.Exec(t.Context(), insert, firstOrg, "ghcr", "ghcr.io"); err == nil {
+			t.Fatal("duplicate canonical registry succeeded")
+		}
+		for _, identity := range [][2]string{{"other", "registry.example.test"}, {"ghcr", "gcr.io"}, {"GHCR", "ghcr.io"}, {"ghcr", "https://ghcr.io"}} {
+			if _, err := db.Exec(t.Context(), insert, secondOrg, identity[0], identity[1]); err == nil {
+				t.Fatalf("unsupported/noncanonical identity %q/%q succeeded", identity[0], identity[1])
+			}
 		}
 	})
 
@@ -422,6 +446,438 @@ func TestMigration000005ExpiresProtocolIncompatibleSetupSessions(t *testing.T) {
 	}
 	if _, err := conn.Exec(t.Context(), `INSERT INTO github_setup_sessions(state_hash,state_generation,flow_kind,initiating_user_id,initiating_session_hash,status,checkpoint,expires_at) VALUES(repeat('c',64),repeat('d',64),'app_setup',$1,repeat('e',64),'active','created',now()+interval '10 minutes')`, userID); err != nil {
 		t.Fatalf("immediate replacement setup: %v", err)
+	}
+}
+
+func TestMigration000009NormalizationDownAndReUp(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration9_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var firstOrg string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Legacy One','legacy-one') RETURNING id::text`).Scan(&firstOrg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE registries DROP CONSTRAINT registries_singleton_key, DROP CONSTRAINT registries_provider_check, DROP CONSTRAINT registries_registry_host_check, DROP CONSTRAINT registries_singleton_check`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES
+		($1,' GHCR ',' HTTPS://GHCR.IO/ ')`, firstOrg); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(9); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	var normalized int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM registries WHERE provider='ghcr' AND registry_host='ghcr.io'`).Scan(&normalized); err != nil || normalized != 1 {
+		t.Fatalf("normalized rows = %d, %v", normalized, err)
+	}
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatalf("compatibility down: %v", err)
+	}
+	if err := migrator.Migrate(9); err != nil {
+		t.Fatalf("re-up: %v", err)
+	}
+	var count int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM registries`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("rows after down/re-up = %d, %v", count, err)
+	}
+}
+
+func TestMigrations000007And000008DownAndReUp(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration7_8_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(6); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	parents := seedTenantGraph(t, conn, "migration-seven-eight", "main", "", "migration-seven-eight-production")
+
+	if err := migrator.Migrate(7); err != nil {
+		t.Fatalf("000007 up: %v", err)
+	}
+	var revision string
+	if err := conn.QueryRow(t.Context(), `SELECT github_workflow_revision FROM apps WHERE id=$1`, parents.app).Scan(&revision); err != nil || revision != strings.Repeat("0", 40) {
+		t.Fatalf("000007 backfilled revision = %q, %v", revision, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE apps SET github_workflow_revision=$2 WHERE id=$1`, parents.app, strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE apps SET github_workflow_revision='main' WHERE id=$1`, parents.app); err == nil {
+		t.Fatal("000007 accepted a mutable workflow revision")
+	}
+	if err := migrator.Migrate(6); err != nil {
+		t.Fatalf("000007 down: %v", err)
+	}
+	if err := migrator.Migrate(7); err != nil {
+		t.Fatalf("000007 re-up: %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT github_workflow_revision FROM apps WHERE id=$1`, parents.app).Scan(&revision); err != nil || revision != strings.Repeat("0", 40) {
+		t.Fatalf("000007 revision after down/re-up = %q, %v", revision, err)
+	}
+
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatalf("000008 up: %v", err)
+	}
+	var generation int64
+	if err := conn.QueryRow(t.Context(), `SELECT repository_reconciliation_generation FROM github_installations WHERE org_id=$1`, parents.org).Scan(&generation); err != nil || generation != 1 {
+		t.Fatalf("000008 backfilled generation = %d, %v", generation, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_installations SET repository_reconciliation_generation=0 WHERE org_id=$1`, parents.org); err == nil {
+		t.Fatal("000008 accepted a non-positive repository generation")
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_installations SET repository_reconciliation_generation=3 WHERE org_id=$1`, parents.org); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(7); err != nil {
+		t.Fatalf("000008 down: %v", err)
+	}
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatalf("000008 re-up: %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT repository_reconciliation_generation FROM github_installations WHERE org_id=$1`, parents.org).Scan(&generation); err != nil || generation != 1 {
+		t.Fatalf("000008 generation after down/re-up = %d, %v", generation, err)
+	}
+}
+
+func TestMigration000009RejectsUnsupportedLegacyRegistry(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration9_invalid_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var orgID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Unsupported','unsupported') RETURNING id::text`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE registries DROP CONSTRAINT registries_provider_check, DROP CONSTRAINT registries_registry_host_check`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,'ecr','public.ecr.aws')`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	err = migrator.Migrate(9)
+	if err == nil || !strings.Contains(err.Error(), "supported identities are ghcr/ghcr.io and gcr/gcr.io") {
+		t.Fatalf("migration error = %v", err)
+	}
+}
+
+func TestMigration000009RejectsInvalidLegacyRepositoryAtomically(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration9_repository_invalid_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var orgID, projectID, appID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Invalid Repository','invalid-repository') RETURNING id::text`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO projects(org_id,name,slug) VALUES($1,'Invalid Repository','invalid-repository') RETURNING id::text`, orgID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE apps DROP CONSTRAINT apps_image_repository_ghcr`); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO apps(org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch)
+		VALUES($1,$2,'Invalid Repository','invalid-repository','invalid-repository','ghcr.io/acme/api___v2','.github/workflows/deploy.yml','main') RETURNING id::text`, orgID, projectID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	err = migrator.Migrate(9)
+	if err == nil || !strings.Contains(err.Error(), "not a canonical public GHCR repository") {
+		t.Fatalf("migration error = %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 9 || !dirty {
+		t.Fatalf("migration state after rejected up = %d/%t, %v", version, dirty, err)
+	}
+	var repository string
+	if err := conn.QueryRow(t.Context(), `SELECT image_repository FROM apps WHERE id=$1`, appID).Scan(&repository); err != nil || repository != "ghcr.io/acme/api___v2" {
+		t.Fatalf("app after rejected up = %q, %v", repository, err)
+	}
+	var functionCount int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM pg_proc WHERE pronamespace=current_schema()::regnamespace AND proname='valid_repository_path'`).Scan(&functionCount); err != nil || functionCount != 0 {
+		t.Fatalf("validation functions after rejected up = %d, %v", functionCount, err)
+	}
+}
+
+func TestMigration000009RejectsInvalidLegacyRegistryRepositoryAtomically(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration9_registry_repository_invalid_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(8); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var orgID, projectID, registryID, appID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Invalid Registry Repository','invalid-registry-repository') RETURNING id::text`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO projects(org_id,name,slug) VALUES($1,'Invalid Registry Repository','invalid-registry-repository') RETURNING id::text`, orgID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,'ghcr','ghcr.io') RETURNING id::text`, orgID).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE apps DROP CONSTRAINT apps_image_repository_ghcr`); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO apps(org_id,project_id,name,slug,hostname_label,registry_id,image_repository,github_workflow_path,production_branch,image_visibility)
+		VALUES($1,$2,'Invalid Registry Repository','invalid-registry-repository','invalid-registry-repository',$3,'ghcr.io/acme/api','.github/workflows/deploy.yml','main','private') RETURNING id::text`, orgID, projectID, registryID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	err = migrator.Migrate(9)
+	if err == nil || !strings.Contains(err.Error(), "must be a canonical hostless repository path") {
+		t.Fatalf("migration error = %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 9 || !dirty {
+		t.Fatalf("migration state after rejected up = %d/%t, %v", version, dirty, err)
+	}
+	var repository string
+	if err := conn.QueryRow(t.Context(), `SELECT image_repository FROM apps WHERE id=$1`, appID).Scan(&repository); err != nil || repository != "ghcr.io/acme/api" {
+		t.Fatalf("app after rejected up = %q, %v", repository, err)
+	}
+	var functionCount int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM pg_proc WHERE pronamespace=current_schema()::regnamespace AND proname='valid_repository_path'`).Scan(&functionCount); err != nil || functionCount != 0 {
+		t.Fatalf("validation functions after rejected up = %d, %v", functionCount, err)
+	}
+}
+
+func TestMigration000009IncompatibleDownIsAtomic(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration9_down_invalid_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(9); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var orgID, projectID, registryID, appID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Down Invalid','down-invalid') RETURNING id::text`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO projects(org_id,name,slug) VALUES($1,'Down Invalid','down-invalid') RETURNING id::text`, orgID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host,state) VALUES($1,'ghcr','ghcr.io','absent') RETURNING id::text`, orgID).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO apps(org_id,project_id,name,slug,hostname_label,registry_id,image_repository,image_visibility,github_workflow_path,production_branch)
+		VALUES($1,$2,'Down Invalid','down-invalid','down-invalid',$3,'foo--bar','private',NULL,NULL) RETURNING id::text`, orgID, projectID, registryID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	err = migrator.Migrate(8)
+	if err == nil || !strings.Contains(err.Error(), "rollback blocked by registry-backed app") {
+		t.Fatalf("incompatible down error = %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 9 || dirty {
+		t.Fatalf("migration state after rejected down = %d/%t, %v", version, dirty, err)
+	}
+	var workflowNullable, branchNullable string
+	if err := conn.QueryRow(t.Context(), `SELECT max(CASE WHEN column_name='github_workflow_path' THEN is_nullable END),max(CASE WHEN column_name='production_branch' THEN is_nullable END)
+		FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='apps'`).Scan(&workflowNullable, &branchNullable); err != nil || workflowNullable != "YES" || branchNullable != "YES" {
+		t.Fatalf("app nullability after rejected down = %s/%s, %v", workflowNullable, branchNullable, err)
+	}
+	var repository string
+	if err := conn.QueryRow(t.Context(), `SELECT image_repository FROM apps WHERE id=$1`, appID).Scan(&repository); err != nil || repository != "foo--bar" {
+		t.Fatalf("app data after rejected down = %q, %v", repository, err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -371,9 +372,13 @@ func upsertGitHubInstallation(ctx context.Context, tx pgx.Tx, orgID string, inst
 	err := scanGitHubInstallation(tx.QueryRow(ctx, `INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,
 		suspended_at,last_api_confirmed_generation,last_reconciled_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,now())
 		ON CONFLICT(github_installation_id) DO UPDATE SET account_login=EXCLUDED.account_login,account_type=EXCLUDED.account_type,repository_selection=EXCLUDED.repository_selection,
-		access_state=EXCLUDED.access_state,suspended_at=EXCLUDED.suspended_at,last_api_confirmed_generation=github_installations.reconciliation_generation,last_reconciled_at=now(),updated_at=now()
+		access_state=EXCLUDED.access_state,suspended_at=EXCLUDED.suspended_at,last_api_confirmed_generation=github_installations.reconciliation_generation,
+		repository_reconciliation_generation=github_installations.repository_reconciliation_generation + CASE
+			WHEN github_installations.repository_selection IS DISTINCT FROM EXCLUDED.repository_selection
+			  OR github_installations.access_state IS DISTINCT FROM EXCLUDED.access_state THEN 1 ELSE 0 END,
+		last_reconciled_at=now(),updated_at=now()
 		WHERE github_installations.org_id=EXCLUDED.org_id AND github_installations.account_id=EXCLUDED.account_id AND github_installations.access_state<>'deleted'
-		RETURNING id::text,github_installation_id,org_id::text,account_id,account_login,account_type,repository_selection,access_state,suspended_at,deleted_at,last_reconciled_at,created_at,updated_at`,
+		RETURNING id::text,github_installation_id,org_id::text,account_id,account_login,account_type,repository_selection,access_state,repository_reconciliation_generation,suspended_at,deleted_at,last_reconciled_at,created_at,updated_at`,
 		installation.GitHubInstallationID, orgID, installation.AccountID, installation.AccountLogin, installation.AccountType, installation.RepositorySelection,
 		installation.AccessState, installation.SuspendedAt), value)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -383,25 +388,31 @@ func upsertGitHubInstallation(ctx context.Context, tx pgx.Tx, orgID string, inst
 }
 
 type GitHubInstallation struct {
-	ID                                                                 string
-	GitHubInstallationID, AccountID                                    int64
-	OrgID, AccountLogin, AccountType, RepositorySelection, AccessState string
-	SuspendedAt, DeletedAt, LastReconciledAt                           *time.Time
-	CreatedAt, UpdatedAt                                               time.Time
+	ID                                                                  string
+	GitHubInstallationID, AccountID, RepositoryReconciliationGeneration int64
+	OrgID, AccountLogin, AccountType, RepositorySelection, AccessState  string
+	SuspendedAt, DeletedAt, LastReconciledAt                            *time.Time
+	CreatedAt, UpdatedAt                                                time.Time
 }
 
 const githubInstallationSelect = `SELECT id::text,github_installation_id,org_id::text,account_id,account_login,account_type,
-	repository_selection,access_state,suspended_at,deleted_at,last_reconciled_at,created_at,updated_at FROM github_installations`
+	repository_selection,access_state,repository_reconciliation_generation,suspended_at,deleted_at,last_reconciled_at,created_at,updated_at FROM github_installations`
 
 func scanGitHubInstallation(row rowScanner, value *GitHubInstallation) error {
 	return row.Scan(&value.ID, &value.GitHubInstallationID, &value.OrgID, &value.AccountID, &value.AccountLogin, &value.AccountType,
-		&value.RepositorySelection, &value.AccessState, &value.SuspendedAt, &value.DeletedAt, &value.LastReconciledAt,
+		&value.RepositorySelection, &value.AccessState, &value.RepositoryReconciliationGeneration, &value.SuspendedAt, &value.DeletedAt, &value.LastReconciledAt,
 		&value.CreatedAt, &value.UpdatedAt)
 }
 
 func (s *Store) GetGitHubInstallation(ctx context.Context, orgID string, id int64) (GitHubInstallation, error) {
 	var value GitHubInstallation
 	err := scanGitHubInstallation(s.db.QueryRow(ctx, githubInstallationSelect+` WHERE org_id=$1 AND github_installation_id=$2`, orgID, id), &value)
+	return value, resourceQueryError("get github installation", err)
+}
+
+func (s *Store) GetGitHubInstallationByID(ctx context.Context, orgID, id string) (GitHubInstallation, error) {
+	var value GitHubInstallation
+	err := scanGitHubInstallation(s.db.QueryRow(ctx, githubInstallationSelect+` WHERE org_id=$1 AND id=$2`, orgID, id), &value)
 	return value, resourceQueryError("get github installation", err)
 }
 
@@ -424,9 +435,9 @@ func (s *Store) ListGitHubInstallations(ctx context.Context, orgID string) ([]Gi
 
 func markGitHubInstallationDeleted(ctx context.Context, tx pgx.Tx, orgID string, id int64, value *GitHubInstallation) error {
 	err := scanGitHubInstallation(tx.QueryRow(ctx, `UPDATE github_installations SET access_state='deleted',suspended_at=NULL,deleted_at=COALESCE(deleted_at,now()),
-		last_api_confirmed_generation=reconciliation_generation,last_reconciled_at=now(),updated_at=now()
+		last_api_confirmed_generation=reconciliation_generation,repository_reconciliation_generation=repository_reconciliation_generation+1,last_reconciled_at=now(),updated_at=now()
 		WHERE org_id=$1 AND github_installation_id=$2 AND access_state<>'deleted'
-		RETURNING id::text,github_installation_id,org_id::text,account_id,account_login,account_type,repository_selection,access_state,suspended_at,deleted_at,last_reconciled_at,created_at,updated_at`, orgID, id), value)
+		RETURNING id::text,github_installation_id,org_id::text,account_id,account_login,account_type,repository_selection,access_state,repository_reconciliation_generation,suspended_at,deleted_at,last_reconciled_at,created_at,updated_at`, orgID, id), value)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return scanGitHubInstallation(tx.QueryRow(ctx, githubInstallationSelect+` WHERE org_id=$1 AND github_installation_id=$2`, orgID, id), value)
 	}
@@ -495,24 +506,274 @@ func githubInstallationAuditSnapshot(value GitHubInstallation, source, setupSess
 }
 
 type GitHubRepository struct {
-	GitHubRepositoryID, GitHubInstallationID                                          int64
-	OrgID, NodeID, OwnerLogin, Name, FullName, Visibility, DefaultBranch, AccessState string
-	Archived                                                                          bool
-	LastReconciledAt                                                                  *time.Time
-	CreatedAt, UpdatedAt                                                              time.Time
+	GitHubRepositoryID, GitHubInstallationID                                                          int64
+	ReconciliationGeneration                                                                          int64
+	OrgID, InstallationID, NodeID, OwnerLogin, Name, FullName, Visibility, DefaultBranch, AccessState string
+	Archived                                                                                          bool
+	LastReconciledAt                                                                                  *time.Time
+	CreatedAt, UpdatedAt                                                                              time.Time
 }
 
-const githubRepositorySelect = `SELECT github_repository_id,org_id::text,github_installation_id,node_id,owner_login,name,full_name,
-	visibility,archived,default_branch,access_state,last_reconciled_at,created_at,updated_at FROM github_repositories`
+func (s *Store) GetGitHubRepository(ctx context.Context, orgID string, repositoryID int64) (GitHubRepository, error) {
+	var value GitHubRepository
+	err := scanGitHubRepository(s.db.QueryRow(ctx, githubRepositorySelect+` WHERE repository.org_id=$1 AND repository.github_repository_id=$2`, orgID, repositoryID), &value)
+	return value, resourceQueryError("get github repository", err)
+}
+
+func (s *Store) UpsertGitHubRepositories(ctx context.Context, orgID string, installation GitHubInstallation, repositories []GitHubRepository, audit *AuditEvent) ([]GitHubRepository, int64, error) {
+	repositories = append([]GitHubRepository(nil), repositories...)
+	sort.Slice(repositories, func(i, j int) bool {
+		return repositories[i].GitHubRepositoryID < repositories[j].GitHubRepositoryID
+	})
+	nodeIDs := make([]string, 0, len(repositories))
+	for index, repository := range repositories {
+		if repository.GitHubRepositoryID <= 0 || repository.NodeID == "" {
+			return nil, 0, ErrInvalidArgument
+		}
+		if index > 0 && repositories[index-1].GitHubRepositoryID == repository.GitHubRepositoryID {
+			return nil, 0, ErrInvalidArgument
+		}
+		nodeIDs = append(nodeIDs, repository.NodeID)
+	}
+	sort.Strings(nodeIDs)
+	for index := 1; index < len(nodeIDs); index++ {
+		if nodeIDs[index-1] == nodeIDs[index] {
+			return nil, 0, ErrInvalidArgument
+		}
+	}
+
+	values := make([]GitHubRepository, 0, len(repositories))
+	var generation int64
+	var identityMismatch bool
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if installation.OrgID != orgID {
+			return ErrFailedPrecondition
+		}
+		repositoryIDs := make([]int64, len(repositories))
+		for index, repository := range repositories {
+			repositoryIDs[index] = repository.GitHubRepositoryID
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('cyclopus:github_repository:id:' || $1, 0))`, fmt.Sprint(repository.GitHubRepositoryID)); err != nil {
+				return err
+			}
+		}
+		for _, nodeID := range nodeIDs {
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('cyclopus:github_repository:node:' || $1, 0))`, nodeID); err != nil {
+				return err
+			}
+		}
+
+		existingByID := make(map[int64]GitHubRepository, len(repositories))
+		existingByNodeID := make(map[string]GitHubRepository, len(repositories))
+		rows, err := tx.Query(ctx, githubRepositorySelect+` WHERE repository.github_repository_id=ANY($1) OR repository.node_id=ANY($2)
+			ORDER BY repository.github_repository_id`, repositoryIDs, nodeIDs)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var existing GitHubRepository
+			if err := scanGitHubRepository(rows, &existing); err != nil {
+				rows.Close()
+				return err
+			}
+			existingByID[existing.GitHubRepositoryID] = existing
+			existingByNodeID[existing.NodeID] = existing
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+
+		involvedInstallationSet := map[int64]struct{}{installation.GitHubInstallationID: {}}
+		for _, repository := range repositories {
+			if before, ok := existingByID[repository.GitHubRepositoryID]; ok {
+				involvedInstallationSet[before.GitHubInstallationID] = struct{}{}
+			}
+		}
+		installationIDs := make([]int64, 0, len(involvedInstallationSet))
+		for installationID := range involvedInstallationSet {
+			installationIDs = append(installationIDs, installationID)
+		}
+		sort.Slice(installationIDs, func(i, j int) bool { return installationIDs[i] < installationIDs[j] })
+		rows, err = tx.Query(ctx, `SELECT github_installation_id,org_id::text,access_state FROM github_installations
+			WHERE github_installation_id=ANY($1) ORDER BY github_installation_id FOR UPDATE`, installationIDs)
+		if err != nil {
+			return err
+		}
+		states := make(map[int64]string, len(installationIDs))
+		for rows.Next() {
+			var id int64
+			var lockedOrgID, state string
+			if err := rows.Scan(&id, &lockedOrgID, &state); err != nil {
+				rows.Close()
+				return err
+			}
+			if lockedOrgID != orgID {
+				rows.Close()
+				return ErrFailedPrecondition
+			}
+			states[id] = state
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if len(states) != len(installationIDs) || states[installation.GitHubInstallationID] != "active" {
+			return ErrFailedPrecondition
+		}
+		rows, err = tx.Query(ctx, githubRepositorySelect+` WHERE repository.github_repository_id=ANY($1) OR repository.node_id=ANY($2)
+			ORDER BY repository.github_repository_id FOR UPDATE OF repository`, repositoryIDs, nodeIDs)
+		if err != nil {
+			return err
+		}
+		lockedCount := 0
+		for rows.Next() {
+			var locked GitHubRepository
+			if err := scanGitHubRepository(rows, &locked); err != nil {
+				rows.Close()
+				return err
+			}
+			before, ok := existingByID[locked.GitHubRepositoryID]
+			if !ok || before.GitHubInstallationID != locked.GitHubInstallationID || before.NodeID != locked.NodeID {
+				rows.Close()
+				return ErrFailedPrecondition
+			}
+			lockedCount++
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if lockedCount != len(existingByID) {
+			return ErrFailedPrecondition
+		}
+
+		for _, repository := range repositories {
+			before, exists := existingByID[repository.GitHubRepositoryID]
+			if exists && before.NodeID != repository.NodeID {
+				after, _ := json.Marshal(map[string]any{"github_repository_id": repository.GitHubRepositoryID, "mismatch": "node_id"})
+				if err := insertAuditEvent(ctx, tx, orgID, audit, "github_repository.identity_mismatch", "github_installation", installation.ID, nil, after); err != nil {
+					return err
+				}
+				identityMismatch = true
+				break
+			}
+			if nodeOwner, ok := existingByNodeID[repository.NodeID]; ok && nodeOwner.GitHubRepositoryID != repository.GitHubRepositoryID {
+				after, _ := json.Marshal(map[string]any{"github_repository_id": repository.GitHubRepositoryID, "mismatch": "numeric_id"})
+				if err := insertAuditEvent(ctx, tx, orgID, audit, "github_repository.identity_mismatch", "github_installation", installation.ID, nil, after); err != nil {
+					return err
+				}
+				identityMismatch = true
+				break
+			}
+			if exists && before.GitHubInstallationID != installation.GitHubInstallationID && states[before.GitHubInstallationID] == "active" {
+				return ErrFailedPrecondition
+			}
+		}
+		if identityMismatch {
+			return tx.QueryRow(ctx, `SELECT repository_reconciliation_generation FROM github_installations
+				WHERE org_id=$1 AND github_installation_id=$2`, orgID, installation.GitHubInstallationID).Scan(&generation)
+		}
+
+		mutatedInstallations := make(map[int64]struct{})
+		for _, repository := range repositories {
+			before, exists := existingByID[repository.GitHubRepositoryID]
+			var value GitHubRepository
+			err = scanGitHubRepository(tx.QueryRow(ctx, `WITH saved AS (INSERT INTO github_repositories
+				(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,archived,default_branch,access_state,last_api_confirmed_generation,last_reconciled_at)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',1,now())
+				ON CONFLICT(github_repository_id) DO UPDATE SET owner_login=EXCLUDED.owner_login,name=EXCLUDED.name,
+				full_name=EXCLUDED.full_name,visibility=EXCLUDED.visibility,archived=EXCLUDED.archived,default_branch=EXCLUDED.default_branch,
+					github_installation_id=EXCLUDED.github_installation_id,access_state=EXCLUDED.access_state,
+					reconciliation_generation=github_repositories.reconciliation_generation+CASE WHEN
+						github_repositories.github_installation_id IS DISTINCT FROM EXCLUDED.github_installation_id
+						OR github_repositories.owner_login IS DISTINCT FROM EXCLUDED.owner_login
+						OR github_repositories.name IS DISTINCT FROM EXCLUDED.name
+						OR github_repositories.full_name IS DISTINCT FROM EXCLUDED.full_name
+						OR github_repositories.visibility IS DISTINCT FROM EXCLUDED.visibility
+						OR github_repositories.archived IS DISTINCT FROM EXCLUDED.archived
+						OR github_repositories.default_branch IS DISTINCT FROM EXCLUDED.default_branch
+						OR github_repositories.access_state IS DISTINCT FROM EXCLUDED.access_state THEN 1 ELSE 0 END,
+					last_api_confirmed_generation=github_repositories.reconciliation_generation+CASE WHEN
+						github_repositories.github_installation_id IS DISTINCT FROM EXCLUDED.github_installation_id
+						OR github_repositories.owner_login IS DISTINCT FROM EXCLUDED.owner_login
+						OR github_repositories.name IS DISTINCT FROM EXCLUDED.name
+						OR github_repositories.full_name IS DISTINCT FROM EXCLUDED.full_name
+						OR github_repositories.visibility IS DISTINCT FROM EXCLUDED.visibility
+						OR github_repositories.archived IS DISTINCT FROM EXCLUDED.archived
+						OR github_repositories.default_branch IS DISTINCT FROM EXCLUDED.default_branch
+						OR github_repositories.access_state IS DISTINCT FROM EXCLUDED.access_state THEN 1 ELSE 0 END,
+					last_reconciled_at=now(),updated_at=CASE
+					WHEN github_repositories.github_installation_id IS DISTINCT FROM EXCLUDED.github_installation_id
+					  OR github_repositories.owner_login IS DISTINCT FROM EXCLUDED.owner_login
+					  OR github_repositories.name IS DISTINCT FROM EXCLUDED.name
+					  OR github_repositories.full_name IS DISTINCT FROM EXCLUDED.full_name
+					  OR github_repositories.visibility IS DISTINCT FROM EXCLUDED.visibility
+					  OR github_repositories.archived IS DISTINCT FROM EXCLUDED.archived
+					  OR github_repositories.default_branch IS DISTINCT FROM EXCLUDED.default_branch
+					  OR github_repositories.access_state IS DISTINCT FROM EXCLUDED.access_state
+					THEN now() ELSE github_repositories.updated_at END
+				WHERE github_repositories.org_id=EXCLUDED.org_id AND github_repositories.node_id=EXCLUDED.node_id
+					RETURNING *) SELECT saved.github_repository_id,saved.org_id::text,saved.github_installation_id,installation.id::text,saved.node_id,saved.owner_login,saved.name,saved.full_name,saved.visibility,saved.archived,saved.default_branch,saved.access_state,saved.reconciliation_generation,saved.last_reconciled_at,saved.created_at,saved.updated_at FROM saved JOIN github_installations installation ON installation.org_id=saved.org_id AND installation.github_installation_id=saved.github_installation_id`,
+				repository.GitHubRepositoryID, orgID, installation.GitHubInstallationID, repository.NodeID, repository.OwnerLogin, repository.Name,
+				repository.FullName, repository.Visibility, repository.Archived, repository.DefaultBranch), &value)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrFailedPrecondition
+			}
+			if err != nil {
+				return err
+			}
+			values = append(values, value)
+			mutated := !exists || before.GitHubInstallationID != value.GitHubInstallationID || before.OwnerLogin != value.OwnerLogin ||
+				before.Name != value.Name || before.FullName != value.FullName || before.Visibility != value.Visibility || before.Archived != value.Archived ||
+				before.DefaultBranch != value.DefaultBranch || before.AccessState != value.AccessState
+			if mutated {
+				mutatedInstallations[value.GitHubInstallationID] = struct{}{}
+				if exists && before.GitHubInstallationID != value.GitHubInstallationID {
+					mutatedInstallations[before.GitHubInstallationID] = struct{}{}
+				}
+			}
+			if exists && (before.GitHubInstallationID != value.GitHubInstallationID || before.FullName != value.FullName) {
+				action := "github_repository.renamed"
+				if before.GitHubInstallationID != value.GitHubInstallationID {
+					action = "github_repository.transferred_rebound"
+				}
+				beforeJSON, _ := json.Marshal(before)
+				afterJSON, _ := json.Marshal(value)
+				if err := insertAuditEvent(ctx, tx, orgID, audit, action, "github_installation", installation.ID, beforeJSON, afterJSON); err != nil {
+					return err
+				}
+			}
+		}
+		for installationID := range mutatedInstallations {
+			if _, err := tx.Exec(ctx, `UPDATE github_installations SET repository_reconciliation_generation=repository_reconciliation_generation+1
+				WHERE org_id=$1 AND github_installation_id=$2`, orgID, installationID); err != nil {
+				return err
+			}
+		}
+		return tx.QueryRow(ctx, `SELECT repository_reconciliation_generation FROM github_installations
+			WHERE org_id=$1 AND github_installation_id=$2`, orgID, installation.GitHubInstallationID).Scan(&generation)
+	})
+	if err == nil && identityMismatch {
+		err = ErrFailedPrecondition
+	}
+	return values, generation, mapMutationError("upsert github repositories", err)
+}
+
+const githubRepositorySelect = `SELECT repository.github_repository_id,repository.org_id::text,repository.github_installation_id,installation.id::text,repository.node_id,repository.owner_login,repository.name,repository.full_name,
+	repository.visibility,repository.archived,repository.default_branch,repository.access_state,repository.reconciliation_generation,repository.last_reconciled_at,repository.created_at,repository.updated_at FROM github_repositories repository
+	JOIN github_installations installation ON installation.org_id=repository.org_id AND installation.github_installation_id=repository.github_installation_id`
 
 func scanGitHubRepository(row rowScanner, value *GitHubRepository) error {
-	return row.Scan(&value.GitHubRepositoryID, &value.OrgID, &value.GitHubInstallationID, &value.NodeID, &value.OwnerLogin,
+	return row.Scan(&value.GitHubRepositoryID, &value.OrgID, &value.GitHubInstallationID, &value.InstallationID, &value.NodeID, &value.OwnerLogin,
 		&value.Name, &value.FullName, &value.Visibility, &value.Archived, &value.DefaultBranch, &value.AccessState,
-		&value.LastReconciledAt, &value.CreatedAt, &value.UpdatedAt)
+		&value.ReconciliationGeneration, &value.LastReconciledAt, &value.CreatedAt, &value.UpdatedAt)
 }
 
 func (s *Store) ListGitHubRepositories(ctx context.Context, orgID string, installationID int64) ([]GitHubRepository, error) {
-	rows, err := s.db.Query(ctx, githubRepositorySelect+` WHERE org_id=$1 AND github_installation_id=$2 ORDER BY created_at,github_repository_id`, orgID, installationID)
+	rows, err := s.db.Query(ctx, githubRepositorySelect+` WHERE repository.org_id=$1 AND repository.github_installation_id=$2 ORDER BY repository.created_at,repository.github_repository_id`, orgID, installationID)
 	if err != nil {
 		return nil, err
 	}
@@ -535,6 +796,185 @@ type ImportOperation struct {
 	FailureCode, FailureMessage                                          *string
 	CreatedAt, UpdatedAt                                                 time.Time
 	CompletedAt                                                          *time.Time
+}
+
+type ImportRepositoryParams struct {
+	OperationID, OrgID, ActorUserID, IdempotencyKey, RequestDigest string
+	RepositoryID                                                   int64
+	ExpectedInstallationID                                         string
+	ExpectedGitHubInstallationID, ExpectedInstallationGeneration   int64
+	ExpectedRepositoryNodeID                                       string
+	ExpectedRepositoryGeneration                                   int64
+	Project                                                        Project
+	App                                                            App
+	Environment                                                    Environment
+	WorkflowRevision, BranchHeadSHA                                string
+	Idempotency                                                    IdempotencyClaimParams
+	Completion                                                     CompleteIdempotencyParams
+	AuditIDs                                                       []string
+	BeforeCommit                                                   func() error
+}
+
+type FailImportRepositoryParams struct {
+	OperationID, OrgID, ActorUserID, AuditID, IdempotencyKey, RequestDigest string
+	RepositoryID                                                            int64
+	FailureCode, FailureMessage                                             string
+	Completion                                                              CompleteIdempotencyParams
+}
+
+func (s *Store) FailImportGitRepository(ctx context.Context, params FailImportRepositoryParams) (ImportOperation, error) {
+	var operation ImportOperation
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO import_operations(id,org_id,idempotency_key,request_digest,state,github_repository_id,failure_code,failure_message,completed_at)
+			SELECT $1,$2,$3,$4,'failed',$5,$6,$7,now() FROM api_idempotency_records
+			WHERE org_id=$2 AND scope=$8 AND idempotency_key=$3 AND request_hash=$4 AND status='in_progress'
+			  AND lease_owner=$9 AND lease_expires_at>clock_timestamp()
+			RETURNING id::text,org_id::text,state,github_repository_id,failure_code,failure_message,created_at,updated_at,completed_at`,
+			params.OperationID, params.OrgID, params.IdempotencyKey, params.RequestDigest, params.RepositoryID,
+			params.FailureCode, params.FailureMessage, params.Completion.Scope, params.Completion.Owner).Scan(&operation.ID,
+			&operation.OrgID, &operation.State, &operation.GitHubRepositoryID, &operation.FailureCode,
+			&operation.FailureMessage, &operation.CreatedAt, &operation.UpdatedAt, &operation.CompletedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrLeaseNotOwned
+			}
+			return mapMutationError("create failed import operation", err)
+		}
+		body, _ := json.Marshal(operation)
+		params.Completion.Body = body
+		resourceType, resourceID := "import_operation", operation.ID
+		params.Completion.ResourceType, params.Completion.ResourceID = &resourceType, &resourceID
+		if err := completeIdempotency(ctx, tx, params.Completion); err != nil {
+			return err
+		}
+		after, _ := json.Marshal(operation)
+		return insertAuditEvent(ctx, tx, params.OrgID, &AuditEvent{ID: params.AuditID, ActorUserID: &params.ActorUserID}, "github_import.failed", "import_operation", operation.ID, nil, after)
+	})
+	return operation, err
+}
+
+var importBeforeCommitHook func() error
+
+func (s *Store) ImportGitRepository(ctx context.Context, params ImportRepositoryParams) (ImportOperation, IdempotencyResult, error) {
+	var operation ImportOperation
+	result := IdempotencyResult{Disposition: IdempotencyClaimed, Status: "in_progress"}
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var installationID, installationOrgID, installationState string
+		var installationNumericID, installationGeneration int64
+		if err := tx.QueryRow(ctx, `SELECT id::text,org_id::text,github_installation_id,access_state,repository_reconciliation_generation
+			FROM github_installations WHERE org_id=$1 AND github_installation_id=$2 FOR UPDATE`, params.OrgID, params.ExpectedGitHubInstallationID).Scan(
+			&installationID, &installationOrgID, &installationNumericID, &installationState, &installationGeneration); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrFailedPrecondition
+			}
+			return err
+		}
+		if installationOrgID != params.OrgID || (params.ExpectedInstallationID != "" && installationID != params.ExpectedInstallationID) || installationNumericID != params.ExpectedGitHubInstallationID ||
+			installationState != "active" || installationGeneration != params.ExpectedInstallationGeneration {
+			return ErrFailedPrecondition
+		}
+		var repositoryOrgID, repositoryInstallationID, repositoryNodeID, repositoryAccessState string
+		var repositoryInstallationNumericID, repositoryGeneration int64
+		var repositoryArchived bool
+		if err := tx.QueryRow(ctx, `SELECT repository.org_id::text,repository.github_installation_id,installation.id::text,repository.node_id,
+			repository.access_state,repository.archived,repository.reconciliation_generation FROM github_repositories repository
+			JOIN github_installations installation ON installation.org_id=repository.org_id AND installation.github_installation_id=repository.github_installation_id
+			WHERE repository.org_id=$1 AND repository.github_repository_id=$2 FOR UPDATE OF repository`, params.OrgID, params.RepositoryID).Scan(
+			&repositoryOrgID, &repositoryInstallationNumericID, &repositoryInstallationID, &repositoryNodeID, &repositoryAccessState, &repositoryArchived, &repositoryGeneration); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrFailedPrecondition
+			}
+			return err
+		}
+		if repositoryOrgID != params.OrgID || (params.ExpectedInstallationID != "" && repositoryInstallationID != params.ExpectedInstallationID) || repositoryInstallationNumericID != params.ExpectedGitHubInstallationID ||
+			repositoryNodeID != params.ExpectedRepositoryNodeID || repositoryAccessState != "active" || repositoryArchived || repositoryGeneration != params.ExpectedRepositoryGeneration {
+			return ErrFailedPrecondition
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO import_operations(id,org_id,idempotency_key,request_digest,state,checkpoint,github_repository_id,lease_owner,lease_expires_at)
+			SELECT $1,$2,$3,$4,'committing','request_validated',$5,$6,lease_expires_at
+			FROM api_idempotency_records WHERE org_id=$2 AND scope=$7 AND idempotency_key=$3 AND request_hash=$4
+			  AND status='in_progress' AND lease_owner=$6 AND lease_expires_at>clock_timestamp()
+			RETURNING id::text`, params.OperationID, params.OrgID, params.IdempotencyKey, params.RequestDigest,
+			params.RepositoryID, params.Idempotency.Owner, params.Idempotency.Scope).Scan(&operation.ID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrLeaseNotOwned
+			}
+			return mapMutationError("create import operation", err)
+		}
+		var connectionID string
+		if err := tx.QueryRow(ctx, `INSERT INTO git_connections(org_id,github_repository_id,state,access_state)
+			VALUES($1,$2,'active','active') ON CONFLICT(org_id,github_repository_id) DO UPDATE SET state='active',access_state='active',disconnected_at=NULL,updated_at=now()
+			RETURNING id::text`, params.OrgID, params.RepositoryID).Scan(&connectionID); err != nil {
+			return err
+		}
+		params.Project.GitConnectionID = &connectionID
+		if err := tx.QueryRow(ctx, `INSERT INTO projects(id,org_id,name,slug,git_connection_id) VALUES($1,$2,$3,$4,$5) RETURNING id::text`,
+			params.Project.ID, params.OrgID, params.Project.Name, params.Project.Slug, connectionID).Scan(&params.Project.ID); err != nil {
+			return mapMutationError("create imported project", err)
+		}
+		params.App.ProjectID, params.App.GitHubWorkflowRevision = params.Project.ID, params.WorkflowRevision
+		app := normalizeAppDefaults(params.App)
+		if err := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,github_workflow_path,github_workflow_revision,production_branch,annotation_policy,image_visibility)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) RETURNING id::text`, appArgs(app)...).Scan(&params.App.ID); err != nil {
+			return mapMutationError("create imported app", err)
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname,lifecycle_status)
+			VALUES($1,$2,$3,$4,'production',$5,$6,'reserved') RETURNING id::text`, params.Environment.ID, params.OrgID, params.App.ID,
+			params.Environment.Branch, params.Environment.Namespace, params.Environment.PlannedHostname).Scan(&params.Environment.ID); err != nil {
+			return mapMutationError("create imported environment", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO environment_lifecycle_jobs(org_id,environment_id,kind,status,checkpoint,reason)
+			VALUES($1,$2,'provision','queued','reserved','repository_import')`, params.OrgID, params.Environment.ID); err != nil {
+			return err
+		}
+		var job OrchestrationJob
+		if err := scanEnqueuedPush(tx.QueryRow(ctx, `SELECT result.orchestration_job_id::text,result.org_id::text,result.app_id::text,result.environment_id::text,
+			result.github_repository_id::text,result.github_workflow_path,result.workflow_revision,result.dispatch_ref,result.desired_checkout_sha,result.desired_generation,
+			result.idempotency_key,result.pending_github_workflow_path,result.pending_workflow_revision,result.pending_dispatch_ref,result.pending_checkout_sha,
+			result.pending_desired_generation,result.pending_idempotency_key,result.orchestration_status,result.accepted_generation,result.enqueue_result
+			FROM enqueue_orchestration_push($1,$2,$3,$4,$5,$6,$7,$8,$9) result`, params.OrgID, params.App.ID, params.Environment.ID,
+			params.RepositoryID, params.App.GitHubWorkflowPath, params.WorkflowRevision, params.App.ProductionBranch, params.BranchHeadSHA, "import:"+params.OperationID), &job); err != nil {
+			return mapEnqueueOrchestrationError(err)
+		}
+		now := time.Now().UTC()
+		operation = ImportOperation{ID: params.OperationID, OrgID: params.OrgID, State: "completed", GitHubRepositoryID: params.RepositoryID,
+			GitConnectionID: &connectionID, ProjectID: &params.Project.ID, AppID: &params.App.ID, EnvironmentID: &params.Environment.ID, OrchestrationJobID: &job.ID, CompletedAt: &now}
+		if err := tx.QueryRow(ctx, `UPDATE import_operations SET state='completed',checkpoint='completed',git_connection_id=$3,project_id=$4,app_id=$5,
+			environment_id=$6,orchestration_job_id=$7,lease_owner=NULL,lease_expires_at=NULL,completed_at=now(),updated_at=now()
+			WHERE org_id=$1 AND id=$2 RETURNING created_at,updated_at,completed_at`, params.OrgID, params.OperationID, connectionID, params.Project.ID,
+			params.App.ID, params.Environment.ID, job.ID).Scan(&operation.CreatedAt, &operation.UpdatedAt, &operation.CompletedAt); err != nil {
+			return err
+		}
+		ids := append(append([]string(nil), params.AuditIDs...), "", "", "", "", "")
+		for index, event := range []struct {
+			action, kind, id string
+			after            any
+		}{
+			{"git_connection.connected", "git_connection", connectionID, map[string]any{"github_repository_id": params.RepositoryID}},
+			{"project.created", "project", params.Project.ID, params.Project}, {"app.created", "app", params.App.ID, params.App},
+			{"environment.created", "environment", params.Environment.ID, params.Environment}, {"github_import.completed", "import_operation", params.OperationID, operation},
+		} {
+			after, _ := json.Marshal(event.after)
+			if err := insertAuditEvent(ctx, tx, params.OrgID, &AuditEvent{ID: ids[index], ActorUserID: &params.ActorUserID}, event.action, event.kind, event.id, nil, after); err != nil {
+				return err
+			}
+		}
+		if importBeforeCommitHook != nil {
+			if err := importBeforeCommitHook(); err != nil {
+				return err
+			}
+		}
+		if params.BeforeCommit != nil {
+			if err := params.BeforeCommit(); err != nil {
+				return err
+			}
+		}
+		body, _ := json.Marshal(operation)
+		params.Completion.Body, params.Completion.Owner = body, params.Idempotency.Owner
+		resourceType, resourceID := "import_operation", params.OperationID
+		params.Completion.ResourceType, params.Completion.ResourceID = &resourceType, &resourceID
+		return completeIdempotency(ctx, tx, params.Completion)
+	})
+	return operation, result, mapMutationError("import github repository", err)
 }
 
 func (s *Store) GetImportOperation(ctx context.Context, orgID, id string) (ImportOperation, error) {

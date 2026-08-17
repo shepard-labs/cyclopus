@@ -1189,7 +1189,6 @@
           "type": "string"
         },
         "installationId": {
-          "format": "int64",
           "type": "string"
         },
         "name": {

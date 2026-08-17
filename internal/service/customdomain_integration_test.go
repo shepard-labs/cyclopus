@@ -86,7 +86,7 @@ func TestVerifyDomainProvisionsCustomDomainRouting(t *testing.T) {
 	if req.Hostname != hostname || req.ServiceName != "tel-app" || req.ServicePort != 80 {
 		t.Fatalf("request routing = %+v, want host %q -> tel-app:80", req, hostname)
 	}
-	if req.TLSSecretName != "app-customer-test-tls" || req.ClusterIssuer != "letsencrypt" || req.DomainID != domain.ID {
+	if req.TLSSecretName != CustomDomainTLSSecretName(domain.ID) || req.ClusterIssuer != "letsencrypt" || req.DomainID != domain.ID {
 		t.Fatalf("request tls/issuer = %+v", req)
 	}
 }

@@ -142,9 +142,9 @@ func (s *Store) ChangeUserPassword(ctx context.Context, params ChangeUserPasswor
 		if tag.RowsAffected() == 0 {
 			return ErrConflict
 		}
-		if _, err := tx.Exec(ctx, `UPDATE api_tokens SET revoked_at=$4
-			WHERE user_id=$2 AND kind='session' AND id<>$3 AND revoked_at IS NULL`,
-			params.OrgID, params.UserID, params.CurrentTokenID, params.ChangedAt); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE api_tokens SET revoked_at=GREATEST($3,created_at)
+			WHERE user_id=$1 AND kind='session' AND id<>$2 AND revoked_at IS NULL`,
+			params.UserID, params.CurrentTokenID, params.ChangedAt); err != nil {
 			return fmt.Errorf("revoke other sessions: %w", err)
 		}
 		after, _ := json.Marshal(map[string]any{"other_sessions_revoked": true})

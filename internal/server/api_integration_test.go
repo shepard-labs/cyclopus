@@ -316,6 +316,10 @@ type apiFixture struct {
 	services Services
 }
 
+type acceptingWebhookSecretValidator struct{}
+
+func (acceptingWebhookSecretValidator) Validate(context.Context, string) error { return nil }
+
 func (f apiFixture) bootstrapFailureState(t *testing.T) string {
 	t.Helper()
 	var users, tokens, audits int
@@ -385,7 +389,7 @@ func newAPIFixture(t *testing.T, suffix string) apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	domainService := service.New(dataStore)
+	domainService := service.New(dataStore, service.WithWebhookSecretValidator(acceptingWebhookSecretValidator{}))
 	services := NewServices(authService, domainService, time.Hour)
 	services.Authenticator = NewAuthenticator(authService)
 	services.RateLimiter = NewAuthRateLimiter(1000)
@@ -460,7 +464,7 @@ func (f apiFixture) assertReleasePersistence(t *testing.T, releaseID, commitSHA 
 }
 
 func validApplication(registryID string) *cyclopusv1.Application {
-	return &cyclopusv1.Application{Name: "API", Slug: "api", HostnameLabel: "api", RegistryId: registryID, ImageRepository: "acme/api", ContainerPort: 8080, HealthCheckPath: "/healthz", ScalingMode: cyclopusv1.ScalingMode_SCALING_MODE_HPA, MinReplicas: 1, MaxReplicas: 3, HpaTargetCpuPercent: 70, CpuRequestMillicores: 100, CpuLimitMillicores: 1000, MemoryRequestMib: 128, MemoryLimitMib: 512, PreviewsEnabled: true, MaxPreviewEnvironments: 10, PreviewIdleTtlHours: 168, DeployTimeoutSeconds: 600, ReleaseRetentionCount: 5, RuntimeClass: cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR}
+	return &cyclopusv1.Application{Name: "API", Slug: "api", HostnameLabel: "api", RegistryId: registryID, ImageRepository: "acme/api", ContainerPort: 8080, HealthCheckPath: "/healthz", ScalingMode: cyclopusv1.ScalingMode_SCALING_MODE_HPA, MinReplicas: 1, MaxReplicas: 3, HpaTargetCpuPercent: 70, CpuRequestMillicores: 100, CpuLimitMillicores: 1000, MemoryRequestMib: 128, MemoryLimitMib: 512, PreviewsEnabled: false, MaxPreviewEnvironments: 10, PreviewIdleTtlHours: 168, DeployTimeoutSeconds: 600, ReleaseRetentionCount: 5, RuntimeClass: cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR}
 }
 
 func bearerContext(ctx context.Context, token string) context.Context {

@@ -102,7 +102,12 @@ func run(args, environ []string) error {
 	if err != nil {
 		return err
 	}
+	githubClients, err := githubadapter.NewInstallationClientFactory(githubOnboarding, cfg.GitHub.APIBaseURL, cfg.GitHub.UploadURL, cfg.GitHub.APIVersion, nil)
+	if err != nil {
+		return fmt.Errorf("construct GitHub discovery clients: %w", err)
+	}
 	domainService := service.New(dataStore, service.WithLogger(logger), service.WithGitHubOnboarding(githubOnboarding),
+		service.WithGitHubDiscovery(githubClients, []byte(cfg.Auth.TokenPepper)),
 		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget), service.WithHostnameSuffix(cfg.Kubernetes.PreviewHostnameSuffix),
 		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer), service.WithWebhookSecretValidator(webhookSecrets))
 	authenticator := server.NewAuthenticator(authService)

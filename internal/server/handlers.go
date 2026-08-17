@@ -397,7 +397,7 @@ func (h *apiHandlers) DeleteProject(ctx context.Context, req *cyclopusv1.DeleteP
 }
 
 func (h *apiHandlers) CreateApplication(ctx context.Context, req *cyclopusv1.CreateApplicationRequest) (*cyclopusv1.CreateApplicationResponse, error) {
-	_, err := sessionActor(ctx)
+	actor, err := sessionActor(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +410,13 @@ func (h *apiHandlers) CreateApplication(ctx context.Context, req *cyclopusv1.Cre
 	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(), "application.name": req.Application.GetName(), "application.slug": req.Application.GetSlug(), "application.hostname_label": req.Application.GetHostnameLabel()}); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "legacy application creation cannot supply canonical GitHub workflow and production branch fields", "FAILED_PRECONDITION")
+	input := appInput(req.Application)
+	input.ProjectID = req.GetProjectId()
+	value, err := h.service.CreateApp(ctx, actor, req.GetIdempotencyKey(), input)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.CreateApplicationResponse{Application: applicationProto(value)}, nil
 }
 
 func (h *apiHandlers) GetApplication(ctx context.Context, req *cyclopusv1.GetApplicationRequest) (*cyclopusv1.GetApplicationResponse, error) {
@@ -472,13 +478,11 @@ func (h *apiHandlers) UpdateApplication(ctx context.Context, req *cyclopusv1.Upd
 		return nil, rpcError(err)
 	}
 	merged := applicationProto(current)
-	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "keda_cron_schedules": true, "keda_http_target_pending_requests": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true}
+	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "image_repository": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "keda_cron_schedules": true, "keda_http_target_pending_requests": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true}
 	if err := mergeMaskedMessage(merged, req.Application, req.GetUpdateMask(), allowed); err != nil {
 		return nil, err
 	}
 	input := appInput(merged)
-	input.GitHubWorkflowPath = &current.GitHubWorkflowPath
-	input.ProductionBranch = current.ProductionBranch
 	value, err := h.service.UpdateApp(ctx, actor, req.GetIdempotencyKey(), req.Application.GetId(), input)
 	if err != nil {
 		return nil, rpcError(err)
@@ -1437,7 +1441,7 @@ func domainProto(v store.Domain, instructions service.DomainInstructions) *cyclo
 }
 func gitConnectionProto(v store.GitConnection) *cyclopusv1.GitConnection {
 	return &cyclopusv1.GitConnection{Id: v.ID, Repository: &cyclopusv1.GitHubRepository{Id: v.GitHubRepositoryID,
-		InstallationId: v.GitHubInstallationID, NodeId: v.RepositoryNodeID, Owner: v.OwnerLogin, Name: v.RepositoryName,
+		InstallationId: v.InstallationID, NodeId: v.RepositoryNodeID, Owner: v.OwnerLogin, Name: v.RepositoryName,
 		FullName: v.RepositoryFullName, Private: v.RepositoryPrivate, Archived: v.RepositoryArchived,
 		DefaultBranch: v.RepositoryDefaultBranch, AccessStatus: githubRepositoryAccessStatus(v.RepositoryAccessState),
 		SyncedAt: timeProto(v.RepositorySyncedAt)}, Status: gitConnectionStatus(v.State, v.AccessState),

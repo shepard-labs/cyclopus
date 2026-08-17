@@ -4818,7 +4818,7 @@ func (x *GitHubInstallation) GetUpdatedAt() *timestamppb.Timestamp {
 type GitHubRepository struct {
 	state          protoimpl.MessageState       `protogen:"open.v1"`
 	Id             int64                        `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	InstallationId int64                        `protobuf:"varint,2,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	InstallationId string                       `protobuf:"bytes,2,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
 	NodeId         string                       `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Owner          string                       `protobuf:"bytes,4,opt,name=owner,proto3" json:"owner,omitempty"`
 	Name           string                       `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
@@ -4869,11 +4869,11 @@ func (x *GitHubRepository) GetId() int64 {
 	return 0
 }
 
-func (x *GitHubRepository) GetInstallationId() int64 {
+func (x *GitHubRepository) GetInstallationId() string {
 	if x != nil {
 		return x.InstallationId
 	}
-	return 0
+	return ""
 }
 
 func (x *GitHubRepository) GetNodeId() string {
@@ -13187,7 +13187,7 @@ const file_cyclopus_v1_cyclopus_proto_rawDesc = "" +
 	"updated_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x91\x03\n" +
 	"\x10GitHubRepository\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12'\n" +
-	"\x0finstallation_id\x18\x02 \x01(\x03R\x0einstallationId\x12\x17\n" +
+	"\x0finstallation_id\x18\x02 \x01(\tR\x0einstallationId\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x14\n" +
 	"\x05owner\x18\x04 \x01(\tR\x05owner\x12\x12\n" +
 	"\x04name\x18\x05 \x01(\tR\x04name\x12\x1b\n" +

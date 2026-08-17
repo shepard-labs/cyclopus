@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	cronparser "github.com/robfig/cron/v3"
+	githubadapter "github.com/shepard-labs/cyclopus/internal/adapters/github"
 	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/webhook"
@@ -75,6 +76,8 @@ type Service struct {
 	customDomainProvisioner  CustomDomainProvisioner
 	certManagerClusterIssuer string
 	github                   *GitHubOnboarding
+	githubClients            githubadapter.ClientFactory
+	githubCursorKey          []byte
 	webhookSecrets           WebhookSecretValidator
 }
 
@@ -162,6 +165,13 @@ func New(dataStore *store.Store, opts ...Option) *Service {
 
 func WithGitHubOnboarding(onboarding *GitHubOnboarding) Option {
 	return func(s *Service) { s.github = onboarding }
+}
+
+func WithGitHubDiscovery(clients githubadapter.ClientFactory, cursorKey []byte) Option {
+	return func(s *Service) {
+		s.githubClients = clients
+		s.githubCursorKey = append([]byte(nil), cursorKey...)
+	}
 }
 
 func (s *Service) log() *slog.Logger {
@@ -501,12 +511,25 @@ func (s *Service) CreateApp(ctx context.Context, actor ActorContext, key string,
 		return store.App{}, err
 	}
 	input = applyAppCreateDefaults(normalizeAppInput(input))
+	if input.GitHubWorkflowPath != nil || input.ProductionBranch != "" {
+		return store.App{}, ErrForbidden
+	}
 	runtimeClass := "gvisor"
 	if input.RuntimeClass != nil {
 		if !actor.Operator && *input.RuntimeClass != runtimeClass {
 			return store.App{}, ErrForbidden
 		}
 		runtimeClass = *input.RuntimeClass
+	}
+	project, err := s.store.GetProject(ctx, actor.OrgID, input.ProjectID)
+	if err != nil {
+		return store.App{}, mapError(err)
+	}
+	if project.GitConnectionID != nil {
+		return store.App{}, ErrForbidden
+	}
+	if err := s.validateRegistryApp(ctx, actor.OrgID, input); err != nil {
+		return store.App{}, err
 	}
 	if err := validateApp(input, runtimeClass); err != nil {
 		return store.App{}, err
@@ -533,6 +556,25 @@ func (s *Service) UpdateApp(ctx context.Context, actor ActorContext, key, id str
 	if err != nil {
 		return store.App{}, mapError(err)
 	}
+	project, err := s.store.GetProject(ctx, actor.OrgID, current.ProjectID)
+	if err != nil {
+		return store.App{}, mapError(err)
+	}
+	imported := project.GitConnectionID != nil || current.GitHubWorkflowPath != ""
+	input.ProjectID = current.ProjectID
+	input.RegistryID = current.RegistryID
+	if imported {
+		input.GitHubWorkflowPath = &current.GitHubWorkflowPath
+		input.ProductionBranch = current.ProductionBranch
+		input.ImageRepository = current.ImageRepository
+		input.PreviewsEnabled = current.PreviewsEnabled
+	} else {
+		input.GitHubWorkflowPath = nil
+		input.ProductionBranch = ""
+		if err := s.validateRegistryApp(ctx, actor.OrgID, input); err != nil {
+			return store.App{}, err
+		}
+	}
 	runtimeClass := current.RuntimeClass
 	if input.RuntimeClass != nil && *input.RuntimeClass != current.RuntimeClass {
 		if !actor.Operator {
@@ -553,6 +595,7 @@ func (s *Service) UpdateApp(ctx context.Context, actor ActorContext, key, id str
 		return replay, err
 	}
 	value := appValue(actor.OrgID, id, input, runtimeClass)
+	value.GitHubWorkflowRevision = current.GitHubWorkflowRevision
 	body, _ := json.Marshal(value)
 	idem := s.completion(actor, "app.update", key, request, body, 200)
 	value, err = s.store.UpdateApp(ctx, store.SaveAppParams{App: value, Idempotency: idem, Audit: audit(actor)})
@@ -593,14 +636,11 @@ func appValue(orgID, id string, i AppInput, runtimeClass string) store.App {
 		workflowPath = *i.GitHubWorkflowPath
 	}
 	branch := i.ProductionBranch
-	if branch == "" {
-		branch = "main"
-	}
 	visibility := "public"
 	if i.RegistryID != nil {
 		visibility = "private"
 	}
-	return store.App{ID: id, OrgID: orgID, ProjectID: i.ProjectID, Name: i.Name, Slug: i.Slug, HostnameLabel: i.HostnameLabel, RegistryID: i.RegistryID, ImageRepository: i.ImageRepository, GitHubWorkflowPath: workflowPath, ProductionBranch: branch, AnnotationPolicy: "validate_if_present", ImageVisibility: visibility, ContainerPort: i.ContainerPort, HealthCheckPath: i.HealthCheckPath, ScalingMode: i.ScalingMode, MinReplicas: i.MinReplicas, MaxReplicas: i.MaxReplicas, HPATargetCPUPercent: i.HPATargetCPUPercent, KEDACronSchedules: i.KEDACronSchedules, KEDAHTTPTargetPendingRequests: i.KEDAHTTPTargetPendingRequests, CPURequestMillicores: i.CPURequestMillicores, CPULimitMillicores: i.CPULimitMillicores, MemoryRequestMiB: i.MemoryRequestMiB, MemoryLimitMiB: i.MemoryLimitMiB, PreviewsEnabled: i.PreviewsEnabled, MaxPreviewEnvironments: i.MaxPreviewEnvironments, PreviewIdleTTLHours: i.PreviewIdleTTLHours, DeployTimeoutSeconds: i.DeployTimeoutSeconds, ReleaseRetentionCount: i.ReleaseRetentionCount, RuntimeClass: runtimeClass}
+	return store.App{ID: id, OrgID: orgID, ProjectID: i.ProjectID, Name: i.Name, Slug: i.Slug, HostnameLabel: i.HostnameLabel, RegistryID: i.RegistryID, ImageRepository: i.ImageRepository, GitHubWorkflowPath: workflowPath, GitHubWorkflowRevision: strings.Repeat("0", 40), ProductionBranch: branch, AnnotationPolicy: "validate_if_present", ImageVisibility: visibility, ContainerPort: i.ContainerPort, HealthCheckPath: i.HealthCheckPath, ScalingMode: i.ScalingMode, MinReplicas: i.MinReplicas, MaxReplicas: i.MaxReplicas, HPATargetCPUPercent: i.HPATargetCPUPercent, KEDACronSchedules: i.KEDACronSchedules, KEDAHTTPTargetPendingRequests: i.KEDAHTTPTargetPendingRequests, CPURequestMillicores: i.CPURequestMillicores, CPULimitMillicores: i.CPULimitMillicores, MemoryRequestMiB: i.MemoryRequestMiB, MemoryLimitMiB: i.MemoryLimitMiB, PreviewsEnabled: i.PreviewsEnabled, MaxPreviewEnvironments: i.MaxPreviewEnvironments, PreviewIdleTTLHours: i.PreviewIdleTTLHours, DeployTimeoutSeconds: i.DeployTimeoutSeconds, ReleaseRetentionCount: i.ReleaseRetentionCount, RuntimeClass: runtimeClass}
 }
 
 type AcceptedOperation struct {
@@ -949,17 +989,59 @@ func validateApp(i AppInput, runtimeClass string) error {
 	if i.MaxPreviewEnvironments < 0 || i.MaxPreviewEnvironments > 1000 || i.PreviewIdleTTLHours <= 0 || i.PreviewIdleTTLHours > 8760 || i.DeployTimeoutSeconds <= 0 || i.DeployTimeoutSeconds > 86400 || i.ReleaseRetentionCount < 1 || i.ReleaseRetentionCount > 1000 {
 		return ErrInvalidArgument
 	}
-	if (i.RegistryID == nil) != (i.ImageRepository == nil) {
+	if i.GitHubWorkflowPath == nil {
+		if i.RegistryID == nil || i.ImageRepository == nil || i.ProductionBranch != "" {
+			return ErrInvalidArgument
+		}
+	} else {
+		if i.RegistryID != nil || i.ImageRepository == nil {
+			return ErrInvalidArgument
+		}
+		if !regexp.MustCompile(`^\.github/workflows/[^/\s]+\.(yml|yaml)$`).MatchString(*i.GitHubWorkflowPath) || len(*i.GitHubWorkflowPath) > 255 {
+			return ErrInvalidArgument
+		}
+		if strings.TrimSpace(i.ProductionBranch) == "" || strings.TrimSpace(i.ProductionBranch) != i.ProductionBranch || len(i.ProductionBranch) > 255 {
+			return ErrInvalidArgument
+		}
+	}
+	return nil
+}
+
+func (s *Service) validateRegistryApp(ctx context.Context, orgID string, input AppInput) error {
+	if input.RegistryID == nil || input.ImageRepository == nil {
 		return ErrInvalidArgument
 	}
-	workflowPath := i.GitHubWorkflowPath
-	if workflowPath == nil || !regexp.MustCompile(`^\.github/workflows/[^/\s]+\.(yml|yaml)$`).MatchString(*workflowPath) || len(*workflowPath) > 255 {
-		return ErrInvalidArgument
+	registry, err := s.store.GetRegistry(ctx, orgID, *input.RegistryID)
+	if err != nil {
+		return mapError(err)
 	}
-	if strings.TrimSpace(i.ProductionBranch) == "" || strings.TrimSpace(i.ProductionBranch) != i.ProductionBranch || len(i.ProductionBranch) > 255 {
+	if !store.ValidRegistryIdentity(registry.Provider, registry.RegistryHost) || registry.State != "ready" || !validRegistryRepository(registry.RegistryHost, *input.ImageRepository) {
 		return ErrInvalidArgument
 	}
 	return nil
+}
+
+func validRegistryRepository(registryHost, repository string) bool {
+	hostURL, err := url.Parse(registryHost)
+	if err != nil {
+		return false
+	}
+	host := hostURL.Host
+	if host == "" {
+		host = hostURL.Path
+	}
+	host = strings.Trim(strings.ToLower(host), "/")
+	if host == "" || repository == "" || repository != strings.ToLower(repository) || strings.TrimSpace(repository) != repository || len(repository) > 255 || strings.HasPrefix(repository, host+"/") {
+		return false
+	}
+	component := regexp.MustCompile(`^[a-z0-9]+(?:(?:\.|_{1,2}|-+)[a-z0-9]+)*$`)
+	parts := strings.Split(repository, "/")
+	for _, part := range parts {
+		if !component.MatchString(part) {
+			return false
+		}
+	}
+	return true
 }
 func validateKEDAAppConfig(i AppInput) error {
 	if i.KEDAHTTPTargetPendingRequests < 1 {

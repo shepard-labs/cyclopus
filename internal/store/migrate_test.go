@@ -21,9 +21,18 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000001_foundation.up.sql",
 		"000002_user_profiles.up.sql",
 		"000003_avatar_key_format.up.sql",
+		"000004_self_hosted_github_import_epoch.down.sql",
 		"000004_self_hosted_github_import_epoch.up.sql",
+		"000005_github_setup_state_generation.down.sql",
 		"000005_github_setup_state_generation.up.sql",
+		"000006_github_installation_audit_id.down.sql",
 		"000006_github_installation_audit_id.up.sql",
+		"000007_import_workflow_revision.down.sql",
+		"000007_import_workflow_revision.up.sql",
+		"000008_github_repository_cursor_generation.down.sql",
+		"000008_github_repository_cursor_generation.up.sql",
+		"000009_registry_canonical_identity.down.sql",
+		"000009_registry_canonical_identity.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -93,6 +102,10 @@ func TestMigrationForwardDownAndEpochContract(t *testing.T) {
 		"migrations/000004_self_hosted_github_import_epoch.down.sql",
 		"migrations/000005_github_setup_state_generation.up.sql",
 		"migrations/000005_github_setup_state_generation.down.sql",
+		"migrations/000008_github_repository_cursor_generation.up.sql",
+		"migrations/000008_github_repository_cursor_generation.down.sql",
+		"migrations/000009_registry_canonical_identity.up.sql",
+		"migrations/000009_registry_canonical_identity.down.sql",
 	} {
 		contents, err := os.ReadFile(name)
 		if err != nil {

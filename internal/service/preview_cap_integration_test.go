@@ -95,8 +95,8 @@ func seedCapTenant(t *testing.T, pool *pgxpool.Pool) {
 		{`INSERT INTO git_connections (id,org_id,github_repository_id) VALUES($1,$2,4244)`, []any{capRepoID, capOrgID}},
 		{`INSERT INTO projects (id, org_id, name, slug, git_connection_id)
 			VALUES ($1, $2, 'Cap Project', 'cap-project', $3)`, []any{capProjectID, capOrgID, capRepoID}},
-		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label,image_repository,github_workflow_path,production_branch,max_preview_environments,deploy_timeout_seconds)
-			VALUES ($1, $2, $3, 'Cap App', 'cap-app', 'cap-host','ghcr.io/acme/cap','.github/workflows/deploy.yml','main',1,60)`, []any{capAppID, capOrgID, capProjectID}},
+		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label,image_repository,github_workflow_path,production_branch,previews_enabled,max_preview_environments,deploy_timeout_seconds)
+			VALUES ($1, $2, $3, 'Cap App', 'cap-app', 'cap-host','ghcr.io/acme/cap','.github/workflows/deploy.yml','main',true,1,60)`, []any{capAppID, capOrgID, capProjectID}},
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s.query, s.args...); err != nil {

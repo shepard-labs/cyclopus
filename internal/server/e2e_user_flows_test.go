@@ -156,14 +156,14 @@ func finalizeReleaseLive(t *testing.T, fixture apiFixture, dataStore *store.Stor
 func seedGitIntegration(t *testing.T, fixture apiFixture, orgID, projectID string, appIDs ...string) {
 	t.Helper()
 	var gitID string
-	mustExec(t, fixture.pool, `INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(12345,$1,12346,'acme','Organization','selected','active',1,1)`, orgID)
-	mustExec(t, fixture.pool, `INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(12347,$1,12345,'api-node','acme','api','acme/api','private','main','active',1,1)`, orgID)
-	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,12347) RETURNING id::text`, orgID).Scan(&gitID); err != nil {
+	mustExec(t, fixture.pool, `INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(12345,$1,12346,'acme','Organization','selected','active',1,1) ON CONFLICT(github_installation_id) DO NOTHING`, orgID)
+	mustExec(t, fixture.pool, `INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(12347,$1,12345,'api-node','acme','api','acme/api','private','main','active',1,1) ON CONFLICT(github_repository_id) DO NOTHING`, orgID)
+	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,12347) ON CONFLICT(org_id,github_repository_id) DO UPDATE SET updated_at=now() RETURNING id::text`, orgID).Scan(&gitID); err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=$2 WHERE id=$1`, projectID, gitID)
 	for _, appID := range appIDs {
-		mustExec(t, fixture.pool, `UPDATE apps SET github_workflow_path='.github/workflows/build.yml',production_branch='main' WHERE id=$1`, appID)
+		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='ghcr.io/acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=true WHERE id=$1`, appID)
 	}
 }
 
@@ -609,20 +609,20 @@ func TestE2EApplications(t *testing.T) {
 			app.GetMinReplicas() != 1 || app.GetMaxReplicas() != 3 || app.GetHpaTargetCpuPercent() != 70 ||
 			app.GetCpuRequestMillicores() != 100 || app.GetCpuLimitMillicores() != 1000 ||
 			app.GetMemoryRequestMib() != 128 || app.GetMemoryLimitMib() != 512 ||
-			!app.GetPreviewsEnabled() || app.GetMaxPreviewEnvironments() != 10 || app.GetPreviewIdleTtlHours() != 168 ||
+			app.GetPreviewsEnabled() || app.GetMaxPreviewEnvironments() != 10 || app.GetPreviewIdleTtlHours() != 168 ||
 			app.GetDeployTimeoutSeconds() != 600 || app.GetReleaseRetentionCount() != 5 ||
 			app.GetRuntimeClass() != cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR {
 			t.Fatalf("CreateApplication() = %+v", app)
 		}
 		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM apps WHERE id=$1 AND org_id=$2 AND project_id=$3
-			AND name='API' AND slug='api' AND hostname_label='api' AND registry_id=$4 AND image_repository='ghcr.io/acme/api'
+			AND name='API' AND slug='api' AND hostname_label='api' AND registry_id=$4 AND image_repository='acme/api'
 			AND container_port=8080 AND health_check_path='/healthz' AND scaling_mode='hpa'
 			AND min_replicas=1 AND max_replicas=3 AND hpa_target_cpu_percent=70
 			AND cpu_request_millicores=100 AND cpu_limit_millicores=1000
 			AND memory_request_mib=128 AND memory_limit_mib=512
-			AND previews_enabled AND max_preview_environments=10 AND preview_idle_ttl_hours=168
+			AND NOT previews_enabled AND max_preview_environments=10 AND preview_idle_ttl_hours=168
 			AND deploy_timeout_seconds=600 AND release_retention_count=5 AND runtime_class='gvisor'
-			AND github_workflow_path='.github/workflows/build.yml' AND production_branch='main'
+			AND github_workflow_path IS NULL AND production_branch IS NULL
 			AND deleted_at IS NULL AND external_credentials_revoked_at IS NULL`,
 			appID, clients.orgID, project.GetProject().GetId(), registryID); count != 1 {
 			t.Fatalf("apps row mismatch, count = %d", count)
@@ -635,15 +635,14 @@ func TestE2EApplications(t *testing.T) {
 	t.Run("ValidationRejectionsConsumeNothing", func(t *testing.T) {
 		appsBefore := queryInt(t, fixture.pool, `SELECT count(*) FROM apps`)
 		hpaZero := validApplication(registryID)
-		hpaZero.MinReplicas = 0
-		portZero := validApplication(registryID)
-		portZero.ContainerPort = 0
+		hpaZero.MaxReplicas = -1
 		cpuInverted := validApplication(registryID)
 		cpuInverted.CpuLimitMillicores = 50
 		registryOnly := validApplication(registryID)
 		registryOnly.ImageRepository = ""
-		for index, bad := range []*cyclopusv1.Application{hpaZero, portZero, cpuInverted, registryOnly} {
-			bad.Slug = "bad"
+		for index, bad := range []*cyclopusv1.Application{hpaZero, cpuInverted, registryOnly} {
+			bad.Slug = "bad-" + string(rune('1'+index))
+			bad.HostnameLabel = bad.Slug
 			_, err := clients.application.CreateApplication(sessionCtx, &cyclopusv1.CreateApplicationRequest{
 				ProjectId: project.GetProject().GetId(), IdempotencyKey: "bad-app-" + string(rune('1'+index)), Application: bad,
 			})
@@ -652,26 +651,48 @@ func TestE2EApplications(t *testing.T) {
 		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM apps`); count != appsBefore {
 			t.Fatalf("apps after invalid creates = %d, want %d", count, appsBefore)
 		}
-		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM api_idempotency_records WHERE idempotency_key IN ('bad-app-1','bad-app-2','bad-app-3','bad-app-4')`); count != 0 {
+		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM api_idempotency_records WHERE idempotency_key IN ('bad-app-1','bad-app-2','bad-app-3')`); count != 0 {
 			t.Fatalf("invalid creates consumed idempotency claims = %d", count)
 		}
 	})
 
 	t.Run("UpdateMask", func(t *testing.T) {
 		if _, err := clients.application.UpdateApplication(sessionCtx, &cyclopusv1.UpdateApplicationRequest{
-			Application:    &cyclopusv1.Application{Id: appID, HealthCheckPath: "/ready", MaxReplicas: 9},
-			UpdateMask:     &fieldmaskpb.FieldMask{Paths: []string{"health_check_path", "max_replicas"}},
+			Application:    &cyclopusv1.Application{Id: appID, HealthCheckPath: "/ready", MaxReplicas: 9, ImageRepository: "acme/replaced"},
+			UpdateMask:     &fieldmaskpb.FieldMask{Paths: []string{"health_check_path", "max_replicas", "image_repository"}},
 			IdempotencyKey: "app-2",
 		}); err != nil {
 			t.Fatal(err)
 		}
 		if !queryBool(t, fixture.pool, `SELECT health_check_path='/ready' AND max_replicas=9
-			AND container_port=8080 AND slug='api' AND scaling_mode='hpa' AND runtime_class='gvisor' FROM apps WHERE id=$1`, appID) {
+			AND container_port=8080 AND slug='api' AND scaling_mode='hpa' AND runtime_class='gvisor'
+			AND image_repository='acme/replaced' FROM apps WHERE id=$1`, appID) {
 			t.Fatal("UpdateApplication mask changed unexpected columns")
 		}
 		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM audit_events WHERE action='app.updated' AND target_id=$1
 			AND after->>'HealthCheckPath'='/ready'`, appID); count != 1 {
 			t.Fatalf("app.updated audit rows = %d", count)
+		}
+	})
+
+	t.Run("ImportedUpdatePreservesGitOwnedFields", func(t *testing.T) {
+		seedGitIntegration(t, fixture, clients.orgID, project.GetProject().GetId(), appID)
+		mustExec(t, fixture.pool, `UPDATE apps SET github_workflow_revision=$2 WHERE id=$1`, appID, strings.Repeat("c", 40))
+		updated, err := clients.application.UpdateApplication(sessionCtx, &cyclopusv1.UpdateApplicationRequest{
+			Application: &cyclopusv1.Application{Id: appID, Name: "Imported API Renamed", ContainerPort: 9090, MaxReplicas: 7,
+				ImageRepository: "ghcr.io/attacker/replaced", PreviewsEnabled: false},
+			UpdateMask:     &fieldmaskpb.FieldMask{Paths: []string{"name", "container_port", "max_replicas", "image_repository", "previews_enabled"}},
+			IdempotencyKey: "app-imported-update",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := updated.GetApplication()
+		if app.GetName() != "Imported API Renamed" || app.GetContainerPort() != 9090 || app.GetMaxReplicas() != 7 || app.GetRegistryId() != "" || app.GetImageRepository() != "ghcr.io/acme/api" || app.GetGithubWorkflowPath() != ".github/workflows/build.yml" || app.GetProductionBranch() != "main" || !app.GetPreviewsEnabled() {
+			t.Fatalf("UpdateApplication(imported) = %+v", app)
+		}
+		if revision := queryString(t, fixture.pool, `SELECT github_workflow_revision FROM apps WHERE id=$1`, appID); revision != strings.Repeat("c", 40) {
+			t.Fatalf("github_workflow_revision = %q", revision)
 		}
 	})
 }
@@ -724,7 +745,7 @@ func TestE2EPreviewLifecycle(t *testing.T) {
 			t.Fatalf("provision job rows = %d", count)
 		}
 		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM orchestration_jobs WHERE environment_id=$1
-			AND status='queued' AND git_ref='refs/heads/feature-x' AND commit_sha=$2`, previewEnvID, commit); count != 1 {
+			AND status='queued' AND dispatch_ref='refs/heads/feature-x' AND desired_checkout_sha=$2`, previewEnvID, commit); count != 1 {
 			t.Fatalf("orchestration job rows = %d", count)
 		}
 		if count := queryInt(t, fixture.pool, `SELECT count(*) FROM preview_lifecycle_requests WHERE idempotency_key='push-1'
@@ -761,12 +782,16 @@ func TestE2EPreviewLifecycle(t *testing.T) {
 		disabled := validApplication(registryID)
 		disabled.Name, disabled.Slug, disabled.HostnameLabel = "No Preview", "no-preview", "no-preview"
 		disabled.PreviewsEnabled = false
+		gitConnectionID := queryString(t, fixture.pool, `SELECT git_connection_id::text FROM projects WHERE id=$1`, project.GetProject().GetId())
+		mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=NULL WHERE id=$1`, project.GetProject().GetId())
 		appNoPreview, err := clients.application.CreateApplication(sessionCtx, &cyclopusv1.CreateApplicationRequest{
 			ProjectId: project.GetProject().GetId(), IdempotencyKey: "app-np", Application: disabled,
 		})
+		mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=$2 WHERE id=$1`, project.GetProject().GetId(), gitConnectionID)
 		if err != nil {
 			t.Fatal(err)
 		}
+		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='ghcr.io/acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=false WHERE id=$1`, appNoPreview.GetApplication().GetId())
 		push, err := clients.environment.AcceptPreviewPush(sessionCtx, &cyclopusv1.PreviewPushRequest{
 			ApplicationId: appNoPreview.GetApplication().GetId(), Branch: "feature-y",
 			CommitSha: strings.Repeat("c", 40), IdempotencyKey: "push-3",
@@ -793,13 +818,16 @@ func TestE2EPreviewLifecycle(t *testing.T) {
 		capped := validApplication(registryID)
 		capped.Name, capped.Slug, capped.HostnameLabel = "Capped", "capped", "capped"
 		capped.MaxPreviewEnvironments = 1
+		gitConnectionID := queryString(t, fixture.pool, `SELECT git_connection_id::text FROM projects WHERE id=$1`, project.GetProject().GetId())
+		mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=NULL WHERE id=$1`, project.GetProject().GetId())
 		appCapped, err := clients.application.CreateApplication(sessionCtx, &cyclopusv1.CreateApplicationRequest{
 			ProjectId: project.GetProject().GetId(), IdempotencyKey: "app-cap", Application: capped,
 		})
+		mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=$2 WHERE id=$1`, project.GetProject().GetId(), gitConnectionID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustExec(t, fixture.pool, `UPDATE apps SET github_workflow_path='.github/workflows/build.yml' WHERE id=$1`, appCapped.GetApplication().GetId())
+		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='ghcr.io/acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=true WHERE id=$1`, appCapped.GetApplication().GetId())
 		if _, err := clients.environment.AcceptPreviewPush(sessionCtx, &cyclopusv1.PreviewPushRequest{
 			ApplicationId: appCapped.GetApplication().GetId(), Branch: "cap-a",
 			CommitSha: strings.Repeat("e", 40), IdempotencyKey: "push-5",

@@ -228,14 +228,21 @@ func currentUserEmail(t *testing.T, pool *pgxpool.Pool) string {
 func insertAppGraph(t *testing.T, pool *pgxpool.Pool, orgID, suffix string) string {
 	t.Helper()
 	ctx := context.Background()
-	var projectID, appID string
+	var registryID, projectID, appID string
+	if err := pool.QueryRow(ctx, `INSERT INTO registries
+		(org_id, provider, registry_host, active_generation, active_credential_secret_ref, state, checkpoint, reconciliation_generation)
+		VALUES ($1, 'ghcr', 'ghcr.io', 1, 'k8s-secret://cyclopus-system/auth-ghcr#token', 'ready', 'activated', 1)
+		RETURNING id::text`, orgID).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
 	if err := pool.QueryRow(ctx, `INSERT INTO projects (org_id, name, slug)
 		VALUES ($1, $2, $3) RETURNING id::text`, orgID, "Project "+suffix, "project-"+suffix).Scan(&projectID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO apps
-		(org_id, project_id, name, slug, hostname_label) VALUES ($1, $2, $3, $4, $5)
-		RETURNING id::text`, orgID, projectID, "App "+suffix, "app-"+suffix, "auth-"+suffix).Scan(&appID); err != nil {
+		(org_id, project_id, name, slug, hostname_label, registry_id, image_repository, image_visibility)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'private')
+		RETURNING id::text`, orgID, projectID, "App "+suffix, "app-"+suffix, "auth-"+suffix, registryID, "auth/app-"+suffix).Scan(&appID); err != nil {
 		t.Fatal(err)
 	}
 	return appID
