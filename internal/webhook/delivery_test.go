@@ -73,6 +73,30 @@ type fakeSecretResolver struct {
 	calls  int
 }
 
+type fakeSecretAuthorizer struct {
+	calls []string
+	err   error
+}
+
+type mutableReferenceAuthorizer struct {
+	calls   int
+	allowed bool
+}
+
+func (a *mutableReferenceAuthorizer) Authorize(context.Context, string, string) error { return nil }
+func (a *mutableReferenceAuthorizer) AuthorizeReference(context.Context, string) error {
+	a.calls++
+	if !a.allowed {
+		return errors.New("revoked")
+	}
+	return nil
+}
+
+func (f *fakeSecretAuthorizer) Authorize(_ context.Context, namespace, name string) error {
+	f.calls = append(f.calls, namespace+"/"+name)
+	return f.err
+}
+
 func (f *fakeSecretResolver) Resolve(context.Context, string) ([]byte, error) {
 	f.calls++
 	return f.secret, f.err
@@ -152,6 +176,42 @@ func TestWebhookSignatureFixedVector(t *testing.T) {
 	}
 }
 
+func TestAuthorizedWebhookDeliveryAuthorizesBeforeSecretRead(t *testing.T) {
+	server, _ := newReceiver(t, http.StatusOK)
+	dataStore := &fakeDeliveryStore{}
+	resolver := &fakeSecretResolver{secret: []byte("receiver-secret")}
+	authorizer := &fakeSecretAuthorizer{}
+	sender := newTestSender(dataStore, resolver, server)
+	sender.authorizer = authorizer
+	sender.secretNamespace = "cyclopus"
+
+	if _, err := sender.Deliver(context.Background(), testDelivery("https://hooks.example.com/webhook", []byte(`{}`))); err != nil {
+		t.Fatalf("Deliver() error = %v", err)
+	}
+	if len(authorizer.calls) != 1 || authorizer.calls[0] != "cyclopus/hooks" || resolver.calls != 1 {
+		t.Fatalf("authorization calls = %v, resolver calls = %d", authorizer.calls, resolver.calls)
+	}
+}
+
+func TestAuthorizedWebhookDeliveryRejectsCrossNamespaceBeforeKubernetesCalls(t *testing.T) {
+	server, _ := newReceiver(t, http.StatusOK)
+	dataStore := &fakeDeliveryStore{}
+	resolver := &fakeSecretResolver{secret: []byte("receiver-secret")}
+	authorizer := &fakeSecretAuthorizer{}
+	sender := newTestSender(dataStore, resolver, server)
+	sender.authorizer = authorizer
+	sender.secretNamespace = "cyclopus"
+	delivery := testDelivery("https://hooks.example.com/webhook", []byte(`{}`))
+	delivery.SecretRef = "k8s-secret://other/hooks#secret"
+
+	if _, err := sender.Deliver(context.Background(), delivery); err != nil {
+		t.Fatalf("Deliver() error = %v", err)
+	}
+	if len(authorizer.calls) != 0 || resolver.calls != 0 {
+		t.Fatalf("disallowed ref reached Kubernetes path: authorization=%v resolve=%d", authorizer.calls, resolver.calls)
+	}
+}
+
 func TestWebhookSignatureFormat(t *testing.T) {
 	signature := Sign([]byte("secret"), 1700000001, []byte(`{"a":1}`))
 	if !strings.HasPrefix(signature, "sha256=") {
@@ -228,6 +288,9 @@ func TestWebhookSignatureRetryReusesPersistedTimestampAndSignature(t *testing.T)
 	dataStore := &fakeDeliveryStore{}
 	resolver := &fakeSecretResolver{err: errors.New("secret backend down")}
 	sender := newTestSender(dataStore, resolver, server)
+	authorizer := &fakeSecretAuthorizer{}
+	sender.authorizer = authorizer
+	sender.secretNamespace = "cyclopus"
 	body := []byte(`{"event":"deploy.failed"}`)
 	delivery := testDelivery("https://hooks.example.com/webhook", body)
 	timestamp := int64(1700000123)
@@ -243,6 +306,9 @@ func TestWebhookSignatureRetryReusesPersistedTimestampAndSignature(t *testing.T)
 	if resolver.calls != 0 {
 		t.Fatalf("Resolve calls = %d, want 0 for retry with persisted signature", resolver.calls)
 	}
+	if len(authorizer.calls) != 1 {
+		t.Fatalf("Authorize calls = %d, want 1 for cached retry", len(authorizer.calls))
+	}
 	persisted, results := dataStore.snapshot()
 	if len(persisted) != 0 {
 		t.Fatalf("PersistWebhookSignature calls = %d, want 0", len(persisted))
@@ -252,6 +318,38 @@ func TestWebhookSignatureRetryReusesPersistedTimestampAndSignature(t *testing.T)
 	}
 	if len(results) != 1 || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("CompleteWebhookAttempt results = %+v", results)
+	}
+}
+
+func TestWebhookSignatureRetryRevokedBeforeCachedSignatureSend(t *testing.T) {
+	server, captured := newReceiver(t, http.StatusOK)
+	dataStore := &fakeDeliveryStore{}
+	resolver := &fakeSecretResolver{secret: []byte("receiver-secret")}
+	authorizer := &mutableReferenceAuthorizer{allowed: true}
+	sender := newTestSender(dataStore, resolver, server)
+	sender.authorizer = authorizer
+	sender.secretNamespace = "cyclopus"
+	delivery := testDelivery("https://hooks.example.com/webhook", []byte(`{}`))
+
+	if _, err := sender.Deliver(context.Background(), delivery); err != nil {
+		t.Fatal(err)
+	}
+	persisted, _ := dataStore.snapshot()
+	delivery.FirstSendTimestamp = &persisted[0].timestamp
+	delivery.Signature = &persisted[0].signature
+	authorizer.allowed = false
+	if _, err := sender.Deliver(context.Background(), delivery); err != nil {
+		t.Fatal(err)
+	}
+	if authorizer.calls != 2 || resolver.calls != 1 {
+		t.Fatalf("Authorize calls = %d, Resolve calls = %d, want 2/1", authorizer.calls, resolver.calls)
+	}
+	if captured.signature != persisted[0].signature {
+		t.Fatalf("first request signature = %q", captured.signature)
+	}
+	_, results := dataStore.snapshot()
+	if len(results) != 2 || !strings.Contains(results[1].Error, "authorize webhook secret") {
+		t.Fatalf("retry results = %+v", results)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
@@ -25,19 +26,37 @@ type SecretResolver interface {
 	Resolve(context.Context, string) ([]byte, error)
 }
 
+type SecretAuthorizer interface {
+	Authorize(context.Context, string, string) error
+}
+
+type secretReferenceAuthorizer interface {
+	AuthorizeReference(context.Context, string) error
+}
+
 type Store interface {
 	PersistWebhookSignature(context.Context, store.WebhookDelivery, int64, string) error
 	CompleteWebhookAttempt(context.Context, store.WebhookDelivery, store.WebhookAttemptResult) (store.WebhookDeliveryOutcome, error)
 }
 
 type Sender struct {
-	store   Store
-	secrets SecretResolver
-	client  *http.Client
-	now     func() time.Time
+	store           Store
+	secrets         SecretResolver
+	authorizer      SecretAuthorizer
+	secretNamespace string
+	client          *http.Client
+	now             func() time.Time
 }
 
 func NewSender(dataStore Store, secrets SecretResolver) *Sender {
+	return newSender(dataStore, secrets, nil, "")
+}
+
+func NewAuthorizedSender(dataStore Store, secrets SecretResolver, authorizer SecretAuthorizer, secretNamespace string) *Sender {
+	return newSender(dataStore, secrets, authorizer, secretNamespace)
+}
+
+func newSender(dataStore Store, secrets SecretResolver, authorizer SecretAuthorizer, secretNamespace string) *Sender {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	dialer := &net.Dialer{Timeout: RequestTimeout}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -59,7 +78,7 @@ func NewSender(dataStore Store, secrets SecretResolver) *Sender {
 		}
 		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 	}
-	return &Sender{store: dataStore, secrets: secrets, client: &http.Client{Timeout: RequestTimeout, Transport: transport,
+	return &Sender{store: dataStore, secrets: secrets, authorizer: authorizer, secretNamespace: secretNamespace, client: &http.Client{Timeout: RequestTimeout, Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, now: time.Now}
 }
 
@@ -95,6 +114,21 @@ func (s *Sender) Deliver(ctx context.Context, delivery store.WebhookDelivery) (s
 }
 
 func (s *Sender) signature(ctx context.Context, delivery store.WebhookDelivery) (int64, string, error) {
+	var reference secretref.Reference
+	if s.authorizer != nil {
+		parsed, err := secretref.Parse(delivery.SecretRef)
+		if err != nil || parsed.Namespace != s.secretNamespace {
+			return 0, "", fmt.Errorf("webhook Secret reference must be valid and use control-plane namespace %q", s.secretNamespace)
+		}
+		reference = parsed
+		if exact, ok := s.authorizer.(secretReferenceAuthorizer); ok {
+			if err := exact.AuthorizeReference(ctx, delivery.SecretRef); err != nil {
+				return 0, "", fmt.Errorf("authorize webhook secret: %w", err)
+			}
+		} else if err := s.authorizer.Authorize(ctx, reference.Namespace, reference.Name); err != nil {
+			return 0, "", fmt.Errorf("authorize webhook secret: %w", err)
+		}
+	}
 	if delivery.FirstSendTimestamp != nil && delivery.Signature != nil {
 		return *delivery.FirstSendTimestamp, *delivery.Signature, nil
 	}

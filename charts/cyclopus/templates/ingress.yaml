@@ -2,7 +2,26 @@
 {{- if not .Values.ingress.host }}
 {{- fail "ingress.enabled=true requires ingress.host (the console FQDN)" }}
 {{- end }}
+{{- if not .Values.ingress.tlsSecretName }}
+{{- fail "ingress.enabled=true requires ingress.tlsSecretName" }}
+{{- end }}
+{{- $expectedExternalURL := printf "https://%s" .Values.ingress.host }}
+{{- if ne (trimSuffix "/" .Values.config.externalUrl) $expectedExternalURL }}
+{{- fail (printf "ingress.enabled=true requires config.externalUrl=%s so callbacks match the TLS ingress host" $expectedExternalURL) }}
+{{- end }}
 {{- $issuer := .Values.ingress.clusterIssuer | default .Values.config.kubernetes.certManagerClusterIssuer }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-https-redirect
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,6 +30,7 @@ metadata:
   labels:
     {{- include "cyclopus.labels" . | nindent 4 }}
   annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s-https-redirect@kubernetescrd" .Release.Namespace (include "cyclopus.fullname" .) | quote }}
     {{- if $issuer }}
     cert-manager.io/cluster-issuer: {{ $issuer | quote }}
     {{- end }}

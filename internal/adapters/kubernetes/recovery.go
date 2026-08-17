@@ -82,13 +82,14 @@ type RecoveryStore interface {
 }
 
 type RecoveryAdapter struct {
-	config    Config
-	client    kubernetes.Interface
-	dynamic   dynamic.Interface
-	store     RecoveryStore
-	now       func() time.Time
-	lifecycle *LifecycleAdapter
-	logger    *slog.Logger
+	config      Config
+	client      kubernetes.Interface
+	provisioner kubernetes.Interface
+	dynamic     dynamic.Interface
+	store       RecoveryStore
+	now         func() time.Time
+	lifecycle   *LifecycleAdapter
+	logger      *slog.Logger
 }
 
 // AdapterOption extends adapter construction without breaking the existing
@@ -99,6 +100,12 @@ type AdapterOption func(*RecoveryAdapter)
 // HTTPScaledObject apply/delete paths.
 func WithDynamicClient(client dynamic.Interface) AdapterOption {
 	return func(a *RecoveryAdapter) { a.dynamic = client }
+}
+
+// WithProvisionerClient injects the separately authenticated client used only
+// for namespace, fixed RBAC, and immutable destination Secret provisioning.
+func WithProvisionerClient(client kubernetes.Interface) AdapterOption {
+	return func(a *RecoveryAdapter) { a.provisioner = client }
 }
 
 // WithLogger wires the redacting structured logger the adapter uses to emit the
@@ -133,6 +140,9 @@ func NewRecoveryAdapter(config Config, client kubernetes.Interface, recoveryStor
 			opt(adapter)
 		}
 	}
+	if adapter.provisioner == nil {
+		adapter.provisioner = client
+	}
 	return adapter, nil
 }
 
@@ -152,7 +162,7 @@ func NewAdapter(config Config, client kubernetes.Interface, dataStore ForwardSto
 	if err != nil {
 		return nil, err
 	}
-	adapter.lifecycle, err = NewLifecycleAdapter(client, lifecycleStore, NewNetworkPolicyProvisioner(client, config.NetworkEgressExcludedCIDRs), hostnames, config.PollInterval)
+	adapter.lifecycle, err = NewLifecycleAdapter(adapter.provisioner, lifecycleStore, NewNetworkPolicyProvisioner(client, config.NetworkEgressExcludedCIDRs), hostnames, config.PollInterval)
 	return adapter, err
 }
 
@@ -421,6 +431,15 @@ func (a *RecoveryAdapter) restorePreviousSecretRevision(ctx context.Context, lea
 	}
 	if envelope.DesiredState.Secret == nil || envelope.DesiredState.Secret.Identity.Namespace != lease.Namespace {
 		return fmt.Errorf("%w: previous destination Secret intent is missing", ErrRecoveryStateInvalid)
+	}
+	expectedName := store.EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, envelope.EnvVarRevision.ID)
+	if envelope.DesiredState.Secret.Identity.Name != expectedName ||
+		envelope.DesiredState.Secret.Identity.Labels[ManagedByLabel] != ManagedByValue ||
+		envelope.DesiredState.Secret.Identity.Labels[EnvironmentIDLabel] != lease.EnvironmentID {
+		return fmt.Errorf("%w: previous destination Secret identity is invalid", ErrRecoveryStateInvalid)
+	}
+	if err := a.ensureSecretReaderNames(ctx, lease, envelope); err != nil {
+		return fmt.Errorf("authorize previous destination Secret: %w", err)
 	}
 	for _, identity := range []store.ObjectIdentity{envelope.DesiredState.Secret.Identity} {
 		namespace, name := identity.Namespace, identity.Name

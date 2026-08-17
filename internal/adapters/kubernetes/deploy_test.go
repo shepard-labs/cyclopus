@@ -14,6 +14,7 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -695,14 +696,14 @@ func TestEnvSnapshotMutableSourceFailsBeforeAnyDestinationOrDeploymentMutation(t
 	envelope := envDeployEnvelope(t)
 	execution := deployExecution(t, envelope)
 	source := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "source", Namespace: "tenant"}, Data: map[string][]byte{"TOKEN": []byte("secret")}}
-	client := fake.NewSimpleClientset(source)
+	client := fake.NewSimpleClientset(managedTestNamespace(), managedTestSecretRole(), source)
 	dataStore := newFakeForwardStore(execution)
 	adapter := newForwardAdapter(t, client, dataStore)
 	if _, err := adapter.ExecuteDeploy(context.Background(), execution); err != nil {
 		t.Fatalf("permanent source failure was not terminalized: %v", err)
 	}
-	if dataStore.failedCalls != 1 || countActions(client.Actions(), "create") != 0 || countActions(client.Actions(), "update") != 0 {
-		t.Fatalf("failed=%d creates=%d updates=%d", dataStore.failedCalls, countActions(client.Actions(), "create"), countActions(client.Actions(), "update"))
+	if dataStore.failedCalls != 1 || countResourceActions(client.Actions(), "create", "secrets") != 0 || countResourceActions(client.Actions(), "create", "deployments") != 0 || countResourceActions(client.Actions(), "update", "secrets") != 0 || countResourceActions(client.Actions(), "update", "deployments") != 0 {
+		t.Fatalf("failed=%d actions=%#v", dataStore.failedCalls, client.Actions())
 	}
 }
 
@@ -711,7 +712,7 @@ func TestEnvSnapshotImmutableSourceMaterializesStableContentAndRejectsMismatched
 	execution := deployExecution(t, envelope)
 	immutable := true
 	source := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "source", Namespace: "tenant"}, Immutable: &immutable, Data: map[string][]byte{"TOKEN": []byte("secret")}}
-	client := fake.NewSimpleClientset(source)
+	client := fake.NewSimpleClientset(managedTestNamespace(), managedTestSecretRole(), source)
 	adapter := newForwardAdapter(t, client, newFakeForwardStore(execution))
 	data1, err := adapter.resolveSecretData(context.Background(), execution, envelope)
 	if err != nil {
@@ -730,10 +731,65 @@ func TestEnvSnapshotImmutableSourceMaterializesStableContentAndRejectsMismatched
 	}
 	mismatch := objects.Secret.DeepCopy()
 	mismatch.Data["TOKEN"] = []byte("other")
-	client = fake.NewSimpleClientset(source, mismatch)
+	client = fake.NewSimpleClientset(managedTestNamespace(), managedTestSecretRole(), source, mismatch)
 	adapter = newForwardAdapter(t, client, newFakeForwardStore(execution))
 	if err := adapter.preflightDesired(context.Background(), execution, objects); !errors.Is(err, ErrImmutableSecretMismatch) {
 		t.Fatalf("mismatch error=%v", err)
+	}
+}
+
+func TestEnvSnapshotRejectsArbitraryDestinationNameAndUnownedNamespaceBeforeSecretRead(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		edit func(*store.ReleaseSnapshotEnvelope, *corev1.Namespace)
+	}{
+		{name: "arbitrary destination name", edit: func(envelope *store.ReleaseSnapshotEnvelope, _ *corev1.Namespace) {
+			envelope.DesiredState.Secret.Identity.Name = "unrelated"
+		}},
+		{name: "unowned namespace", edit: func(_ *store.ReleaseSnapshotEnvelope, namespace *corev1.Namespace) {
+			namespace.Labels[OrgIDLabel] = "other-org"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			envelope := envDeployEnvelope(t)
+			execution := deployExecution(t, envelope)
+			namespace := managedTestNamespace()
+			test.edit(&envelope, namespace)
+			client := fake.NewSimpleClientset(namespace, managedTestSecretRole())
+			adapter := newForwardAdapter(t, client, newFakeForwardStore(execution))
+			if _, err := adapter.resolveSecretData(context.Background(), execution, envelope); err == nil {
+				t.Fatal("invalid managed Secret scope was accepted")
+			}
+			if countResourceActions(client.Actions(), "get", "secrets") != 0 {
+				t.Fatalf("source Secret was read before scope rejection: %#v", client.Actions())
+			}
+		})
+	}
+}
+
+func TestEnvSnapshotBootstrapsExactNameSecretRoleAndBindingRestartSafely(t *testing.T) {
+	envelope := envDeployEnvelope(t)
+	execution := deployExecution(t, envelope)
+	immutable := true
+	source := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "source", Namespace: "tenant"}, Immutable: &immutable, Data: map[string][]byte{"TOKEN": []byte("secret")}}
+	client := fake.NewSimpleClientset(managedTestNamespace(), source)
+	adapter := newForwardAdapter(t, client, newFakeForwardStore(execution))
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := adapter.resolveSecretData(context.Background(), execution, envelope); err != nil {
+			t.Fatalf("attempt %d: %v", attempt, err)
+		}
+	}
+	role, err := client.RbacV1().Roles("tenant").Get(context.Background(), secretReaderRoleName, metav1.GetOptions{})
+	wantNames := []string{store.EnvDestinationSecretName("app", "revision"), "source"}
+	if err != nil || len(role.Rules) != 1 || !reflect.DeepEqual(role.Rules[0].ResourceNames, wantNames) || !reflect.DeepEqual(role.Rules[0].Verbs, []string{"get"}) {
+		t.Fatalf("role = %+v, %v", role, err)
+	}
+	binding, err := client.RbacV1().RoleBindings("tenant").Get(context.Background(), secretReaderRoleName, metav1.GetOptions{})
+	if err != nil || len(binding.Subjects) != 1 || binding.RoleRef.Name != secretReaderRoleName {
+		t.Fatalf("binding = %+v, %v", binding, err)
+	}
+	if countResourceActions(client.Actions(), "create", "roles") != 1 || countResourceActions(client.Actions(), "create", "rolebindings") != 1 {
+		t.Fatalf("bootstrap was not restart-safe: %#v", client.Actions())
 	}
 }
 
@@ -824,6 +880,18 @@ func envDeployEnvelope(t *testing.T) store.ReleaseSnapshotEnvelope {
 	return envelope
 }
 
+func managedTestNamespace() *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant", Labels: map[string]string{
+		ManagedByLabel: ManagedByValue, EnvironmentIDLabel: "environment", OrgIDLabel: "org", AppIDLabel: "app",
+	}}}
+}
+
+func managedTestSecretRole() *rbacv1.Role {
+	return &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: "tenant", Labels: map[string]string{
+		ManagedByLabel: ManagedByValue, EnvironmentIDLabel: "environment", OrgIDLabel: "org", AppIDLabel: "app",
+	}}}
+}
+
 func deployStringPointer(value string) *string { return &value }
 
 func deployEnvelope(t *testing.T, scaling string) store.ReleaseSnapshotEnvelope {
@@ -832,7 +900,7 @@ func deployEnvelope(t *testing.T, scaling string) store.ReleaseSnapshotEnvelope 
 	selector := map[string]string{EnvironmentIDLabel: "environment", "app.kubernetes.io/name": "app"}
 	identity := store.ObjectIdentity{Name: "app", Namespace: "tenant", Labels: labels}
 	snapshot := store.ReleaseSnapshotEnvelope{Version: store.ReleaseSnapshotVersion, DesiredState: store.DesiredStateSnapshot{Version: 1,
-		Deployment: store.DeploymentIntent{Version: 1, Identity: identity, Selector: selector, Replicas: 1, Strategy: store.RollingUpdateIntent{Type: "RollingUpdate", MaxUnavailable: 0, MaxSurge: 1}, PodLabels: labels, PodAnnotations: map[string]string{ReleaseAnnotation: store.ReleaseIDAnnotationTemplate, ConfigHashAnnotation: store.ConfigHashAnnotationTemplate}, RuntimeClassName: "gvisor", ProgressDeadlineSeconds: 60, Container: store.ContainerIntent{Name: "app", Image: "registry/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Port: 8080, Resources: store.ResourceIntent{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}, ReadinessProbe: store.ReadinessIntent{Path: "/ready", Port: 8080}}},
+		Deployment: store.DeploymentIntent{Version: 1, Identity: identity, Selector: selector, Replicas: 1, Strategy: store.RollingUpdateIntent{Type: "RollingUpdate", MaxUnavailable: 0, MaxSurge: 1}, PodLabels: labels, PodAnnotations: map[string]string{ReleaseAnnotation: store.ReleaseIDAnnotationTemplate, ConfigHashAnnotation: store.ConfigHashAnnotationTemplate, AppIDLabel: "app", OrgIDLabel: "org"}, RuntimeClassName: "gvisor", ProgressDeadlineSeconds: 60, Container: store.ContainerIntent{Name: "app", Image: "registry/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Port: 8080, Resources: store.ResourceIntent{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}, ReadinessProbe: store.ReadinessIntent{Path: "/ready", Port: 8080}}},
 		Service:    store.ServiceIntent{Version: 1, Identity: identity, Selector: selector, Port: 80, TargetPort: 8080},
 		Ingress:    store.IngressIntent{Version: 1, Identity: identity, Hostname: "app.example.test", Path: "/", ServiceName: "app", ServicePort: 80, TLS: store.TLSIntent{Enabled: true, SecretName: "app-tls"}},
 		Scaling:    store.ScalingIntent{Version: 1, Kind: scaling},

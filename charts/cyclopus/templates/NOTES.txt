@@ -13,3 +13,10 @@ owns the install (§9). Keep the control plane on a private network / VPN.
 
 Upgrades (§9.3): `helm upgrade` replaces the single pod (brief downtime). See
 infra/backup/upgrade.sh for the sequenced expand/contract procedure.
+
+GitHub App credentials: the cyclopus-github-app Secret is retained when this
+release is uninstalled. A reinstall must use the same release name and namespace.
+For intentional credential removal or instance migration, back up and restore
+the Secret together with the database. Manually delete the retained Secret only
+after the corresponding database GitHub App state has been reset, or after the
+entire Cyclopus application/database instance has been reset.

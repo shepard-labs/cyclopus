@@ -88,7 +88,7 @@ func Migrate(ctx context.Context, cfg MigrationConfig) error {
 	defer m.Close()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("apply migrations: database is old, missing, or partially applied; back up the database and apply all migrations through 000004 before starting Cyclopus: %w", err)
+		return fmt.Errorf("apply migrations: database is old, missing, or partially applied; back up the database and apply all migrations through 000005 before starting Cyclopus: %w", err)
 	}
 	return ValidateSchemaEpoch(ctx, conn)
 }

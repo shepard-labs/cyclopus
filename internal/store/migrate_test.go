@@ -17,8 +17,21 @@ func TestEmbeddedMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir() error = %v", err)
 	}
-	if len(entries) != 4 || entries[0].Name() != "000001_foundation.up.sql" || entries[1].Name() != "000002_user_profiles.up.sql" || entries[2].Name() != "000003_avatar_key_format.up.sql" || entries[3].Name() != "000004_self_hosted_github_import_epoch.up.sql" {
-		t.Fatalf("embedded migrations = %v, want migrations 000001 through 000004", entries)
+	want := []string{
+		"000001_foundation.up.sql",
+		"000002_user_profiles.up.sql",
+		"000003_avatar_key_format.up.sql",
+		"000004_self_hosted_github_import_epoch.up.sql",
+		"000005_github_setup_state_generation.up.sql",
+		"000006_github_installation_audit_id.up.sql",
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
+	}
+	for index, name := range want {
+		if entries[index].Name() != name {
+			t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
+		}
 	}
 	contents, err := fs.ReadFile(Migrations, "migrations/000001_foundation.up.sql")
 	if err != nil {
@@ -62,6 +75,46 @@ func TestEmbeddedMigrations(t *testing.T) {
 	}
 	if !strings.Contains(string(avatarFormat), "avatar_key ~ '^[a-f0-9]{10}$'") {
 		t.Error("avatar format migration must not pin the database to the current asset manifest")
+	}
+	stateGeneration, err := fs.ReadFile(Migrations, "migrations/000005_github_setup_state_generation.up.sql")
+	if err != nil {
+		t.Fatalf("ReadFile(state generation migration) error = %v", err)
+	}
+	for _, want := range []string{"ADD COLUMN state_generation", "status = 'expired'", "github_setup_protocol_incompatible", "status <> 'active' OR state_generation IS NOT NULL"} {
+		if !strings.Contains(string(stateGeneration), want) {
+			t.Errorf("state generation migration does not contain %q", want)
+		}
+	}
+}
+
+func TestMigrationForwardDownAndEpochContract(t *testing.T) {
+	for _, name := range []string{
+		"migrations/000004_self_hosted_github_import_epoch.up.sql",
+		"migrations/000004_self_hosted_github_import_epoch.down.sql",
+		"migrations/000005_github_setup_state_generation.up.sql",
+		"migrations/000005_github_setup_state_generation.down.sql",
+	} {
+		contents, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", name, err)
+		}
+		if len(strings.TrimSpace(string(contents))) == 0 {
+			t.Fatalf("migration %s is empty", name)
+		}
+	}
+	epoch, err := os.ReadFile("migrations/000004_self_hosted_github_import_epoch.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(epoch), SchemaEpoch) || !strings.Contains(string(epoch), SchemaFingerprint) {
+		t.Fatalf("migration 000004 does not establish schema epoch %q and fingerprint %q", SchemaEpoch, SchemaFingerprint)
+	}
+	stateGeneration, err := os.ReadFile("migrations/000005_github_setup_state_generation.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stateGeneration), "schema_epoch") {
+		t.Fatal("migration 000005 unexpectedly changes the schema epoch")
 	}
 }
 

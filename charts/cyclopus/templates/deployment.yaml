@@ -29,6 +29,7 @@ spec:
         {{- include "cyclopus.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "cyclopus.serviceAccountName" . }}
+      automountServiceAccountToken: true
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -80,18 +81,26 @@ spec:
                   key: AUTH_BOOTSTRAP_SECRET
             - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
               valueFrom:
-                secretKeyRef:
-                  name: {{ include "cyclopus.secretName" . }}
+                configMapKeyRef:
+                  name: {{ include "cyclopus.fullname" . }}-config
                   key: OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
             - name: CYCLOPUS_OBSERVABILITY_BESZEL_CREDENTIAL_SECRET
               valueFrom:
-                secretKeyRef:
-                  name: {{ include "cyclopus.secretName" . }}
+                configMapKeyRef:
+                  name: {{ include "cyclopus.fullname" . }}-config
                   key: OBSERVABILITY_BESZEL_CREDENTIAL_SECRET
             # Re-map the non-secret ConfigMap keys to the CYCLOPUS_* namespace
             # the binary reads.
             - name: CYCLOPUS_LOG_LEVEL
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: LOG_LEVEL } }
+            - name: CYCLOPUS_EXTERNAL_URL
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: EXTERNAL_URL } }
+            - name: CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE
+              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: KUBERNETES_INSTANCE_NAMESPACE } }
+            - name: CYCLOPUS_SERVICE_ACCOUNT_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: CYCLOPUS_SERVICE_ACCOUNT_NAME
+              value: {{ include "cyclopus.serviceAccountName" . | quote }}
             - name: CYCLOPUS_HTTP_ADDRESS
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: HTTP_ADDRESS } }
             - name: CYCLOPUS_GRPC_ADDRESS
@@ -129,6 +138,13 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: provisioner-token
+              mountPath: /var/run/secrets/cyclopus-provisioner
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: provisioner-token
+          secret:
+            secretName: {{ include "cyclopus.provisionerServiceAccountName" . }}-token
+            defaultMode: 0400

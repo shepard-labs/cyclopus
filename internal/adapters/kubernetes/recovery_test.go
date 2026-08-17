@@ -150,7 +150,7 @@ func TestRecoverExpiredEnvChangeVerifiesPreviousImmutableSecretBeforeDeploymentR
 	recoveryStore := newFakeRecoveryStore(state)
 	recoveryStore.lease.FailedRelease.Kind = "env_change"
 	recoveryStore.lease.PreviousRelease.EnvVarRevisionID = stringPointer("revision-one")
-	client := fake.NewSimpleClientset(append([]runtime.Object{secret}, recoveryObjects(t, recoveryStore, current)...)...)
+	client := fake.NewSimpleClientset(append([]runtime.Object{managedTestNamespace(), managedTestSecretRole(), secret}, recoveryObjects(t, recoveryStore, current)...)...)
 	adapter := newTestAdapter(t, client, recoveryStore)
 
 	if _, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease); err != nil {
@@ -197,7 +197,7 @@ func TestRecoverExpiredEnvChangeRejectsPreviousSecretHashMismatchBeforeDeploymen
 			EnvRevisionAnnotation: "revision-one", ConfigHashAnnotation: "wrong-hash", ReleaseAnnotation: "stale-release",
 			SecretContentHashAnnotation: "wrong-content-hash",
 		}}, Immutable: &immutable}
-	client := fake.NewSimpleClientset(secret, failed.DeepCopy())
+	client := fake.NewSimpleClientset(managedTestNamespace(), managedTestSecretRole(), secret, failed.DeepCopy())
 	recoveryStore := newFakeRecoveryStore(state)
 	recoveryStore.lease.FailedRelease.Kind = "env_change"
 	recoveryStore.lease.PreviousRelease.EnvVarRevisionID = stringPointer("revision-one")

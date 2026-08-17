@@ -11,13 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/store"
-	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -156,7 +157,10 @@ func BuildDesiredObjects(execution store.DeployExecution, envelope store.Release
 		if envelope.EnvVarRevision != nil {
 			secretAnnotations[EnvRevisionAnnotation] = envelope.EnvVarRevision.ID
 		}
-		objects.Secret = &corev1.Secret{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}, ObjectMeta: metav1.ObjectMeta{Name: desired.Secret.Identity.Name, Namespace: execution.Namespace, Labels: managedLabels(desired.Secret.Identity.Labels, execution.EnvironmentID), Annotations: secretAnnotations}, Immutable: &immutable, Type: corev1.SecretTypeOpaque, Data: cloneBytes(secretData)}
+		secretLabels := managedLabels(desired.Secret.Identity.Labels, execution.EnvironmentID)
+		secretLabels[OrgIDLabel] = execution.OrgID
+		secretLabels[AppIDLabel] = d.PodAnnotations[AppIDLabel]
+		objects.Secret = &corev1.Secret{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}, ObjectMeta: metav1.ObjectMeta{Name: desired.Secret.Identity.Name, Namespace: execution.Namespace, Labels: secretLabels, Annotations: secretAnnotations}, Immutable: &immutable, Type: corev1.SecretTypeOpaque, Data: cloneBytes(secretData)}
 	}
 	switch desired.Scaling.Kind {
 	case "hpa":
@@ -366,6 +370,12 @@ func (a *RecoveryAdapter) resolveSecretData(ctx context.Context, execution store
 	if envelope.DesiredState.Secret == nil {
 		return nil, nil
 	}
+	if err := a.validateManagedSecretScope(ctx, execution, envelope); err != nil {
+		return nil, err
+	}
+	if err := a.ensureSecretReaderNames(ctx, execution, envelope); err != nil {
+		return nil, err
+	}
 	data := make(map[string][]byte, len(envelope.DesiredState.Secret.Entries))
 	for _, entry := range envelope.DesiredState.Secret.Entries {
 		parsed, err := secretref.Parse(entry.SecretRef)
@@ -388,6 +398,100 @@ func (a *RecoveryAdapter) resolveSecretData(ctx context.Context, execution store
 		data[entry.Key] = append([]byte(nil), value...)
 	}
 	return data, nil
+}
+
+func (a *RecoveryAdapter) ensureSecretReaderNames(ctx context.Context, execution store.DeployExecution, envelopes ...store.ReleaseSnapshotEnvelope) error {
+	names := map[string]struct{}{}
+	for _, envelope := range envelopes {
+		if envelope.DesiredState.Secret == nil {
+			continue
+		}
+		if envelope.DesiredState.Secret.Identity.Namespace != execution.Namespace {
+			return fmt.Errorf("%w: managed Secret namespace is invalid", ErrDesiredStateInvalid)
+		}
+		names[envelope.DesiredState.Secret.Identity.Name] = struct{}{}
+		for _, entry := range envelope.DesiredState.Secret.Entries {
+			parsed, err := secretref.Parse(entry.SecretRef)
+			if err != nil || parsed.Namespace != execution.Namespace {
+				return fmt.Errorf("%w: invalid source Secret reference", ErrDesiredStateInvalid)
+			}
+			names[parsed.Name] = struct{}{}
+		}
+	}
+	resourceNames := make([]string, 0, len(names))
+	for name := range names {
+		resourceNames = append(resourceNames, name)
+	}
+	sort.Strings(resourceNames)
+	appID := envelopes[0].DesiredState.Deployment.PodAnnotations[AppIDLabel]
+	if appID == "" {
+		namespace, err := a.client.CoreV1().Namespaces().Get(ctx, execution.Namespace, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("read managed namespace identity: %w", err)
+		}
+		appID = namespace.Labels[AppIDLabel]
+	}
+	labels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: execution.EnvironmentID,
+		OrgIDLabel: execution.OrgID, AppIDLabel: appID}
+	roles := a.provisioner.RbacV1().Roles(execution.Namespace)
+	role, err := roles.Get(ctx, secretReaderRoleName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		role, err = roles.Create(ctx, &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace, Labels: labels}}, metav1.CreateOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("read source Secret Role: %w", err)
+	}
+	if !ownedByEnvironment(role.Labels, execution.EnvironmentID) || role.Labels[OrgIDLabel] != execution.OrgID || role.Labels[AppIDLabel] != labels[AppIDLabel] {
+		return ErrResourceOwnership
+	}
+	desiredRules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: resourceNames, Verbs: []string{"get"}}}
+	if !reflect.DeepEqual(role.Rules, desiredRules) {
+		candidate := role.DeepCopy()
+		candidate.Rules = desiredRules
+		if _, err := roles.Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("update source Secret Role: %w", err)
+		}
+	}
+	serviceAccountNamespace, serviceAccountName := cyclopusServiceAccount()
+	binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace, Labels: labels},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: secretReaderRoleName},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: serviceAccountName, Namespace: serviceAccountNamespace}}}
+	bindings := a.provisioner.RbacV1().RoleBindings(execution.Namespace)
+	currentBinding, err := bindings.Get(ctx, binding.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = bindings.Create(ctx, binding, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("read source Secret RoleBinding: %w", err)
+	}
+	if !ownedByEnvironment(currentBinding.Labels, execution.EnvironmentID) || currentBinding.Labels[OrgIDLabel] != execution.OrgID ||
+		currentBinding.Labels[AppIDLabel] != labels[AppIDLabel] || currentBinding.RoleRef != binding.RoleRef || !reflect.DeepEqual(currentBinding.Subjects, binding.Subjects) {
+		return ErrResourceOwnership
+	}
+	return nil
+}
+
+func (a *RecoveryAdapter) validateManagedSecretScope(ctx context.Context, execution store.DeployExecution, envelope store.ReleaseSnapshotEnvelope) error {
+	secret := envelope.DesiredState.Secret
+	if secret == nil || envelope.EnvVarRevision == nil {
+		return fmt.Errorf("%w: managed Secret revision is incomplete", ErrDesiredStateInvalid)
+	}
+	expectedName := store.EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, envelope.EnvVarRevision.ID)
+	if secret.Identity.Namespace != execution.Namespace || secret.Identity.Name != expectedName ||
+		secret.Identity.Labels[ManagedByLabel] != ManagedByValue || secret.Identity.Labels[EnvironmentIDLabel] != execution.EnvironmentID {
+		return fmt.Errorf("%w: managed Secret identity is invalid", ErrDesiredStateInvalid)
+	}
+	namespace, err := a.client.CoreV1().Namespaces().Get(ctx, execution.Namespace, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("validate managed Secret namespace: %w", err)
+	}
+	expectedAppID := envelope.DesiredState.Deployment.PodAnnotations[AppIDLabel]
+	if namespace.Labels[ManagedByLabel] != ManagedByValue || namespace.Labels[EnvironmentIDLabel] != execution.EnvironmentID ||
+		namespace.Labels[OrgIDLabel] != execution.OrgID || expectedAppID == "" || namespace.Labels[AppIDLabel] != expectedAppID {
+		return ErrResourceOwnership
+	}
+	return nil
 }
 
 func (a *RecoveryAdapter) preflightDesired(ctx context.Context, execution store.DeployExecution, objects DesiredObjects) error {
@@ -628,10 +732,13 @@ func setMetadataIdentity(metadata *metav1.ObjectMeta, releaseID, configHash stri
 
 func (a *RecoveryAdapter) applySecret(ctx context.Context, execution *store.DeployExecution, desired *corev1.Secret, identity ...string) error {
 	return a.retryMutation(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
+		if desired.Namespace != execution.Namespace || desired.Labels[ManagedByLabel] != ManagedByValue || desired.Labels[EnvironmentIDLabel] != execution.EnvironmentID {
+			return ErrResourceOwnership
+		}
 		stampFence(&desired.ObjectMeta, lease)
 		current, err := a.client.CoreV1().Secrets(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			_, err = a.client.CoreV1().Secrets(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
+			_, err = a.provisioner.CoreV1().Secrets(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
 			return err
 		}
 		if err != nil {

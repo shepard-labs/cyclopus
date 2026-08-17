@@ -207,6 +207,9 @@ func buildHandler(readiness ReadinessCheck, services Services, maxBodyBytes int6
 	// the / mount below.
 	router.Handle("/openapi.json", apidocs.SpecHandler())
 	router.Handle("/docs", apidocs.DocsHandler())
+	if services.GitHubBrowser != nil {
+		router.Mount("/github", readinessHTTPMiddleware(readiness, services.GitHubBrowser))
+	}
 	if services.UIHandler != nil {
 		// UI is mounted at / ; API gateway only handles /v1/* paths.
 		router.Handle("/v1/*", api)

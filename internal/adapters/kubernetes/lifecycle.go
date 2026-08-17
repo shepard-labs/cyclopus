@@ -11,6 +11,7 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/store"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,7 +39,26 @@ func observabilityNamespace() string {
 	return "cyclopus"
 }
 
-const PoliciesPendingLabel = "cyclopus.app/policies-pending"
+func cyclopusServiceAccount() (string, string) {
+	namespace := strings.TrimSpace(os.Getenv("CYCLOPUS_SERVICE_ACCOUNT_NAMESPACE"))
+	name := strings.TrimSpace(os.Getenv("CYCLOPUS_SERVICE_ACCOUNT_NAME"))
+	if namespace == "" {
+		namespace = observabilityNamespace()
+	}
+	if name == "" {
+		name = "cyclopus"
+	}
+	return namespace, name
+}
+
+const (
+	PoliciesPendingLabel     = "cyclopus.app/policies-pending"
+	NamespaceOwnerAnnotation = "cyclopus.dev/namespace-owner"
+	NamespaceUIDAnnotation   = "cyclopus.dev/namespace-uid"
+	OrgIDLabel               = "cyclopus.dev/org-id"
+	AppIDLabel               = "cyclopus.dev/app-id"
+	secretReaderRoleName     = "cyclopus-source-secret-reader"
+)
 
 var (
 	ErrPolicyProvisionerUnavailable = errors.New("Phase 3 policy provisioner is unavailable")
@@ -197,25 +217,41 @@ func (a *LifecycleAdapter) ExecuteEnvironmentLifecycle(ctx context.Context, job 
 }
 
 func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentLifecycleJob) error {
-	labels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: job.EnvironmentID, PoliciesPendingLabel: "true"}
-	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: job.Namespace, Labels: labels}}
+	labels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: job.EnvironmentID, OrgIDLabel: job.OrgID, AppIDLabel: job.App.ID, PoliciesPendingLabel: "true"}
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: job.Namespace, Labels: labels, Annotations: map[string]string{NamespaceOwnerAnnotation: job.EnvironmentID}}}
 	current, err := a.client.CoreV1().Namespaces().Get(ctx, job.Namespace, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		if _, err = a.client.CoreV1().Namespaces().Create(ctx, namespace, metav1.CreateOptions{}); err != nil {
 			return err
 		}
+		current, err = a.client.CoreV1().Namespaces().Get(ctx, job.Namespace, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		candidate := current.DeepCopy()
+		candidate.Annotations[NamespaceUIDAnnotation] = string(current.UID)
+		if _, err = a.client.CoreV1().Namespaces().Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
 	} else if err != nil {
 		return err
-	} else if current.Labels[ManagedByLabel] != ManagedByValue || current.Labels[EnvironmentIDLabel] != job.EnvironmentID {
+	} else if !ownedNamespace(current, job.EnvironmentID) ||
+		(current.Labels[OrgIDLabel] != "" && current.Labels[OrgIDLabel] != job.OrgID) ||
+		(current.Labels[AppIDLabel] != "" && current.Labels[AppIDLabel] != job.App.ID) {
 		return ErrResourceOwnership
-	} else if current.Labels[PoliciesPendingLabel] != "true" {
+	} else if current.Labels[PoliciesPendingLabel] != "true" || current.Labels[OrgIDLabel] != job.OrgID || current.Labels[AppIDLabel] != job.App.ID {
 		candidate := current.DeepCopy()
-		candidate.Labels[PoliciesPendingLabel] = "true"
+		for key, value := range labels {
+			candidate.Labels[key] = value
+		}
 		if _, err = a.client.CoreV1().Namespaces().Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
 			return err
 		}
 	}
 	if err := a.store.CheckpointEnvironmentLifecycle(ctx, job, "namespace_pending"); err != nil {
+		return err
+	}
+	if err := a.provisionSecretReader(ctx, job, labels); err != nil {
 		return err
 	}
 	// Spec §4.3: ResourceQuota + LimitRange are preview-only bounds ("a preview
@@ -280,6 +316,52 @@ func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentL
 	return nil
 }
 
+func (a *LifecycleAdapter) provisionSecretReader(ctx context.Context, job store.EnvironmentLifecycleJob, labels map[string]string) error {
+	desired := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: job.Namespace, Labels: labels}}
+	roles := a.client.RbacV1().Roles(job.Namespace)
+	current, err := roles.Get(ctx, desired.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err = roles.Create(ctx, desired, metav1.CreateOptions{}); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else {
+		if !ownedByEnvironment(current.Labels, job.EnvironmentID) {
+			return ErrResourceOwnership
+		}
+		candidate := current.DeepCopy()
+		candidate.Labels = labels
+		candidate.Rules = desired.Rules
+		if _, err = roles.Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
+	serviceAccountNamespace, serviceAccountName := cyclopusServiceAccount()
+	binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: job.Namespace, Labels: labels},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: secretReaderRoleName},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: serviceAccountName, Namespace: serviceAccountNamespace}}}
+	bindings := a.client.RbacV1().RoleBindings(job.Namespace)
+	currentBinding, err := bindings.Get(ctx, binding.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = bindings.Create(ctx, binding, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if !ownedByEnvironment(currentBinding.Labels, job.EnvironmentID) {
+		return ErrResourceOwnership
+	}
+	candidate := currentBinding.DeepCopy()
+	candidate.Labels = labels
+	candidate.RoleRef = binding.RoleRef
+	candidate.Subjects = binding.Subjects
+	_, err = bindings.Update(ctx, candidate, metav1.UpdateOptions{})
+	return err
+}
+
 func (a *LifecycleAdapter) applyPreviewBounds(ctx context.Context, job store.EnvironmentLifecycleJob, labels map[string]string) error {
 	quota := &corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: "cyclopus-preview", Namespace: job.Namespace, Labels: labels}, Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
 		corev1.ResourcePods:           resource.MustParse("1"),
@@ -330,7 +412,7 @@ func (a *LifecycleAdapter) teardown(ctx context.Context, job store.EnvironmentLi
 		return err
 	}
 	if err == nil {
-		if !ownedByEnvironment(current.Labels, job.EnvironmentID) {
+		if !ownedNamespace(current, job.EnvironmentID) {
 			return ErrResourceOwnership
 		}
 		uid := current.UID
@@ -357,4 +439,10 @@ func (a *LifecycleAdapter) teardown(ctx context.Context, job store.EnvironmentLi
 
 func ownedByEnvironment(labels map[string]string, environmentID string) bool {
 	return labels[ManagedByLabel] == ManagedByValue && labels[EnvironmentIDLabel] == environmentID
+}
+
+func ownedNamespace(namespace *corev1.Namespace, environmentID string) bool {
+	return ownedByEnvironment(namespace.Labels, environmentID) &&
+		namespace.Annotations[NamespaceOwnerAnnotation] == environmentID &&
+		namespace.Annotations[NamespaceUIDAnnotation] == string(namespace.UID)
 }

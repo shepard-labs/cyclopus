@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -54,6 +57,32 @@ func TestPostgres18Migrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close(context.Background())
+
+	t.Run("greenfield reaches migration 000005 and preserves epoch", func(t *testing.T) {
+		var version uint
+		var dirty bool
+		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
+			t.Fatal(err)
+		}
+		if version != 5 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:5 dirty:false", version, dirty)
+		}
+		var nullable string
+		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
+			t.Fatal(err)
+		}
+		if nullable != "YES" {
+			t.Fatalf("state_generation is_nullable = %q, want YES for terminal legacy rows", nullable)
+		}
+		epochDB, err := sql.Open("pgx", testURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer epochDB.Close()
+		if err := ValidateSchemaEpoch(context.Background(), epochDB); err != nil {
+			t.Fatalf("ValidateSchemaEpoch() after 000005: %v", err)
+		}
+	})
 
 	t.Run("uuidv7", func(t *testing.T) {
 		var id string
@@ -121,8 +150,8 @@ func TestPostgres18Migrations(t *testing.T) {
 	t.Run("keda scaling constraints", func(t *testing.T) {
 		insertApp := func(scalingMode string, minReplicas int, schedules string, pendingRequests int) error {
 			_, err := db.Exec(context.Background(), `
-				INSERT INTO apps (org_id, project_id, name, slug, hostname_label, scaling_mode, min_replicas, keda_cron_schedules, keda_http_target_pending_requests)
-				VALUES ($1, $2, 'KEDA App', $3, $3, $4, $5, $6::jsonb, $7)`,
+				INSERT INTO apps (org_id, project_id, name, slug, hostname_label, image_repository, github_workflow_path, production_branch, scaling_mode, min_replicas, keda_cron_schedules, keda_http_target_pending_requests)
+				VALUES ($1, $2, 'KEDA App', $3, $3, 'ghcr.io/acme/keda', '.github/workflows/deploy.yml', 'main', $4, $5, $6::jsonb, $7)`,
 				ids.org, ids.project, "keda-"+strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", ""), scalingMode, minReplicas, schedules, pendingRequests)
 			return err
 		}
@@ -133,8 +162,8 @@ func TestPostgres18Migrations(t *testing.T) {
 		if err := insertApp("keda_http", 0, `[]`, 100); err != nil {
 			t.Fatalf("valid keda_http scale-to-zero app rejected: %v", err)
 		}
-		if err := insertApp("keda_http", 0, validSchedules, 100); err != nil {
-			t.Fatalf("keda_http carrying cron schedules should be stored (service layer rejects): %v", err)
+		if err := insertApp("keda_http", 0, validSchedules, 100); err == nil {
+			t.Fatal("keda_http carrying cron schedules succeeded")
 		}
 		if err := insertApp("hpa", 0, `[]`, 100); err == nil {
 			t.Fatal("hpa scale-to-zero succeeded")
@@ -175,8 +204,8 @@ func TestPostgres18Migrations(t *testing.T) {
 		}
 		var defaultTarget int
 		if err := db.QueryRow(context.Background(), `
-			INSERT INTO apps (org_id, project_id, name, slug, hostname_label, scaling_mode, min_replicas)
-			VALUES ($1, $2, 'Default KEDA Target', $3, $3, 'keda_http', 0)
+			INSERT INTO apps (org_id, project_id, name, slug, hostname_label, image_repository, github_workflow_path, production_branch, scaling_mode, min_replicas)
+			VALUES ($1, $2, 'Default KEDA Target', $3, $3, 'ghcr.io/acme/keda-default', '.github/workflows/deploy.yml', 'main', 'keda_http', 0)
 			RETURNING keda_http_target_pending_requests`, ids.org, ids.project, "keda-default-"+strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")).Scan(&defaultTarget); err != nil {
 			t.Fatalf("database KEDA HTTP default rejected: %v", err)
 		}
@@ -205,7 +234,7 @@ func TestPostgres18Migrations(t *testing.T) {
 	})
 
 	t.Run("preview branch can be recreated after teardown", func(t *testing.T) {
-		preview := seedTenantGraph(t, db, "preview", "feature/recreate", "recreate", "recreate-ns")
+		preview := seedTenantGraph(t, db, "previewx", "feature/recreate", "recreate", "recreate-ns")
 		if _, err := db.Exec(context.Background(), "UPDATE environments SET torn_down_at = now() WHERE id = $1", preview.environment); err != nil {
 			t.Fatal(err)
 		}
@@ -329,6 +358,71 @@ func TestPostgres18Migrations(t *testing.T) {
 			t.Fatalf("app tombstone failed: %v", err)
 		}
 	})
+}
+
+func TestMigration000005ExpiresProtocolIncompatibleSetupSessions(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration5_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(4); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var orgID, userID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Legacy','legacy') RETURNING id::text`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `INSERT INTO users(org_id,email,password_hash,display_name,operator) VALUES($1,'legacy@example.test','hash','Legacy',true) RETURNING id::text`, orgID).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO github_setup_sessions(state_hash,flow_kind,initiating_user_id,initiating_session_hash,status,checkpoint,expires_at) VALUES(repeat('a',64),'app_setup',$1,repeat('b',64),'active','created',now()+interval '10 minutes')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(5); err != nil {
+		t.Fatal(err)
+	}
+	var status, checkpoint, code string
+	var generation *string
+	if err := conn.QueryRow(t.Context(), `SELECT status,checkpoint,failure_code,state_generation FROM github_setup_sessions`).Scan(&status, &checkpoint, &code, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if status != "expired" || checkpoint != "completed" || code != "github_setup_protocol_incompatible" || generation != nil {
+		t.Fatalf("legacy session = %s %s %s %v", status, checkpoint, code, generation)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO github_setup_sessions(state_hash,state_generation,flow_kind,initiating_user_id,initiating_session_hash,status,checkpoint,expires_at) VALUES(repeat('c',64),repeat('d',64),'app_setup',$1,repeat('e',64),'active','created',now()+interval '10 minutes')`, userID); err != nil {
+		t.Fatalf("immediate replacement setup: %v", err)
+	}
 }
 
 func TestMigrationAdvisoryLock(t *testing.T) {

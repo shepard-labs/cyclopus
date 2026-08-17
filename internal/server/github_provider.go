@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -25,23 +26,39 @@ func (h *apiHandlers) GetGitHubAppStatus(ctx context.Context, _ *cyclopusv1.GetG
 }
 
 func (h *apiHandlers) BeginGitHubAppSetup(ctx context.Context, req *cyclopusv1.BeginGitHubAppSetupRequest) (*cyclopusv1.BeginGitHubAppSetupResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub App setup is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	if h.service == nil {
+		return nil, typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	}
+	flow, err := h.service.BeginGitHubAppSetup(ctx, actor, req.GetIdempotencyKey())
+	if err != nil {
+		return nil, githubProviderError(err)
+	}
+	return &cyclopusv1.BeginGitHubAppSetupResponse{Flow: &cyclopusv1.BeginGitHubFlowResponse{StartUrl: flow.StartURL, ExpiresAt: timestamppb.New(flow.ExpiresAt)}}, nil
 }
 
 func (h *apiHandlers) BeginGitHubInstallation(ctx context.Context, req *cyclopusv1.BeginGitHubInstallationRequest) (*cyclopusv1.BeginGitHubInstallationResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub App setup is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	if h.service == nil {
+		return nil, typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	}
+	flow, err := h.service.BeginGitHubInstallation(ctx, actor, req.GetIdempotencyKey())
+	if err != nil {
+		return nil, githubProviderError(err)
+	}
+	return &cyclopusv1.BeginGitHubInstallationResponse{Flow: &cyclopusv1.BeginGitHubFlowResponse{StartUrl: flow.StartURL, ExpiresAt: timestamppb.New(flow.ExpiresAt)}}, nil
 }
 
 func (h *apiHandlers) GetGitHubInstallation(ctx context.Context, req *cyclopusv1.GetGitHubInstallationRequest) (*cyclopusv1.GetGitHubInstallationResponse, error) {
@@ -83,7 +100,8 @@ func (h *apiHandlers) ListGitHubInstallations(ctx context.Context, req *cyclopus
 }
 
 func (h *apiHandlers) RefreshGitHubInstallation(ctx context.Context, req *cyclopusv1.RefreshGitHubInstallationRequest) (*cyclopusv1.RefreshGitHubInstallationResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
 	installationID, err := strconv.ParseInt(req.GetInstallationId(), 10, 64)
@@ -93,7 +111,31 @@ func (h *apiHandlers) RefreshGitHubInstallation(ctx context.Context, req *cyclop
 	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub installation refresh is unavailable until GitHub App setup is configured", "GITHUB_APP_NOT_CONFIGURED")
+	if h.service == nil {
+		return nil, typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	}
+	value, err := h.service.RefreshGitHubInstallation(ctx, actor, req.GetIdempotencyKey(), req.GetInstallationId())
+	if err != nil {
+		return nil, githubProviderError(err)
+	}
+	return &cyclopusv1.RefreshGitHubInstallationResponse{Installation: githubInstallationProto(value)}, nil
+}
+
+func githubProviderError(err error) error {
+	switch {
+	case errors.Is(err, service.ErrGitHubAppNotConfigured):
+		return typedError(codes.FailedPrecondition, "GitHub App is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	case errors.Is(err, service.ErrGitHubSetupState), errors.Is(err, store.ErrFailedPrecondition):
+		return typedError(codes.FailedPrecondition, "GitHub setup state is invalid, expired, or consumed", "GITHUB_SETUP_STATE_INVALID")
+	case errors.Is(err, store.ErrAlreadyExists):
+		return typedError(codes.Aborted, "GitHub App setup is already in progress", "GITHUB_APP_SETUP_IN_PROGRESS")
+	case errors.Is(err, service.ErrConflict):
+		return typedError(codes.Aborted, "idempotency key conflicts with a different GitHub request", "CONFLICT")
+	case errors.Is(err, service.ErrInProgress):
+		return typedError(codes.Aborted, "GitHub operation is already in progress", "CONFLICT")
+	default:
+		return rpcError(err)
+	}
 }
 
 func (h *apiHandlers) ListGitHubRepositories(ctx context.Context, req *cyclopusv1.ListGitHubRepositoriesRequest) (*cyclopusv1.ListGitHubRepositoriesResponse, error) {
@@ -204,6 +246,7 @@ func administratorActor(ctx context.Context) (service.ActorContext, error) {
 
 func githubAppProto(v store.GitHubApp) *cyclopusv1.GitHubAppStatus {
 	status := &cyclopusv1.GitHubAppStatus{SetupState: githubAppState(v.State), Slug: v.Slug, Name: v.Name, HtmlUrl: v.HTMLURL,
+		WebhookUrl:          v.WebhookURL,
 		CredentialReadiness: githubCredentialReadiness(v.State, v.HasCredential), FailureCode: integrationFailureCode(stringValue(v.FailureCode)), FailureMessage: stringValue(v.FailureMessage), CreatedAt: timestamppb.New(v.CreatedAt), UpdatedAt: timestamppb.New(v.UpdatedAt)}
 	if v.AppID != nil {
 		status.AppId = *v.AppID
@@ -218,7 +261,7 @@ func githubAppProto(v store.GitHubApp) *cyclopusv1.GitHubAppStatus {
 }
 
 func githubInstallationProto(v store.GitHubInstallation) *cyclopusv1.GitHubInstallation {
-	return &cyclopusv1.GitHubInstallation{Id: strconv.FormatInt(v.GitHubInstallationID, 10), GithubInstallationId: v.GitHubInstallationID,
+	return &cyclopusv1.GitHubInstallation{Id: v.ID, GithubInstallationId: v.GitHubInstallationID,
 		AccountId: v.AccountID, AccountLogin: v.AccountLogin, AccountType: githubAccountType(v.AccountType), RepositorySelection: githubRepositorySelection(v.RepositorySelection),
 		LifecycleStatus: githubInstallationStatus(v.AccessState), SuspendedAt: timeProto(v.SuspendedAt), DeletedAt: timeProto(v.DeletedAt), SyncedAt: timeProto(v.LastReconciledAt),
 		SettingsUrl: "https://github.com/settings/installations/" + strconv.FormatInt(v.GitHubInstallationID, 10), CreatedAt: timestamppb.New(v.CreatedAt), UpdatedAt: timestamppb.New(v.UpdatedAt)}

@@ -55,8 +55,17 @@ func (s *Store) ClaimIdempotency(ctx context.Context, params IdempotencyClaimPar
 
 	var result IdempotencyResult
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		var inserted bool
-		if err := tx.QueryRow(ctx, `
+		var err error
+		result, err = claimIdempotency(ctx, tx, params)
+		return err
+	})
+	return result, err
+}
+
+func claimIdempotency(ctx context.Context, tx pgx.Tx, params IdempotencyClaimParams) (IdempotencyResult, error) {
+	var result IdempotencyResult
+	var inserted bool
+	if err := tx.QueryRow(ctx, `
 			INSERT INTO api_idempotency_records (
 				org_id, scope, idempotency_key, request_hash, status,
 				lease_owner, lease_expires_at, expires_at
@@ -64,65 +73,65 @@ func (s *Store) ClaimIdempotency(ctx context.Context, params IdempotencyClaimPar
 				now() + make_interval(secs => $6), now() + make_interval(secs => $7))
 			ON CONFLICT (org_id, scope, idempotency_key) DO NOTHING
 			RETURNING true`, params.OrgID, params.Scope, params.Key, params.RequestHash,
-			params.Owner, params.LeaseDuration.Seconds(), params.Retention.Seconds()).Scan(&inserted); err == nil {
-			result.Disposition = IdempotencyClaimed
-			return tx.QueryRow(ctx, `
-				SELECT status, lease_expires_at FROM api_idempotency_records
-				WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3`,
-				params.OrgID, params.Scope, params.Key).Scan(&result.Status, &result.LeaseExpiresAt)
-		} else if err != pgx.ErrNoRows {
-			return fmt.Errorf("insert idempotency record: %w", err)
-		}
+		params.Owner, params.LeaseDuration.Seconds(), params.Retention.Seconds()).Scan(&inserted); err == nil {
+		result.Disposition = IdempotencyClaimed
+		err := tx.QueryRow(ctx, `
+					SELECT status, lease_expires_at FROM api_idempotency_records
+					WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3`,
+			params.OrgID, params.Scope, params.Key).Scan(&result.Status, &result.LeaseExpiresAt)
+		return result, err
+	} else if err != pgx.ErrNoRows {
+		return IdempotencyResult{}, fmt.Errorf("insert idempotency record: %w", err)
+	}
 
-		var storedHash, status string
-		var statusCode *int
-		var body json.RawMessage
-		var leaseExpiresAt *time.Time
-		if err := tx.QueryRow(ctx, `
+	var storedHash, status string
+	var statusCode *int
+	var body json.RawMessage
+	var leaseExpiresAt *time.Time
+	if err := tx.QueryRow(ctx, `
 			SELECT request_hash, status, response_code, response_body, resource_type,
 				resource_id::text, error_code, lease_expires_at
 			FROM api_idempotency_records
 			WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3
 			FOR UPDATE`, params.OrgID, params.Scope, params.Key).Scan(&storedHash, &status,
-			&statusCode, &body, &result.ResourceType, &result.ResourceID, &result.ErrorCode,
-			&leaseExpiresAt); err != nil {
-			return fmt.Errorf("lock idempotency record: %w", err)
+		&statusCode, &body, &result.ResourceType, &result.ResourceID, &result.ErrorCode,
+		&leaseExpiresAt); err != nil {
+		return IdempotencyResult{}, fmt.Errorf("lock idempotency record: %w", err)
+	}
+	result.Status = status
+	if storedHash != params.RequestHash {
+		result.Disposition = IdempotencyConflict
+		return result, nil
+	}
+	if status != "in_progress" {
+		result.Disposition = IdempotencyReplay
+		if statusCode != nil {
+			result.StatusCode = *statusCode
 		}
-		result.Status = status
-		if storedHash != params.RequestHash {
-			result.Disposition = IdempotencyConflict
-			return nil
-		}
-		if status != "in_progress" {
-			result.Disposition = IdempotencyReplay
-			if statusCode != nil {
-				result.StatusCode = *statusCode
-			}
-			result.Body = append(json.RawMessage(nil), body...)
-			return nil
-		}
+		result.Body = append(json.RawMessage(nil), body...)
+		return result, nil
+	}
 
-		commandTag, err := tx.Exec(ctx, `
+	commandTag, err := tx.Exec(ctx, `
 			UPDATE api_idempotency_records
 			SET lease_owner = $4, lease_expires_at = now() + make_interval(secs => $5),
 				expires_at = GREATEST(expires_at, now() + make_interval(secs => $6)), updated_at = now()
 			WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3
 			  AND status = 'in_progress' AND lease_expires_at <= now()`, params.OrgID,
-			params.Scope, params.Key, params.Owner, params.LeaseDuration.Seconds(), params.Retention.Seconds())
-		if err != nil {
-			return fmt.Errorf("take over stale idempotency record: %w", err)
-		}
-		if commandTag.RowsAffected() == 0 {
-			result.Disposition = IdempotencyInProgress
-			result.LeaseExpiresAt = leaseExpiresAt
-			return nil
-		}
-		result.Disposition = IdempotencyClaimed
-		result.LeaseExpiresAt = nil
-		return tx.QueryRow(ctx, `SELECT lease_expires_at FROM api_idempotency_records
-			WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3`, params.OrgID,
-			params.Scope, params.Key).Scan(&result.LeaseExpiresAt)
-	})
+		params.Scope, params.Key, params.Owner, params.LeaseDuration.Seconds(), params.Retention.Seconds())
+	if err != nil {
+		return IdempotencyResult{}, fmt.Errorf("take over stale idempotency record: %w", err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		result.Disposition = IdempotencyInProgress
+		result.LeaseExpiresAt = leaseExpiresAt
+		return result, nil
+	}
+	result.Disposition = IdempotencyClaimed
+	result.LeaseExpiresAt = nil
+	err = tx.QueryRow(ctx, `SELECT lease_expires_at FROM api_idempotency_records
+				WHERE org_id = $1 AND scope = $2 AND idempotency_key = $3`, params.OrgID,
+		params.Scope, params.Key).Scan(&result.LeaseExpiresAt)
 	return result, err
 }
 
@@ -142,6 +151,16 @@ func (s *Store) DeleteExpiredIdempotencyRecords(ctx context.Context, limit int) 
 		return nil
 	})
 	return deleted, err
+}
+
+func (s *Store) AbandonIdempotency(ctx context.Context, params IdempotencyClaimParams) error {
+	tag, err := s.db.Exec(ctx, `DELETE FROM api_idempotency_records
+		WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3 AND request_hash=$4
+		  AND status='in_progress' AND lease_owner=$5`, params.OrgID, params.Scope, params.Key, params.RequestHash, params.Owner)
+	if err != nil {
+		return fmt.Errorf("abandon idempotency record: %w", err)
+	}
+	return rowsAffected(tag, ErrLeaseNotOwned)
 }
 
 type CompleteIdempotencyParams struct {

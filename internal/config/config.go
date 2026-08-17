@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
 )
 
 const envPrefix = "CYCLOPUS_"
@@ -35,6 +36,7 @@ const MaxSessionTTL = 7 * 24 * time.Hour
 var sliceViperKeys = map[string]struct{}{
 	"github.trusted_hosts":                     {},
 	"kubernetes.network_egress_excluded_cidrs": {},
+	"webhook.allowed_secret_refs":              {},
 }
 
 func isSliceKey(key string) bool {
@@ -69,6 +71,7 @@ func normalizeSliceValues(values []string) []string {
 }
 
 type Config struct {
+	ExternalURL             string
 	HTTP                    HTTP
 	GRPC                    GRPC
 	Auth                    Auth
@@ -76,6 +79,7 @@ type Config struct {
 	DB                      DB
 	Worker                  Worker
 	GitHub                  GitHub
+	Webhook                 Webhook
 	Kubernetes              Kubernetes
 	Observability           Observability
 	InsecurePublicListeners bool
@@ -145,8 +149,6 @@ type Worker struct {
 }
 
 type GitHub struct {
-	AppID                       int64
-	PrivateKeyFile              string
 	APIBaseURL                  string
 	UploadURL                   string
 	APIVersion                  string
@@ -156,7 +158,13 @@ type GitHub struct {
 	TrustedHosts                []string
 }
 
+type Webhook struct {
+	AllowedSecretRefs []string
+	ReleaseName       string
+}
+
 type Kubernetes struct {
+	InstanceNamespace          string
 	Kubeconfig                 string
 	RecoveryPollInterval       time.Duration
 	ConflictRetries            int
@@ -170,6 +178,7 @@ func Load(args, environ []string) (Config, error) {
 	flags := pflag.NewFlagSet("cyclopus", pflag.ContinueOnError)
 	flags.SetInterspersed(true)
 	configFile := flags.String("config", "", "path to a configuration file")
+	flags.String("external-url", "", "canonical public HTTPS URL used for browser callbacks")
 	flags.String("http-address", "", "HTTP listen address")
 	flags.String("grpc-address", "", "gRPC listen address")
 	flags.String("auth-token-pepper", "", "secret pepper used to hash API credentials")
@@ -196,8 +205,6 @@ func Load(args, environ []string) (Config, error) {
 	flags.Duration("worker-scan-interval", 0, "recovery worker scan interval")
 	flags.Duration("worker-lease-duration", 0, "recovery worker lease duration")
 	flags.Int("worker-max-concurrent-deploys", 0, "maximum concurrent Kubernetes deploy observations")
-	flags.Int64("github-app-id", 0, "GitHub App ID")
-	flags.String("github-private-key-file", "", "GitHub App private key file")
 	flags.String("github-api-base-url", "", "GitHub REST API base URL")
 	flags.String("github-upload-url", "", "GitHub uploads base URL")
 	flags.String("github-api-version", "", "GitHub REST API version")
@@ -205,7 +212,10 @@ func Load(args, environ []string) (Config, error) {
 	flags.Duration("github-run-poll-interval", 0, "GitHub workflow run polling interval")
 	flags.Duration("github-request-timeout", 0, "GitHub API request timeout")
 	flags.StringSlice("github-trusted-hosts", nil, "trusted GitHub API and upload hosts")
+	flags.StringSlice("webhook-allowed-secret-refs", nil, "exact Kubernetes Secret references allowed for webhook signing")
+	flags.String("webhook-release-name", "", "Helm release name that owns webhook signing Secrets")
 	flags.String("kubeconfig", "", "path to a Kubernetes client configuration file")
+	flags.String("kubernetes-instance-namespace", "", "namespace containing Cyclopus-managed source credentials")
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
 	flags.Int("kubernetes-conflict-retries", 0, "Kubernetes optimistic update conflict retries")
 	flags.String("kubernetes-preview-hostname-suffix", "", "verified DNS suffix appended to generated preview slugs")
@@ -240,6 +250,7 @@ func Load(args, environ []string) (Config, error) {
 		v.Set(key, value)
 	}
 	flagKeys := map[string]string{
+		"external-url":                                "external_url",
 		"http-address":                                "http.address",
 		"grpc-address":                                "grpc.address",
 		"auth-token-pepper":                           "auth.token_pepper",
@@ -266,8 +277,6 @@ func Load(args, environ []string) (Config, error) {
 		"worker-scan-interval":                        "worker.scan_interval",
 		"worker-lease-duration":                       "worker.lease_duration",
 		"worker-max-concurrent-deploys":               "worker.max_concurrent_deploys",
-		"github-app-id":                               "github.app_id",
-		"github-private-key-file":                     "github.private_key_file",
 		"github-api-base-url":                         "github.api_base_url",
 		"github-upload-url":                           "github.upload_url",
 		"github-api-version":                          "github.api_version",
@@ -275,7 +284,10 @@ func Load(args, environ []string) (Config, error) {
 		"github-run-poll-interval":                    "github.run_poll_interval",
 		"github-request-timeout":                      "github.request_timeout",
 		"github-trusted-hosts":                        "github.trusted_hosts",
+		"webhook-allowed-secret-refs":                 "webhook.allowed_secret_refs",
+		"webhook-release-name":                        "webhook.release_name",
 		"kubeconfig":                                  "kubernetes.kubeconfig",
+		"kubernetes-instance-namespace":               "kubernetes.instance_namespace",
 		"kubernetes-recovery-poll-interval":           "kubernetes.recovery_poll_interval",
 		"kubernetes-conflict-retries":                 "kubernetes.conflict_retries",
 		"kubernetes-preview-hostname-suffix":          "kubernetes.preview_hostname_suffix",
@@ -314,6 +326,7 @@ func Load(args, environ []string) (Config, error) {
 	}
 
 	cfg := Config{
+		ExternalURL: v.GetString("external_url"),
 		HTTP: HTTP{
 			Address:           v.GetString("http.address"),
 			ReadTimeout:       v.GetDuration("http.read_timeout"),
@@ -343,8 +356,6 @@ func Load(args, environ []string) (Config, error) {
 			MaxConcurrentDeploys: v.GetInt("worker.max_concurrent_deploys"),
 		},
 		GitHub: GitHub{
-			AppID:                       v.GetInt64("github.app_id"),
-			PrivateKeyFile:              v.GetString("github.private_key_file"),
 			APIBaseURL:                  v.GetString("github.api_base_url"),
 			UploadURL:                   v.GetString("github.upload_url"),
 			APIVersion:                  v.GetString("github.api_version"),
@@ -353,7 +364,12 @@ func Load(args, environ []string) (Config, error) {
 			RequestTimeout:              v.GetDuration("github.request_timeout"),
 			TrustedHosts:                normalizeSliceValues(v.GetStringSlice("github.trusted_hosts")),
 		},
+		Webhook: Webhook{
+			AllowedSecretRefs: normalizeSliceValues(v.GetStringSlice("webhook.allowed_secret_refs")),
+			ReleaseName:       strings.TrimSpace(v.GetString("webhook.release_name")),
+		},
 		Kubernetes: Kubernetes{
+			InstanceNamespace:          strings.TrimSpace(v.GetString("kubernetes.instance_namespace")),
 			Kubeconfig:                 v.GetString("kubernetes.kubeconfig"),
 			RecoveryPollInterval:       v.GetDuration("kubernetes.recovery_poll_interval"),
 			ConflictRetries:            v.GetInt("kubernetes.conflict_retries"),
@@ -372,6 +388,9 @@ func Load(args, environ []string) (Config, error) {
 			BeszelCredentialSecret:      v.GetString("observability.beszel_credential_secret"),
 		},
 		InsecurePublicListeners: v.GetBool("insecure_public_listeners"),
+	}
+	if normalized, err := normalizeExternalURL(cfg.ExternalURL); err == nil {
+		cfg.ExternalURL = normalized
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -405,6 +424,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("github.run_poll_interval", "30s")
 	v.SetDefault("github.request_timeout", "20s")
 	v.SetDefault("github.trusted_hosts", []string{"api.github.com", "uploads.github.com"})
+	v.SetDefault("kubernetes.instance_namespace", "default")
 	v.SetDefault("kubernetes.recovery_poll_interval", "2s")
 	v.SetDefault("kubernetes.conflict_retries", 5)
 	v.SetDefault("kubernetes.preview_hostname_suffix", "preview.invalid")
@@ -413,6 +433,7 @@ func setDefaults(v *viper.Viper) {
 
 func environment(environ []string) map[string]string {
 	keys := map[string]string{
+		"EXTERNAL_URL":                                "external_url",
 		"HTTP_ADDRESS":                                "http.address",
 		"GRPC_ADDRESS":                                "grpc.address",
 		"AUTH_TOKEN_PEPPER":                           "auth.token_pepper",
@@ -439,8 +460,6 @@ func environment(environ []string) map[string]string {
 		"WORKER_SCAN_INTERVAL":                        "worker.scan_interval",
 		"WORKER_LEASE_DURATION":                       "worker.lease_duration",
 		"WORKER_MAX_CONCURRENT_DEPLOYS":               "worker.max_concurrent_deploys",
-		"GITHUB_APP_ID":                               "github.app_id",
-		"GITHUB_PRIVATE_KEY_FILE":                     "github.private_key_file",
 		"GITHUB_API_BASE_URL":                         "github.api_base_url",
 		"GITHUB_UPLOAD_URL":                           "github.upload_url",
 		"GITHUB_API_VERSION":                          "github.api_version",
@@ -448,7 +467,10 @@ func environment(environ []string) map[string]string {
 		"GITHUB_RUN_POLL_INTERVAL":                    "github.run_poll_interval",
 		"GITHUB_REQUEST_TIMEOUT":                      "github.request_timeout",
 		"GITHUB_TRUSTED_HOSTS":                        "github.trusted_hosts",
+		"WEBHOOK_ALLOWED_SECRET_REFS":                 "webhook.allowed_secret_refs",
+		"WEBHOOK_RELEASE_NAME":                        "webhook.release_name",
 		"KUBECONFIG":                                  "kubernetes.kubeconfig",
+		"KUBERNETES_INSTANCE_NAMESPACE":               "kubernetes.instance_namespace",
 		"KUBERNETES_RECOVERY_POLL_INTERVAL":           "kubernetes.recovery_poll_interval",
 		"KUBERNETES_CONFLICT_RETRIES":                 "kubernetes.conflict_retries",
 		"KUBERNETES_PREVIEW_HOSTNAME_SUFFIX":          "kubernetes.preview_hostname_suffix",
@@ -477,14 +499,19 @@ func environment(environ []string) map[string]string {
 }
 
 func (g GitHub) Enabled() bool {
-	return g.AppID > 0 && strings.TrimSpace(g.PrivateKeyFile) != "" &&
-		strings.TrimSpace(g.APIBaseURL) != "" && strings.TrimSpace(g.UploadURL) != "" &&
+	return strings.TrimSpace(g.APIBaseURL) != "" && strings.TrimSpace(g.UploadURL) != "" &&
 		strings.TrimSpace(g.APIVersion) != "" && g.DispatchObservationInterval > 0 &&
 		g.RunPollInterval > 0 && g.RequestTimeout > 0
 }
 
 func (c Config) Validate() error {
 	var errs []error
+	externalURL, err := normalizeExternalURL(c.ExternalURL)
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		c.ExternalURL = externalURL
+	}
 	if _, _, err := net.SplitHostPort(c.HTTP.Address); err != nil {
 		errs = append(errs, fmt.Errorf("http.address must be a host:port pair: %w", err))
 	}
@@ -563,15 +590,6 @@ func (c Config) Validate() error {
 	if c.Worker.MaxConcurrentDeploys <= 0 || c.Worker.MaxConcurrentDeploys > 32 {
 		errs = append(errs, fmt.Errorf("worker.max_concurrent_deploys must be between 1 and 32"))
 	}
-	githubConfigured := c.GitHub.AppID != 0 || strings.TrimSpace(c.GitHub.PrivateKeyFile) != ""
-	if githubConfigured {
-		if c.GitHub.AppID <= 0 {
-			errs = append(errs, fmt.Errorf("github.app_id must be greater than zero"))
-		}
-		if strings.TrimSpace(c.GitHub.PrivateKeyFile) == "" {
-			errs = append(errs, fmt.Errorf("github.private_key_file is required"))
-		}
-	}
 	trustedHosts := make(map[string]struct{}, len(c.GitHub.TrustedHosts))
 	for _, host := range c.GitHub.TrustedHosts {
 		host = strings.ToLower(strings.TrimSpace(host))
@@ -607,8 +625,32 @@ func (c Config) Validate() error {
 	if c.GitHub.RequestTimeout >= c.Worker.LeaseDuration {
 		errs = append(errs, fmt.Errorf("github.request_timeout must be shorter than worker.lease_duration"))
 	}
+	seenWebhookRefs := make(map[string]struct{}, len(c.Webhook.AllowedSecretRefs))
+	for _, value := range c.Webhook.AllowedSecretRefs {
+		reference, err := secretref.Parse(value)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("webhook.allowed_secret_refs entry %q must be a valid Kubernetes Secret reference: %w", value, err))
+			continue
+		}
+		if reference.Namespace != c.Kubernetes.InstanceNamespace {
+			errs = append(errs, fmt.Errorf("webhook.allowed_secret_refs entry %q must reference the Kubernetes control-plane namespace %q", value, c.Kubernetes.InstanceNamespace))
+		}
+		if !strings.HasPrefix(reference.Name, "cyclopus-webhook-") {
+			errs = append(errs, fmt.Errorf("webhook.allowed_secret_refs entry %q must use a cyclopus-webhook- Secret name", value))
+		}
+		if _, exists := seenWebhookRefs[value]; exists {
+			errs = append(errs, fmt.Errorf("webhook.allowed_secret_refs entry %q is duplicated", value))
+		}
+		seenWebhookRefs[value] = struct{}{}
+	}
+	if len(c.Webhook.AllowedSecretRefs) > 0 && strings.TrimSpace(c.Webhook.ReleaseName) == "" {
+		errs = append(errs, fmt.Errorf("webhook.release_name is required when webhook.allowed_secret_refs is configured"))
+	}
 	if c.Kubernetes.RecoveryPollInterval <= 0 {
 		errs = append(errs, fmt.Errorf("kubernetes.recovery_poll_interval must be greater than zero"))
+	}
+	if namespace := strings.TrimSpace(c.Kubernetes.InstanceNamespace); namespace == "" || len(namespace) > 63 || !regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`).MatchString(namespace) {
+		errs = append(errs, fmt.Errorf("kubernetes.instance_namespace must be a DNS label"))
 	}
 	if c.Kubernetes.ConflictRetries <= 0 {
 		errs = append(errs, fmt.Errorf("kubernetes.conflict_retries must be greater than zero"))
@@ -640,8 +682,24 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("kubernetes.network_egress_excluded_cidrs entry %q is not a valid CIDR", cidr))
 		}
 	}
-	errs = append(errs, c.Observability.validate()...)
+	errs = append(errs, c.Observability.validate(c.Kubernetes.InstanceNamespace)...)
 	return errors.Join(errs...)
+}
+
+func normalizeExternalURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("external_url is required")
+	}
+	u, err := url.ParseRequestURI(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("external_url must be an absolute HTTPS URL without userinfo, query, or fragment")
+	}
+	if u.Path != "" && u.Path != "/" {
+		return "", fmt.Errorf("external_url path must be empty or /")
+	}
+	u.Path, u.RawPath = "", ""
+	return strings.TrimRight(u.String(), "/"), nil
 }
 
 // LogsEnabled reports whether OpenObserve-backed logs/traces proxying is
@@ -668,7 +726,7 @@ func (o Observability) beszelConfigured() bool {
 	return strings.TrimSpace(o.BeszelBaseURL) != ""
 }
 
-func (o Observability) validate() []error {
+func (o Observability) validate(controlPlaneNamespace string) []error {
 	var errs []error
 	if o.LogsEnabled() {
 		if err := observability.ValidateBackendBaseURL(o.OpenObserveBaseURL); err != nil {
@@ -686,6 +744,22 @@ func (o Observability) validate() []error {
 			slog.Warn("observability.beszel_base_url is set but observability.beszel_credential_secret is empty; "+
 				"operator metrics stay disabled until a Beszel credential is configured",
 				"beszel_base_url", o.BeszelBaseURL)
+		}
+	}
+	for name, value := range map[string]string{
+		"observability.openobserve_credential_secret": o.OpenObserveCredentialSecret,
+		"observability.beszel_credential_secret":      o.BeszelCredentialSecret,
+	} {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		reference, err := secretref.Parse(value)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s must be a valid Kubernetes Secret reference: %w", name, err))
+			continue
+		}
+		if reference.Namespace != controlPlaneNamespace {
+			errs = append(errs, fmt.Errorf("%s must reference the Kubernetes control-plane namespace %q", name, controlPlaneNamespace))
 		}
 	}
 	return errs

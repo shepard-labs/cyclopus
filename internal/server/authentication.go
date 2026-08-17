@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	cyclopusv1 "github.com/shepard-labs/cyclopus/gen/go/cyclopus/v1"
 	internalauth "github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/service"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -74,7 +74,7 @@ func (a *Authenticator) authenticate(ctx context.Context, authorization string) 
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
 	}
-	actor := service.ActorContext{UserID: principal.UserID, OrgID: principal.OrgID, Operator: principal.Operator}
+	actor := service.ActorContext{UserID: principal.UserID, OrgID: principal.OrgID, SessionID: principal.TokenID, Operator: principal.Operator}
 	ctx = context.WithValue(ctx, principalContextKey, principal)
 	ctx = context.WithValue(ctx, actorContextKey, actor)
 	return ctx, nil

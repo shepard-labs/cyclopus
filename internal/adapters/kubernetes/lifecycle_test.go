@@ -8,6 +8,7 @@ import (
 
 	"github.com/shepard-labs/cyclopus/internal/store"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -61,6 +62,24 @@ func TestPreviewProvisionVerifiedPolicyRemovesPendingLabelAndMarksReady(t *testi
 	}
 	if !found {
 		t.Fatalf("preview checkpoints = %v, want resource_bounds_applied recorded", persisted.checkpoints)
+	}
+	role, err := client.RbacV1().Roles(job.Namespace).Get(context.Background(), secretReaderRoleName, metav1.GetOptions{})
+	if err != nil || len(role.Rules) != 0 {
+		t.Fatalf("source Secret Role = %+v, %v", role, err)
+	}
+	binding, err := client.RbacV1().RoleBindings(job.Namespace).Get(context.Background(), secretReaderRoleName, metav1.GetOptions{})
+	if err != nil || binding.RoleRef != (rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: secretReaderRoleName}) || len(binding.Subjects) != 1 {
+		t.Fatalf("source Secret RoleBinding = %+v, %v", binding, err)
+	}
+}
+
+func TestProvisionSecretReaderRejectsUnownedExistingRBAC(t *testing.T) {
+	job := previewLifecycleJob()
+	foreign := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: job.Namespace}}
+	client := fake.NewSimpleClientset(foreign)
+	adapter, _ := NewLifecycleAdapter(client, &fakeLifecycleStore{}, successfulPolicy{}, staticHostname("preview.example.test"), time.Millisecond)
+	if err := adapter.ExecuteEnvironmentLifecycle(context.Background(), job); !errors.Is(err, ErrResourceOwnership) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -200,12 +219,12 @@ func TestPreviewTeardownRejectsUnownedNamespace(t *testing.T) {
 }
 
 func previewLifecycleJob() store.EnvironmentLifecycleJob {
-	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", EnvironmentKind: "preview", Namespace: "preview-calm-otter-0001", App: store.App{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
+	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", EnvironmentKind: "preview", Namespace: "preview-calm-otter-0001", App: store.App{ID: "app", CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
 }
 
 func productionLifecycleJob() store.EnvironmentLifecycleJob {
 	hostname := "whoami.example.test"
-	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", EnvironmentKind: "production", Namespace: "whoami-production", PlannedHostname: &hostname, App: store.App{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
+	return store.EnvironmentLifecycleJob{ID: "job", OrgID: "org", EnvironmentID: "environment", Kind: "provision", EnvironmentKind: "production", Namespace: "whoami-production", PlannedHostname: &hostname, App: store.App{ID: "app", CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}}
 }
 
 func TestProductionProvisionUsesPlannedHostnameWithoutHostnameProvider(t *testing.T) {

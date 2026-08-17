@@ -56,9 +56,10 @@ func productionHostname(hostnameLabel, suffix string) (string, error) {
 }
 
 type ActorContext struct {
-	UserID   string
-	OrgID    string
-	Operator bool
+	UserID    string
+	OrgID     string
+	SessionID string
+	Operator  bool
 }
 
 type Service struct {
@@ -73,6 +74,12 @@ type Service struct {
 	hostnameProvider         string
 	customDomainProvisioner  CustomDomainProvisioner
 	certManagerClusterIssuer string
+	github                   *GitHubOnboarding
+	webhookSecrets           WebhookSecretValidator
+}
+
+type WebhookSecretValidator interface {
+	Validate(context.Context, string) error
 }
 
 type Option func(*Service)
@@ -139,6 +146,10 @@ func WithCertManagerClusterIssuer(issuer string) Option {
 	}
 }
 
+func WithWebhookSecretValidator(validator WebhookSecretValidator) Option {
+	return func(s *Service) { s.webhookSecrets = validator }
+}
+
 func New(dataStore *store.Store, opts ...Option) *Service {
 	s := &Service{store: dataStore, now: time.Now, previewSlugs: randomPreviewSlugGenerator{source: rand.Reader}, logger: slog.Default(), dnsResolver: stdlibDNSResolver{}}
 	for _, opt := range opts {
@@ -147,6 +158,10 @@ func New(dataStore *store.Store, opts ...Option) *Service {
 		}
 	}
 	return s
+}
+
+func WithGitHubOnboarding(onboarding *GitHubOnboarding) Option {
+	return func(s *Service) { s.github = onboarding }
 }
 
 func (s *Service) log() *slog.Logger {
@@ -228,22 +243,38 @@ func (s *Service) GetWebhook(ctx context.Context, actor ActorContext, id string)
 	if err := validateActor(actor); err != nil {
 		return store.Webhook{}, err
 	}
-	return s.store.GetWebhook(ctx, actor.OrgID, id)
+	value, err := s.store.GetWebhook(ctx, actor.OrgID, id)
+	if err == nil && !actor.Operator {
+		value.SecretRef = ""
+	}
+	return value, err
 }
 
 func (s *Service) ListWebhooks(ctx context.Context, actor ActorContext) ([]store.Webhook, error) {
 	if err := validateActor(actor); err != nil {
 		return nil, err
 	}
-	return s.store.ListWebhooks(ctx, actor.OrgID)
+	values, err := s.store.ListWebhooks(ctx, actor.OrgID)
+	if err == nil && !actor.Operator {
+		for i := range values {
+			values[i].SecretRef = ""
+		}
+	}
+	return values, err
 }
 
 func (s *Service) CreateWebhook(ctx context.Context, actor ActorContext, key string, input WebhookInput) (store.Webhook, error) {
 	if err := validateActor(actor); err != nil {
 		return store.Webhook{}, err
 	}
+	if !actor.Operator {
+		return store.Webhook{}, ErrForbidden
+	}
 	if err := validateWebhook(input); err != nil {
 		return store.Webhook{}, err
+	}
+	if s.webhookSecrets == nil || s.webhookSecrets.Validate(ctx, input.SecretRef) != nil {
+		return store.Webhook{}, ErrInvalidArgument
 	}
 	var replay store.Webhook
 	claimed, err := s.claim(ctx, actor, "webhook.create", key, input, &replay)
@@ -261,8 +292,14 @@ func (s *Service) UpdateWebhook(ctx context.Context, actor ActorContext, key, id
 	if err := validateActor(actor); err != nil {
 		return store.Webhook{}, err
 	}
+	if !actor.Operator {
+		return store.Webhook{}, ErrForbidden
+	}
 	if err := validateWebhook(input); err != nil {
 		return store.Webhook{}, err
+	}
+	if s.webhookSecrets == nil || s.webhookSecrets.Validate(ctx, input.SecretRef) != nil {
+		return store.Webhook{}, ErrInvalidArgument
 	}
 	request := struct {
 		ID    string

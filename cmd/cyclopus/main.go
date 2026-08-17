@@ -79,17 +79,40 @@ func run(args, environ []string) error {
 	if err != nil {
 		return fmt.Errorf("construct authentication service: %w", err)
 	}
-	domainService := service.New(dataStore, service.WithLogger(logger),
-		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget),
-		service.WithHostnameSuffix(cfg.Kubernetes.PreviewHostnameSuffix),
-		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer))
+	kubernetesConfig, err := resolveKubernetesConfig(cfg.Kubernetes.Kubeconfig)
+	if err != nil {
+		return err
+	}
+	kubernetesClient, err := kubernetes.NewForConfig(kubernetesConfig)
+	if err != nil {
+		return fmt.Errorf("create Kubernetes client: %w", err)
+	}
+	webhookSecrets, err := kubernetesadapter.NewWebhookSecretAuthorizer(kubernetesClient, cfg.Kubernetes.InstanceNamespace, cfg.Webhook.ReleaseName, cfg.Webhook.AllowedSecretRefs)
+	if err != nil {
+		return fmt.Errorf("construct webhook Secret policy: %w", err)
+	}
+	managedSecrets, err := secretref.NewKubernetesManagedWriter(kubernetesClient, cfg.Kubernetes.InstanceNamespace)
+	if err != nil {
+		return err
+	}
+	githubOnboarding, err := service.NewGitHubOnboarding(dataStore, managedSecrets, service.GitHubOnboardingConfig{ExternalURL: cfg.ExternalURL,
+		APIBaseURL: cfg.GitHub.APIBaseURL, UploadURL: cfg.GitHub.UploadURL, APIVersion: cfg.GitHub.APIVersion, RequestTimeout: cfg.GitHub.RequestTimeout,
+		CredentialSecretRef: "k8s-secret://" + cfg.Kubernetes.InstanceNamespace + "/" + secretref.GitHubAppSecretName + "#" + secretref.GitHubPrivateKeyKey,
+		SealingKey:          []byte(cfg.Auth.TokenPepper)}, nil)
+	if err != nil {
+		return err
+	}
+	domainService := service.New(dataStore, service.WithLogger(logger), service.WithGitHubOnboarding(githubOnboarding),
+		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget), service.WithHostnameSuffix(cfg.Kubernetes.PreviewHostnameSuffix),
+		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer), service.WithWebhookSecretValidator(webhookSecrets))
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)
 	services.Authenticator = authenticator
 	services.RateLimiter = server.NewAuthRateLimiter(cfg.Auth.RateLimitPerMinute)
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
-	services.UIHandler = uihandler.New(ui.NewBackend(domainService, authService, cfg.Auth.SessionTTL))
-	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger))
+	services.GitHubBrowser = server.NewGitHubBrowser(domainService, authenticator, cfg.ExternalURL, []byte(cfg.Auth.TokenPepper))
+	services.UIHandler = server.LoginContinuationMiddleware(uihandler.New(ui.NewBackend(domainService, authService, cfg.Auth.SessionTTL)))
+	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger, githubOnboarding))
 	if err != nil {
 		return err
 	}
@@ -100,7 +123,7 @@ func run(args, environ []string) error {
 		Owner:                owner,
 		RequestTimeout:       cfg.GitHub.RequestTimeout,
 	}, logger, dataStore, adapters)
-	if provider, err := buildTelemetryProvider(ctx, cfg.Observability, adapters); err != nil {
+	if provider, err := buildTelemetryProvider(ctx, cfg.Observability, cfg.Kubernetes.InstanceNamespace, adapters); err != nil {
 		return err
 	} else if provider != nil {
 		domainService.SetTelemetry(provider)
@@ -118,6 +141,9 @@ func run(args, environ []string) error {
 		}
 		return pool.Ping(ctx)
 	}
+	if err := githubOnboarding.Reconcile(ctx); err != nil {
+		return fmt.Errorf("reconcile GitHub App credentials: %w", err)
+	}
 
 	logger.Info("server starting", "address", cfg.HTTP.Address, "worker_owner", owner)
 	apiServer, err := server.New(cfg.HTTP, cfg.GRPC, logger, readiness, services)
@@ -134,7 +160,7 @@ func run(args, environ []string) error {
 // Kubernetes resolver used for webhook secrets. It returns nil (no error) when
 // neither backend is configured, leaving telemetry RPCs to report the backend
 // as unavailable.
-func buildTelemetryProvider(ctx context.Context, cfg config.Observability, adapters worker.RecoveryAdapters) (service.TelemetryProvider, error) {
+func buildTelemetryProvider(ctx context.Context, cfg config.Observability, controlPlaneNamespace string, adapters worker.RecoveryAdapters) (service.TelemetryProvider, error) {
 	if !cfg.LogsEnabled() && !cfg.MetricsEnabled() {
 		return nil, nil
 	}
@@ -148,6 +174,10 @@ func buildTelemetryProvider(ctx context.Context, cfg config.Observability, adapt
 	resolve := func(reference string) (string, error) {
 		if reference == "" {
 			return "", nil
+		}
+		parsed, err := secretref.Parse(reference)
+		if err != nil || parsed.Namespace != controlPlaneNamespace {
+			return "", fmt.Errorf("telemetry Secret reference must use control-plane namespace %q", controlPlaneNamespace)
 		}
 		value, err := resolver.Resolve(ctx, reference)
 		if err != nil {
@@ -253,7 +283,15 @@ func buildRecoveryAdapters(cfg config.Config, dataStore *store.Store, constructo
 	if !ok {
 		return worker.RecoveryAdapters{}, errors.New("Kubernetes adapter does not expose a client for webhook delivery")
 	}
-	adapters.Webhook = webhookdelivery.NewSender(dataStore, secretref.NewKubernetesResolver(webhookClient.KubernetesClient()))
+	webhookNamespace := cfg.Kubernetes.InstanceNamespace
+	if webhookNamespace == "" {
+		webhookNamespace = "default"
+	}
+	webhookAuthorizer, err := kubernetesadapter.NewWebhookSecretAuthorizer(webhookClient.KubernetesClient(), webhookNamespace, cfg.Webhook.ReleaseName, cfg.Webhook.AllowedSecretRefs)
+	if err != nil {
+		return worker.RecoveryAdapters{}, fmt.Errorf("construct webhook Secret authorizer: %w", err)
+	}
+	adapters.Webhook = webhookdelivery.NewAuthorizedSender(dataStore, secretref.NewKubernetesResolver(webhookClient.KubernetesClient()), webhookAuthorizer, webhookNamespace)
 	if reconciler, ok := kubernetesRecovery.(worker.ReconciliationAdapter); ok {
 		adapters.Reconciliation = reconciler
 	}
@@ -277,18 +315,15 @@ func buildRecoveryAdapters(cfg config.Config, dataStore *store.Store, constructo
 	return adapters, nil
 }
 
-func productionAdapterConstructors(dataStore *store.Store, owner string, logger *slog.Logger) adapterConstructors {
+func productionAdapterConstructors(dataStore *store.Store, owner string, logger *slog.Logger, credentials githubadapter.AppCredentialProvider) adapterConstructors {
 	return adapterConstructors{
 		github: func(cfg config.GitHub) (worker.GitHubRecoveryAdapter, error) {
-			clients, err := githubadapter.NewInstallationClientFactory(cfg.AppID, cfg.PrivateKeyFile,
-				cfg.APIBaseURL, cfg.UploadURL, cfg.APIVersion, nil)
+			clients, err := githubadapter.NewInstallationClientFactory(credentials, cfg.APIBaseURL, cfg.UploadURL, cfg.APIVersion, nil)
 			if err != nil {
 				return nil, err
 			}
-			return githubadapter.New(githubadapter.Config{
-				Owner: owner, DispatchObservationInterval: cfg.DispatchObservationInterval,
-				RunPollInterval: cfg.RunPollInterval, RequestTimeout: cfg.RequestTimeout,
-			}, dataStore, clients)
+			return githubadapter.New(githubadapter.Config{Owner: owner, DispatchObservationInterval: cfg.DispatchObservationInterval,
+				RunPollInterval: cfg.RunPollInterval, RequestTimeout: cfg.RequestTimeout}, dataStore, clients)
 		},
 		kubernetes: func(cfg config.Kubernetes) (worker.KubernetesRecoveryAdapter, error) {
 			clientConfig, err := resolveKubernetesConfig(cfg.Kubeconfig)
@@ -299,6 +334,13 @@ func productionAdapterConstructors(dataStore *store.Store, owner string, logger 
 			if err != nil {
 				return nil, fmt.Errorf("create Kubernetes client: %w", err)
 			}
+			provisionerConfig := rest.CopyConfig(clientConfig)
+			provisionerConfig.BearerToken = ""
+			provisionerConfig.BearerTokenFile = "/var/run/secrets/cyclopus-provisioner/token"
+			provisioner, err := kubernetes.NewForConfig(provisionerConfig)
+			if err != nil {
+				return nil, fmt.Errorf("create Kubernetes provisioner client: %w", err)
+			}
 			dynamicClient, err := dynamic.NewForConfig(clientConfig)
 			if err != nil {
 				return nil, fmt.Errorf("create Kubernetes dynamic client: %w", err)
@@ -308,7 +350,7 @@ func productionAdapterConstructors(dataStore *store.Store, owner string, logger 
 				PreviewHostnameSuffix:      cfg.PreviewHostnameSuffix,
 				CertManagerClusterIssuer:   cfg.CertManagerClusterIssuer,
 				NetworkEgressExcludedCIDRs: cfg.NetworkEgressExcludedCIDRs,
-			}, client, dataStore, kubernetesadapter.WithDynamicClient(dynamicClient), kubernetesadapter.WithLogger(logger))
+			}, client, dataStore, kubernetesadapter.WithProvisionerClient(provisioner), kubernetesadapter.WithDynamicClient(dynamicClient), kubernetesadapter.WithLogger(logger))
 		},
 	}
 }

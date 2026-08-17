@@ -19,7 +19,7 @@ func SetSession(w http.ResponseWriter, token string, expires time.Time) {
 		Expires:  expires,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   false, // set to true behind TLS termination
+		Secure:   true,
 	})
 }
 
@@ -43,5 +43,6 @@ func ClearSession(w http.ResponseWriter) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   true,
 	})
 }

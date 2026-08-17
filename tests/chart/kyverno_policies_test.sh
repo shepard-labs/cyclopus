@@ -21,7 +21,7 @@ command -v "$HELM" >/dev/null 2>&1 || fail "helm not found on PATH"
 
 # Secrets the chart requires to render at all (they do not affect the kyverno
 # policy output; the infra unit gate passes the same placeholders).
-SECRETS="--set secrets.databaseUrl=postgres://u:p@h/db --set secrets.authTokenPepper=x"
+SECRETS="--set secrets.databaseUrl=postgres://u:p@h/db --set secrets.authTokenPepper=x --set config.externalUrl=https://cyclopus.example.test"
 
 # --- default render (policies enabled) ---------------------------------------
 # shellcheck disable=SC2086
@@ -91,14 +91,14 @@ contains "VAP requires a sandbox runtime class" 'object.spec.runtimeClassName in
 # --- toggle off (policies disabled) ------------------------------------------
 # shellcheck disable=SC2086
 disabled=$("$HELM" template cyclopus "$CHART" --kube-version 1.33.13 $SECRETS \
-  --set kyverno.policies.enabled=false 2>/dev/null) \
+	--set kyverno.policies.enabled=false 2>/dev/null) \
   || fail "helm template (enabled=false) failed"
 if printf '%s\n' "$disabled" | grep -q '^kind: ClusterPolicy'; then
   fail "kyverno.policies.enabled=false must render NO ClusterPolicy"
 fi
 pass "kyverno.policies.enabled=false renders no ClusterPolicy (toggle works)"
-if printf '%s\n' "$disabled" | grep -q '^kind: ValidatingAdmissionPolicy'; then
-  fail "kyverno.policies.enabled=false must render NO ValidatingAdmissionPolicy"
+if printf '%s\n' "$disabled" | grep -q 'name: cyclopus-enforce-sandbox'; then
+  fail "kyverno.policies.enabled=false must render NO sandbox ValidatingAdmissionPolicy"
 fi
 pass "kyverno.policies.enabled=false renders no VAP backstop (toggle works)"
 

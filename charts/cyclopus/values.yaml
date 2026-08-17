@@ -33,6 +33,10 @@ serviceAccount:
   name: ""
   annotations: {}
 
+provisionerServiceAccount:
+  name: ""
+  annotations: {}
+
 # §9.2: reconcile has cluster-wide write reach. RBAC is a ClusterRole so a single
 # org-scoped reconcile loop can regenerate objects across every app namespace.
 rbac:
@@ -45,8 +49,13 @@ service:
 
 # Control-plane console Ingress (§7.5). When enabled, the UI + REST API (same
 # process, mounted at / and /v1/*) are exposed via Traefik at https://{host} with
-# a cert-manager-issued Let's Encrypt certificate. TLS terminates at Traefik; the
-# pod itself stays plaintext inside the cluster (insecure_public_listeners: true).
+# a cert-manager-issued Let's Encrypt certificate and permanent HTTP-to-HTTPS
+# redirect. This template supports Traefik's Middleware CRD. Traefik access-log
+# query redaction is controller-global, not configurable per Ingress: operators
+# must configure the Traefik installation to drop/redact query strings so GitHub
+# callback codes are not recorded. The application checkpoints callbacks onto a
+# clean URL and does not log their query values. TLS terminates at Traefik; the
+# pod stays plaintext inside the cluster (insecure_public_listeners: true).
 ingress:
   enabled: false
   className: traefik
@@ -61,6 +70,8 @@ ingress:
 # The Cyclopus binary reads config from CYCLOPUS_*-prefixed env vars.
 # Non-secret settings go in the ConfigMap; secrets are referenced from a Secret.
 config:
+  # Canonical public HTTPS origin used exclusively for GitHub callbacks.
+  externalUrl: ""
   logLevel: info
   httpAddress: "0.0.0.0:8080"
   grpcAddress: "0.0.0.0:9090"
@@ -78,7 +89,12 @@ config:
     scanInterval: "30s"
     leaseDuration: "60s"
     maxConcurrentDeploys: 4
+  webhook:
+    # Exact signing-key refs only. Each Secret must be immutable, start with
+    # cyclopus-webhook-, and carry the release ownership labels validated by the API.
+    allowedSecretRefs: []
   kubernetes:
+    instanceNamespace: ""
     # DNS suffix appended to all platform-generated hostnames (preview and
     # production). Set to "{ingress-ip-dashed}.sslip.io" for zero-config
     # deployments (recommended default; note: sslip.io is not PSL-listed —
@@ -108,7 +124,9 @@ config:
     openobserveOrganization: "cyclopus"
     openobserveLogStream: "app_logs"
     openobserveTraceStream: "app_traces"
+    openobserveCredentialSecret: ""
     beszelBaseUrl: ""
+    beszelCredentialSecret: ""
 
 # Secret wiring. In real installs these reference an existing Secret created out
 # of band (never committed). Inline values are for local `helm template` only.

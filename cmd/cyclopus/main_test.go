@@ -27,7 +27,7 @@ func TestBuildRecoveryAdaptersUsesSuccessfullyConstructedAdapters(t *testing.T) 
 	adapters, err := buildRecoveryAdapters(cfg, nil, adapterConstructors{
 		github: func(got config.GitHub) (worker.GitHubRecoveryAdapter, error) {
 			githubCalls++
-			if got.AppID != cfg.GitHub.AppID {
+			if got.APIBaseURL != cfg.GitHub.APIBaseURL {
 				t.Fatalf("GitHub config = %+v", got)
 			}
 			return github, nil
@@ -137,8 +137,8 @@ func TestStartupWithDueWorkUsesConstructedAdapters(t *testing.T) {
 func adapterTestConfig() config.Config {
 	return config.Config{
 		GitHub: config.GitHub{
-			AppID: 42, PrivateKeyFile: "/github.pem", APIBaseURL: "https://api.github.test/",
-			UploadURL: "https://uploads.github.test/", APIVersion: "2026-03-10",
+			APIBaseURL: "https://api.github.test/",
+			UploadURL:  "https://uploads.github.test/", APIVersion: "2026-03-10",
 			DispatchObservationInterval: time.Second, RunPollInterval: time.Second, RequestTimeout: time.Second,
 		},
 		Kubernetes: config.Kubernetes{Kubeconfig: "/kubeconfig", RecoveryPollInterval: time.Second, ConflictRetries: 3},

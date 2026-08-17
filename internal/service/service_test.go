@@ -1,12 +1,38 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
+
+type rejectingWebhookSecretValidator struct{}
+
+func (rejectingWebhookSecretValidator) Validate(context.Context, string) error {
+	return errors.New("not allowed")
+}
+
+func TestWebhookMutationsRequireOperatorAndAllowedSecret(t *testing.T) {
+	input := WebhookInput{TargetURL: "https://hooks.example.test", Events: []string{"deploy.succeeded"}, SecretRef: "k8s-secret://cyclopus/cyclopus-webhook-primary#secret", Enabled: true}
+	svc := New(nil, WithWebhookSecretValidator(rejectingWebhookSecretValidator{}))
+	nonAdmin := ActorContext{UserID: "user", OrgID: "org"}
+	if _, err := svc.CreateWebhook(context.Background(), nonAdmin, "key", input); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("CreateWebhook() error = %v, want ErrForbidden", err)
+	}
+	if _, err := svc.UpdateWebhook(context.Background(), nonAdmin, "key", "id", input); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("UpdateWebhook() error = %v, want ErrForbidden", err)
+	}
+	admin := ActorContext{UserID: "admin", OrgID: "org", Operator: true}
+	if _, err := svc.CreateWebhook(context.Background(), admin, "key", input); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("CreateWebhook() disallowed Secret error = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := svc.UpdateWebhook(context.Background(), admin, "key", "id", input); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("UpdateWebhook() disallowed Secret error = %v, want ErrInvalidArgument", err)
+	}
+}
 
 func TestValidateImageRef(t *testing.T) {
 	registry := "https://ghcr.io"

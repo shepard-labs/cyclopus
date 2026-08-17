@@ -12,7 +12,7 @@ metadata:
     {{- include "cyclopus.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: [namespaces, services, configmaps, secrets, serviceaccounts, pods, resourcequotas, limitranges]
+    resources: [services, configmaps, serviceaccounts, pods, resourcequotas, limitranges]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: ["apps"]
     resources: [deployments, replicasets]
@@ -35,6 +35,9 @@ rules:
   - apiGroups: ["cert-manager.io"]
     resources: [certificates]
     verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -50,4 +53,319 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "cyclopus.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-provisioner
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, create, update, delete]
+  - apiGroups: [""]
+    resources: [resourcequotas, limitranges]
+    verbs: [get, create, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]
+    verbs: [get, create, update]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles]
+    resourceNames: [cyclopus-source-secret-reader]
+    verbs: [escalate]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [rolebindings]
+    resourceNames: [cyclopus-source-secret-reader]
+    verbs: [bind]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-provisioner
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cyclopus.fullname" . }}-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cyclopus.provisionerServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-namespace-provisioner
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["namespaces"]
+  validations:
+    - expression: >-
+        request.userInfo.username == {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }} ||
+        (request.operation == "CREATE" ?
+          object.metadata.labels["app.kubernetes.io/managed-by"] != "cyclopus" &&
+          !has(object.metadata.annotations["cyclopus.dev/namespace-owner"]) &&
+          !has(object.metadata.annotations["cyclopus.dev/namespace-uid"]) :
+         request.operation == "DELETE" ||
+          (object.metadata.labels["app.kubernetes.io/managed-by"] == oldObject.metadata.labels["app.kubernetes.io/managed-by"] &&
+           object.metadata.labels["cyclopus.dev/environment-id"] == oldObject.metadata.labels["cyclopus.dev/environment-id"] &&
+           object.metadata.annotations["cyclopus.dev/namespace-owner"] == oldObject.metadata.annotations["cyclopus.dev/namespace-owner"] &&
+           object.metadata.annotations["cyclopus.dev/namespace-uid"] == oldObject.metadata.annotations["cyclopus.dev/namespace-uid"]))
+      message: Only the Cyclopus provisioner may establish or change namespace ownership identity.
+    - expression: >-
+        request.userInfo.username != {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }} || object == null ||
+        (object.metadata.name.matches('^(preview-[a-z0-9]([-a-z0-9]*[a-z0-9])?|[a-z0-9]([-a-z0-9]*[a-z0-9])?-production)$') &&
+         object.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus" &&
+         object.metadata.labels["cyclopus.dev/environment-id"].matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') &&
+         object.metadata.annotations["cyclopus.dev/namespace-owner"] == object.metadata.labels["cyclopus.dev/environment-id"])
+      message: The provisioner may manage only deterministic Cyclopus environment namespaces.
+    - expression: >-
+        request.userInfo.username != {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }} || request.operation == "CREATE" ||
+        (oldObject.metadata.annotations["cyclopus.dev/namespace-owner"] == oldObject.metadata.labels["cyclopus.dev/environment-id"] &&
+         (!has(oldObject.metadata.annotations["cyclopus.dev/namespace-uid"]) ?
+           object.metadata.annotations["cyclopus.dev/namespace-uid"] == string(oldObject.metadata.uid) :
+           oldObject.metadata.annotations["cyclopus.dev/namespace-uid"] == string(oldObject.metadata.uid) &&
+         (object == null || (object.metadata.uid == oldObject.metadata.uid &&
+          object.metadata.annotations["cyclopus.dev/namespace-owner"] == oldObject.metadata.annotations["cyclopus.dev/namespace-owner"] &&
+          object.metadata.annotations["cyclopus.dev/namespace-uid"] == oldObject.metadata.annotations["cyclopus.dev/namespace-uid"]))))
+      message: Existing namespaces require immutable Cyclopus ownership bound to their UID.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-namespace-provisioner
+spec:
+  policyName: {{ include "cyclopus.fullname" . }}-namespace-provisioner
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-managed-secret-create
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: provisioner-only
+      expression: request.userInfo.username == {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }}
+  validations:
+    - expression: >-
+        namespaceObject != null &&
+        namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus" &&
+        namespaceObject.metadata.annotations["cyclopus.dev/namespace-owner"] == namespaceObject.metadata.labels["cyclopus.dev/environment-id"] &&
+        namespaceObject.metadata.annotations["cyclopus.dev/namespace-uid"] == string(namespaceObject.metadata.uid) &&
+        object.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus" &&
+        object.metadata.labels["cyclopus.dev/environment-id"] == namespaceObject.metadata.labels["cyclopus.dev/environment-id"] &&
+        object.metadata.labels["cyclopus.dev/org-id"] == namespaceObject.metadata.labels["cyclopus.dev/org-id"] &&
+        object.metadata.labels["cyclopus.dev/app-id"] == namespaceObject.metadata.labels["cyclopus.dev/app-id"] &&
+        object.metadata.name.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?-env-[a-f0-9]{16}$') &&
+        object.immutable == true
+      message: Cyclopus may create only immutable deterministic env revision Secrets in owned application namespaces.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-managed-secret-create
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "cyclopus.fullname" . }}-managed-secret-create
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-secret-reader-rbac
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["roles", "rolebindings"]
+  matchConditions:
+    - name: provisioner-only
+      expression: request.userInfo.username == {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }}
+  validations:
+    - expression: >-
+        object.metadata.name == "cyclopus-source-secret-reader" &&
+         namespaceObject != null && namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus" &&
+         namespaceObject.metadata.annotations["cyclopus.dev/namespace-owner"] == namespaceObject.metadata.labels["cyclopus.dev/environment-id"] &&
+         namespaceObject.metadata.annotations["cyclopus.dev/namespace-uid"] == string(namespaceObject.metadata.uid) &&
+         object.metadata.labels["cyclopus.dev/environment-id"] == namespaceObject.metadata.labels["cyclopus.dev/environment-id"] &&
+         object.metadata.labels["cyclopus.dev/org-id"] == namespaceObject.metadata.labels["cyclopus.dev/org-id"] &&
+         object.metadata.labels["cyclopus.dev/app-id"] == namespaceObject.metadata.labels["cyclopus.dev/app-id"]
+      message: Cyclopus may mutate only its fixed source Secret reader RBAC in owned application namespaces.
+    - expression: >-
+        object.kind == "RoleBinding" ||
+        (object.rules.size() <= 1 && object.rules.all(rule,
+          rule.apiGroups == [""] && rule.resources == ["secrets"] &&
+          rule.verbs == ["get"] && has(rule.resourceNames) && rule.resourceNames.size() > 0))
+      message: The Cyclopus source Secret Role must grant get only on explicit resourceNames.
+    - expression: >-
+        object.kind == "Role" ||
+        (object.roleRef.apiGroup == "rbac.authorization.k8s.io" && object.roleRef.kind == "Role" &&
+         object.subjects.size() == 1 &&
+         object.subjects[0].kind == "ServiceAccount" &&
+           object.roleRef.name == "cyclopus-source-secret-reader" &&
+          object.metadata.name == object.roleRef.name &&
+          object.subjects[0].name == {{ include "cyclopus.serviceAccountName" . | quote }} &&
+          object.subjects[0].namespace == {{ .Release.Namespace | quote }})
+      message: The Cyclopus source Secret RoleBinding must bind only the release service account.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-secret-reader-rbac
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "cyclopus.fullname" . }}-secret-reader-rbac
+  validationActions: [Deny]
+---
+# The GitHub App credential is pre-created by this chart, so the runtime never
+# needs namespace-wide Secret create access. resourceNames confines every
+# granted operation to the one deterministic instance credential Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-github-app-secret
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cyclopus-github-app]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-github-app-secret
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cyclopus.fullname" . }}-github-app-secret
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cyclopus.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- $telemetryNames := dict -}}
+{{- range $field := list (default $.Values.secrets.openobserveCredential $.Values.config.observability.openobserveCredentialSecret) (default $.Values.secrets.beszelCredential $.Values.config.observability.beszelCredentialSecret) -}}
+{{- if $field -}}
+{{- $pattern := printf "^k8s-secret://%s/([a-z0-9]([-a-z0-9.]*[a-z0-9])?)#[A-Za-z0-9._-]+$" $.Release.Namespace -}}
+{{- if not (regexMatch $pattern $field) -}}
+{{- fail (printf "telemetry credential Secret reference %q must be a valid k8s-secret://%s/name#key reference" $field $.Release.Namespace) -}}
+{{- end -}}
+{{- $path := trimPrefix "k8s-secret://" $field -}}
+{{- $nameAndKey := splitList "/" $path -}}
+{{- $name := first (splitList "#" (index $nameAndKey 1)) -}}
+{{- $_ := set $telemetryNames $name true -}}
+{{- end -}}
+{{- end -}}
+{{- if gt (len $telemetryNames) 0 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-telemetry-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      {{- range $name := keys $telemetryNames | sortAlpha }}
+      - {{ $name | quote }}
+      {{- end }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-telemetry-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cyclopus.fullname" . }}-telemetry-secrets
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cyclopus.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- $webhookNames := dict -}}
+{{- range $reference := .Values.config.webhook.allowedSecretRefs -}}
+{{- $pattern := printf "^k8s-secret://%s/(cyclopus-webhook-[a-z0-9]([-a-z0-9.]*[a-z0-9])?)#[A-Za-z0-9._-]+$" $.Release.Namespace -}}
+{{- if not (regexMatch $pattern $reference) -}}
+{{- fail (printf "webhook signing Secret reference %q must be an exact k8s-secret://%s/cyclopus-webhook-name#key reference" $reference $.Release.Namespace) -}}
+{{- end -}}
+{{- $path := trimPrefix "k8s-secret://" $reference -}}
+{{- $nameAndKey := splitList "/" $path -}}
+{{- $name := first (splitList "#" (index $nameAndKey 1)) -}}
+{{- $_ := set $webhookNames $name true -}}
+{{- end -}}
+{{- if gt (len $webhookNames) 0 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cyclopus-webhook-secret-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      {{- range $name := keys $webhookNames | sortAlpha }}
+      - {{ $name | quote }}
+      {{- end }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cyclopus-webhook-secret-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cyclopus-webhook-secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cyclopus.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

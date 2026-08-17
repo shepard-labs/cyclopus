@@ -24,7 +24,7 @@ func TestLoadPrecedence(t *testing.T) {
 
 	cfg, err := Load(
 		[]string{"--config", path, "--http-address", "127.0.0.1:9000"},
-		[]string{"CYCLOPUS_HTTP_ADDRESS=127.0.0.1:8000", "CYCLOPUS_LOG_LEVEL=warn", "CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		[]string{"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example", "CYCLOPUS_HTTP_ADDRESS=127.0.0.1:8000", "CYCLOPUS_LOG_LEVEL=warn", "CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -69,11 +69,37 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadWebhookAllowedSecretRefs(t *testing.T) {
+	cfg, err := Load(nil, append(baseValidEnv,
+		"CYCLOPUS_WEBHOOK_RELEASE_NAME=release",
+		"CYCLOPUS_WEBHOOK_ALLOWED_SECRET_REFS=k8s-secret://cyclopus/cyclopus-webhook-primary#secret,k8s-secret://cyclopus/cyclopus-webhook-secondary#key"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Webhook.AllowedSecretRefs) != 2 {
+		t.Fatalf("AllowedSecretRefs = %v", cfg.Webhook.AllowedSecretRefs)
+	}
+}
+
+func TestLoadRejectsInvalidWebhookAllowedSecretRefs(t *testing.T) {
+	for _, value := range []string{
+		"bad",
+		"k8s-secret://other/cyclopus-webhook-primary#secret",
+		"k8s-secret://cyclopus/arbitrary#secret",
+		"k8s-secret://cyclopus/cyclopus-webhook-primary#secret,k8s-secret://cyclopus/cyclopus-webhook-primary#secret",
+	} {
+		_, err := Load(nil, append(baseValidEnv, "CYCLOPUS_WEBHOOK_RELEASE_NAME=release", "CYCLOPUS_WEBHOOK_ALLOWED_SECRET_REFS="+value))
+		if err == nil || !strings.Contains(err.Error(), "webhook.allowed_secret_refs") {
+			t.Fatalf("Load(%q) error = %v", value, err)
+		}
+	}
+}
+
 func TestLoadCertManagerClusterIssuerPrecedence(t *testing.T) {
 	// Flag overrides env, mirroring the other kubernetes fields.
 	cfg, err := Load(
 		[]string{"--kubernetes-cert-manager-cluster-issuer", "letsencrypt-prod"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER=letsencrypt-staging"},
+		append(baseValidEnv, "CYCLOPUS_KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER=letsencrypt-staging"),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -86,7 +112,7 @@ func TestLoadCertManagerClusterIssuerPrecedence(t *testing.T) {
 func TestLoadCertManagerClusterIssuerFromEnv(t *testing.T) {
 	cfg, err := Load(
 		nil,
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER=letsencrypt-staging"},
+		append(baseValidEnv, "CYCLOPUS_KUBERNETES_CERT_MANAGER_CLUSTER_ISSUER=letsencrypt-staging"),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -100,7 +126,7 @@ func TestLoadCertManagerClusterIssuerEmptyAllowed(t *testing.T) {
 	// An explicitly empty issuer disables the annotation and must validate.
 	cfg, err := Load(
 		[]string{"--kubernetes-cert-manager-cluster-issuer", ""},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err != nil {
 		t.Fatalf("Load() with empty issuer error = %v", err)
@@ -113,7 +139,7 @@ func TestLoadCertManagerClusterIssuerEmptyAllowed(t *testing.T) {
 func TestLoadCertManagerClusterIssuerRejectsInvalid(t *testing.T) {
 	_, err := Load(
 		[]string{"--kubernetes-cert-manager-cluster-issuer", "Bad Issuer!"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err == nil || !strings.Contains(err.Error(), "kubernetes.cert_manager_cluster_issuer must be a valid Kubernetes resource name") {
 		t.Fatalf("Load() error = %v, want cert-manager cluster issuer validation", err)
@@ -122,38 +148,56 @@ func TestLoadCertManagerClusterIssuerRejectsInvalid(t *testing.T) {
 
 func TestLoadGitHubConfigPrecedence(t *testing.T) {
 	cfg, err := Load(
-		[]string{"--github-app-id", "42", "--github-api-version", "2026-03-10", "--github-run-poll-interval", "5s"},
+		[]string{"--external-url", "https://cyclopus.example/", "--github-api-version", "2026-03-10", "--github-run-poll-interval", "5s"},
 		[]string{
 			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-			"CYCLOPUS_GITHUB_APP_ID=21",
-			"CYCLOPUS_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github.pem",
+			"CYCLOPUS_EXTERNAL_URL=https://env.example",
 			"CYCLOPUS_GITHUB_RUN_POLL_INTERVAL=10s",
 		},
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.GitHub.AppID != 42 || cfg.GitHub.PrivateKeyFile != "/run/secrets/github.pem" || cfg.GitHub.RunPollInterval != 5*time.Second {
-		t.Fatalf("github config = %+v", cfg.GitHub)
+	if cfg.ExternalURL != "https://cyclopus.example" || cfg.GitHub.RunPollInterval != 5*time.Second {
+		t.Fatalf("external URL/GitHub config = %q %+v", cfg.ExternalURL, cfg.GitHub)
 	}
 }
 
-func TestLoadGitHubPartialConfigValidation(t *testing.T) {
-	_, err := Load(nil, []string{
-		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
-		"CYCLOPUS_GITHUB_APP_ID=42",
-	})
-	if err == nil || !strings.Contains(err.Error(), "github.private_key_file is required") {
-		t.Fatalf("Load() error = %v, want private key requirement", err)
+func TestLoadExternalURLValidationAndNormalization(t *testing.T) {
+	for _, test := range []struct {
+		name, value, want string
+		valid             bool
+	}{
+		{name: "canonical", value: " https://cyclopus.example/ ", want: "https://cyclopus.example", valid: true},
+		{name: "path rejected", value: "https://cyclopus.example/control/"},
+		{name: "http", value: "http://cyclopus.example"},
+		{name: "userinfo", value: "https://admin@cyclopus.example"},
+		{name: "query", value: "https://cyclopus.example?next=evil"},
+		{name: "fragment", value: "https://cyclopus.example/#evil"},
+		{name: "malformed host", value: "https://bad host/"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := append(append([]string(nil), baseValidEnv...), "CYCLOPUS_EXTERNAL_URL="+test.value)
+			cfg, err := Load(nil, env)
+			if !test.valid {
+				if err == nil || !strings.Contains(err.Error(), "external_url") {
+					t.Fatalf("Load() error = %v, want external_url rejection", err)
+				}
+				return
+			}
+			if err != nil || cfg.ExternalURL != test.want {
+				t.Fatalf("Load() external URL = %q, %v, want %q", cfg.ExternalURL, err, test.want)
+			}
+		})
 	}
 }
 
 func TestLoadKubernetesRecoveryConfigPrecedence(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubeconfig", "/flag/kubeconfig", "--kubernetes-conflict-retries", "9", "--kubernetes-preview-hostname-suffix", "flag.example.test"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef", "CYCLOPUS_KUBECONFIG=/env/kubeconfig", "CYCLOPUS_KUBERNETES_RECOVERY_POLL_INTERVAL=250ms", "CYCLOPUS_KUBERNETES_CONFLICT_RETRIES=7", "CYCLOPUS_KUBERNETES_PREVIEW_HOSTNAME_SUFFIX=env.example.test"},
+		append(baseValidEnv, "CYCLOPUS_KUBECONFIG=/env/kubeconfig", "CYCLOPUS_KUBERNETES_RECOVERY_POLL_INTERVAL=250ms", "CYCLOPUS_KUBERNETES_CONFLICT_RETRIES=7", "CYCLOPUS_KUBERNETES_PREVIEW_HOSTNAME_SUFFIX=env.example.test"),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -166,7 +210,7 @@ func TestLoadKubernetesRecoveryConfigPrecedence(t *testing.T) {
 func TestLoadCustomDomainCNAMETargetDefaultsToPreviewSuffix(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.example.test"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -182,7 +226,7 @@ func TestLoadCustomDomainCNAMETargetDefaultsToPreviewSuffix(t *testing.T) {
 func TestLoadCustomDomainCNAMETargetOverride(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-preview-hostname-suffix", "203-0-113-7.example.test", "--kubernetes-custom-domain-cname-target", "ingress.example.test"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -198,7 +242,7 @@ func TestLoadCustomDomainCNAMETargetOverride(t *testing.T) {
 func TestLoadCustomDomainCNAMETargetRejectsInvalid(t *testing.T) {
 	_, err := Load(
 		[]string{"--kubernetes-custom-domain-cname-target", "bad/target"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err == nil || !strings.Contains(err.Error(), "kubernetes.custom_domain_cname_target must be a DNS suffix") {
 		t.Fatalf("Load() error = %v, want custom domain CNAME target validation", err)
@@ -208,7 +252,7 @@ func TestLoadCustomDomainCNAMETargetRejectsInvalid(t *testing.T) {
 func TestLoadNetworkEgressExcludedCIDRsParses(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5/32,198.51.100.0/24"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -228,7 +272,7 @@ func TestLoadNetworkEgressExcludedCIDRsParses(t *testing.T) {
 func TestLoadRejectsInvalidNetworkEgressExcludedCIDR(t *testing.T) {
 	_, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err == nil || !strings.Contains(err.Error(), "kubernetes.network_egress_excluded_cidrs") {
 		t.Fatalf("Load() error = %v, want invalid CIDR error", err)
@@ -237,6 +281,7 @@ func TestLoadRejectsInvalidNetworkEgressExcludedCIDR(t *testing.T) {
 
 func TestLoadNetworkEgressExcludedCIDRsFromEnvSplits(t *testing.T) {
 	cfg, err := Load(nil, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -259,6 +304,7 @@ func TestLoadNetworkEgressExcludedCIDRsFromEnvSplits(t *testing.T) {
 
 func TestLoadTrustedHostsFromEnvSplits(t *testing.T) {
 	cfg, err := Load(nil, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -281,6 +327,7 @@ func TestLoadTrustedHostsFromEnvSplits(t *testing.T) {
 
 func TestLoadSingleValueEnvSliceYieldsSingleElement(t *testing.T) {
 	cfg, err := Load(nil, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -299,6 +346,7 @@ func TestLoadUnsetEnvSliceDoesNotClobberFlag(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5/32"},
 		[]string{
+			"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -320,6 +368,7 @@ func TestLoadUnsetEnvSliceDoesNotClobberFlag(t *testing.T) {
 
 func TestLoadNetworkEgressExcludedCIDRsTrimsWhitespaceAndEmpties(t *testing.T) {
 	cfg, err := Load(nil, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -344,6 +393,7 @@ func TestLoadNetworkEgressExcludedCIDRsFlagTrimsWhitespace(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", " 203.0.113.0/24 , 198.51.100.0/24 "},
 		[]string{
+			"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -364,21 +414,20 @@ func TestLoadNetworkEgressExcludedCIDRsFlagTrimsWhitespace(t *testing.T) {
 	}
 }
 
-func TestGitHubEnabledOnlyWithCompleteConfig(t *testing.T) {
+func TestGitHubEnabledUsesRuntimeOnboardingConfiguration(t *testing.T) {
 	cfg, err := Load(nil, []string{
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-		"CYCLOPUS_GITHUB_APP_ID=42",
-		"CYCLOPUS_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github.pem",
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 	})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if !cfg.GitHub.Enabled() {
-		t.Fatal("GitHub.Enabled() = false for complete configuration")
+		t.Fatal("GitHub.Enabled() = false for valid runtime configuration")
 	}
-	cfg.GitHub.PrivateKeyFile = ""
+	cfg.GitHub.RequestTimeout = 0
 	if cfg.GitHub.Enabled() {
 		t.Fatal("GitHub.Enabled() = true for incomplete configuration")
 	}
@@ -405,7 +454,7 @@ func TestLoadRequiresBootstrapSecretOfAtLeast32Bytes(t *testing.T) {
 func TestLoadValidation(t *testing.T) {
 	_, err := Load(
 		[]string{"--http-address", "invalid", "--grpc-address", "also-invalid", "--http-read-timeout", "0s", "--log-level", "verbose", "--worker-scan-interval", "0s", "--worker-max-concurrent-deploys", "0", "--github-api-base-url", "relative", "--github-dispatch-observation-interval", "0s", "--kubernetes-recovery-poll-interval", "0s", "--kubernetes-conflict-retries", "-1"},
-		[]string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		baseValidEnv,
 	)
 	if err == nil {
 		t.Fatal("Load() error = nil, want validation error")
@@ -423,7 +472,7 @@ func TestLoadRejectsUntrustedOrInsecureGitHubURLsAndLongTimeout(t *testing.T) {
 		"--github-api-base-url", "http://evil.example/",
 		"--github-upload-url", "https://uploads.evil.example/",
 		"--github-request-timeout", "10s",
-	}, []string{"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"})
+	}, baseValidEnv)
 	if err == nil {
 		t.Fatal("Load() error = nil")
 	}
@@ -447,6 +496,7 @@ func TestLoadRejectsPublicPlaintextAndLongSession(t *testing.T) {
 
 func TestLoadAllowsSevenDaySessionTTL(t *testing.T) {
 	cfg, err := Load([]string{"--auth-session-ttl", "168h"}, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -458,6 +508,7 @@ func TestLoadAllowsSevenDaySessionTTL(t *testing.T) {
 
 func TestLoadAllowsExplicitDevelopmentPublicPlaintext(t *testing.T) {
 	cfg, err := Load([]string{"--http-address", "0.0.0.0:8080", "--insecure-public-listeners"}, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -469,6 +520,7 @@ func TestLoadAllowsExplicitDevelopmentPublicPlaintext(t *testing.T) {
 
 func TestLoadListenerSecurityDefaults(t *testing.T) {
 	cfg, err := Load(nil, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -541,6 +593,7 @@ func TestLoadAllowsPublicTLSListeners(t *testing.T) {
 		"--grpc-tls-cert-file", "grpc.crt",
 		"--grpc-tls-key-file", "grpc.key",
 	}, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
@@ -558,6 +611,8 @@ var baseValidEnv = []string{
 	"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 	"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 	"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+	"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
+	"CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE=cyclopus",
 }
 
 func TestMetricsEnabledRequiresURLAndCredential(t *testing.T) {
@@ -630,5 +685,18 @@ func TestMetricsEnabledRequiresURLAndCredential(t *testing.T) {
 				t.Fatalf("MetricsEnabled() = %v, want %v", got, tc.wantEnabled)
 			}
 		})
+	}
+}
+
+func TestTelemetrySecretRefsMustUseControlPlaneNamespace(t *testing.T) {
+	for _, reference := range []string{"not-a-ref", "k8s-secret://other/openobserve#credential"} {
+		_, err := Load([]string{
+			"--observability-openobserve-base-url", "https://openobserve.example",
+			"--observability-openobserve-organization", "cyclopus",
+			"--observability-openobserve-credential-secret", reference,
+		}, baseValidEnv)
+		if err == nil || !strings.Contains(err.Error(), "observability.openobserve_credential_secret") {
+			t.Fatalf("Load() error = %v for %q, want telemetry Secret ref rejection", err, reference)
+		}
 	}
 }
