@@ -5,9 +5,6 @@ import (
 	"time"
 )
 
-// Registry is one row of the registries table: an OCI image registry an app
-// pulls images from (§6). CredentialSecretRef is a k8s-secret://…#… REFERENCE
-// to the pull credential — the raw credential is never stored in Postgres.
 type Registry struct {
 	ID, OrgID, Provider, RegistryHost, State, Checkpoint string
 	RegistryURL                                          string
@@ -16,12 +13,6 @@ type Registry struct {
 	PendingGeneration                                    *int64
 	FailureCode, FailureMessage                          *string
 	CreatedAt, UpdatedAt                                 time.Time
-}
-
-type SaveRegistryParams struct {
-	Registry    Registry
-	Idempotency CompleteIdempotencyParams
-	Audit       *AuditEvent
 }
 
 const registrySelect = `SELECT id::text,org_id::text,provider,registry_host,state,COALESCE(checkpoint,''),active_generation,
@@ -36,22 +27,6 @@ func scanRegistry(row rowScanner, value *Registry) error {
 	}
 	value.RegistryURL = value.RegistryHost
 	return nil
-}
-
-// CreateRegistry inserts a registry, guarding that the actor's org exists so a
-// missing org yields ErrNotFound rather than a bare foreign-key violation. A
-// duplicate (org_id, registry_url) maps to ErrAlreadyExists and a CHECK
-// violation (bad provider/url/secret_ref shape) maps to ErrInvalidArgument.
-func (s *Store) CreateRegistry(ctx context.Context, p SaveRegistryParams) (Registry, error) {
-	return Registry{}, ErrFailedPrecondition
-}
-
-// DeleteRegistry removes a registry org-scoped. Because apps.registry_id
-// references registries ON DELETE RESTRICT, deleting a registry still referenced
-// by an app raises a foreign-key violation; mapMutationError classifies that as
-// ErrFailedPrecondition (409) rather than a bare 500.
-func (s *Store) DeleteRegistry(ctx context.Context, orgID, id string, idem CompleteIdempotencyParams, audit *AuditEvent) error {
-	return ErrFailedPrecondition
 }
 
 func (s *Store) GetRegistry(ctx context.Context, orgID, id string) (Registry, error) {

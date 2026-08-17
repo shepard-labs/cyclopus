@@ -1,80 +1,39 @@
 package settings
 
 import (
-	"fmt"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui"
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
 templ GitConnections(connections []store.GitConnection, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
-	@components.Page("Git Connections", user, org, flash, "/settings/git-connections", gitConnectionsContent(connections, org, errMsg))
+	@components.Page("Git Connections", user, org, flash, "/settings/git-connections", gitConnectionsContent(connections, errMsg))
 }
 
-templ gitConnectionsContent(connections []store.GitConnection, org store.Organization, errMsg string) {
+templ gitConnectionsContent(connections []store.GitConnection, errMsg string) {
 	<div class="w-full space-y-6">
-		@components.SectionCard("Add GitHub App connection") {
+		@components.SectionCard("GitHub App connections") {
 			if errMsg != "" {
 				@components.Alert("error", errMsg)
 			}
-			<form method="POST" action="/settings/git-connections" class="space-y-4">
-				<div class="grid gap-4 sm:grid-cols-2">
-					<div>
-						@components.FormField("gc-repo", "repo_full_name", "Repository (owner/repo)", "text", "", "acme/api", true)
-					</div>
-					<div>
-						<div>
-							<label for="gc-installation" class="block text-xs font-medium text-base-content/80 mb-1.5">GitHub App Installation ID <span class="text-error" aria-hidden="true">*</span></label>
-							<input type="number" id="gc-installation" name="installation_id" required placeholder="12345678" class="block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
-						</div>
-					</div>
-				</div>
-				<div class="grid gap-4 sm:grid-cols-2">
-					<div>
-						@components.FormField("gc-branch", "default_branch", "Default branch", "text", "main", "", false)
-					</div>
-					<div>
-						<label for="gc-secret" class="block text-xs font-medium text-base-content/80 mb-1.5">Webhook secret ref <span class="text-base-content/50 font-normal">(k8s-secret://…)</span> <span class="text-error" aria-hidden="true">*</span></label>
-						<input type="text" id="gc-secret" name="webhook_secret_ref" required placeholder="k8s-secret://cyclopus/webhook-secret#value" class="block w-full rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
-					</div>
-				</div>
-				@components.Button(components.ButtonProps{
-					Type:    components.ButtonTypeSubmit,
-					Variant: components.ButtonVariantPrimary,
-				}) {
-					Add connection
-				}
-			</form>
+			<p class="text-sm text-base-content/65">GitHub App setup and repository import are not available in this phase. Existing connection status is shown read-only.</p>
 		}
 		if len(connections) > 0 {
 			@components.Card("Connections") {
 				<table class="table-auto w-full text-sm">
 					<thead>
 						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
-							<th class="text-left py-2">Repository</th>
-							<th class="text-left py-2">Branch</th>
-							<th class="text-left py-2">Installation</th>
+							<th class="text-left py-2">Status</th>
+							<th class="text-left py-2">Access</th>
 							<th class="text-left py-2">Created</th>
-							<th class="text-right py-2">Actions</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-line">
 						for _, gc := range connections {
 							<tr class="bg-base-300/40 text-base-content/80">
-								<td class="py-2 font-mono text-xs">{ gc.RepoFullName }</td>
-								<td class="py-2 text-xs text-base-content/65">{ gc.DefaultBranch }</td>
-								<td class="py-2 text-xs text-base-content/65 font-mono">{ fmt.Sprintf("%d", gc.InstallationID) }</td>
+								<td class="py-2 text-xs text-base-content/65">{ gc.State }</td>
+								<td class="py-2 text-xs text-base-content/65">{ gc.AccessState }</td>
 								<td class="py-2 text-xs text-base-content/50">{ relTimeSettings(gc.CreatedAt) }</td>
-								<td class="py-2 text-right">
-									<form method="POST" action={ templ.SafeURL("/settings/git-connections/" + gc.ID + "/delete") } onsubmit="return confirm('Delete this connection?')">
-										@components.Button(components.ButtonProps{
-											Type:    components.ButtonTypeSubmit,
-											Variant: components.ButtonVariantDanger,
-										}) {
-											Delete
-										}
-									</form>
-								</td>
 							</tr>
 						}
 					</tbody>

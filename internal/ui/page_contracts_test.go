@@ -198,7 +198,7 @@ func TestSettingsAndAdminPagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 			store.User{Email: "operator@example.com"}, store.Organization{}, nil, "", "", "",
 		),
 		"git connections": settingspages.GitConnections(
-			[]store.GitConnection{{ID: "connection-1", RepoFullName: "acme/api", DefaultBranch: "main"}},
+			[]store.GitConnection{{ID: "connection-1", RepositoryFullName: "acme/api", RepositoryDefaultBranch: "main"}},
 			store.User{}, store.Organization{}, nil, "",
 		),
 		"registries": settingspages.Registries(
@@ -241,6 +241,20 @@ func TestSettingsAndAdminPagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPhaseTwoIntegrationSettingsAreReadOnly(t *testing.T) {
+	gitOutput := renderPage(t, settingspages.GitConnections([]store.GitConnection{{State: "active", AccessState: "active"}}, store.User{}, store.Organization{}, nil, ""))
+	requirePageContracts(t, gitOutput, "GitHub App setup and repository import are not available in this phase", "Existing connection status is shown read-only")
+	registryOutput := renderPage(t, settingspages.Registries([]store.Registry{{Provider: "ghcr", State: "ready", HasActiveCredential: true}}, store.User{}, store.Organization{}, nil, ""))
+	requirePageContracts(t, registryOutput, "GHCR credential setup and rotation are not available in this phase", "Current credential status is shown read-only")
+	for name, output := range map[string]string{"git connections": gitOutput, "registries": registryOutput} {
+		for _, forbidden := range []string{"action=\"/settings/git-connections", "action=\"/settings/registries", "/settings/git-connections/", "/settings/registries/", "installation_id", "webhook_secret_ref", "credential_secret_ref", "k8s-secret://"} {
+			if strings.Contains(output, forbidden) {
+				t.Errorf("%s contains obsolete mutation or secret contract %q", name, forbidden)
+			}
+		}
 	}
 }
 

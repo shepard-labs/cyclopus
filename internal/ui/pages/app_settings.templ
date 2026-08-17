@@ -37,7 +37,7 @@ templ appSettingsContent(app store.App, project store.Project, errMsg string) {
 					</div>
 					@components.FormField("s-health", "health_check_path", "Health check path", "text", app.HealthCheckPath, "", true)
 				</div>
-				@components.FormField("s-ci", "ci_workflow_id", "CI workflow ID (GitHub Actions)", "text", strptr(app.CIWorkflowID), "deploy.yml", false)
+				@components.FormField("s-ci", "github_workflow_path", "GitHub workflow path", "text", app.GitHubWorkflowPath, ".github/workflows/deploy.yml", false)
 				@components.FormField("s-image-repo", "image_repository", "Image repository", "text", strptr(app.ImageRepository), "ghcr.io/org/repo", false)
 			}
 			@components.SectionCard("Scaling (production only)") {

@@ -27,7 +27,6 @@ type Project struct {
 type App struct {
 	ID, OrgID, ProjectID, Name, Slug, HostnameLabel        string
 	RegistryID, RegistryURL, ImageRepository               *string
-	CIWorkflowID                                           *string
 	GitHubWorkflowPath, ProductionBranch, AnnotationPolicy string
 	ImageVisibility, CleanupState                          string
 	DesiredGeneration                                      int64
@@ -210,7 +209,6 @@ func scanApp(row rowScanner) (App, error) {
 	if v.KEDACronSchedules == nil {
 		v.KEDACronSchedules = []KEDACronSchedule{}
 	}
-	v.CIWorkflowID = &v.GitHubWorkflowPath
 	return v, nil
 }
 

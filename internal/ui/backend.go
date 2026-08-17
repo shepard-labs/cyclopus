@@ -345,28 +345,6 @@ func (b *Backend) ListGitConnections(ctx context.Context, token, _ string) ([]st
 	return b.svc.ListGitConnections(ctx, actor)
 }
 
-// CreateGitConnection passes the same fields the old REST payload carried
-// (Provider empty — the service applies its default).
-func (b *Backend) CreateGitConnection(ctx context.Context, token, idemKey, _ string, input service.GitConnectionInput) (*store.GitConnection, error) {
-	actor, err := b.actor(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	value, err := b.svc.CreateGitConnection(ctx, actor, idemKey, input)
-	if err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (b *Backend) DeleteGitConnection(ctx context.Context, token, idemKey, gcID string) error {
-	actor, err := b.actor(ctx, token)
-	if err != nil {
-		return err
-	}
-	return b.svc.DeleteGitConnection(ctx, actor, idemKey, gcID)
-}
-
 // ── Registries ──────────────────────────────────────────────────────────────
 
 func (b *Backend) ListRegistries(ctx context.Context, token, _ string) ([]store.Registry, error) {
@@ -375,26 +353,6 @@ func (b *Backend) ListRegistries(ctx context.Context, token, _ string) ([]store.
 		return nil, err
 	}
 	return b.svc.ListRegistries(ctx, actor)
-}
-
-func (b *Backend) CreateRegistry(ctx context.Context, token, idemKey, _ string, input service.RegistryInput) (*store.Registry, error) {
-	actor, err := b.actor(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	value, err := b.svc.CreateRegistry(ctx, actor, idemKey, input)
-	if err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (b *Backend) DeleteRegistry(ctx context.Context, token, idemKey, regID string) error {
-	actor, err := b.actor(ctx, token)
-	if err != nil {
-		return err
-	}
-	return b.svc.DeleteRegistry(ctx, actor, idemKey, regID)
 }
 
 // ── Webhooks ────────────────────────────────────────────────────────────────
@@ -545,7 +503,7 @@ func appInputFromStore(v store.App) service.AppInput {
 	runtimeClass := v.RuntimeClass
 	return service.AppInput{
 		ProjectID: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel,
-		RegistryID: v.RegistryID, ImageRepository: v.ImageRepository, CIWorkflowID: v.CIWorkflowID,
+		RegistryID: v.RegistryID, ImageRepository: v.ImageRepository, GitHubWorkflowPath: stringPtrField(v.GitHubWorkflowPath),
 		ContainerPort: v.ContainerPort, HealthCheckPath: v.HealthCheckPath, ScalingMode: v.ScalingMode,
 		MinReplicas: v.MinReplicas, MaxReplicas: v.MaxReplicas, HPATargetCPUPercent: v.HPATargetCPUPercent,
 		KEDACronSchedules:             append([]store.KEDACronSchedule(nil), v.KEDACronSchedules...),
@@ -571,8 +529,8 @@ func applyAppField(input *service.AppInput, path string, value any) error {
 		input.HostnameLabel = stringField(value)
 	case "health_check_path":
 		input.HealthCheckPath = stringField(value)
-	case "ci_workflow_id":
-		input.CIWorkflowID = stringPtrField(value)
+	case "github_workflow_path":
+		input.GitHubWorkflowPath = stringPtrField(value)
 	case "image_repository":
 		input.ImageRepository = stringPtrField(value)
 	case "registry_id":

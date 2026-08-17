@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi2"
 	"github.com/getkin/kin-openapi/openapi2conv"
@@ -39,10 +40,13 @@ func main() {
 	if err := doc2.UnmarshalJSON(raw); err != nil {
 		fatal("parse swagger 2.0: %v", err)
 	}
+	markSensitiveSwaggerSchemas(doc2)
+	writeJSON(os.Args[1], doc2)
 	doc3, err := openapi2conv.ToV3(doc2)
 	if err != nil {
 		fatal("convert to OpenAPI 3: %v", err)
 	}
+	markWriteOnlySchemas(doc3)
 
 	// Presentation metadata. The proto carries no API-info annotation, so the
 	// generator's placeholders are replaced wholesale.
@@ -73,6 +77,68 @@ func main() {
 		fatal("write output: %v", err)
 	}
 	fmt.Printf("gen-openapi: wrote %s (%d bytes, %d paths)\n", os.Args[2], len(out), len(doc3.Paths.Map()))
+}
+
+func markSensitiveSwaggerSchemas(doc *openapi2.T) {
+	for _, schema := range doc.Definitions {
+		markSensitiveSwaggerSchema(schema)
+	}
+}
+
+func markSensitiveSwaggerSchema(schema *openapi2.SchemaRef) {
+	if schema == nil || schema.Value == nil {
+		return
+	}
+	value := schema.Value
+	if strings.Contains(strings.ToLower(value.Description), "sensitive pat classic") {
+		value.Format = "password"
+		if value.Extensions == nil {
+			value.Extensions = map[string]any{}
+		}
+		value.Extensions["x-writeOnly"] = true
+	}
+	for _, property := range value.Properties {
+		markSensitiveSwaggerSchema(property)
+	}
+	markSensitiveSwaggerSchema(value.Items)
+}
+
+func writeJSON(path string, value any) {
+	out, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		fatal("marshal %s: %v", path, err)
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		fatal("write %s: %v", path, err)
+	}
+}
+
+func markWriteOnlySchemas(doc *openapi3.T) {
+	if doc.Components == nil {
+		return
+	}
+	for _, schemaRef := range doc.Components.Schemas {
+		markWriteOnlySchema(schemaRef)
+	}
+}
+
+func markWriteOnlySchema(schemaRef *openapi3.SchemaRef) {
+	if schemaRef == nil || schemaRef.Value == nil {
+		return
+	}
+	schema := schemaRef.Value
+	if strings.Contains(strings.ToLower(schema.Description), "sensitive pat classic") {
+		schema.WriteOnly = true
+	}
+	if value, ok := schema.Extensions["x-writeOnly"].(bool); ok && value {
+		schema.WriteOnly = true
+		delete(schema.Extensions, "x-writeOnly")
+	}
+	for _, property := range schema.Properties {
+		markWriteOnlySchema(property)
+	}
+	markWriteOnlySchema(schema.Items)
 }
 
 func dirOf(path string) string {

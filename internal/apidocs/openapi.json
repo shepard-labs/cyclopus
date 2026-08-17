@@ -37,6 +37,22 @@
         },
         "type": "object"
       },
+      "GitProviderServiceDisconnectGitConnectionBody": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "GitProviderServiceRefreshGitHubInstallationBody": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ReleaseServiceDeployBody": {
         "properties": {
           "gitCommitSha": {
@@ -170,8 +186,11 @@
       },
       "v1Application": {
         "properties": {
-          "ciWorkflowId": {
-            "type": "string"
+          "annotationPolicy": {
+            "$ref": "#/components/schemas/v1OciAnnotationPolicy"
+          },
+          "annotationStatus": {
+            "$ref": "#/components/schemas/v1OciAnnotationStatus"
           },
           "containerPort": {
             "format": "int32",
@@ -196,6 +215,9 @@
           "deployTimeoutSeconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "githubWorkflowPath": {
+            "type": "string"
           },
           "healthCheckPath": {
             "type": "string"
@@ -258,6 +280,9 @@
           "previewsEnabled": {
             "type": "boolean"
           },
+          "productionBranch": {
+            "type": "string"
+          },
           "projectId": {
             "type": "string"
           },
@@ -312,6 +337,51 @@
           },
           "targetType": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1BeginGitHubAppSetupRequest": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1BeginGitHubAppSetupResponse": {
+        "properties": {
+          "flow": {
+            "$ref": "#/components/schemas/v1BeginGitHubFlowResponse"
+          }
+        },
+        "type": "object"
+      },
+      "v1BeginGitHubFlowResponse": {
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startUrl": {
+            "description": "A short-lived same-origin browser route, never a raw GitHub URL.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1BeginGitHubInstallationRequest": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1BeginGitHubInstallationResponse": {
+        "properties": {
+          "flow": {
+            "$ref": "#/components/schemas/v1BeginGitHubFlowResponse"
           }
         },
         "type": "object"
@@ -443,14 +513,6 @@
         },
         "type": "object"
       },
-      "v1CreateGitConnectionResponse": {
-        "properties": {
-          "gitConnection": {
-            "$ref": "#/components/schemas/v1GitConnection"
-          }
-        },
-        "type": "object"
-      },
       "v1CreateProductionEnvironmentResponse": {
         "properties": {
           "environment": {
@@ -463,14 +525,6 @@
         "properties": {
           "project": {
             "$ref": "#/components/schemas/v1Project"
-          }
-        },
-        "type": "object"
-      },
-      "v1CreateRegistryResponse": {
-        "properties": {
-          "registry": {
-            "$ref": "#/components/schemas/v1Registry"
           }
         },
         "type": "object"
@@ -494,9 +548,6 @@
       "v1DeleteDomainResponse": {
         "type": "object"
       },
-      "v1DeleteGitConnectionResponse": {
-        "type": "object"
-      },
       "v1DeleteOrganizationResponse": {
         "properties": {
           "operation": {
@@ -513,9 +564,6 @@
         },
         "type": "object"
       },
-      "v1DeleteRegistryResponse": {
-        "type": "object"
-      },
       "v1DeleteWebhookResponse": {
         "type": "object"
       },
@@ -523,6 +571,14 @@
         "properties": {
           "operation": {
             "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1DisconnectGitConnectionResponse": {
+        "properties": {
+          "gitConnection": {
+            "$ref": "#/components/schemas/v1GitConnection"
           }
         },
         "type": "object"
@@ -779,10 +835,42 @@
         },
         "type": "object"
       },
+      "v1GetGhcrCredentialStatusResponse": {
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/v1GhcrCredentialStatus"
+          }
+        },
+        "type": "object"
+      },
       "v1GetGitConnectionResponse": {
         "properties": {
           "gitConnection": {
             "$ref": "#/components/schemas/v1GitConnection"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetGitHubAppStatusResponse": {
+        "properties": {
+          "githubApp": {
+            "$ref": "#/components/schemas/v1GitHubAppStatus"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetGitHubInstallationResponse": {
+        "properties": {
+          "installation": {
+            "$ref": "#/components/schemas/v1GitHubInstallation"
+          }
+        },
+        "type": "object"
+      },
+      "v1GetImportOperationResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1ImportOperation"
           }
         },
         "type": "object"
@@ -823,14 +911,6 @@
         },
         "type": "object"
       },
-      "v1GetRegistryResponse": {
-        "properties": {
-          "registry": {
-            "$ref": "#/components/schemas/v1Registry"
-          }
-        },
-        "type": "object"
-      },
       "v1GetReleaseResponse": {
         "properties": {
           "release": {
@@ -847,39 +927,550 @@
         },
         "type": "object"
       },
-      "v1GitConnection": {
-        "description": "GitConnection is one row of the git_connections table: a GitHub App\ninstallation bound to a single repository. webhook_secret_ref is a\nk8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e REFERENCE to the webhook signing\nsecret; the raw secret is never accepted or stored in Postgres.",
+      "v1GhcrCredential": {
         "properties": {
+          "personalAccessToken": {
+            "description": "Input-only and sensitive PAT classic with read:packages. Never returned or logged.",
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          },
+          "username": {
+            "description": "Input-only and sensitive. Never returned, logged, or persisted in PostgreSQL.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1GhcrCredentialState": {
+        "default": "GHCR_CREDENTIAL_STATE_UNSPECIFIED",
+        "enum": [
+          "GHCR_CREDENTIAL_STATE_UNSPECIFIED",
+          "GHCR_CREDENTIAL_STATE_NOT_CONFIGURED",
+          "GHCR_CREDENTIAL_STATE_CREATING",
+          "GHCR_CREDENTIAL_STATE_READY",
+          "GHCR_CREDENTIAL_STATE_ROTATING",
+          "GHCR_CREDENTIAL_STATE_RECONCILING",
+          "GHCR_CREDENTIAL_STATE_FAILED"
+        ],
+        "type": "string"
+      },
+      "v1GhcrCredentialStatus": {
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
           },
-          "defaultBranch": {
+          "failureCode": {
+            "$ref": "#/components/schemas/v1IntegrationFailureCode"
+          },
+          "failureMessage": {
+            "type": "string"
+          },
+          "generation": {
+            "format": "int64",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/v1GhcrCredentialState"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1GitConnection": {
+        "properties": {
+          "connectedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "disconnectedAt": {
+            "format": "date-time",
             "type": "string"
           },
           "id": {
+            "type": "string"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/v1GitHubRepository"
+          },
+          "status": {
+            "$ref": "#/components/schemas/v1GitConnectionStatus"
+          }
+        },
+        "type": "object"
+      },
+      "v1GitConnectionStatus": {
+        "default": "GIT_CONNECTION_STATUS_UNSPECIFIED",
+        "enum": [
+          "GIT_CONNECTION_STATUS_UNSPECIFIED",
+          "GIT_CONNECTION_STATUS_ACTIVE",
+          "GIT_CONNECTION_STATUS_SUSPENDED",
+          "GIT_CONNECTION_STATUS_INACCESSIBLE",
+          "GIT_CONNECTION_STATUS_DELETED",
+          "GIT_CONNECTION_STATUS_DISCONNECTED"
+        ],
+        "type": "string"
+      },
+      "v1GitHubAccountType": {
+        "default": "GITHUB_ACCOUNT_TYPE_UNSPECIFIED",
+        "enum": [
+          "GITHUB_ACCOUNT_TYPE_UNSPECIFIED",
+          "GITHUB_ACCOUNT_TYPE_USER",
+          "GITHUB_ACCOUNT_TYPE_ORGANIZATION"
+        ],
+        "type": "string"
+      },
+      "v1GitHubAppSetupState": {
+        "default": "GITHUB_APP_SETUP_STATE_UNSPECIFIED",
+        "enum": [
+          "GITHUB_APP_SETUP_STATE_UNSPECIFIED",
+          "GITHUB_APP_SETUP_STATE_NOT_CONFIGURED",
+          "GITHUB_APP_SETUP_STATE_SETUP_IN_PROGRESS",
+          "GITHUB_APP_SETUP_STATE_READY",
+          "GITHUB_APP_SETUP_STATE_FAILED",
+          "GITHUB_APP_SETUP_STATE_ORPHANED",
+          "GITHUB_APP_SETUP_STATE_REPLACING"
+        ],
+        "type": "string"
+      },
+      "v1GitHubAppStatus": {
+        "properties": {
+          "appId": {
+            "format": "int64",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credentialReadiness": {
+            "$ref": "#/components/schemas/v1GitHubCredentialReadiness"
+          },
+          "failureCode": {
+            "$ref": "#/components/schemas/v1IntegrationFailureCode"
+          },
+          "failureMessage": {
+            "type": "string"
+          },
+          "htmlUrl": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerLogin": {
+            "type": "string"
+          },
+          "ownerType": {
+            "$ref": "#/components/schemas/v1GitHubAccountType"
+          },
+          "setupState": {
+            "$ref": "#/components/schemas/v1GitHubAppSetupState"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "webhookUrl": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1GitHubCredentialReadiness": {
+        "default": "GITHUB_CREDENTIAL_READINESS_UNSPECIFIED",
+        "enum": [
+          "GITHUB_CREDENTIAL_READINESS_UNSPECIFIED",
+          "GITHUB_CREDENTIAL_READINESS_NOT_CONFIGURED",
+          "GITHUB_CREDENTIAL_READINESS_PENDING",
+          "GITHUB_CREDENTIAL_READINESS_READY",
+          "GITHUB_CREDENTIAL_READINESS_FAILED"
+        ],
+        "type": "string"
+      },
+      "v1GitHubInstallation": {
+        "properties": {
+          "accountId": {
+            "format": "int64",
+            "type": "string"
+          },
+          "accountLogin": {
+            "type": "string"
+          },
+          "accountType": {
+            "$ref": "#/components/schemas/v1GitHubAccountType"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "githubInstallationId": {
+            "format": "int64",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lifecycleStatus": {
+            "$ref": "#/components/schemas/v1GitHubInstallationLifecycleStatus"
+          },
+          "repositorySelection": {
+            "$ref": "#/components/schemas/v1GitHubInstallationRepositorySelection"
+          },
+          "settingsUrl": {
+            "type": "string"
+          },
+          "suspendedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "syncedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1GitHubInstallationLifecycleStatus": {
+        "default": "GITHUB_INSTALLATION_LIFECYCLE_STATUS_UNSPECIFIED",
+        "enum": [
+          "GITHUB_INSTALLATION_LIFECYCLE_STATUS_UNSPECIFIED",
+          "GITHUB_INSTALLATION_LIFECYCLE_STATUS_ACTIVE",
+          "GITHUB_INSTALLATION_LIFECYCLE_STATUS_SUSPENDED",
+          "GITHUB_INSTALLATION_LIFECYCLE_STATUS_DELETED"
+        ],
+        "type": "string"
+      },
+      "v1GitHubInstallationRepositorySelection": {
+        "default": "GITHUB_INSTALLATION_REPOSITORY_SELECTION_UNSPECIFIED",
+        "enum": [
+          "GITHUB_INSTALLATION_REPOSITORY_SELECTION_UNSPECIFIED",
+          "GITHUB_INSTALLATION_REPOSITORY_SELECTION_ALL",
+          "GITHUB_INSTALLATION_REPOSITORY_SELECTION_SELECTED"
+        ],
+        "type": "string"
+      },
+      "v1GitHubRepository": {
+        "properties": {
+          "accessStatus": {
+            "$ref": "#/components/schemas/v1GitHubRepositoryAccessStatus"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
             "type": "string"
           },
           "installationId": {
             "format": "int64",
             "type": "string"
           },
-          "organizationId": {
+          "name": {
             "type": "string"
           },
-          "provider": {
-            "description": "provider is \"github\" (the only supported value in v1).",
+          "nodeId": {
             "type": "string"
           },
-          "repoFullName": {
+          "owner": {
             "type": "string"
           },
-          "webhookSecretRef": {
-            "description": "webhook_secret_ref is a k8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e reference to\nthe webhook signing secret, NOT a plaintext secret.",
+          "private": {
+            "type": "boolean"
+          },
+          "syncedAt": {
+            "format": "date-time",
             "type": "string"
           }
         },
         "type": "object"
+      },
+      "v1GitHubRepositoryAccessStatus": {
+        "default": "GITHUB_REPOSITORY_ACCESS_STATUS_UNSPECIFIED",
+        "enum": [
+          "GITHUB_REPOSITORY_ACCESS_STATUS_UNSPECIFIED",
+          "GITHUB_REPOSITORY_ACCESS_STATUS_ACTIVE",
+          "GITHUB_REPOSITORY_ACCESS_STATUS_INACCESSIBLE",
+          "GITHUB_REPOSITORY_ACCESS_STATUS_DELETED"
+        ],
+        "type": "string"
+      },
+      "v1GitHubWorkflow": {
+        "properties": {
+          "compatibility": {
+            "$ref": "#/components/schemas/v1GitHubWorkflowCompatibility"
+          },
+          "incompatibilityReasons": {
+            "description": "Stable, deterministic reason codes emitted only by the approved narrow parser.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/v1GitHubWorkflowState"
+          }
+        },
+        "type": "object"
+      },
+      "v1GitHubWorkflowCompatibility": {
+        "default": "GITHUB_WORKFLOW_COMPATIBILITY_UNSPECIFIED",
+        "enum": [
+          "GITHUB_WORKFLOW_COMPATIBILITY_UNSPECIFIED",
+          "GITHUB_WORKFLOW_COMPATIBILITY_COMPATIBLE",
+          "GITHUB_WORKFLOW_COMPATIBILITY_INCOMPATIBLE",
+          "GITHUB_WORKFLOW_COMPATIBILITY_UNAVAILABLE"
+        ],
+        "type": "string"
+      },
+      "v1GitHubWorkflowState": {
+        "default": "GITHUB_WORKFLOW_STATE_UNSPECIFIED",
+        "enum": [
+          "GITHUB_WORKFLOW_STATE_UNSPECIFIED",
+          "GITHUB_WORKFLOW_STATE_ACTIVE",
+          "GITHUB_WORKFLOW_STATE_DISABLED"
+        ],
+        "type": "string"
+      },
+      "v1ImportGitRepositoryRequest": {
+        "properties": {
+          "annotationPolicy": {
+            "$ref": "#/components/schemas/v1OciAnnotationPolicy"
+          },
+          "applicationName": {
+            "type": "string"
+          },
+          "applicationSlug": {
+            "type": "string"
+          },
+          "containerPort": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "cpuLimitMillicores": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "cpuRequestMillicores": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "deployTimeoutSeconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "ghcrCredential": {
+            "$ref": "#/components/schemas/v1GhcrCredential"
+          },
+          "githubWorkflowPath": {
+            "type": "string"
+          },
+          "healthCheckPath": {
+            "type": "string"
+          },
+          "hostnameLabel": {
+            "type": "string"
+          },
+          "hpaTargetCpuPercent": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "imageRepository": {
+            "type": "string"
+          },
+          "kedaCronSchedules": {
+            "items": {
+              "$ref": "#/components/schemas/v1KedaCronSchedule"
+            },
+            "type": "array"
+          },
+          "kedaHttpTargetPendingRequests": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "maxPreviewEnvironments": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "maxReplicas": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "memoryLimitMib": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "memoryRequestMib": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "minReplicas": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "previewIdleTtlHours": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "previewsEnabled": {
+            "type": "boolean"
+          },
+          "productionBranch": {
+            "type": "string"
+          },
+          "projectName": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "releaseRetentionCount": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "repositoryId": {
+            "format": "int64",
+            "type": "string"
+          },
+          "runtimeClass": {
+            "$ref": "#/components/schemas/v1RuntimeClass"
+          },
+          "scalingMode": {
+            "$ref": "#/components/schemas/v1ScalingMode"
+          }
+        },
+        "type": "object"
+      },
+      "v1ImportGitRepositoryResponse": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/v1ImportOperation"
+          }
+        },
+        "type": "object"
+      },
+      "v1ImportOperation": {
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "completedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "environmentId": {
+            "type": "string"
+          },
+          "failureCode": {
+            "$ref": "#/components/schemas/v1IntegrationFailureCode"
+          },
+          "failureMessage": {
+            "type": "string"
+          },
+          "gitConnectionId": {
+            "type": "string"
+          },
+          "githubRepositoryId": {
+            "format": "int64",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "orchestrationJobId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/v1ImportOperationState"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ImportOperationState": {
+        "default": "IMPORT_OPERATION_STATE_UNSPECIFIED",
+        "enum": [
+          "IMPORT_OPERATION_STATE_UNSPECIFIED",
+          "IMPORT_OPERATION_STATE_PENDING",
+          "IMPORT_OPERATION_STATE_CREDENTIAL_PENDING",
+          "IMPORT_OPERATION_STATE_COMMITTING",
+          "IMPORT_OPERATION_STATE_PENDING_DISPATCH",
+          "IMPORT_OPERATION_STATE_COMPLETED",
+          "IMPORT_OPERATION_STATE_FAILED",
+          "IMPORT_OPERATION_STATE_CANCELLED"
+        ],
+        "type": "string"
+      },
+      "v1IntegrationFailureCode": {
+        "default": "INTEGRATION_FAILURE_CODE_UNSPECIFIED",
+        "enum": [
+          "INTEGRATION_FAILURE_CODE_UNSPECIFIED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_APP_NOT_CONFIGURED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_APP_SETUP_IN_PROGRESS",
+          "INTEGRATION_FAILURE_CODE_GITHUB_MANIFEST_CODE_INVALID",
+          "INTEGRATION_FAILURE_CODE_GITHUB_MANIFEST_CODE_CONSUMED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_APP_SECRET_WRITE_FAILED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_SETUP_STATE_INVALID",
+          "INTEGRATION_FAILURE_CODE_GITHUB_INSTALLATION_SUSPENDED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_INSTALLATION_ACCESS_REMOVED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_REPOSITORY_ACCESS_REMOVED",
+          "INTEGRATION_FAILURE_CODE_WORKFLOW_INCOMPATIBLE",
+          "INTEGRATION_FAILURE_CODE_REGISTRY_AUTH_REQUIRED",
+          "INTEGRATION_FAILURE_CODE_REGISTRY_AUTH_FAILED",
+          "INTEGRATION_FAILURE_CODE_IMAGE_PULL_SECRET_RECONCILE_FAILED",
+          "INTEGRATION_FAILURE_CODE_GITHUB_RUN_MISSING",
+          "INTEGRATION_FAILURE_CODE_GITHUB_RUN_AMBIGUOUS",
+          "INTEGRATION_FAILURE_CODE_GITHUB_RUN_CANCEL_FAILED",
+          "INTEGRATION_FAILURE_CODE_REGISTRY_CHALLENGE_INVALID",
+          "INTEGRATION_FAILURE_CODE_IMAGE_NOT_PUBLISHED",
+          "INTEGRATION_FAILURE_CODE_IMAGE_DIGEST_INVALID",
+          "INTEGRATION_FAILURE_CODE_OCI_ANNOTATION_MISMATCH",
+          "INTEGRATION_FAILURE_CODE_GITHUB_RUN_TIMED_OUT"
+        ],
+        "type": "string"
       },
       "v1KedaCronSchedule": {
         "properties": {
@@ -1026,6 +1617,48 @@
         },
         "type": "object"
       },
+      "v1ListGitHubInstallationsResponse": {
+        "properties": {
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/v1GitHubInstallation"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListGitHubRepositoriesResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/v1GitHubRepository"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "v1ListGitHubRepositoryWorkflowsResponse": {
+        "properties": {
+          "nextPageToken": {
+            "type": "string"
+          },
+          "workflows": {
+            "items": {
+              "$ref": "#/components/schemas/v1GitHubWorkflow"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "v1ListProjectsResponse": {
         "properties": {
           "nextPageToken": {
@@ -1062,20 +1695,6 @@
           "reconciliations": {
             "items": {
               "$ref": "#/components/schemas/v1ReconciliationRun"
-            },
-            "type": "array"
-          }
-        },
-        "type": "object"
-      },
-      "v1ListRegistriesResponse": {
-        "properties": {
-          "nextPageToken": {
-            "type": "string"
-          },
-          "registries": {
-            "items": {
-              "$ref": "#/components/schemas/v1Registry"
             },
             "type": "array"
           }
@@ -1181,6 +1800,25 @@
           }
         },
         "type": "object"
+      },
+      "v1OciAnnotationPolicy": {
+        "default": "OCI_ANNOTATION_POLICY_UNSPECIFIED",
+        "enum": [
+          "OCI_ANNOTATION_POLICY_UNSPECIFIED",
+          "OCI_ANNOTATION_POLICY_VALIDATE_IF_PRESENT"
+        ],
+        "type": "string"
+      },
+      "v1OciAnnotationStatus": {
+        "default": "OCI_ANNOTATION_STATUS_UNSPECIFIED",
+        "enum": [
+          "OCI_ANNOTATION_STATUS_UNSPECIFIED",
+          "OCI_ANNOTATION_STATUS_PENDING",
+          "OCI_ANNOTATION_STATUS_MATCHED",
+          "OCI_ANNOTATION_STATUS_ABSENT",
+          "OCI_ANNOTATION_STATUS_MISMATCHED"
+        ],
+        "type": "string"
       },
       "v1Operation": {
         "properties": {
@@ -1592,29 +2230,10 @@
         },
         "type": "object"
       },
-      "v1Registry": {
-        "description": "Registry is one row of the registries table: an OCI image registry an app\npulls container images from. credential_secret_ref is a\nk8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e REFERENCE to the pull credential; the\nraw credential is never accepted or stored in Postgres — only the reference.",
+      "v1RefreshGitHubInstallationResponse": {
         "properties": {
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "credentialSecretRef": {
-            "description": "credential_secret_ref is a k8s-secret://\u003cnamespace\u003e/\u003cname\u003e#\u003ckey\u003e reference\nto the pull credential, NOT a plaintext credential.",
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "organizationId": {
-            "type": "string"
-          },
-          "provider": {
-            "description": "provider identifies the registry flavour: one of \"ghcr\", \"gcr\", \"ecr\",\n\"other\".",
-            "type": "string"
-          },
-          "registryUrl": {
-            "type": "string"
+          "installation": {
+            "$ref": "#/components/schemas/v1GitHubInstallation"
           }
         },
         "type": "object"
@@ -1688,6 +2307,25 @@
         "properties": {
           "operation": {
             "$ref": "#/components/schemas/v1Operation"
+          }
+        },
+        "type": "object"
+      },
+      "v1RotateGhcrCredentialRequest": {
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/v1GhcrCredential"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "v1RotateGhcrCredentialResponse": {
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/v1GhcrCredentialStatus"
           }
         },
         "type": "object"
@@ -2031,8 +2669,11 @@
             "application/json": {
               "schema": {
                 "properties": {
-                  "ciWorkflowId": {
-                    "type": "string"
+                  "annotationPolicy": {
+                    "$ref": "#/components/schemas/v1OciAnnotationPolicy"
+                  },
+                  "annotationStatus": {
+                    "$ref": "#/components/schemas/v1OciAnnotationStatus"
                   },
                   "containerPort": {
                     "format": "int32",
@@ -2057,6 +2698,9 @@
                   "deployTimeoutSeconds": {
                     "format": "int32",
                     "type": "integer"
+                  },
+                  "githubWorkflowPath": {
+                    "type": "string"
                   },
                   "healthCheckPath": {
                     "type": "string"
@@ -2115,6 +2759,9 @@
                   },
                   "previewsEnabled": {
                     "type": "boolean"
+                  },
+                  "productionBranch": {
+                    "type": "string"
                   },
                   "projectId": {
                     "type": "string"
@@ -3457,21 +4104,21 @@
         ]
       }
     },
-    "/v1/git-connections/{gitConnectionId}": {
-      "delete": {
-        "operationId": "GitConnectionService_DeleteGitConnection",
+    "/v1/git-connections": {
+      "get": {
+        "operationId": "GitProviderService_ListGitConnections",
         "parameters": [
           {
-            "in": "path",
-            "name": "gitConnectionId",
-            "required": true,
+            "in": "query",
+            "name": "pageSize",
             "schema": {
-              "type": "string"
+              "format": "int32",
+              "type": "integer"
             }
           },
           {
             "in": "query",
-            "name": "idempotencyKey",
+            "name": "pageToken",
             "schema": {
               "type": "string"
             }
@@ -3482,7 +4129,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/v1DeleteGitConnectionResponse"
+                  "$ref": "#/components/schemas/v1ListGitConnectionsResponse"
                 }
               }
             },
@@ -3500,11 +4147,13 @@
           }
         },
         "tags": [
-          "GitConnectionService"
+          "GitProviderService"
         ]
-      },
+      }
+    },
+    "/v1/git-connections/{gitConnectionId}": {
       "get": {
-        "operationId": "GitConnectionService_GetGitConnection",
+        "operationId": "GitProviderService_GetGitConnection",
         "parameters": [
           {
             "in": "path",
@@ -3538,7 +4187,571 @@
           }
         },
         "tags": [
-          "GitConnectionService"
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/git-connections/{gitConnectionId}:disconnect": {
+      "post": {
+        "operationId": "GitProviderService_DisconnectGitConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gitConnectionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitProviderServiceDisconnectGitConnectionBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1DisconnectGitConnectionResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/app": {
+      "get": {
+        "operationId": "GitProviderService_GetGitHubAppStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetGitHubAppStatusResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/app:beginSetup": {
+      "post": {
+        "operationId": "GitProviderService_BeginGitHubAppSetup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1BeginGitHubAppSetupRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1BeginGitHubAppSetupResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/ghcr-credential": {
+      "get": {
+        "operationId": "GitProviderService_GetGhcrCredentialStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetGhcrCredentialStatusResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/ghcr-credential:rotate": {
+      "post": {
+        "operationId": "GitProviderService_RotateGhcrCredential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1RotateGhcrCredentialRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1RotateGhcrCredentialResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/installations": {
+      "get": {
+        "operationId": "GitProviderService_ListGitHubInstallations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListGitHubInstallationsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/installations/{installationId}": {
+      "get": {
+        "operationId": "GitProviderService_GetGitHubInstallation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetGitHubInstallationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/installations/{installationId}/repositories": {
+      "get": {
+        "operationId": "GitProviderService_ListGitHubRepositories",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListGitHubRepositoriesResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/installations/{installationId}:refresh": {
+      "post": {
+        "operationId": "GitProviderService_RefreshGitHubInstallation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitProviderServiceRefreshGitHubInstallationBody"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1RefreshGitHubInstallationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/installations:begin": {
+      "post": {
+        "operationId": "GitProviderService_BeginGitHubInstallation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1BeginGitHubInstallationRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1BeginGitHubInstallationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/repositories/{repositoryId}/workflows": {
+      "get": {
+        "operationId": "GitProviderService_ListGitHubRepositoryWorkflows",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repositoryId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ListGitHubRepositoryWorkflowsResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/github/repositories:import": {
+      "post": {
+        "operationId": "GitProviderService_ImportGitRepository",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/v1ImportGitRepositoryRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1ImportGitRepositoryResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
+        ]
+      }
+    },
+    "/v1/import-operations/{importOperationId}": {
+      "get": {
+        "operationId": "GitProviderService_GetImportOperation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importOperationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1GetImportOperationResponse"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "GitProviderService"
         ]
       }
     },
@@ -3816,117 +5029,6 @@
         ]
       }
     },
-    "/v1/organizations/{organizationId}/git-connections": {
-      "get": {
-        "operationId": "GitConnectionService_ListGitConnections",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organizationId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pageSize",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pageToken",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/v1ListGitConnectionsResponse"
-                }
-              }
-            },
-            "description": "A successful response."
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/rpcStatus"
-                }
-              }
-            },
-            "description": "An unexpected error response."
-          }
-        },
-        "tags": [
-          "GitConnectionService"
-        ]
-      },
-      "post": {
-        "operationId": "GitConnectionService_CreateGitConnection",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organizationId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "idempotencyKey",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/v1GitConnection"
-              }
-            }
-          },
-          "required": true,
-          "x-originalParamName": "gitConnection"
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/v1CreateGitConnectionResponse"
-                }
-              }
-            },
-            "description": "A successful response."
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/rpcStatus"
-                }
-              }
-            },
-            "description": "An unexpected error response."
-          }
-        },
-        "tags": [
-          "GitConnectionService"
-        ]
-      }
-    },
     "/v1/organizations/{organizationId}/projects": {
       "get": {
         "operationId": "ProjectService_ListProjects",
@@ -4042,117 +5144,6 @@
         },
         "tags": [
           "ProjectService"
-        ]
-      }
-    },
-    "/v1/organizations/{organizationId}/registries": {
-      "get": {
-        "operationId": "RegistryService_ListRegistries",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organizationId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pageSize",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pageToken",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/v1ListRegistriesResponse"
-                }
-              }
-            },
-            "description": "A successful response."
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/rpcStatus"
-                }
-              }
-            },
-            "description": "An unexpected error response."
-          }
-        },
-        "tags": [
-          "RegistryService"
-        ]
-      },
-      "post": {
-        "operationId": "RegistryService_CreateRegistry",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organizationId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "idempotencyKey",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/v1Registry"
-              }
-            }
-          },
-          "required": true,
-          "x-originalParamName": "registry"
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/v1CreateRegistryResponse"
-                }
-              }
-            },
-            "description": "A successful response."
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/rpcStatus"
-                }
-              }
-            },
-            "description": "An unexpected error response."
-          }
-        },
-        "tags": [
-          "RegistryService"
         ]
       }
     },
@@ -4759,91 +5750,6 @@
         ]
       }
     },
-    "/v1/registries/{registryId}": {
-      "delete": {
-        "operationId": "RegistryService_DeleteRegistry",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "registryId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "idempotencyKey",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/v1DeleteRegistryResponse"
-                }
-              }
-            },
-            "description": "A successful response."
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/rpcStatus"
-                }
-              }
-            },
-            "description": "An unexpected error response."
-          }
-        },
-        "tags": [
-          "RegistryService"
-        ]
-      },
-      "get": {
-        "operationId": "RegistryService_GetRegistry",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "registryId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/v1GetRegistryResponse"
-                }
-              }
-            },
-            "description": "A successful response."
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/rpcStatus"
-                }
-              }
-            },
-            "description": "An unexpected error response."
-          }
-        },
-        "tags": [
-          "RegistryService"
-        ]
-      }
-    },
     "/v1/releases/{releaseId}": {
       "get": {
         "operationId": "ReleaseService_GetRelease",
@@ -5341,10 +6247,7 @@
       "name": "DomainService"
     },
     {
-      "name": "RegistryService"
-    },
-    {
-      "name": "GitConnectionService"
+      "name": "GitProviderService"
     },
     {
       "name": "ObservabilityService"

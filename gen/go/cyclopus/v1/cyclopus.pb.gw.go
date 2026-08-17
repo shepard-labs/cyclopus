@@ -2158,270 +2158,307 @@ func local_request_DomainService_DeleteDomain_0(ctx context.Context, marshaler r
 	return msg, metadata, err
 }
 
-var filter_RegistryService_CreateRegistry_0 = &utilities.DoubleArray{Encoding: map[string]int{"registry": 0, "organization_id": 1}, Base: []int{1, 1, 2, 0, 0}, Check: []int{0, 1, 1, 2, 3}}
-
-func request_RegistryService_CreateRegistry_0(ctx context.Context, marshaler runtime.Marshaler, client RegistryServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_GetGitHubAppStatus_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq CreateRegistryRequest
+		protoReq GetGitHubAppStatusRequest
 		metadata runtime.ServerMetadata
-		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq.Registry); err != nil && !errors.Is(err, io.EOF) {
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.GetGitHubAppStatus(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_GitProviderService_GetGitHubAppStatus_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetGitHubAppStatusRequest
+		metadata runtime.ServerMetadata
+	)
+	msg, err := server.GetGitHubAppStatus(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_GitProviderService_BeginGitHubAppSetup_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq BeginGitHubAppSetupRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	val, ok := pathParams["organization_id"]
-	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
-	}
-	protoReq.OrganizationId, err = runtime.String(val)
-	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
-	}
-	if err := req.ParseForm(); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_RegistryService_CreateRegistry_0); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	msg, err := client.CreateRegistry(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.BeginGitHubAppSetup(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_RegistryService_CreateRegistry_0(ctx context.Context, marshaler runtime.Marshaler, server RegistryServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_BeginGitHubAppSetup_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq CreateRegistryRequest
+		protoReq BeginGitHubAppSetupRequest
 		metadata runtime.ServerMetadata
-		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq.Registry); err != nil && !errors.Is(err, io.EOF) {
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	val, ok := pathParams["organization_id"]
-	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
-	}
-	protoReq.OrganizationId, err = runtime.String(val)
-	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
-	}
-	if err := req.ParseForm(); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_RegistryService_CreateRegistry_0); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	msg, err := server.CreateRegistry(ctx, &protoReq)
+	msg, err := server.BeginGitHubAppSetup(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-func request_RegistryService_GetRegistry_0(ctx context.Context, marshaler runtime.Marshaler, client RegistryServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_BeginGitHubInstallation_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq GetRegistryRequest
+		protoReq BeginGitHubInstallationRequest
 		metadata runtime.ServerMetadata
-		err      error
 	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	val, ok := pathParams["registry_id"]
-	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "registry_id")
-	}
-	protoReq.RegistryId, err = runtime.String(val)
-	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "registry_id", err)
-	}
-	msg, err := client.GetRegistry(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.BeginGitHubInstallation(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_RegistryService_GetRegistry_0(ctx context.Context, marshaler runtime.Marshaler, server RegistryServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_BeginGitHubInstallation_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq GetRegistryRequest
+		protoReq BeginGitHubInstallationRequest
 		metadata runtime.ServerMetadata
-		err      error
 	)
-	val, ok := pathParams["registry_id"]
-	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "registry_id")
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	protoReq.RegistryId, err = runtime.String(val)
-	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "registry_id", err)
-	}
-	msg, err := server.GetRegistry(ctx, &protoReq)
+	msg, err := server.BeginGitHubInstallation(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-var filter_RegistryService_ListRegistries_0 = &utilities.DoubleArray{Encoding: map[string]int{"organization_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
-
-func request_RegistryService_ListRegistries_0(ctx context.Context, marshaler runtime.Marshaler, client RegistryServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_GetGitHubInstallation_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq ListRegistriesRequest
+		protoReq GetGitHubInstallationRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	val, ok := pathParams["organization_id"]
+	val, ok := pathParams["installation_id"]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "installation_id")
 	}
-	protoReq.OrganizationId, err = runtime.String(val)
+	protoReq.InstallationId, err = runtime.String(val)
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "installation_id", err)
 	}
-	if err := req.ParseForm(); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_RegistryService_ListRegistries_0); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	msg, err := client.ListRegistries(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.GetGitHubInstallation(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_RegistryService_ListRegistries_0(ctx context.Context, marshaler runtime.Marshaler, server RegistryServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_GetGitHubInstallation_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq ListRegistriesRequest
+		protoReq GetGitHubInstallationRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
-	val, ok := pathParams["organization_id"]
+	val, ok := pathParams["installation_id"]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "installation_id")
 	}
-	protoReq.OrganizationId, err = runtime.String(val)
+	protoReq.InstallationId, err = runtime.String(val)
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "installation_id", err)
+	}
+	msg, err := server.GetGitHubInstallation(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+var filter_GitProviderService_ListGitHubInstallations_0 = &utilities.DoubleArray{Encoding: map[string]int{}, Base: []int(nil), Check: []int(nil)}
+
+func request_GitProviderService_ListGitHubInstallations_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ListGitHubInstallationsRequest
+		metadata runtime.ServerMetadata
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
 	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_RegistryService_ListRegistries_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitHubInstallations_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := server.ListRegistries(ctx, &protoReq)
+	msg, err := client.ListGitHubInstallations(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-var filter_RegistryService_DeleteRegistry_0 = &utilities.DoubleArray{Encoding: map[string]int{"registry_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
-
-func request_RegistryService_DeleteRegistry_0(ctx context.Context, marshaler runtime.Marshaler, client RegistryServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_ListGitHubInstallations_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq DeleteRegistryRequest
+		protoReq ListGitHubInstallationsRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := req.ParseForm(); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitHubInstallations_0); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.ListGitHubInstallations(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_GitProviderService_RefreshGitHubInstallation_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RefreshGitHubInstallationRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["installation_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "installation_id")
+	}
+	protoReq.InstallationId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "installation_id", err)
+	}
+	msg, err := client.RefreshGitHubInstallation(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_GitProviderService_RefreshGitHubInstallation_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RefreshGitHubInstallationRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["installation_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "installation_id")
+	}
+	protoReq.InstallationId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "installation_id", err)
+	}
+	msg, err := server.RefreshGitHubInstallation(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+var filter_GitProviderService_ListGitHubRepositories_0 = &utilities.DoubleArray{Encoding: map[string]int{"installation_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
+
+func request_GitProviderService_ListGitHubRepositories_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ListGitHubRepositoriesRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	val, ok := pathParams["registry_id"]
+	val, ok := pathParams["installation_id"]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "registry_id")
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "installation_id")
 	}
-	protoReq.RegistryId, err = runtime.String(val)
+	protoReq.InstallationId, err = runtime.String(val)
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "registry_id", err)
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "installation_id", err)
 	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_RegistryService_DeleteRegistry_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitHubRepositories_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := client.DeleteRegistry(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.ListGitHubRepositories(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_RegistryService_DeleteRegistry_0(ctx context.Context, marshaler runtime.Marshaler, server RegistryServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_ListGitHubRepositories_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq DeleteRegistryRequest
+		protoReq ListGitHubRepositoriesRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
-	val, ok := pathParams["registry_id"]
+	val, ok := pathParams["installation_id"]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "registry_id")
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "installation_id")
 	}
-	protoReq.RegistryId, err = runtime.String(val)
+	protoReq.InstallationId, err = runtime.String(val)
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "registry_id", err)
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "installation_id", err)
 	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_RegistryService_DeleteRegistry_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitHubRepositories_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := server.DeleteRegistry(ctx, &protoReq)
+	msg, err := server.ListGitHubRepositories(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-var filter_GitConnectionService_CreateGitConnection_0 = &utilities.DoubleArray{Encoding: map[string]int{"git_connection": 0, "organization_id": 1}, Base: []int{1, 1, 2, 0, 0}, Check: []int{0, 1, 1, 2, 3}}
+var filter_GitProviderService_ListGitHubRepositoryWorkflows_0 = &utilities.DoubleArray{Encoding: map[string]int{"repository_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
 
-func request_GitConnectionService_CreateGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, client GitConnectionServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_ListGitHubRepositoryWorkflows_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq CreateGitConnectionRequest
+		protoReq ListGitHubRepositoryWorkflowsRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq.GitConnection); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	val, ok := pathParams["organization_id"]
+	val, ok := pathParams["repository_id"]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "repository_id")
 	}
-	protoReq.OrganizationId, err = runtime.String(val)
+	protoReq.RepositoryId, err = runtime.Int64(val)
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "repository_id", err)
 	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitConnectionService_CreateGitConnection_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitHubRepositoryWorkflows_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := client.CreateGitConnection(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.ListGitHubRepositoryWorkflows(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_GitConnectionService_CreateGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, server GitConnectionServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_ListGitHubRepositoryWorkflows_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq CreateGitConnectionRequest
+		protoReq ListGitHubRepositoryWorkflowsRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq.GitConnection); err != nil && !errors.Is(err, io.EOF) {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	val, ok := pathParams["organization_id"]
+	val, ok := pathParams["repository_id"]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "repository_id")
 	}
-	protoReq.OrganizationId, err = runtime.String(val)
+	protoReq.RepositoryId, err = runtime.Int64(val)
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "repository_id", err)
 	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitConnectionService_CreateGitConnection_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitHubRepositoryWorkflows_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := server.CreateGitConnection(ctx, &protoReq)
+	msg, err := server.ListGitHubRepositoryWorkflows(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-func request_GitConnectionService_GetGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, client GitConnectionServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_GetGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq GetGitConnectionRequest
 		metadata runtime.ServerMetadata
@@ -2442,7 +2479,7 @@ func request_GitConnectionService_GetGitConnection_0(ctx context.Context, marsha
 	return msg, metadata, err
 }
 
-func local_request_GitConnectionService_GetGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, server GitConnectionServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_GetGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq GetGitConnectionRequest
 		metadata runtime.ServerMetadata
@@ -2460,67 +2497,50 @@ func local_request_GitConnectionService_GetGitConnection_0(ctx context.Context, 
 	return msg, metadata, err
 }
 
-var filter_GitConnectionService_ListGitConnections_0 = &utilities.DoubleArray{Encoding: map[string]int{"organization_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
+var filter_GitProviderService_ListGitConnections_0 = &utilities.DoubleArray{Encoding: map[string]int{}, Base: []int(nil), Check: []int(nil)}
 
-func request_GitConnectionService_ListGitConnections_0(ctx context.Context, marshaler runtime.Marshaler, client GitConnectionServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_ListGitConnections_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq ListGitConnectionsRequest
 		metadata runtime.ServerMetadata
-		err      error
 	)
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	val, ok := pathParams["organization_id"]
-	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
-	}
-	protoReq.OrganizationId, err = runtime.String(val)
-	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
-	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitConnectionService_ListGitConnections_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitConnections_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	msg, err := client.ListGitConnections(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_GitConnectionService_ListGitConnections_0(ctx context.Context, marshaler runtime.Marshaler, server GitConnectionServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_ListGitConnections_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
 		protoReq ListGitConnectionsRequest
 		metadata runtime.ServerMetadata
-		err      error
 	)
-	val, ok := pathParams["organization_id"]
-	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "organization_id")
-	}
-	protoReq.OrganizationId, err = runtime.String(val)
-	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "organization_id", err)
-	}
 	if err := req.ParseForm(); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitConnectionService_ListGitConnections_0); err != nil {
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitProviderService_ListGitConnections_0); err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	msg, err := server.ListGitConnections(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-var filter_GitConnectionService_DeleteGitConnection_0 = &utilities.DoubleArray{Encoding: map[string]int{"git_connection_id": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
-
-func request_GitConnectionService_DeleteGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, client GitConnectionServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_GitProviderService_DisconnectGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq DeleteGitConnectionRequest
+		protoReq DisconnectGitConnectionRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
@@ -2532,22 +2552,19 @@ func request_GitConnectionService_DeleteGitConnection_0(ctx context.Context, mar
 	if err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "git_connection_id", err)
 	}
-	if err := req.ParseForm(); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitConnectionService_DeleteGitConnection_0); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
-	}
-	msg, err := client.DeleteGitConnection(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.DisconnectGitConnection(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_GitConnectionService_DeleteGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, server GitConnectionServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_GitProviderService_DisconnectGitConnection_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq DeleteGitConnectionRequest
+		protoReq DisconnectGitConnectionRequest
 		metadata runtime.ServerMetadata
 		err      error
 	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 	val, ok := pathParams["git_connection_id"]
 	if !ok {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "git_connection_id")
@@ -2556,13 +2573,121 @@ func local_request_GitConnectionService_DeleteGitConnection_0(ctx context.Contex
 	if err != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "git_connection_id", err)
 	}
-	if err := req.ParseForm(); err != nil {
+	msg, err := server.DisconnectGitConnection(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_GitProviderService_ImportGitRepository_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ImportGitRepositoryRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_GitConnectionService_DeleteGitConnection_0); err != nil {
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.ImportGitRepository(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_GitProviderService_ImportGitRepository_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq ImportGitRepositoryRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := server.DeleteGitConnection(ctx, &protoReq)
+	msg, err := server.ImportGitRepository(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_GitProviderService_GetImportOperation_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetImportOperationRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	val, ok := pathParams["import_operation_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "import_operation_id")
+	}
+	protoReq.ImportOperationId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "import_operation_id", err)
+	}
+	msg, err := client.GetImportOperation(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_GitProviderService_GetImportOperation_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetImportOperationRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["import_operation_id"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "import_operation_id")
+	}
+	protoReq.ImportOperationId, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "import_operation_id", err)
+	}
+	msg, err := server.GetImportOperation(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_GitProviderService_GetGhcrCredentialStatus_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetGhcrCredentialStatusRequest
+		metadata runtime.ServerMetadata
+	)
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.GetGhcrCredentialStatus(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_GitProviderService_GetGhcrCredentialStatus_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetGhcrCredentialStatusRequest
+		metadata runtime.ServerMetadata
+	)
+	msg, err := server.GetGhcrCredentialStatus(ctx, &protoReq)
+	return msg, metadata, err
+}
+
+func request_GitProviderService_RotateGhcrCredential_0(ctx context.Context, marshaler runtime.Marshaler, client GitProviderServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RotateGhcrCredentialRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	msg, err := client.RotateGhcrCredential(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_GitProviderService_RotateGhcrCredential_0(ctx context.Context, marshaler runtime.Marshaler, server GitProviderServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq RotateGhcrCredentialRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.RotateGhcrCredential(ctx, &protoReq)
 	return msg, metadata, err
 }
 
@@ -3976,181 +4101,311 @@ func RegisterDomainServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 	return nil
 }
 
-// RegisterRegistryServiceHandlerServer registers the http handlers for service RegistryService to "mux".
-// UnaryRPC     :call RegistryServiceServer directly.
+// RegisterGitProviderServiceHandlerServer registers the http handlers for service GitProviderService to "mux".
+// UnaryRPC     :call GitProviderServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
-// Note that using this registration option will cause many gRPC library features to stop working. Consider using RegisterRegistryServiceHandlerFromEndpoint instead.
+// Note that using this registration option will cause many gRPC library features to stop working. Consider using RegisterGitProviderServiceHandlerFromEndpoint instead.
 // GRPC interceptors will not work for this type of registration. To use interceptors, you must use the "runtime.WithMiddlewares" option in the "runtime.NewServeMux" call.
-func RegisterRegistryServiceHandlerServer(ctx context.Context, mux *runtime.ServeMux, server RegistryServiceServer) error {
-	mux.Handle(http.MethodPost, pattern_RegistryService_CreateRegistry_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+func RegisterGitProviderServiceHandlerServer(ctx context.Context, mux *runtime.ServeMux, server GitProviderServiceServer) error {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGitHubAppStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.RegistryService/CreateRegistry", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/registries"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGitHubAppStatus", runtime.WithHTTPPathPattern("/v1/github/app"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_RegistryService_CreateRegistry_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_GetGitHubAppStatus_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_CreateRegistry_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_GetGitHubAppStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodGet, pattern_RegistryService_GetRegistry_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_GitProviderService_BeginGitHubAppSetup_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.RegistryService/GetRegistry", runtime.WithHTTPPathPattern("/v1/registries/{registry_id}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/BeginGitHubAppSetup", runtime.WithHTTPPathPattern("/v1/github/app:beginSetup"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_RegistryService_GetRegistry_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_BeginGitHubAppSetup_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_GetRegistry_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_BeginGitHubAppSetup_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodGet, pattern_RegistryService_ListRegistries_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_GitProviderService_BeginGitHubInstallation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.RegistryService/ListRegistries", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/registries"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/BeginGitHubInstallation", runtime.WithHTTPPathPattern("/v1/github/installations:begin"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_RegistryService_ListRegistries_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_BeginGitHubInstallation_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_ListRegistries_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_BeginGitHubInstallation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodDelete, pattern_RegistryService_DeleteRegistry_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGitHubInstallation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.RegistryService/DeleteRegistry", runtime.WithHTTPPathPattern("/v1/registries/{registry_id}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGitHubInstallation", runtime.WithHTTPPathPattern("/v1/github/installations/{installation_id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_RegistryService_DeleteRegistry_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_GetGitHubInstallation_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_DeleteRegistry_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_GetGitHubInstallation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-
-	return nil
-}
-
-// RegisterGitConnectionServiceHandlerServer registers the http handlers for service GitConnectionService to "mux".
-// UnaryRPC     :call GitConnectionServiceServer directly.
-// StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
-// Note that using this registration option will cause many gRPC library features to stop working. Consider using RegisterGitConnectionServiceHandlerFromEndpoint instead.
-// GRPC interceptors will not work for this type of registration. To use interceptors, you must use the "runtime.WithMiddlewares" option in the "runtime.NewServeMux" call.
-func RegisterGitConnectionServiceHandlerServer(ctx context.Context, mux *runtime.ServeMux, server GitConnectionServiceServer) error {
-	mux.Handle(http.MethodPost, pattern_GitConnectionService_CreateGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitHubInstallations_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/CreateGitConnection", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/git-connections"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitHubInstallations", runtime.WithHTTPPathPattern("/v1/github/installations"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_GitConnectionService_CreateGitConnection_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_ListGitHubInstallations_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_GitConnectionService_CreateGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_ListGitHubInstallations_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodGet, pattern_GitConnectionService_GetGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_GitProviderService_RefreshGitHubInstallation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/GetGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/RefreshGitHubInstallation", runtime.WithHTTPPathPattern("/v1/github/installations/{installation_id}:refresh"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_GitConnectionService_GetGitConnection_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_RefreshGitHubInstallation_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_GitConnectionService_GetGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_RefreshGitHubInstallation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodGet, pattern_GitConnectionService_ListGitConnections_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitHubRepositories_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/ListGitConnections", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/git-connections"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitHubRepositories", runtime.WithHTTPPathPattern("/v1/github/installations/{installation_id}/repositories"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_GitConnectionService_ListGitConnections_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_ListGitHubRepositories_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_GitConnectionService_ListGitConnections_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_ListGitHubRepositories_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodDelete, pattern_GitConnectionService_DeleteGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitHubRepositoryWorkflows_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/DeleteGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitHubRepositoryWorkflows", runtime.WithHTTPPathPattern("/v1/github/repositories/{repository_id}/workflows"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_GitConnectionService_DeleteGitConnection_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_GitProviderService_ListGitHubRepositoryWorkflows_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_GitConnectionService_DeleteGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_ListGitHubRepositoryWorkflows_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_GetGitConnection_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_GetGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitConnections_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitConnections", runtime.WithHTTPPathPattern("/v1/git-connections"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_ListGitConnections_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ListGitConnections_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_DisconnectGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/DisconnectGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}:disconnect"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_DisconnectGitConnection_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_DisconnectGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_ImportGitRepository_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ImportGitRepository", runtime.WithHTTPPathPattern("/v1/github/repositories:import"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_ImportGitRepository_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ImportGitRepository_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetImportOperation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetImportOperation", runtime.WithHTTPPathPattern("/v1/import-operations/{import_operation_id}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_GetImportOperation_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_GetImportOperation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGhcrCredentialStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGhcrCredentialStatus", runtime.WithHTTPPathPattern("/v1/github/ghcr-credential"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_GetGhcrCredentialStatus_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_GetGhcrCredentialStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_RotateGhcrCredential_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/RotateGhcrCredential", runtime.WithHTTPPathPattern("/v1/github/ghcr-credential:rotate"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_GitProviderService_RotateGhcrCredential_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_RotateGhcrCredential_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
 
 	return nil
@@ -5654,9 +5909,9 @@ var (
 	forward_DomainService_DeleteDomain_0 = runtime.ForwardResponseMessage
 )
 
-// RegisterRegistryServiceHandlerFromEndpoint is same as RegisterRegistryServiceHandler but
+// RegisterGitProviderServiceHandlerFromEndpoint is same as RegisterGitProviderServiceHandler but
 // automatically dials to "endpoint" and closes the connection when "ctx" gets done.
-func RegisterRegistryServiceHandlerFromEndpoint(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error) {
+func RegisterGitProviderServiceHandlerFromEndpoint(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error) {
 	conn, err := grpc.NewClient(endpoint, opts...)
 	if err != nil {
 		return err
@@ -5675,225 +5930,313 @@ func RegisterRegistryServiceHandlerFromEndpoint(ctx context.Context, mux *runtim
 			}
 		}()
 	}()
-	return RegisterRegistryServiceHandler(ctx, mux, conn)
+	return RegisterGitProviderServiceHandler(ctx, mux, conn)
 }
 
-// RegisterRegistryServiceHandler registers the http handlers for service RegistryService to "mux".
+// RegisterGitProviderServiceHandler registers the http handlers for service GitProviderService to "mux".
 // The handlers forward requests to the grpc endpoint over "conn".
-func RegisterRegistryServiceHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
-	return RegisterRegistryServiceHandlerClient(ctx, mux, NewRegistryServiceClient(conn))
+func RegisterGitProviderServiceHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
+	return RegisterGitProviderServiceHandlerClient(ctx, mux, NewGitProviderServiceClient(conn))
 }
 
-// RegisterRegistryServiceHandlerClient registers the http handlers for service RegistryService
-// to "mux". The handlers forward requests to the grpc endpoint over the given implementation of "RegistryServiceClient".
-// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "RegistryServiceClient"
+// RegisterGitProviderServiceHandlerClient registers the http handlers for service GitProviderService
+// to "mux". The handlers forward requests to the grpc endpoint over the given implementation of "GitProviderServiceClient".
+// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "GitProviderServiceClient"
 // doesn't go through the normal gRPC flow (creating a gRPC client etc.) then it will be up to the passed in
-// "RegistryServiceClient" to call the correct interceptors. This client ignores the HTTP middlewares.
-func RegisterRegistryServiceHandlerClient(ctx context.Context, mux *runtime.ServeMux, client RegistryServiceClient) error {
-	mux.Handle(http.MethodPost, pattern_RegistryService_CreateRegistry_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+// "GitProviderServiceClient" to call the correct interceptors. This client ignores the HTTP middlewares.
+func RegisterGitProviderServiceHandlerClient(ctx context.Context, mux *runtime.ServeMux, client GitProviderServiceClient) error {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGitHubAppStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.RegistryService/CreateRegistry", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/registries"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGitHubAppStatus", runtime.WithHTTPPathPattern("/v1/github/app"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := request_RegistryService_CreateRegistry_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		resp, md, err := request_GitProviderService_GetGitHubAppStatus_0(annotatedContext, inboundMarshaler, client, req, pathParams)
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_CreateRegistry_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_GetGitHubAppStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodGet, pattern_RegistryService_GetRegistry_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_GitProviderService_BeginGitHubAppSetup_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.RegistryService/GetRegistry", runtime.WithHTTPPathPattern("/v1/registries/{registry_id}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/BeginGitHubAppSetup", runtime.WithHTTPPathPattern("/v1/github/app:beginSetup"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := request_RegistryService_GetRegistry_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		resp, md, err := request_GitProviderService_BeginGitHubAppSetup_0(annotatedContext, inboundMarshaler, client, req, pathParams)
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_GetRegistry_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_BeginGitHubAppSetup_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodGet, pattern_RegistryService_ListRegistries_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodPost, pattern_GitProviderService_BeginGitHubInstallation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.RegistryService/ListRegistries", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/registries"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/BeginGitHubInstallation", runtime.WithHTTPPathPattern("/v1/github/installations:begin"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := request_RegistryService_ListRegistries_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		resp, md, err := request_GitProviderService_BeginGitHubInstallation_0(annotatedContext, inboundMarshaler, client, req, pathParams)
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_ListRegistries_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_BeginGitHubInstallation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
-	mux.Handle(http.MethodDelete, pattern_RegistryService_DeleteRegistry_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGitHubInstallation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.RegistryService/DeleteRegistry", runtime.WithHTTPPathPattern("/v1/registries/{registry_id}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGitHubInstallation", runtime.WithHTTPPathPattern("/v1/github/installations/{installation_id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := request_RegistryService_DeleteRegistry_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		resp, md, err := request_GitProviderService_GetGitHubInstallation_0(annotatedContext, inboundMarshaler, client, req, pathParams)
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_RegistryService_DeleteRegistry_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_GitProviderService_GetGitHubInstallation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitHubInstallations_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitHubInstallations", runtime.WithHTTPPathPattern("/v1/github/installations"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_ListGitHubInstallations_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ListGitHubInstallations_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_RefreshGitHubInstallation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/RefreshGitHubInstallation", runtime.WithHTTPPathPattern("/v1/github/installations/{installation_id}:refresh"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_RefreshGitHubInstallation_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_RefreshGitHubInstallation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitHubRepositories_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitHubRepositories", runtime.WithHTTPPathPattern("/v1/github/installations/{installation_id}/repositories"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_ListGitHubRepositories_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ListGitHubRepositories_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitHubRepositoryWorkflows_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitHubRepositoryWorkflows", runtime.WithHTTPPathPattern("/v1/github/repositories/{repository_id}/workflows"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_ListGitHubRepositoryWorkflows_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ListGitHubRepositoryWorkflows_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_GetGitConnection_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_GetGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_ListGitConnections_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ListGitConnections", runtime.WithHTTPPathPattern("/v1/git-connections"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_ListGitConnections_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ListGitConnections_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_DisconnectGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/DisconnectGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}:disconnect"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_DisconnectGitConnection_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_DisconnectGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_ImportGitRepository_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/ImportGitRepository", runtime.WithHTTPPathPattern("/v1/github/repositories:import"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_ImportGitRepository_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_ImportGitRepository_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetImportOperation_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetImportOperation", runtime.WithHTTPPathPattern("/v1/import-operations/{import_operation_id}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_GetImportOperation_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_GetImportOperation_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_GitProviderService_GetGhcrCredentialStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/GetGhcrCredentialStatus", runtime.WithHTTPPathPattern("/v1/github/ghcr-credential"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_GetGhcrCredentialStatus_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_GetGhcrCredentialStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_GitProviderService_RotateGhcrCredential_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitProviderService/RotateGhcrCredential", runtime.WithHTTPPathPattern("/v1/github/ghcr-credential:rotate"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_GitProviderService_RotateGhcrCredential_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_GitProviderService_RotateGhcrCredential_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
 	return nil
 }
 
 var (
-	pattern_RegistryService_CreateRegistry_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "organizations", "organization_id", "registries"}, ""))
-	pattern_RegistryService_GetRegistry_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "registries", "registry_id"}, ""))
-	pattern_RegistryService_ListRegistries_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "organizations", "organization_id", "registries"}, ""))
-	pattern_RegistryService_DeleteRegistry_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "registries", "registry_id"}, ""))
+	pattern_GitProviderService_GetGitHubAppStatus_0            = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "app"}, ""))
+	pattern_GitProviderService_BeginGitHubAppSetup_0           = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "app"}, "beginSetup"))
+	pattern_GitProviderService_BeginGitHubInstallation_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "installations"}, "begin"))
+	pattern_GitProviderService_GetGitHubInstallation_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"v1", "github", "installations", "installation_id"}, ""))
+	pattern_GitProviderService_ListGitHubInstallations_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "installations"}, ""))
+	pattern_GitProviderService_RefreshGitHubInstallation_0     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"v1", "github", "installations", "installation_id"}, "refresh"))
+	pattern_GitProviderService_ListGitHubRepositories_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"v1", "github", "installations", "installation_id", "repositories"}, ""))
+	pattern_GitProviderService_ListGitHubRepositoryWorkflows_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"v1", "github", "repositories", "repository_id", "workflows"}, ""))
+	pattern_GitProviderService_GetGitConnection_0              = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "git-connections", "git_connection_id"}, ""))
+	pattern_GitProviderService_ListGitConnections_0            = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"v1", "git-connections"}, ""))
+	pattern_GitProviderService_DisconnectGitConnection_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "git-connections", "git_connection_id"}, "disconnect"))
+	pattern_GitProviderService_ImportGitRepository_0           = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "repositories"}, "import"))
+	pattern_GitProviderService_GetImportOperation_0            = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "import-operations", "import_operation_id"}, ""))
+	pattern_GitProviderService_GetGhcrCredentialStatus_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "ghcr-credential"}, ""))
+	pattern_GitProviderService_RotateGhcrCredential_0          = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "github", "ghcr-credential"}, "rotate"))
 )
 
 var (
-	forward_RegistryService_CreateRegistry_0 = runtime.ForwardResponseMessage
-	forward_RegistryService_GetRegistry_0    = runtime.ForwardResponseMessage
-	forward_RegistryService_ListRegistries_0 = runtime.ForwardResponseMessage
-	forward_RegistryService_DeleteRegistry_0 = runtime.ForwardResponseMessage
-)
-
-// RegisterGitConnectionServiceHandlerFromEndpoint is same as RegisterGitConnectionServiceHandler but
-// automatically dials to "endpoint" and closes the connection when "ctx" gets done.
-func RegisterGitConnectionServiceHandlerFromEndpoint(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error) {
-	conn, err := grpc.NewClient(endpoint, opts...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if cerr := conn.Close(); cerr != nil {
-				grpclog.Errorf("Failed to close conn to %s: %v", endpoint, cerr)
-			}
-			return
-		}
-		go func() {
-			<-ctx.Done()
-			if cerr := conn.Close(); cerr != nil {
-				grpclog.Errorf("Failed to close conn to %s: %v", endpoint, cerr)
-			}
-		}()
-	}()
-	return RegisterGitConnectionServiceHandler(ctx, mux, conn)
-}
-
-// RegisterGitConnectionServiceHandler registers the http handlers for service GitConnectionService to "mux".
-// The handlers forward requests to the grpc endpoint over "conn".
-func RegisterGitConnectionServiceHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
-	return RegisterGitConnectionServiceHandlerClient(ctx, mux, NewGitConnectionServiceClient(conn))
-}
-
-// RegisterGitConnectionServiceHandlerClient registers the http handlers for service GitConnectionService
-// to "mux". The handlers forward requests to the grpc endpoint over the given implementation of "GitConnectionServiceClient".
-// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "GitConnectionServiceClient"
-// doesn't go through the normal gRPC flow (creating a gRPC client etc.) then it will be up to the passed in
-// "GitConnectionServiceClient" to call the correct interceptors. This client ignores the HTTP middlewares.
-func RegisterGitConnectionServiceHandlerClient(ctx context.Context, mux *runtime.ServeMux, client GitConnectionServiceClient) error {
-	mux.Handle(http.MethodPost, pattern_GitConnectionService_CreateGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
-		ctx, cancel := context.WithCancel(req.Context())
-		defer cancel()
-		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/CreateGitConnection", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/git-connections"))
-		if err != nil {
-			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		resp, md, err := request_GitConnectionService_CreateGitConnection_0(annotatedContext, inboundMarshaler, client, req, pathParams)
-		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
-		if err != nil {
-			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		forward_GitConnectionService_CreateGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
-	})
-	mux.Handle(http.MethodGet, pattern_GitConnectionService_GetGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
-		ctx, cancel := context.WithCancel(req.Context())
-		defer cancel()
-		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/GetGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}"))
-		if err != nil {
-			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		resp, md, err := request_GitConnectionService_GetGitConnection_0(annotatedContext, inboundMarshaler, client, req, pathParams)
-		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
-		if err != nil {
-			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		forward_GitConnectionService_GetGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
-	})
-	mux.Handle(http.MethodGet, pattern_GitConnectionService_ListGitConnections_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
-		ctx, cancel := context.WithCancel(req.Context())
-		defer cancel()
-		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/ListGitConnections", runtime.WithHTTPPathPattern("/v1/organizations/{organization_id}/git-connections"))
-		if err != nil {
-			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		resp, md, err := request_GitConnectionService_ListGitConnections_0(annotatedContext, inboundMarshaler, client, req, pathParams)
-		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
-		if err != nil {
-			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		forward_GitConnectionService_ListGitConnections_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
-	})
-	mux.Handle(http.MethodDelete, pattern_GitConnectionService_DeleteGitConnection_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
-		ctx, cancel := context.WithCancel(req.Context())
-		defer cancel()
-		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/cyclopus.v1.GitConnectionService/DeleteGitConnection", runtime.WithHTTPPathPattern("/v1/git-connections/{git_connection_id}"))
-		if err != nil {
-			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		resp, md, err := request_GitConnectionService_DeleteGitConnection_0(annotatedContext, inboundMarshaler, client, req, pathParams)
-		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
-		if err != nil {
-			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
-			return
-		}
-		forward_GitConnectionService_DeleteGitConnection_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
-	})
-	return nil
-}
-
-var (
-	pattern_GitConnectionService_CreateGitConnection_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "organizations", "organization_id", "git-connections"}, ""))
-	pattern_GitConnectionService_GetGitConnection_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "git-connections", "git_connection_id"}, ""))
-	pattern_GitConnectionService_ListGitConnections_0  = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"v1", "organizations", "organization_id", "git-connections"}, ""))
-	pattern_GitConnectionService_DeleteGitConnection_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"v1", "git-connections", "git_connection_id"}, ""))
-)
-
-var (
-	forward_GitConnectionService_CreateGitConnection_0 = runtime.ForwardResponseMessage
-	forward_GitConnectionService_GetGitConnection_0    = runtime.ForwardResponseMessage
-	forward_GitConnectionService_ListGitConnections_0  = runtime.ForwardResponseMessage
-	forward_GitConnectionService_DeleteGitConnection_0 = runtime.ForwardResponseMessage
+	forward_GitProviderService_GetGitHubAppStatus_0            = runtime.ForwardResponseMessage
+	forward_GitProviderService_BeginGitHubAppSetup_0           = runtime.ForwardResponseMessage
+	forward_GitProviderService_BeginGitHubInstallation_0       = runtime.ForwardResponseMessage
+	forward_GitProviderService_GetGitHubInstallation_0         = runtime.ForwardResponseMessage
+	forward_GitProviderService_ListGitHubInstallations_0       = runtime.ForwardResponseMessage
+	forward_GitProviderService_RefreshGitHubInstallation_0     = runtime.ForwardResponseMessage
+	forward_GitProviderService_ListGitHubRepositories_0        = runtime.ForwardResponseMessage
+	forward_GitProviderService_ListGitHubRepositoryWorkflows_0 = runtime.ForwardResponseMessage
+	forward_GitProviderService_GetGitConnection_0              = runtime.ForwardResponseMessage
+	forward_GitProviderService_ListGitConnections_0            = runtime.ForwardResponseMessage
+	forward_GitProviderService_DisconnectGitConnection_0       = runtime.ForwardResponseMessage
+	forward_GitProviderService_ImportGitRepository_0           = runtime.ForwardResponseMessage
+	forward_GitProviderService_GetImportOperation_0            = runtime.ForwardResponseMessage
+	forward_GitProviderService_GetGhcrCredentialStatus_0       = runtime.ForwardResponseMessage
+	forward_GitProviderService_RotateGhcrCredential_0          = runtime.ForwardResponseMessage
 )
 
 // RegisterObservabilityServiceHandlerFromEndpoint is same as RegisterObservabilityServiceHandler but

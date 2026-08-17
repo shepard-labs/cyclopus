@@ -8,50 +8,30 @@ import (
 type GitConnection struct {
 	ID, OrgID, State, AccessState                  string
 	GitHubRepositoryID, GitHubInstallationID       int64
-	OwnerLogin, RepositoryName, RepositoryFullName string
+	RepositoryNodeID, OwnerLogin                   string
+	RepositoryName, RepositoryFullName             string
 	RepositoryDefaultBranch, RepositoryAccessState string
-	RepoFullName, DefaultBranch                    string
-	InstallationID                                 int64
+	RepositoryPrivate, RepositoryArchived          bool
+	RepositorySyncedAt                             *time.Time
 	CreatedAt, UpdatedAt                           time.Time
-}
-
-type SaveGitConnectionParams struct {
-	GitConnection GitConnection
-	Idempotency   CompleteIdempotencyParams
-	Audit         *AuditEvent
+	DisconnectedAt                                 *time.Time
 }
 
 const gitConnectionSelect = `SELECT connection.id::text,connection.org_id::text,connection.state,connection.access_state,
-	repository.github_repository_id,repository.github_installation_id,repository.owner_login,repository.name,
-	repository.full_name,repository.default_branch,repository.access_state,connection.created_at,connection.updated_at
+		repository.github_repository_id,repository.github_installation_id,repository.owner_login,repository.name,
+		repository.full_name,repository.node_id,repository.visibility='private',repository.archived,repository.default_branch,
+		repository.access_state,repository.last_reconciled_at,connection.created_at,connection.updated_at,connection.disconnected_at
 	FROM git_connections connection
 	JOIN github_repositories repository ON repository.org_id=connection.org_id AND repository.github_repository_id=connection.github_repository_id`
 
 func scanGitConnection(row rowScanner, value *GitConnection) error {
 	if err := row.Scan(&value.ID, &value.OrgID, &value.State, &value.AccessState, &value.GitHubRepositoryID,
 		&value.GitHubInstallationID, &value.OwnerLogin, &value.RepositoryName, &value.RepositoryFullName,
-		&value.RepositoryDefaultBranch, &value.RepositoryAccessState, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		&value.RepositoryNodeID, &value.RepositoryPrivate, &value.RepositoryArchived, &value.RepositoryDefaultBranch,
+		&value.RepositoryAccessState, &value.RepositorySyncedAt, &value.CreatedAt, &value.UpdatedAt, &value.DisconnectedAt); err != nil {
 		return err
 	}
-	value.RepoFullName = value.RepositoryFullName
-	value.DefaultBranch = value.RepositoryDefaultBranch
-	value.InstallationID = value.GitHubInstallationID
 	return nil
-}
-
-// CreateGitConnection inserts a git connection, guarding that the actor's org
-// exists so a missing org yields ErrNotFound rather than a bare foreign-key
-// violation. A duplicate (org_id, provider, installation_id, repo_full_name)
-// maps to ErrAlreadyExists and a CHECK violation maps to ErrInvalidArgument.
-func (s *Store) CreateGitConnection(ctx context.Context, p SaveGitConnectionParams) (GitConnection, error) {
-	return GitConnection{}, ErrFailedPrecondition
-}
-
-// DeleteGitConnection removes a git connection org-scoped. projects.git_connection_id
-// references git_connections ON DELETE SET NULL, so deleting a connection still
-// referenced by a project nulls that reference rather than failing.
-func (s *Store) DeleteGitConnection(ctx context.Context, orgID, id string, idem CompleteIdempotencyParams, audit *AuditEvent) error {
-	return ErrFailedPrecondition
 }
 
 func (s *Store) GetGitConnection(ctx context.Context, orgID, id string) (GitConnection, error) {

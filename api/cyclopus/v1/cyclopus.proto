@@ -3,6 +3,7 @@ syntax = "proto3";
 package cyclopus.v1;
 
 import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -125,6 +126,44 @@ enum TraceStatus {
   TRACE_STATUS_ERROR = 2;
 }
 
+enum GitHubAccountType { GITHUB_ACCOUNT_TYPE_UNSPECIFIED = 0; GITHUB_ACCOUNT_TYPE_USER = 1; GITHUB_ACCOUNT_TYPE_ORGANIZATION = 2; }
+enum GitHubAppSetupState { GITHUB_APP_SETUP_STATE_UNSPECIFIED = 0; GITHUB_APP_SETUP_STATE_NOT_CONFIGURED = 1; GITHUB_APP_SETUP_STATE_SETUP_IN_PROGRESS = 2; GITHUB_APP_SETUP_STATE_READY = 3; GITHUB_APP_SETUP_STATE_FAILED = 4; GITHUB_APP_SETUP_STATE_ORPHANED = 5; GITHUB_APP_SETUP_STATE_REPLACING = 6; }
+enum GitHubCredentialReadiness { GITHUB_CREDENTIAL_READINESS_UNSPECIFIED = 0; GITHUB_CREDENTIAL_READINESS_NOT_CONFIGURED = 1; GITHUB_CREDENTIAL_READINESS_PENDING = 2; GITHUB_CREDENTIAL_READINESS_READY = 3; GITHUB_CREDENTIAL_READINESS_FAILED = 4; }
+enum GitHubInstallationRepositorySelection { GITHUB_INSTALLATION_REPOSITORY_SELECTION_UNSPECIFIED = 0; GITHUB_INSTALLATION_REPOSITORY_SELECTION_ALL = 1; GITHUB_INSTALLATION_REPOSITORY_SELECTION_SELECTED = 2; }
+enum GitHubInstallationLifecycleStatus { GITHUB_INSTALLATION_LIFECYCLE_STATUS_UNSPECIFIED = 0; GITHUB_INSTALLATION_LIFECYCLE_STATUS_ACTIVE = 1; GITHUB_INSTALLATION_LIFECYCLE_STATUS_SUSPENDED = 2; GITHUB_INSTALLATION_LIFECYCLE_STATUS_DELETED = 3; }
+enum GitHubRepositoryAccessStatus { GITHUB_REPOSITORY_ACCESS_STATUS_UNSPECIFIED = 0; GITHUB_REPOSITORY_ACCESS_STATUS_ACTIVE = 1; GITHUB_REPOSITORY_ACCESS_STATUS_INACCESSIBLE = 2; GITHUB_REPOSITORY_ACCESS_STATUS_DELETED = 3; }
+enum GitHubWorkflowState { GITHUB_WORKFLOW_STATE_UNSPECIFIED = 0; GITHUB_WORKFLOW_STATE_ACTIVE = 1; GITHUB_WORKFLOW_STATE_DISABLED = 2; }
+enum GitHubWorkflowCompatibility { GITHUB_WORKFLOW_COMPATIBILITY_UNSPECIFIED = 0; GITHUB_WORKFLOW_COMPATIBILITY_COMPATIBLE = 1; GITHUB_WORKFLOW_COMPATIBILITY_INCOMPATIBLE = 2; GITHUB_WORKFLOW_COMPATIBILITY_UNAVAILABLE = 3; }
+enum GitConnectionStatus { GIT_CONNECTION_STATUS_UNSPECIFIED = 0; GIT_CONNECTION_STATUS_ACTIVE = 1; GIT_CONNECTION_STATUS_SUSPENDED = 2; GIT_CONNECTION_STATUS_INACCESSIBLE = 3; GIT_CONNECTION_STATUS_DELETED = 4; GIT_CONNECTION_STATUS_DISCONNECTED = 5; }
+enum ImportOperationState { IMPORT_OPERATION_STATE_UNSPECIFIED = 0; IMPORT_OPERATION_STATE_PENDING = 1; IMPORT_OPERATION_STATE_CREDENTIAL_PENDING = 2; IMPORT_OPERATION_STATE_COMMITTING = 3; IMPORT_OPERATION_STATE_PENDING_DISPATCH = 4; IMPORT_OPERATION_STATE_COMPLETED = 5; IMPORT_OPERATION_STATE_FAILED = 6; IMPORT_OPERATION_STATE_CANCELLED = 7; }
+enum GhcrCredentialState { GHCR_CREDENTIAL_STATE_UNSPECIFIED = 0; GHCR_CREDENTIAL_STATE_NOT_CONFIGURED = 1; GHCR_CREDENTIAL_STATE_CREATING = 2; GHCR_CREDENTIAL_STATE_READY = 3; GHCR_CREDENTIAL_STATE_ROTATING = 4; GHCR_CREDENTIAL_STATE_RECONCILING = 5; GHCR_CREDENTIAL_STATE_FAILED = 6; }
+enum OciAnnotationPolicy { OCI_ANNOTATION_POLICY_UNSPECIFIED = 0; OCI_ANNOTATION_POLICY_VALIDATE_IF_PRESENT = 1; }
+enum OciAnnotationStatus { OCI_ANNOTATION_STATUS_UNSPECIFIED = 0; OCI_ANNOTATION_STATUS_PENDING = 1; OCI_ANNOTATION_STATUS_MATCHED = 2; OCI_ANNOTATION_STATUS_ABSENT = 3; OCI_ANNOTATION_STATUS_MISMATCHED = 4; }
+enum IntegrationFailureCode {
+  INTEGRATION_FAILURE_CODE_UNSPECIFIED = 0;
+  INTEGRATION_FAILURE_CODE_GITHUB_APP_NOT_CONFIGURED = 1;
+  INTEGRATION_FAILURE_CODE_GITHUB_APP_SETUP_IN_PROGRESS = 2;
+  INTEGRATION_FAILURE_CODE_GITHUB_MANIFEST_CODE_INVALID = 3;
+  INTEGRATION_FAILURE_CODE_GITHUB_MANIFEST_CODE_CONSUMED = 4;
+  INTEGRATION_FAILURE_CODE_GITHUB_APP_SECRET_WRITE_FAILED = 5;
+  INTEGRATION_FAILURE_CODE_GITHUB_SETUP_STATE_INVALID = 6;
+  INTEGRATION_FAILURE_CODE_GITHUB_INSTALLATION_SUSPENDED = 7;
+  INTEGRATION_FAILURE_CODE_GITHUB_INSTALLATION_ACCESS_REMOVED = 8;
+  INTEGRATION_FAILURE_CODE_GITHUB_REPOSITORY_ACCESS_REMOVED = 9;
+  INTEGRATION_FAILURE_CODE_WORKFLOW_INCOMPATIBLE = 10;
+  INTEGRATION_FAILURE_CODE_REGISTRY_AUTH_REQUIRED = 11;
+  INTEGRATION_FAILURE_CODE_REGISTRY_AUTH_FAILED = 12;
+  INTEGRATION_FAILURE_CODE_IMAGE_PULL_SECRET_RECONCILE_FAILED = 13;
+  INTEGRATION_FAILURE_CODE_GITHUB_RUN_MISSING = 14;
+  INTEGRATION_FAILURE_CODE_GITHUB_RUN_AMBIGUOUS = 15;
+  INTEGRATION_FAILURE_CODE_GITHUB_RUN_CANCEL_FAILED = 16;
+  INTEGRATION_FAILURE_CODE_REGISTRY_CHALLENGE_INVALID = 17;
+  INTEGRATION_FAILURE_CODE_IMAGE_NOT_PUBLISHED = 18;
+  INTEGRATION_FAILURE_CODE_IMAGE_DIGEST_INVALID = 19;
+  INTEGRATION_FAILURE_CODE_OCI_ANNOTATION_MISMATCH = 20;
+  INTEGRATION_FAILURE_CODE_GITHUB_RUN_TIMED_OUT = 21;
+}
+
 message User {
   string id = 1;
   string organization_id = 2;
@@ -206,7 +245,8 @@ message Application {
   int32 deploy_timeout_seconds = 22;
   int32 release_retention_count = 23;
   RuntimeClass runtime_class = 24;
-  string ci_workflow_id = 25;
+  reserved 25;
+  reserved "ci_workflow_id";
   google.protobuf.Timestamp created_at = 26;
   google.protobuf.Timestamp deleted_at = 27;
   // Cron windows applied when scaling_mode is KEDA_CRON; must be non-empty
@@ -214,6 +254,10 @@ message Application {
   repeated KedaCronSchedule keda_cron_schedules = 28;
   // HTTP add-on concurrency target applied when scaling_mode is KEDA_HTTP.
   int32 keda_http_target_pending_requests = 29;
+  string production_branch = 30;
+  OciAnnotationPolicy annotation_policy = 31;
+  OciAnnotationStatus annotation_status = 32;
+  string github_workflow_path = 33;
 }
 
 message Environment {
@@ -407,74 +451,77 @@ message DeleteDomainRequest {
 }
 message DeleteDomainResponse {}
 
-// Registry is one row of the registries table: an OCI image registry an app
-// pulls container images from. credential_secret_ref is a
-// k8s-secret://<namespace>/<name>#<key> REFERENCE to the pull credential; the
-// raw credential is never accepted or stored in Postgres — only the reference.
-message Registry {
-  string id = 1;
-  string organization_id = 2;
-  // provider identifies the registry flavour: one of "ghcr", "gcr", "ecr",
-  // "other".
-  string provider = 3;
-  string registry_url = 4;
-  // credential_secret_ref is a k8s-secret://<namespace>/<name>#<key> reference
-  // to the pull credential, NOT a plaintext credential.
-  string credential_secret_ref = 5;
-  google.protobuf.Timestamp created_at = 6;
+message GitHubAppStatus {
+  GitHubAppSetupState setup_state = 1; int64 app_id = 2; string slug = 3; string name = 4;
+  string owner_login = 5; GitHubAccountType owner_type = 6; string html_url = 7; string webhook_url = 8;
+  GitHubCredentialReadiness credential_readiness = 9; IntegrationFailureCode failure_code = 10; string failure_message = 11;
+  google.protobuf.Timestamp created_at = 12; google.protobuf.Timestamp updated_at = 13;
 }
-
-message CreateRegistryRequest {
-  string organization_id = 1;
-  Registry registry = 2;
-  string idempotency_key = 3;
+message GitHubInstallation {
+  string id = 1; int64 github_installation_id = 2; int64 account_id = 3; string account_login = 4;
+  GitHubAccountType account_type = 5; GitHubInstallationRepositorySelection repository_selection = 6;
+  GitHubInstallationLifecycleStatus lifecycle_status = 7; google.protobuf.Timestamp suspended_at = 8;
+  google.protobuf.Timestamp deleted_at = 9; google.protobuf.Timestamp synced_at = 10; string settings_url = 11;
+  google.protobuf.Timestamp created_at = 12; google.protobuf.Timestamp updated_at = 13;
 }
-message CreateRegistryResponse { Registry registry = 1; }
-message GetRegistryRequest { string registry_id = 1; }
-message GetRegistryResponse { Registry registry = 1; }
-message ListRegistriesRequest {
-  string organization_id = 1;
-  int32 page_size = 2;
-  string page_token = 3;
+message GitHubRepository {
+  int64 id = 1; int64 installation_id = 2; string node_id = 3; string owner = 4; string name = 5;
+  string full_name = 6; bool private = 7; bool archived = 8; string default_branch = 9;
+  GitHubRepositoryAccessStatus access_status = 10; google.protobuf.Timestamp synced_at = 11;
 }
-message ListRegistriesResponse {
-  repeated Registry registries = 1;
-  string next_page_token = 2;
+message GitHubWorkflow {
+  string path = 1; string name = 2; GitHubWorkflowState state = 3; GitHubWorkflowCompatibility compatibility = 4;
+  // Stable, deterministic reason codes emitted only by the approved narrow parser.
+  repeated string incompatibility_reasons = 5;
 }
-message DeleteRegistryRequest {
-  string registry_id = 1;
-  string idempotency_key = 2;
-}
-message DeleteRegistryResponse {}
-
-// GitConnection is one row of the git_connections table: a GitHub App
-// installation bound to a single repository. webhook_secret_ref is a
-// k8s-secret://<namespace>/<name>#<key> REFERENCE to the webhook signing
-// secret; the raw secret is never accepted or stored in Postgres.
 message GitConnection {
-  string id = 1;
-  string organization_id = 2;
-  // provider is "github" (the only supported value in v1).
-  string provider = 3;
-  int64 installation_id = 4;
-  string repo_full_name = 5;
-  string default_branch = 6;
-  // webhook_secret_ref is a k8s-secret://<namespace>/<name>#<key> reference to
-  // the webhook signing secret, NOT a plaintext secret.
-  string webhook_secret_ref = 7;
-  google.protobuf.Timestamp created_at = 8;
+  reserved 2 to 8;
+  reserved "organization_id", "provider", "installation_id", "repo_full_name", "default_branch", "webhook_secret_ref", "created_at";
+  string id = 1; GitHubRepository repository = 9; GitConnectionStatus status = 10;
+  google.protobuf.Timestamp connected_at = 11; google.protobuf.Timestamp disconnected_at = 12;
 }
-
-message CreateGitConnectionRequest {
-  string organization_id = 1;
-  GitConnection git_connection = 2;
-  string idempotency_key = 3;
+message GhcrCredential {
+  // Input-only and sensitive. Never returned, logged, or persisted in PostgreSQL.
+  string username = 1;
+  // Input-only and sensitive PAT classic with read:packages. Never returned or logged.
+  string personal_access_token = 2 [(google.api.field_behavior) = INPUT_ONLY];
 }
-message CreateGitConnectionResponse { GitConnection git_connection = 1; }
+message GhcrCredentialStatus {
+  bool configured = 1; int64 generation = 2; GhcrCredentialState state = 3; IntegrationFailureCode failure_code = 4;
+  string failure_message = 5; google.protobuf.Timestamp created_at = 6; google.protobuf.Timestamp updated_at = 7;
+}
+message ImportOperation {
+  string id = 1; ImportOperationState state = 2; int64 github_repository_id = 3; string git_connection_id = 4;
+  string project_id = 5; string application_id = 6; string environment_id = 7; string orchestration_job_id = 8;
+  IntegrationFailureCode failure_code = 9; string failure_message = 10; google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12; google.protobuf.Timestamp completed_at = 13;
+}
+message BeginGitHubFlowResponse {
+  // A short-lived same-origin browser route, never a raw GitHub URL.
+  string start_url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+message GetGitHubAppStatusRequest {}
+message GetGitHubAppStatusResponse { GitHubAppStatus github_app = 1; }
+message BeginGitHubAppSetupRequest { string idempotency_key = 1; }
+message BeginGitHubAppSetupResponse { BeginGitHubFlowResponse flow = 1; }
+message BeginGitHubInstallationRequest { string idempotency_key = 1; }
+message BeginGitHubInstallationResponse { BeginGitHubFlowResponse flow = 1; }
+message GetGitHubInstallationRequest { string installation_id = 1; }
+message GetGitHubInstallationResponse { GitHubInstallation installation = 1; }
+message ListGitHubInstallationsRequest { int32 page_size = 1; string page_token = 2; }
+message ListGitHubInstallationsResponse { repeated GitHubInstallation installations = 1; string next_page_token = 2; }
+message RefreshGitHubInstallationRequest { string installation_id = 1; string idempotency_key = 2; }
+message RefreshGitHubInstallationResponse { GitHubInstallation installation = 1; }
+message ListGitHubRepositoriesRequest { string installation_id = 1; int32 page_size = 2; string page_token = 3; }
+message ListGitHubRepositoriesResponse { repeated GitHubRepository repositories = 1; string next_page_token = 2; }
+message ListGitHubRepositoryWorkflowsRequest { int64 repository_id = 1; int32 page_size = 2; string page_token = 3; }
+message ListGitHubRepositoryWorkflowsResponse { repeated GitHubWorkflow workflows = 1; string next_page_token = 2; }
 message GetGitConnectionRequest { string git_connection_id = 1; }
 message GetGitConnectionResponse { GitConnection git_connection = 1; }
 message ListGitConnectionsRequest {
-  string organization_id = 1;
+  reserved 1;
+  reserved "organization_id";
   int32 page_size = 2;
   string page_token = 3;
 }
@@ -482,11 +529,26 @@ message ListGitConnectionsResponse {
   repeated GitConnection git_connections = 1;
   string next_page_token = 2;
 }
-message DeleteGitConnectionRequest {
-  string git_connection_id = 1;
-  string idempotency_key = 2;
+message DisconnectGitConnectionRequest { string git_connection_id = 1; string idempotency_key = 2; }
+message DisconnectGitConnectionResponse { GitConnection git_connection = 1; }
+message ImportGitRepositoryRequest {
+  int64 repository_id = 1; string github_workflow_path = 2; string project_name = 3; string project_slug = 4;
+  string application_name = 5; string application_slug = 6; string hostname_label = 7; string production_branch = 8;
+  string image_repository = 9; bool previews_enabled = 10; int32 container_port = 11; string health_check_path = 12;
+  ScalingMode scaling_mode = 13; int32 min_replicas = 14; int32 max_replicas = 15; int32 hpa_target_cpu_percent = 16;
+  int32 cpu_request_millicores = 17; int32 cpu_limit_millicores = 18; int32 memory_request_mib = 19;
+  int32 memory_limit_mib = 20; int32 max_preview_environments = 21; int32 preview_idle_ttl_hours = 22;
+  int32 deploy_timeout_seconds = 23; int32 release_retention_count = 24; RuntimeClass runtime_class = 25;
+  repeated KedaCronSchedule keda_cron_schedules = 26; int32 keda_http_target_pending_requests = 27;
+  OciAnnotationPolicy annotation_policy = 28; GhcrCredential ghcr_credential = 29; string idempotency_key = 30;
 }
-message DeleteGitConnectionResponse {}
+message ImportGitRepositoryResponse { ImportOperation operation = 1; }
+message GetImportOperationRequest { string import_operation_id = 1; }
+message GetImportOperationResponse { ImportOperation operation = 1; }
+message GetGhcrCredentialStatusRequest {}
+message GetGhcrCredentialStatusResponse { GhcrCredentialStatus credential = 1; }
+message RotateGhcrCredentialRequest { GhcrCredential credential = 1; string idempotency_key = 2; }
+message RotateGhcrCredentialResponse { GhcrCredentialStatus credential = 1; }
 
 // Alias is one row of the aliases table: a bookkeeping record of which release
 // currently serves at a hostname for an environment (§3.7). There is at most
@@ -1162,40 +1224,51 @@ service DomainService {
   }
 }
 
-// RegistryService manages OCI image registries an app pulls images from (§6).
-// The pull credential is passed as a k8s-secret:// reference, never as a raw
-// secret. Deleting a registry still referenced by an app fails (FK RESTRICT).
-service RegistryService {
-  rpc CreateRegistry(CreateRegistryRequest) returns (CreateRegistryResponse) {
-    option (google.api.http) = { post: "/v1/organizations/{organization_id}/registries" body: "registry" };
+service GitProviderService {
+  rpc GetGitHubAppStatus(GetGitHubAppStatusRequest) returns (GetGitHubAppStatusResponse) {
+    option (google.api.http) = { get: "/v1/github/app" };
   }
-  rpc GetRegistry(GetRegistryRequest) returns (GetRegistryResponse) {
-    option (google.api.http) = { get: "/v1/registries/{registry_id}" };
+  rpc BeginGitHubAppSetup(BeginGitHubAppSetupRequest) returns (BeginGitHubAppSetupResponse) {
+    option (google.api.http) = { post: "/v1/github/app:beginSetup" body: "*" };
   }
-  rpc ListRegistries(ListRegistriesRequest) returns (ListRegistriesResponse) {
-    option (google.api.http) = { get: "/v1/organizations/{organization_id}/registries" };
+  rpc BeginGitHubInstallation(BeginGitHubInstallationRequest) returns (BeginGitHubInstallationResponse) {
+    option (google.api.http) = { post: "/v1/github/installations:begin" body: "*" };
   }
-  rpc DeleteRegistry(DeleteRegistryRequest) returns (DeleteRegistryResponse) {
-    option (google.api.http) = { delete: "/v1/registries/{registry_id}" };
+  rpc GetGitHubInstallation(GetGitHubInstallationRequest) returns (GetGitHubInstallationResponse) {
+    option (google.api.http) = { get: "/v1/github/installations/{installation_id}" };
   }
-}
-
-// GitConnectionService manages GitHub App installations bound to a repository
-// (§6). The webhook signing secret is passed as a k8s-secret:// reference,
-// never as a raw secret. Deleting a git connection nulls referencing projects
-// (FK SET NULL).
-service GitConnectionService {
-  rpc CreateGitConnection(CreateGitConnectionRequest) returns (CreateGitConnectionResponse) {
-    option (google.api.http) = { post: "/v1/organizations/{organization_id}/git-connections" body: "git_connection" };
+  rpc ListGitHubInstallations(ListGitHubInstallationsRequest) returns (ListGitHubInstallationsResponse) {
+    option (google.api.http) = { get: "/v1/github/installations" };
+  }
+  rpc RefreshGitHubInstallation(RefreshGitHubInstallationRequest) returns (RefreshGitHubInstallationResponse) {
+    option (google.api.http) = { post: "/v1/github/installations/{installation_id}:refresh" body: "*" };
+  }
+  rpc ListGitHubRepositories(ListGitHubRepositoriesRequest) returns (ListGitHubRepositoriesResponse) {
+    option (google.api.http) = { get: "/v1/github/installations/{installation_id}/repositories" };
+  }
+  rpc ListGitHubRepositoryWorkflows(ListGitHubRepositoryWorkflowsRequest) returns (ListGitHubRepositoryWorkflowsResponse) {
+    option (google.api.http) = { get: "/v1/github/repositories/{repository_id}/workflows" };
   }
   rpc GetGitConnection(GetGitConnectionRequest) returns (GetGitConnectionResponse) {
     option (google.api.http) = { get: "/v1/git-connections/{git_connection_id}" };
   }
   rpc ListGitConnections(ListGitConnectionsRequest) returns (ListGitConnectionsResponse) {
-    option (google.api.http) = { get: "/v1/organizations/{organization_id}/git-connections" };
+    option (google.api.http) = { get: "/v1/git-connections" };
   }
-  rpc DeleteGitConnection(DeleteGitConnectionRequest) returns (DeleteGitConnectionResponse) {
-    option (google.api.http) = { delete: "/v1/git-connections/{git_connection_id}" };
+  rpc DisconnectGitConnection(DisconnectGitConnectionRequest) returns (DisconnectGitConnectionResponse) {
+    option (google.api.http) = { post: "/v1/git-connections/{git_connection_id}:disconnect" body: "*" };
+  }
+  rpc ImportGitRepository(ImportGitRepositoryRequest) returns (ImportGitRepositoryResponse) {
+    option (google.api.http) = { post: "/v1/github/repositories:import" body: "*" };
+  }
+  rpc GetImportOperation(GetImportOperationRequest) returns (GetImportOperationResponse) {
+    option (google.api.http) = { get: "/v1/import-operations/{import_operation_id}" };
+  }
+  rpc GetGhcrCredentialStatus(GetGhcrCredentialStatusRequest) returns (GetGhcrCredentialStatusResponse) {
+    option (google.api.http) = { get: "/v1/github/ghcr-credential" };
+  }
+  rpc RotateGhcrCredential(RotateGhcrCredentialRequest) returns (RotateGhcrCredentialResponse) {
+    option (google.api.http) = { post: "/v1/github/ghcr-credential:rotate" body: "*" };
   }
 }
 

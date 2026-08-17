@@ -377,7 +377,7 @@ func (s *Service) DeleteProject(ctx context.Context, actor ActorContext, key, id
 
 type AppInput struct {
 	ProjectID, Name, Slug, HostnameLabel                                                     string
-	RegistryID, ImageRepository, CIWorkflowID, GitHubWorkflowPath                            *string
+	RegistryID, ImageRepository, GitHubWorkflowPath                                          *string
 	ProductionBranch                                                                         string
 	ContainerPort                                                                            int
 	HealthCheckPath, ScalingMode                                                             string
@@ -554,8 +554,6 @@ func appValue(orgID, id string, i AppInput, runtimeClass string) store.App {
 	workflowPath := ""
 	if i.GitHubWorkflowPath != nil {
 		workflowPath = *i.GitHubWorkflowPath
-	} else if i.CIWorkflowID != nil {
-		workflowPath = *i.CIWorkflowID
 	}
 	branch := i.ProductionBranch
 	if branch == "" {
@@ -918,9 +916,6 @@ func validateApp(i AppInput, runtimeClass string) error {
 		return ErrInvalidArgument
 	}
 	workflowPath := i.GitHubWorkflowPath
-	if workflowPath == nil {
-		workflowPath = i.CIWorkflowID
-	}
 	if workflowPath == nil || !regexp.MustCompile(`^\.github/workflows/[^/\s]+\.(yml|yaml)$`).MatchString(*workflowPath) || len(*workflowPath) > 255 {
 		return ErrInvalidArgument
 	}

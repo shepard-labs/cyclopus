@@ -2385,449 +2385,633 @@ var DomainService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	RegistryService_CreateRegistry_FullMethodName = "/cyclopus.v1.RegistryService/CreateRegistry"
-	RegistryService_GetRegistry_FullMethodName    = "/cyclopus.v1.RegistryService/GetRegistry"
-	RegistryService_ListRegistries_FullMethodName = "/cyclopus.v1.RegistryService/ListRegistries"
-	RegistryService_DeleteRegistry_FullMethodName = "/cyclopus.v1.RegistryService/DeleteRegistry"
+	GitProviderService_GetGitHubAppStatus_FullMethodName            = "/cyclopus.v1.GitProviderService/GetGitHubAppStatus"
+	GitProviderService_BeginGitHubAppSetup_FullMethodName           = "/cyclopus.v1.GitProviderService/BeginGitHubAppSetup"
+	GitProviderService_BeginGitHubInstallation_FullMethodName       = "/cyclopus.v1.GitProviderService/BeginGitHubInstallation"
+	GitProviderService_GetGitHubInstallation_FullMethodName         = "/cyclopus.v1.GitProviderService/GetGitHubInstallation"
+	GitProviderService_ListGitHubInstallations_FullMethodName       = "/cyclopus.v1.GitProviderService/ListGitHubInstallations"
+	GitProviderService_RefreshGitHubInstallation_FullMethodName     = "/cyclopus.v1.GitProviderService/RefreshGitHubInstallation"
+	GitProviderService_ListGitHubRepositories_FullMethodName        = "/cyclopus.v1.GitProviderService/ListGitHubRepositories"
+	GitProviderService_ListGitHubRepositoryWorkflows_FullMethodName = "/cyclopus.v1.GitProviderService/ListGitHubRepositoryWorkflows"
+	GitProviderService_GetGitConnection_FullMethodName              = "/cyclopus.v1.GitProviderService/GetGitConnection"
+	GitProviderService_ListGitConnections_FullMethodName            = "/cyclopus.v1.GitProviderService/ListGitConnections"
+	GitProviderService_DisconnectGitConnection_FullMethodName       = "/cyclopus.v1.GitProviderService/DisconnectGitConnection"
+	GitProviderService_ImportGitRepository_FullMethodName           = "/cyclopus.v1.GitProviderService/ImportGitRepository"
+	GitProviderService_GetImportOperation_FullMethodName            = "/cyclopus.v1.GitProviderService/GetImportOperation"
+	GitProviderService_GetGhcrCredentialStatus_FullMethodName       = "/cyclopus.v1.GitProviderService/GetGhcrCredentialStatus"
+	GitProviderService_RotateGhcrCredential_FullMethodName          = "/cyclopus.v1.GitProviderService/RotateGhcrCredential"
 )
 
-// RegistryServiceClient is the client API for RegistryService service.
+// GitProviderServiceClient is the client API for GitProviderService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// RegistryService manages OCI image registries an app pulls images from (§6).
-// The pull credential is passed as a k8s-secret:// reference, never as a raw
-// secret. Deleting a registry still referenced by an app fails (FK RESTRICT).
-type RegistryServiceClient interface {
-	CreateRegistry(ctx context.Context, in *CreateRegistryRequest, opts ...grpc.CallOption) (*CreateRegistryResponse, error)
-	GetRegistry(ctx context.Context, in *GetRegistryRequest, opts ...grpc.CallOption) (*GetRegistryResponse, error)
-	ListRegistries(ctx context.Context, in *ListRegistriesRequest, opts ...grpc.CallOption) (*ListRegistriesResponse, error)
-	DeleteRegistry(ctx context.Context, in *DeleteRegistryRequest, opts ...grpc.CallOption) (*DeleteRegistryResponse, error)
-}
-
-type registryServiceClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewRegistryServiceClient(cc grpc.ClientConnInterface) RegistryServiceClient {
-	return &registryServiceClient{cc}
-}
-
-func (c *registryServiceClient) CreateRegistry(ctx context.Context, in *CreateRegistryRequest, opts ...grpc.CallOption) (*CreateRegistryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateRegistryResponse)
-	err := c.cc.Invoke(ctx, RegistryService_CreateRegistry_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *registryServiceClient) GetRegistry(ctx context.Context, in *GetRegistryRequest, opts ...grpc.CallOption) (*GetRegistryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetRegistryResponse)
-	err := c.cc.Invoke(ctx, RegistryService_GetRegistry_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *registryServiceClient) ListRegistries(ctx context.Context, in *ListRegistriesRequest, opts ...grpc.CallOption) (*ListRegistriesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListRegistriesResponse)
-	err := c.cc.Invoke(ctx, RegistryService_ListRegistries_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *registryServiceClient) DeleteRegistry(ctx context.Context, in *DeleteRegistryRequest, opts ...grpc.CallOption) (*DeleteRegistryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteRegistryResponse)
-	err := c.cc.Invoke(ctx, RegistryService_DeleteRegistry_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// RegistryServiceServer is the server API for RegistryService service.
-// All implementations must embed UnimplementedRegistryServiceServer
-// for forward compatibility.
-//
-// RegistryService manages OCI image registries an app pulls images from (§6).
-// The pull credential is passed as a k8s-secret:// reference, never as a raw
-// secret. Deleting a registry still referenced by an app fails (FK RESTRICT).
-type RegistryServiceServer interface {
-	CreateRegistry(context.Context, *CreateRegistryRequest) (*CreateRegistryResponse, error)
-	GetRegistry(context.Context, *GetRegistryRequest) (*GetRegistryResponse, error)
-	ListRegistries(context.Context, *ListRegistriesRequest) (*ListRegistriesResponse, error)
-	DeleteRegistry(context.Context, *DeleteRegistryRequest) (*DeleteRegistryResponse, error)
-	mustEmbedUnimplementedRegistryServiceServer()
-}
-
-// UnimplementedRegistryServiceServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
-type UnimplementedRegistryServiceServer struct{}
-
-func (UnimplementedRegistryServiceServer) CreateRegistry(context.Context, *CreateRegistryRequest) (*CreateRegistryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateRegistry not implemented")
-}
-func (UnimplementedRegistryServiceServer) GetRegistry(context.Context, *GetRegistryRequest) (*GetRegistryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetRegistry not implemented")
-}
-func (UnimplementedRegistryServiceServer) ListRegistries(context.Context, *ListRegistriesRequest) (*ListRegistriesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListRegistries not implemented")
-}
-func (UnimplementedRegistryServiceServer) DeleteRegistry(context.Context, *DeleteRegistryRequest) (*DeleteRegistryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeleteRegistry not implemented")
-}
-func (UnimplementedRegistryServiceServer) mustEmbedUnimplementedRegistryServiceServer() {}
-func (UnimplementedRegistryServiceServer) testEmbeddedByValue()                         {}
-
-// UnsafeRegistryServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to RegistryServiceServer will
-// result in compilation errors.
-type UnsafeRegistryServiceServer interface {
-	mustEmbedUnimplementedRegistryServiceServer()
-}
-
-func RegisterRegistryServiceServer(s grpc.ServiceRegistrar, srv RegistryServiceServer) {
-	// If the following call panics, it indicates UnimplementedRegistryServiceServer was
-	// embedded by pointer and is nil.  This will cause panics if an
-	// unimplemented method is ever invoked, so we test this at initialization
-	// time to prevent it from happening at runtime later due to I/O.
-	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
-		t.testEmbeddedByValue()
-	}
-	s.RegisterService(&RegistryService_ServiceDesc, srv)
-}
-
-func _RegistryService_CreateRegistry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateRegistryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RegistryServiceServer).CreateRegistry(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: RegistryService_CreateRegistry_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RegistryServiceServer).CreateRegistry(ctx, req.(*CreateRegistryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _RegistryService_GetRegistry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetRegistryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RegistryServiceServer).GetRegistry(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: RegistryService_GetRegistry_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RegistryServiceServer).GetRegistry(ctx, req.(*GetRegistryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _RegistryService_ListRegistries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListRegistriesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RegistryServiceServer).ListRegistries(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: RegistryService_ListRegistries_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RegistryServiceServer).ListRegistries(ctx, req.(*ListRegistriesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _RegistryService_DeleteRegistry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteRegistryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RegistryServiceServer).DeleteRegistry(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: RegistryService_DeleteRegistry_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RegistryServiceServer).DeleteRegistry(ctx, req.(*DeleteRegistryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// RegistryService_ServiceDesc is the grpc.ServiceDesc for RegistryService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var RegistryService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "cyclopus.v1.RegistryService",
-	HandlerType: (*RegistryServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "CreateRegistry",
-			Handler:    _RegistryService_CreateRegistry_Handler,
-		},
-		{
-			MethodName: "GetRegistry",
-			Handler:    _RegistryService_GetRegistry_Handler,
-		},
-		{
-			MethodName: "ListRegistries",
-			Handler:    _RegistryService_ListRegistries_Handler,
-		},
-		{
-			MethodName: "DeleteRegistry",
-			Handler:    _RegistryService_DeleteRegistry_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "cyclopus/v1/cyclopus.proto",
-}
-
-const (
-	GitConnectionService_CreateGitConnection_FullMethodName = "/cyclopus.v1.GitConnectionService/CreateGitConnection"
-	GitConnectionService_GetGitConnection_FullMethodName    = "/cyclopus.v1.GitConnectionService/GetGitConnection"
-	GitConnectionService_ListGitConnections_FullMethodName  = "/cyclopus.v1.GitConnectionService/ListGitConnections"
-	GitConnectionService_DeleteGitConnection_FullMethodName = "/cyclopus.v1.GitConnectionService/DeleteGitConnection"
-)
-
-// GitConnectionServiceClient is the client API for GitConnectionService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// GitConnectionService manages GitHub App installations bound to a repository
-// (§6). The webhook signing secret is passed as a k8s-secret:// reference,
-// never as a raw secret. Deleting a git connection nulls referencing projects
-// (FK SET NULL).
-type GitConnectionServiceClient interface {
-	CreateGitConnection(ctx context.Context, in *CreateGitConnectionRequest, opts ...grpc.CallOption) (*CreateGitConnectionResponse, error)
+type GitProviderServiceClient interface {
+	GetGitHubAppStatus(ctx context.Context, in *GetGitHubAppStatusRequest, opts ...grpc.CallOption) (*GetGitHubAppStatusResponse, error)
+	BeginGitHubAppSetup(ctx context.Context, in *BeginGitHubAppSetupRequest, opts ...grpc.CallOption) (*BeginGitHubAppSetupResponse, error)
+	BeginGitHubInstallation(ctx context.Context, in *BeginGitHubInstallationRequest, opts ...grpc.CallOption) (*BeginGitHubInstallationResponse, error)
+	GetGitHubInstallation(ctx context.Context, in *GetGitHubInstallationRequest, opts ...grpc.CallOption) (*GetGitHubInstallationResponse, error)
+	ListGitHubInstallations(ctx context.Context, in *ListGitHubInstallationsRequest, opts ...grpc.CallOption) (*ListGitHubInstallationsResponse, error)
+	RefreshGitHubInstallation(ctx context.Context, in *RefreshGitHubInstallationRequest, opts ...grpc.CallOption) (*RefreshGitHubInstallationResponse, error)
+	ListGitHubRepositories(ctx context.Context, in *ListGitHubRepositoriesRequest, opts ...grpc.CallOption) (*ListGitHubRepositoriesResponse, error)
+	ListGitHubRepositoryWorkflows(ctx context.Context, in *ListGitHubRepositoryWorkflowsRequest, opts ...grpc.CallOption) (*ListGitHubRepositoryWorkflowsResponse, error)
 	GetGitConnection(ctx context.Context, in *GetGitConnectionRequest, opts ...grpc.CallOption) (*GetGitConnectionResponse, error)
 	ListGitConnections(ctx context.Context, in *ListGitConnectionsRequest, opts ...grpc.CallOption) (*ListGitConnectionsResponse, error)
-	DeleteGitConnection(ctx context.Context, in *DeleteGitConnectionRequest, opts ...grpc.CallOption) (*DeleteGitConnectionResponse, error)
+	DisconnectGitConnection(ctx context.Context, in *DisconnectGitConnectionRequest, opts ...grpc.CallOption) (*DisconnectGitConnectionResponse, error)
+	ImportGitRepository(ctx context.Context, in *ImportGitRepositoryRequest, opts ...grpc.CallOption) (*ImportGitRepositoryResponse, error)
+	GetImportOperation(ctx context.Context, in *GetImportOperationRequest, opts ...grpc.CallOption) (*GetImportOperationResponse, error)
+	GetGhcrCredentialStatus(ctx context.Context, in *GetGhcrCredentialStatusRequest, opts ...grpc.CallOption) (*GetGhcrCredentialStatusResponse, error)
+	RotateGhcrCredential(ctx context.Context, in *RotateGhcrCredentialRequest, opts ...grpc.CallOption) (*RotateGhcrCredentialResponse, error)
 }
 
-type gitConnectionServiceClient struct {
+type gitProviderServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewGitConnectionServiceClient(cc grpc.ClientConnInterface) GitConnectionServiceClient {
-	return &gitConnectionServiceClient{cc}
+func NewGitProviderServiceClient(cc grpc.ClientConnInterface) GitProviderServiceClient {
+	return &gitProviderServiceClient{cc}
 }
 
-func (c *gitConnectionServiceClient) CreateGitConnection(ctx context.Context, in *CreateGitConnectionRequest, opts ...grpc.CallOption) (*CreateGitConnectionResponse, error) {
+func (c *gitProviderServiceClient) GetGitHubAppStatus(ctx context.Context, in *GetGitHubAppStatusRequest, opts ...grpc.CallOption) (*GetGitHubAppStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateGitConnectionResponse)
-	err := c.cc.Invoke(ctx, GitConnectionService_CreateGitConnection_FullMethodName, in, out, cOpts...)
+	out := new(GetGitHubAppStatusResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_GetGitHubAppStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *gitConnectionServiceClient) GetGitConnection(ctx context.Context, in *GetGitConnectionRequest, opts ...grpc.CallOption) (*GetGitConnectionResponse, error) {
+func (c *gitProviderServiceClient) BeginGitHubAppSetup(ctx context.Context, in *BeginGitHubAppSetupRequest, opts ...grpc.CallOption) (*BeginGitHubAppSetupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BeginGitHubAppSetupResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_BeginGitHubAppSetup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) BeginGitHubInstallation(ctx context.Context, in *BeginGitHubInstallationRequest, opts ...grpc.CallOption) (*BeginGitHubInstallationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BeginGitHubInstallationResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_BeginGitHubInstallation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) GetGitHubInstallation(ctx context.Context, in *GetGitHubInstallationRequest, opts ...grpc.CallOption) (*GetGitHubInstallationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetGitHubInstallationResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_GetGitHubInstallation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) ListGitHubInstallations(ctx context.Context, in *ListGitHubInstallationsRequest, opts ...grpc.CallOption) (*ListGitHubInstallationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListGitHubInstallationsResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_ListGitHubInstallations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) RefreshGitHubInstallation(ctx context.Context, in *RefreshGitHubInstallationRequest, opts ...grpc.CallOption) (*RefreshGitHubInstallationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshGitHubInstallationResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_RefreshGitHubInstallation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) ListGitHubRepositories(ctx context.Context, in *ListGitHubRepositoriesRequest, opts ...grpc.CallOption) (*ListGitHubRepositoriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListGitHubRepositoriesResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_ListGitHubRepositories_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) ListGitHubRepositoryWorkflows(ctx context.Context, in *ListGitHubRepositoryWorkflowsRequest, opts ...grpc.CallOption) (*ListGitHubRepositoryWorkflowsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListGitHubRepositoryWorkflowsResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_ListGitHubRepositoryWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) GetGitConnection(ctx context.Context, in *GetGitConnectionRequest, opts ...grpc.CallOption) (*GetGitConnectionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetGitConnectionResponse)
-	err := c.cc.Invoke(ctx, GitConnectionService_GetGitConnection_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, GitProviderService_GetGitConnection_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *gitConnectionServiceClient) ListGitConnections(ctx context.Context, in *ListGitConnectionsRequest, opts ...grpc.CallOption) (*ListGitConnectionsResponse, error) {
+func (c *gitProviderServiceClient) ListGitConnections(ctx context.Context, in *ListGitConnectionsRequest, opts ...grpc.CallOption) (*ListGitConnectionsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListGitConnectionsResponse)
-	err := c.cc.Invoke(ctx, GitConnectionService_ListGitConnections_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, GitProviderService_ListGitConnections_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *gitConnectionServiceClient) DeleteGitConnection(ctx context.Context, in *DeleteGitConnectionRequest, opts ...grpc.CallOption) (*DeleteGitConnectionResponse, error) {
+func (c *gitProviderServiceClient) DisconnectGitConnection(ctx context.Context, in *DisconnectGitConnectionRequest, opts ...grpc.CallOption) (*DisconnectGitConnectionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteGitConnectionResponse)
-	err := c.cc.Invoke(ctx, GitConnectionService_DeleteGitConnection_FullMethodName, in, out, cOpts...)
+	out := new(DisconnectGitConnectionResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_DisconnectGitConnection_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// GitConnectionServiceServer is the server API for GitConnectionService service.
-// All implementations must embed UnimplementedGitConnectionServiceServer
+func (c *gitProviderServiceClient) ImportGitRepository(ctx context.Context, in *ImportGitRepositoryRequest, opts ...grpc.CallOption) (*ImportGitRepositoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportGitRepositoryResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_ImportGitRepository_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) GetImportOperation(ctx context.Context, in *GetImportOperationRequest, opts ...grpc.CallOption) (*GetImportOperationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetImportOperationResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_GetImportOperation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) GetGhcrCredentialStatus(ctx context.Context, in *GetGhcrCredentialStatusRequest, opts ...grpc.CallOption) (*GetGhcrCredentialStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetGhcrCredentialStatusResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_GetGhcrCredentialStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gitProviderServiceClient) RotateGhcrCredential(ctx context.Context, in *RotateGhcrCredentialRequest, opts ...grpc.CallOption) (*RotateGhcrCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RotateGhcrCredentialResponse)
+	err := c.cc.Invoke(ctx, GitProviderService_RotateGhcrCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GitProviderServiceServer is the server API for GitProviderService service.
+// All implementations must embed UnimplementedGitProviderServiceServer
 // for forward compatibility.
-//
-// GitConnectionService manages GitHub App installations bound to a repository
-// (§6). The webhook signing secret is passed as a k8s-secret:// reference,
-// never as a raw secret. Deleting a git connection nulls referencing projects
-// (FK SET NULL).
-type GitConnectionServiceServer interface {
-	CreateGitConnection(context.Context, *CreateGitConnectionRequest) (*CreateGitConnectionResponse, error)
+type GitProviderServiceServer interface {
+	GetGitHubAppStatus(context.Context, *GetGitHubAppStatusRequest) (*GetGitHubAppStatusResponse, error)
+	BeginGitHubAppSetup(context.Context, *BeginGitHubAppSetupRequest) (*BeginGitHubAppSetupResponse, error)
+	BeginGitHubInstallation(context.Context, *BeginGitHubInstallationRequest) (*BeginGitHubInstallationResponse, error)
+	GetGitHubInstallation(context.Context, *GetGitHubInstallationRequest) (*GetGitHubInstallationResponse, error)
+	ListGitHubInstallations(context.Context, *ListGitHubInstallationsRequest) (*ListGitHubInstallationsResponse, error)
+	RefreshGitHubInstallation(context.Context, *RefreshGitHubInstallationRequest) (*RefreshGitHubInstallationResponse, error)
+	ListGitHubRepositories(context.Context, *ListGitHubRepositoriesRequest) (*ListGitHubRepositoriesResponse, error)
+	ListGitHubRepositoryWorkflows(context.Context, *ListGitHubRepositoryWorkflowsRequest) (*ListGitHubRepositoryWorkflowsResponse, error)
 	GetGitConnection(context.Context, *GetGitConnectionRequest) (*GetGitConnectionResponse, error)
 	ListGitConnections(context.Context, *ListGitConnectionsRequest) (*ListGitConnectionsResponse, error)
-	DeleteGitConnection(context.Context, *DeleteGitConnectionRequest) (*DeleteGitConnectionResponse, error)
-	mustEmbedUnimplementedGitConnectionServiceServer()
+	DisconnectGitConnection(context.Context, *DisconnectGitConnectionRequest) (*DisconnectGitConnectionResponse, error)
+	ImportGitRepository(context.Context, *ImportGitRepositoryRequest) (*ImportGitRepositoryResponse, error)
+	GetImportOperation(context.Context, *GetImportOperationRequest) (*GetImportOperationResponse, error)
+	GetGhcrCredentialStatus(context.Context, *GetGhcrCredentialStatusRequest) (*GetGhcrCredentialStatusResponse, error)
+	RotateGhcrCredential(context.Context, *RotateGhcrCredentialRequest) (*RotateGhcrCredentialResponse, error)
+	mustEmbedUnimplementedGitProviderServiceServer()
 }
 
-// UnimplementedGitConnectionServiceServer must be embedded to have
+// UnimplementedGitProviderServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedGitConnectionServiceServer struct{}
+type UnimplementedGitProviderServiceServer struct{}
 
-func (UnimplementedGitConnectionServiceServer) CreateGitConnection(context.Context, *CreateGitConnectionRequest) (*CreateGitConnectionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateGitConnection not implemented")
+func (UnimplementedGitProviderServiceServer) GetGitHubAppStatus(context.Context, *GetGitHubAppStatusRequest) (*GetGitHubAppStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGitHubAppStatus not implemented")
 }
-func (UnimplementedGitConnectionServiceServer) GetGitConnection(context.Context, *GetGitConnectionRequest) (*GetGitConnectionResponse, error) {
+func (UnimplementedGitProviderServiceServer) BeginGitHubAppSetup(context.Context, *BeginGitHubAppSetupRequest) (*BeginGitHubAppSetupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BeginGitHubAppSetup not implemented")
+}
+func (UnimplementedGitProviderServiceServer) BeginGitHubInstallation(context.Context, *BeginGitHubInstallationRequest) (*BeginGitHubInstallationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BeginGitHubInstallation not implemented")
+}
+func (UnimplementedGitProviderServiceServer) GetGitHubInstallation(context.Context, *GetGitHubInstallationRequest) (*GetGitHubInstallationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGitHubInstallation not implemented")
+}
+func (UnimplementedGitProviderServiceServer) ListGitHubInstallations(context.Context, *ListGitHubInstallationsRequest) (*ListGitHubInstallationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListGitHubInstallations not implemented")
+}
+func (UnimplementedGitProviderServiceServer) RefreshGitHubInstallation(context.Context, *RefreshGitHubInstallationRequest) (*RefreshGitHubInstallationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshGitHubInstallation not implemented")
+}
+func (UnimplementedGitProviderServiceServer) ListGitHubRepositories(context.Context, *ListGitHubRepositoriesRequest) (*ListGitHubRepositoriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListGitHubRepositories not implemented")
+}
+func (UnimplementedGitProviderServiceServer) ListGitHubRepositoryWorkflows(context.Context, *ListGitHubRepositoryWorkflowsRequest) (*ListGitHubRepositoryWorkflowsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListGitHubRepositoryWorkflows not implemented")
+}
+func (UnimplementedGitProviderServiceServer) GetGitConnection(context.Context, *GetGitConnectionRequest) (*GetGitConnectionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetGitConnection not implemented")
 }
-func (UnimplementedGitConnectionServiceServer) ListGitConnections(context.Context, *ListGitConnectionsRequest) (*ListGitConnectionsResponse, error) {
+func (UnimplementedGitProviderServiceServer) ListGitConnections(context.Context, *ListGitConnectionsRequest) (*ListGitConnectionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListGitConnections not implemented")
 }
-func (UnimplementedGitConnectionServiceServer) DeleteGitConnection(context.Context, *DeleteGitConnectionRequest) (*DeleteGitConnectionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeleteGitConnection not implemented")
+func (UnimplementedGitProviderServiceServer) DisconnectGitConnection(context.Context, *DisconnectGitConnectionRequest) (*DisconnectGitConnectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DisconnectGitConnection not implemented")
 }
-func (UnimplementedGitConnectionServiceServer) mustEmbedUnimplementedGitConnectionServiceServer() {}
-func (UnimplementedGitConnectionServiceServer) testEmbeddedByValue()                              {}
+func (UnimplementedGitProviderServiceServer) ImportGitRepository(context.Context, *ImportGitRepositoryRequest) (*ImportGitRepositoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ImportGitRepository not implemented")
+}
+func (UnimplementedGitProviderServiceServer) GetImportOperation(context.Context, *GetImportOperationRequest) (*GetImportOperationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetImportOperation not implemented")
+}
+func (UnimplementedGitProviderServiceServer) GetGhcrCredentialStatus(context.Context, *GetGhcrCredentialStatusRequest) (*GetGhcrCredentialStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGhcrCredentialStatus not implemented")
+}
+func (UnimplementedGitProviderServiceServer) RotateGhcrCredential(context.Context, *RotateGhcrCredentialRequest) (*RotateGhcrCredentialResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RotateGhcrCredential not implemented")
+}
+func (UnimplementedGitProviderServiceServer) mustEmbedUnimplementedGitProviderServiceServer() {}
+func (UnimplementedGitProviderServiceServer) testEmbeddedByValue()                            {}
 
-// UnsafeGitConnectionServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to GitConnectionServiceServer will
+// UnsafeGitProviderServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to GitProviderServiceServer will
 // result in compilation errors.
-type UnsafeGitConnectionServiceServer interface {
-	mustEmbedUnimplementedGitConnectionServiceServer()
+type UnsafeGitProviderServiceServer interface {
+	mustEmbedUnimplementedGitProviderServiceServer()
 }
 
-func RegisterGitConnectionServiceServer(s grpc.ServiceRegistrar, srv GitConnectionServiceServer) {
-	// If the following call panics, it indicates UnimplementedGitConnectionServiceServer was
+func RegisterGitProviderServiceServer(s grpc.ServiceRegistrar, srv GitProviderServiceServer) {
+	// If the following call panics, it indicates UnimplementedGitProviderServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&GitConnectionService_ServiceDesc, srv)
+	s.RegisterService(&GitProviderService_ServiceDesc, srv)
 }
 
-func _GitConnectionService_CreateGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateGitConnectionRequest)
+func _GitProviderService_GetGitHubAppStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGitHubAppStatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(GitConnectionServiceServer).CreateGitConnection(ctx, in)
+		return srv.(GitProviderServiceServer).GetGitHubAppStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: GitConnectionService_CreateGitConnection_FullMethodName,
+		FullMethod: GitProviderService_GetGitHubAppStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GitConnectionServiceServer).CreateGitConnection(ctx, req.(*CreateGitConnectionRequest))
+		return srv.(GitProviderServiceServer).GetGitHubAppStatus(ctx, req.(*GetGitHubAppStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _GitConnectionService_GetGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _GitProviderService_BeginGitHubAppSetup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BeginGitHubAppSetupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).BeginGitHubAppSetup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_BeginGitHubAppSetup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).BeginGitHubAppSetup(ctx, req.(*BeginGitHubAppSetupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_BeginGitHubInstallation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BeginGitHubInstallationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).BeginGitHubInstallation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_BeginGitHubInstallation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).BeginGitHubInstallation(ctx, req.(*BeginGitHubInstallationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_GetGitHubInstallation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGitHubInstallationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).GetGitHubInstallation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_GetGitHubInstallation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).GetGitHubInstallation(ctx, req.(*GetGitHubInstallationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_ListGitHubInstallations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListGitHubInstallationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).ListGitHubInstallations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_ListGitHubInstallations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).ListGitHubInstallations(ctx, req.(*ListGitHubInstallationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_RefreshGitHubInstallation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshGitHubInstallationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).RefreshGitHubInstallation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_RefreshGitHubInstallation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).RefreshGitHubInstallation(ctx, req.(*RefreshGitHubInstallationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_ListGitHubRepositories_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListGitHubRepositoriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).ListGitHubRepositories(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_ListGitHubRepositories_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).ListGitHubRepositories(ctx, req.(*ListGitHubRepositoriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_ListGitHubRepositoryWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListGitHubRepositoryWorkflowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).ListGitHubRepositoryWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_ListGitHubRepositoryWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).ListGitHubRepositoryWorkflows(ctx, req.(*ListGitHubRepositoryWorkflowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_GetGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetGitConnectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(GitConnectionServiceServer).GetGitConnection(ctx, in)
+		return srv.(GitProviderServiceServer).GetGitConnection(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: GitConnectionService_GetGitConnection_FullMethodName,
+		FullMethod: GitProviderService_GetGitConnection_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GitConnectionServiceServer).GetGitConnection(ctx, req.(*GetGitConnectionRequest))
+		return srv.(GitProviderServiceServer).GetGitConnection(ctx, req.(*GetGitConnectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _GitConnectionService_ListGitConnections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _GitProviderService_ListGitConnections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListGitConnectionsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(GitConnectionServiceServer).ListGitConnections(ctx, in)
+		return srv.(GitProviderServiceServer).ListGitConnections(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: GitConnectionService_ListGitConnections_FullMethodName,
+		FullMethod: GitProviderService_ListGitConnections_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GitConnectionServiceServer).ListGitConnections(ctx, req.(*ListGitConnectionsRequest))
+		return srv.(GitProviderServiceServer).ListGitConnections(ctx, req.(*ListGitConnectionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _GitConnectionService_DeleteGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteGitConnectionRequest)
+func _GitProviderService_DisconnectGitConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DisconnectGitConnectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(GitConnectionServiceServer).DeleteGitConnection(ctx, in)
+		return srv.(GitProviderServiceServer).DisconnectGitConnection(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: GitConnectionService_DeleteGitConnection_FullMethodName,
+		FullMethod: GitProviderService_DisconnectGitConnection_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GitConnectionServiceServer).DeleteGitConnection(ctx, req.(*DeleteGitConnectionRequest))
+		return srv.(GitProviderServiceServer).DisconnectGitConnection(ctx, req.(*DisconnectGitConnectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// GitConnectionService_ServiceDesc is the grpc.ServiceDesc for GitConnectionService service.
+func _GitProviderService_ImportGitRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportGitRepositoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).ImportGitRepository(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_ImportGitRepository_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).ImportGitRepository(ctx, req.(*ImportGitRepositoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_GetImportOperation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetImportOperationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).GetImportOperation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_GetImportOperation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).GetImportOperation(ctx, req.(*GetImportOperationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_GetGhcrCredentialStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGhcrCredentialStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).GetGhcrCredentialStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_GetGhcrCredentialStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).GetGhcrCredentialStatus(ctx, req.(*GetGhcrCredentialStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GitProviderService_RotateGhcrCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RotateGhcrCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GitProviderServiceServer).RotateGhcrCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GitProviderService_RotateGhcrCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GitProviderServiceServer).RotateGhcrCredential(ctx, req.(*RotateGhcrCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// GitProviderService_ServiceDesc is the grpc.ServiceDesc for GitProviderService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var GitConnectionService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "cyclopus.v1.GitConnectionService",
-	HandlerType: (*GitConnectionServiceServer)(nil),
+var GitProviderService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cyclopus.v1.GitProviderService",
+	HandlerType: (*GitProviderServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "CreateGitConnection",
-			Handler:    _GitConnectionService_CreateGitConnection_Handler,
+			MethodName: "GetGitHubAppStatus",
+			Handler:    _GitProviderService_GetGitHubAppStatus_Handler,
+		},
+		{
+			MethodName: "BeginGitHubAppSetup",
+			Handler:    _GitProviderService_BeginGitHubAppSetup_Handler,
+		},
+		{
+			MethodName: "BeginGitHubInstallation",
+			Handler:    _GitProviderService_BeginGitHubInstallation_Handler,
+		},
+		{
+			MethodName: "GetGitHubInstallation",
+			Handler:    _GitProviderService_GetGitHubInstallation_Handler,
+		},
+		{
+			MethodName: "ListGitHubInstallations",
+			Handler:    _GitProviderService_ListGitHubInstallations_Handler,
+		},
+		{
+			MethodName: "RefreshGitHubInstallation",
+			Handler:    _GitProviderService_RefreshGitHubInstallation_Handler,
+		},
+		{
+			MethodName: "ListGitHubRepositories",
+			Handler:    _GitProviderService_ListGitHubRepositories_Handler,
+		},
+		{
+			MethodName: "ListGitHubRepositoryWorkflows",
+			Handler:    _GitProviderService_ListGitHubRepositoryWorkflows_Handler,
 		},
 		{
 			MethodName: "GetGitConnection",
-			Handler:    _GitConnectionService_GetGitConnection_Handler,
+			Handler:    _GitProviderService_GetGitConnection_Handler,
 		},
 		{
 			MethodName: "ListGitConnections",
-			Handler:    _GitConnectionService_ListGitConnections_Handler,
+			Handler:    _GitProviderService_ListGitConnections_Handler,
 		},
 		{
-			MethodName: "DeleteGitConnection",
-			Handler:    _GitConnectionService_DeleteGitConnection_Handler,
+			MethodName: "DisconnectGitConnection",
+			Handler:    _GitProviderService_DisconnectGitConnection_Handler,
+		},
+		{
+			MethodName: "ImportGitRepository",
+			Handler:    _GitProviderService_ImportGitRepository_Handler,
+		},
+		{
+			MethodName: "GetImportOperation",
+			Handler:    _GitProviderService_GetImportOperation_Handler,
+		},
+		{
+			MethodName: "GetGhcrCredentialStatus",
+			Handler:    _GitProviderService_GetGhcrCredentialStatus_Handler,
+		},
+		{
+			MethodName: "RotateGhcrCredential",
+			Handler:    _GitProviderService_RotateGhcrCredential_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

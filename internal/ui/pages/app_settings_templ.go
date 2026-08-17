@@ -155,7 +155,7 @@ func appSettingsContent(app store.App, project store.Project, errMsg string) tem
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = components.FormField("s-ci", "ci_workflow_id", "CI workflow ID (GitHub Actions)", "text", strptr(app.CIWorkflowID), "deploy.yml", false).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.FormField("s-ci", "github_workflow_path", "GitHub workflow path", "text", app.GitHubWorkflowPath, ".github/workflows/deploy.yml", false).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

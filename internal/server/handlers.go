@@ -41,8 +41,7 @@ type apiHandlers struct {
 	cyclopusv1.UnimplementedReconciliationServiceServer
 	cyclopusv1.UnimplementedWebhookServiceServer
 	cyclopusv1.UnimplementedDomainServiceServer
-	cyclopusv1.UnimplementedRegistryServiceServer
-	cyclopusv1.UnimplementedGitConnectionServiceServer
+	cyclopusv1.UnimplementedGitProviderServiceServer
 	cyclopusv1.UnimplementedObservabilityServiceServer
 	cyclopusv1.UnimplementedAliasServiceServer
 	cyclopusv1.UnimplementedAuditEventServiceServer
@@ -59,7 +58,7 @@ func NewServices(authService *internalauth.Service, domainService *service.Servi
 	handler := &apiHandlers{auth: authService, service: domainService, sessionTTL: sessionTTL}
 	return Services{Authentication: handler, Organization: handler, Project: handler, Application: handler,
 		Environment: handler, Release: handler, Reconciliation: handler, Webhook: handler, Domain: handler,
-		Registry: handler, GitConnection: handler, Observability: handler, Alias: handler,
+		GitProvider: handler, Observability: handler, Alias: handler,
 		AuditEvent: handler, Certificate: handler}
 }
 
@@ -473,17 +472,11 @@ func (h *apiHandlers) UpdateApplication(ctx context.Context, req *cyclopusv1.Upd
 		return nil, rpcError(err)
 	}
 	merged := applicationProto(current)
-	for _, path := range req.GetUpdateMask().GetPaths() {
-		if path == "ci_workflow_id" && req.Application.GetCiWorkflowId() != current.GitHubWorkflowPath {
-			return nil, fieldError("application.ci_workflow_id", "is legacy and cannot mutate the canonical GitHub workflow path")
-		}
-	}
-	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "registry_id": true, "image_repository": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "keda_cron_schedules": true, "keda_http_target_pending_requests": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true, "ci_workflow_id": true}
+	allowed := map[string]bool{"name": true, "slug": true, "hostname_label": true, "container_port": true, "health_check_path": true, "scaling_mode": true, "min_replicas": true, "max_replicas": true, "hpa_target_cpu_percent": true, "keda_cron_schedules": true, "keda_http_target_pending_requests": true, "cpu_request_millicores": true, "cpu_limit_millicores": true, "memory_request_mib": true, "memory_limit_mib": true, "previews_enabled": true, "max_preview_environments": true, "preview_idle_ttl_hours": true, "deploy_timeout_seconds": true, "release_retention_count": true, "runtime_class": true}
 	if err := mergeMaskedMessage(merged, req.Application, req.GetUpdateMask(), allowed); err != nil {
 		return nil, err
 	}
 	input := appInput(merged)
-	input.CIWorkflowID = nil
 	input.GitHubWorkflowPath = &current.GitHubWorkflowPath
 	input.ProductionBranch = current.ProductionBranch
 	value, err := h.service.UpdateApp(ctx, actor, req.GetIdempotencyKey(), req.Application.GetId(), input)
@@ -1133,116 +1126,6 @@ func (h *apiHandlers) DeleteDomain(ctx context.Context, req *cyclopusv1.DeleteDo
 	return &cyclopusv1.DeleteDomainResponse{}, nil
 }
 
-func (h *apiHandlers) CreateRegistry(ctx context.Context, req *cyclopusv1.CreateRegistryRequest) (*cyclopusv1.CreateRegistryResponse, error) {
-	actor, err := sessionActor(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if req.Registry == nil {
-		return nil, fieldError("registry", "is required")
-	}
-	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
-		return nil, err
-	}
-	if req.GetOrganizationId() != actor.OrgID {
-		return nil, status.Error(codes.PermissionDenied, "permission denied")
-	}
-	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(),
-		"registry.registry_url": req.Registry.GetRegistryUrl(), "registry.credential_secret_ref": req.Registry.GetCredentialSecretRef()}); err != nil {
-		return nil, err
-	}
-	value, err := h.service.CreateRegistry(ctx, actor, req.GetIdempotencyKey(), registryInput(req.Registry))
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	return &cyclopusv1.CreateRegistryResponse{Registry: registryProto(value)}, nil
-}
-
-func (h *apiHandlers) GetRegistry(ctx context.Context, req *cyclopusv1.GetRegistryRequest) (*cyclopusv1.GetRegistryResponse, error) {
-	actor, err := sessionActor(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateUUID("registry_id", req.GetRegistryId()); err != nil {
-		return nil, err
-	}
-	value, err := h.service.GetRegistry(ctx, actor, req.GetRegistryId())
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	return &cyclopusv1.GetRegistryResponse{Registry: registryProto(value)}, nil
-}
-
-func (h *apiHandlers) ListRegistries(ctx context.Context, req *cyclopusv1.ListRegistriesRequest) (*cyclopusv1.ListRegistriesResponse, error) {
-	actor, err := sessionActor(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
-		return nil, err
-	}
-	if req.GetOrganizationId() != actor.OrgID {
-		return nil, status.Error(codes.PermissionDenied, "permission denied")
-	}
-	values, err := h.service.ListRegistries(ctx, actor)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	scope := pageScope("registries", actor.OrgID)
-	start, size, err := pageWindow(req.GetPageSize(), req.GetPageToken(), scope, values, func(v store.Registry) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
-	if err != nil {
-		return nil, err
-	}
-	page, next := pageValues(values, start, size, scope, func(v store.Registry) cursorKey { return cursorKey{CreatedAt: v.CreatedAt, ID: v.ID} })
-	response := &cyclopusv1.ListRegistriesResponse{NextPageToken: next, Registries: make([]*cyclopusv1.Registry, 0, len(page))}
-	for _, value := range page {
-		response.Registries = append(response.Registries, registryProto(value))
-	}
-	return response, nil
-}
-
-func (h *apiHandlers) DeleteRegistry(ctx context.Context, req *cyclopusv1.DeleteRegistryRequest) (*cyclopusv1.DeleteRegistryResponse, error) {
-	actor, err := sessionActor(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateUUID("registry_id", req.GetRegistryId()); err != nil {
-		return nil, err
-	}
-	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
-		return nil, err
-	}
-	if err := h.service.DeleteRegistry(ctx, actor, req.GetIdempotencyKey(), req.GetRegistryId()); err != nil {
-		return nil, rpcError(err)
-	}
-	return &cyclopusv1.DeleteRegistryResponse{}, nil
-}
-
-func (h *apiHandlers) CreateGitConnection(ctx context.Context, req *cyclopusv1.CreateGitConnectionRequest) (*cyclopusv1.CreateGitConnectionResponse, error) {
-	actor, err := sessionActor(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if req.GitConnection == nil {
-		return nil, fieldError("git_connection", "is required")
-	}
-	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
-		return nil, err
-	}
-	if req.GetOrganizationId() != actor.OrgID {
-		return nil, status.Error(codes.PermissionDenied, "permission denied")
-	}
-	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey(),
-		"git_connection.repo_full_name": req.GitConnection.GetRepoFullName(), "git_connection.webhook_secret_ref": req.GitConnection.GetWebhookSecretRef()}); err != nil {
-		return nil, err
-	}
-	value, err := h.service.CreateGitConnection(ctx, actor, req.GetIdempotencyKey(), gitConnectionInput(req.GitConnection))
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	return &cyclopusv1.CreateGitConnectionResponse{GitConnection: gitConnectionProto(value)}, nil
-}
-
 func (h *apiHandlers) GetGitConnection(ctx context.Context, req *cyclopusv1.GetGitConnectionRequest) (*cyclopusv1.GetGitConnectionResponse, error) {
 	actor, err := sessionActor(ctx)
 	if err != nil {
@@ -1263,12 +1146,6 @@ func (h *apiHandlers) ListGitConnections(ctx context.Context, req *cyclopusv1.Li
 	if err != nil {
 		return nil, err
 	}
-	if err := validateUUID("organization_id", req.GetOrganizationId()); err != nil {
-		return nil, err
-	}
-	if req.GetOrganizationId() != actor.OrgID {
-		return nil, status.Error(codes.PermissionDenied, "permission denied")
-	}
 	values, err := h.service.ListGitConnections(ctx, actor)
 	if err != nil {
 		return nil, rpcError(err)
@@ -1286,9 +1163,8 @@ func (h *apiHandlers) ListGitConnections(ctx context.Context, req *cyclopusv1.Li
 	return response, nil
 }
 
-func (h *apiHandlers) DeleteGitConnection(ctx context.Context, req *cyclopusv1.DeleteGitConnectionRequest) (*cyclopusv1.DeleteGitConnectionResponse, error) {
-	actor, err := sessionActor(ctx)
-	if err != nil {
+func (h *apiHandlers) DisconnectGitConnection(ctx context.Context, req *cyclopusv1.DisconnectGitConnectionRequest) (*cyclopusv1.DisconnectGitConnectionResponse, error) {
+	if _, err := administratorActor(ctx); err != nil {
 		return nil, err
 	}
 	if err := validateUUID("git_connection_id", req.GetGitConnectionId()); err != nil {
@@ -1297,10 +1173,7 @@ func (h *apiHandlers) DeleteGitConnection(ctx context.Context, req *cyclopusv1.D
 	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
 		return nil, err
 	}
-	if err := h.service.DeleteGitConnection(ctx, actor, req.GetIdempotencyKey(), req.GetGitConnectionId()); err != nil {
-		return nil, rpcError(err)
-	}
-	return &cyclopusv1.DeleteGitConnectionResponse{}, nil
+	return nil, typedError(codes.FailedPrecondition, "GitHub connection lifecycle integration is not configured", "GITHUB_APP_NOT_CONFIGURED")
 }
 
 func sessionActor(ctx context.Context) (service.ActorContext, error) {
@@ -1400,7 +1273,7 @@ func projectInput(value *cyclopusv1.Project) service.ProjectInput {
 func appInput(value *cyclopusv1.Application) service.AppInput {
 	runtimeClass := map[cyclopusv1.RuntimeClass]string{cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR: "gvisor", cyclopusv1.RuntimeClass_RUNTIME_CLASS_RUNC: "runc"}[value.GetRuntimeClass()]
 	input := service.AppInput{ProjectID: value.GetProjectId(), Name: value.GetName(), Slug: value.GetSlug(), HostnameLabel: value.GetHostnameLabel(),
-		RegistryID: pointer(value.GetRegistryId()), ImageRepository: pointer(value.GetImageRepository()), CIWorkflowID: pointer(value.GetCiWorkflowId()), ContainerPort: int(value.GetContainerPort()),
+		RegistryID: pointer(value.GetRegistryId()), ImageRepository: pointer(value.GetImageRepository()), GitHubWorkflowPath: pointer(value.GetGithubWorkflowPath()), ProductionBranch: value.GetProductionBranch(), ContainerPort: int(value.GetContainerPort()),
 		HealthCheckPath: value.GetHealthCheckPath(), ScalingMode: scalingModeString(value.GetScalingMode()), MinReplicas: int(value.GetMinReplicas()), MaxReplicas: int(value.GetMaxReplicas()), HPATargetCPUPercent: int(value.GetHpaTargetCpuPercent()),
 		KEDACronSchedules: kedaCronSchedulesInput(value.GetKedaCronSchedules()), KEDAHTTPTargetPendingRequests: int(value.GetKedaHttpTargetPendingRequests()),
 		CPURequestMillicores: int(value.GetCpuRequestMillicores()), CPULimitMillicores: int(value.GetCpuLimitMillicores()), MemoryRequestMiB: int(value.GetMemoryRequestMib()), MemoryLimitMiB: int(value.GetMemoryLimitMib()),
@@ -1417,14 +1290,6 @@ func webhookInput(value *cyclopusv1.WebhookEndpoint) service.WebhookInput {
 
 func domainInput(applicationID string, value *cyclopusv1.Domain) service.DomainInput {
 	return service.DomainInput{AppID: applicationID, Hostname: value.GetHostname(), VerificationMethod: domainVerificationMethodString(value.GetVerificationMethod())}
-}
-
-func registryInput(value *cyclopusv1.Registry) service.RegistryInput {
-	return service.RegistryInput{Provider: value.GetProvider(), RegistryURL: value.GetRegistryUrl(), CredentialSecretRef: value.GetCredentialSecretRef()}
-}
-
-func gitConnectionInput(value *cyclopusv1.GitConnection) service.GitConnectionInput {
-	return service.GitConnectionInput{Provider: value.GetProvider(), InstallationID: value.GetInstallationId(), RepoFullName: value.GetRepoFullName(), DefaultBranch: value.GetDefaultBranch(), WebhookSecretRef: value.GetWebhookSecretRef()}
 }
 
 func domainVerificationMethodString(v cyclopusv1.DomainVerificationMethod) string {
@@ -1511,7 +1376,7 @@ func projectProto(v store.Project) *cyclopusv1.Project {
 	return &cyclopusv1.Project{Id: v.ID, OrganizationId: v.OrgID, Name: v.Name, Slug: v.Slug, GitConnectionId: stringValue(v.GitConnectionID), CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt)}
 }
 func applicationProto(v store.App) *cyclopusv1.Application {
-	return &cyclopusv1.Application{Id: v.ID, OrganizationId: v.OrgID, ProjectId: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel, RegistryId: stringValue(v.RegistryID), ImageRepository: stringValue(v.ImageRepository), ContainerPort: int32(v.ContainerPort), HealthCheckPath: v.HealthCheckPath, ScalingMode: scalingModeProto(v.ScalingMode), MinReplicas: int32(v.MinReplicas), MaxReplicas: int32(v.MaxReplicas), HpaTargetCpuPercent: int32(v.HPATargetCPUPercent), CpuRequestMillicores: int32(v.CPURequestMillicores), CpuLimitMillicores: int32(v.CPULimitMillicores), MemoryRequestMib: int32(v.MemoryRequestMiB), MemoryLimitMib: int32(v.MemoryLimitMiB), PreviewsEnabled: v.PreviewsEnabled, MaxPreviewEnvironments: int32(v.MaxPreviewEnvironments), PreviewIdleTtlHours: int32(v.PreviewIdleTTLHours), DeployTimeoutSeconds: int32(v.DeployTimeoutSeconds), ReleaseRetentionCount: int32(v.ReleaseRetentionCount), RuntimeClass: runtimeClassProto(v.RuntimeClass), CiWorkflowId: v.GitHubWorkflowPath, CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt), KedaCronSchedules: kedaCronSchedulesProto(v.KEDACronSchedules), KedaHttpTargetPendingRequests: int32(v.KEDAHTTPTargetPendingRequests)}
+	return &cyclopusv1.Application{Id: v.ID, OrganizationId: v.OrgID, ProjectId: v.ProjectID, Name: v.Name, Slug: v.Slug, HostnameLabel: v.HostnameLabel, RegistryId: stringValue(v.RegistryID), ImageRepository: stringValue(v.ImageRepository), ContainerPort: int32(v.ContainerPort), HealthCheckPath: v.HealthCheckPath, ScalingMode: scalingModeProto(v.ScalingMode), MinReplicas: int32(v.MinReplicas), MaxReplicas: int32(v.MaxReplicas), HpaTargetCpuPercent: int32(v.HPATargetCPUPercent), CpuRequestMillicores: int32(v.CPURequestMillicores), CpuLimitMillicores: int32(v.CPULimitMillicores), MemoryRequestMib: int32(v.MemoryRequestMiB), MemoryLimitMib: int32(v.MemoryLimitMiB), PreviewsEnabled: v.PreviewsEnabled, MaxPreviewEnvironments: int32(v.MaxPreviewEnvironments), PreviewIdleTtlHours: int32(v.PreviewIdleTTLHours), DeployTimeoutSeconds: int32(v.DeployTimeoutSeconds), ReleaseRetentionCount: int32(v.ReleaseRetentionCount), RuntimeClass: runtimeClassProto(v.RuntimeClass), GithubWorkflowPath: v.GitHubWorkflowPath, ProductionBranch: v.ProductionBranch, AnnotationPolicy: cyclopusv1.OciAnnotationPolicy_OCI_ANNOTATION_POLICY_VALIDATE_IF_PRESENT, CreatedAt: timestamppb.New(v.CreatedAt), DeletedAt: timeProto(v.DeletedAt), KedaCronSchedules: kedaCronSchedulesProto(v.KEDACronSchedules), KedaHttpTargetPendingRequests: int32(v.KEDAHTTPTargetPendingRequests)}
 }
 
 func kedaCronSchedulesInput(values []*cyclopusv1.KedaCronSchedule) []store.KEDACronSchedule {
@@ -1570,18 +1435,33 @@ func domainProto(v store.Domain, instructions service.DomainInstructions) *cyclo
 	}
 	return proto
 }
-func registryProto(v store.Registry) *cyclopusv1.Registry {
-	return &cyclopusv1.Registry{
-		Id: v.ID, OrganizationId: v.OrgID, Provider: v.Provider, RegistryUrl: v.RegistryHost,
-		CreatedAt: timestamppb.New(v.CreatedAt),
-	}
-}
 func gitConnectionProto(v store.GitConnection) *cyclopusv1.GitConnection {
-	return &cyclopusv1.GitConnection{
-		Id: v.ID, OrganizationId: v.OrgID, Provider: "github", InstallationId: v.GitHubInstallationID,
-		RepoFullName: v.RepositoryFullName, DefaultBranch: v.RepositoryDefaultBranch,
-		CreatedAt: timestamppb.New(v.CreatedAt),
+	return &cyclopusv1.GitConnection{Id: v.ID, Repository: &cyclopusv1.GitHubRepository{Id: v.GitHubRepositoryID,
+		InstallationId: v.GitHubInstallationID, NodeId: v.RepositoryNodeID, Owner: v.OwnerLogin, Name: v.RepositoryName,
+		FullName: v.RepositoryFullName, Private: v.RepositoryPrivate, Archived: v.RepositoryArchived,
+		DefaultBranch: v.RepositoryDefaultBranch, AccessStatus: githubRepositoryAccessStatus(v.RepositoryAccessState),
+		SyncedAt: timeProto(v.RepositorySyncedAt)}, Status: gitConnectionStatus(v.State, v.AccessState),
+		ConnectedAt: timestamppb.New(v.CreatedAt), DisconnectedAt: timeProto(v.DisconnectedAt)}
+}
+
+func githubRepositoryAccessStatus(value string) cyclopusv1.GitHubRepositoryAccessStatus {
+	return map[string]cyclopusv1.GitHubRepositoryAccessStatus{
+		"active":       cyclopusv1.GitHubRepositoryAccessStatus_GITHUB_REPOSITORY_ACCESS_STATUS_ACTIVE,
+		"inaccessible": cyclopusv1.GitHubRepositoryAccessStatus_GITHUB_REPOSITORY_ACCESS_STATUS_INACCESSIBLE,
+		"deleted":      cyclopusv1.GitHubRepositoryAccessStatus_GITHUB_REPOSITORY_ACCESS_STATUS_DELETED,
+	}[value]
+}
+
+func gitConnectionStatus(state, accessState string) cyclopusv1.GitConnectionStatus {
+	if state == "disconnected" {
+		return cyclopusv1.GitConnectionStatus_GIT_CONNECTION_STATUS_DISCONNECTED
 	}
+	return map[string]cyclopusv1.GitConnectionStatus{
+		"active":       cyclopusv1.GitConnectionStatus_GIT_CONNECTION_STATUS_ACTIVE,
+		"suspended":    cyclopusv1.GitConnectionStatus_GIT_CONNECTION_STATUS_SUSPENDED,
+		"inaccessible": cyclopusv1.GitConnectionStatus_GIT_CONNECTION_STATUS_INACCESSIBLE,
+		"deleted":      cyclopusv1.GitConnectionStatus_GIT_CONNECTION_STATUS_DELETED,
+	}[accessState]
 }
 func operationProto(v service.AcceptedOperation, prefix string) *cyclopusv1.Operation {
 	return &cyclopusv1.Operation{Id: v.OperationID, ResourceName: prefix + v.ResourceID, Status: operationStatus(v.Status)}

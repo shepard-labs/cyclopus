@@ -99,12 +99,8 @@ func newHandler(client *ui.Backend, loadLogs logsPageLoader) http.Handler {
 		r.Get("/settings/theme", h.getTheme)
 
 		r.Get("/settings/git-connections", h.getGitConnections)
-		r.Post("/settings/git-connections", h.postGitConnection)
-		r.Post("/settings/git-connections/{id}/delete", h.deleteGitConnection)
 
 		r.Get("/settings/registries", h.getRegistries)
-		r.Post("/settings/registries", h.postRegistry)
-		r.Post("/settings/registries/{id}/delete", h.deleteRegistry)
 
 		r.Get("/settings/webhooks", h.getWebhooks)
 		r.Post("/settings/webhooks", h.postWebhook)
@@ -579,7 +575,7 @@ func (h *Handler) postAppSettings(w http.ResponseWriter, r *http.Request) {
 	setField("name", r.FormValue("name"))
 	setField("hostname_label", r.FormValue("hostname_label"))
 	setField("health_check_path", r.FormValue("health_check_path"))
-	setField("ci_workflow_id", r.FormValue("ci_workflow_id"))
+	setField("github_workflow_path", r.FormValue("github_workflow_path"))
 	setField("image_repository", r.FormValue("image_repository"))
 	setField("scaling_mode", r.FormValue("scaling_mode"))
 	for _, key := range []string{"container_port", "min_replicas", "max_replicas", "hpa_target_cpu_percent",
@@ -729,44 +725,6 @@ func (h *Handler) getGitConnections(w http.ResponseWriter, r *http.Request) {
 	render(w, r, settingspages.GitConnections(conns, user, org, flashFromCookie(w, r), ""))
 }
 
-func (h *Handler) postGitConnection(w http.ResponseWriter, r *http.Request) {
-	token := ui.TokenFromContext(r.Context())
-	user, org, err := h.pageCtx(r.Context(), token)
-	if err != nil {
-		h.handleErr(w, r, err)
-		return
-	}
-	var installID int64
-	fmt.Sscanf(r.FormValue("installation_id"), "%d", &installID)
-	gc := service.GitConnectionInput{
-		RepoFullName:     r.FormValue("repo_full_name"),
-		DefaultBranch:    r.FormValue("default_branch"),
-		InstallationID:   installID,
-		WebhookSecretRef: r.FormValue("webhook_secret_ref"),
-	}
-	if gc.DefaultBranch == "" {
-		gc.DefaultBranch = "main"
-	}
-	_, err = h.client.CreateGitConnection(r.Context(), token, newIdemKey(), org.ID, gc)
-	if err != nil {
-		conns, _ := h.client.ListGitConnections(r.Context(), token, org.ID)
-		render(w, r, settingspages.GitConnections(conns, user, org, nil, err.Error()))
-		return
-	}
-	redirectWithFlash(w, r, "/settings/git-connections", "success", "Git connection added.")
-}
-
-func (h *Handler) deleteGitConnection(w http.ResponseWriter, r *http.Request) {
-	token := ui.TokenFromContext(r.Context())
-	id := chi.URLParam(r, "id")
-	err := h.client.DeleteGitConnection(r.Context(), token, newIdemKey(), id)
-	if err != nil {
-		redirectWithFlash(w, r, "/settings/git-connections", "error", "Delete failed: "+err.Error())
-		return
-	}
-	redirectWithFlash(w, r, "/settings/git-connections", "success", "Connection deleted.")
-}
-
 func (h *Handler) getRegistries(w http.ResponseWriter, r *http.Request) {
 	token := ui.TokenFromContext(r.Context())
 	user, org, err := h.pageCtx(r.Context(), token)
@@ -776,38 +734,6 @@ func (h *Handler) getRegistries(w http.ResponseWriter, r *http.Request) {
 	}
 	regs, _ := h.client.ListRegistries(r.Context(), token, org.ID)
 	render(w, r, settingspages.Registries(regs, user, org, flashFromCookie(w, r), ""))
-}
-
-func (h *Handler) postRegistry(w http.ResponseWriter, r *http.Request) {
-	token := ui.TokenFromContext(r.Context())
-	user, org, err := h.pageCtx(r.Context(), token)
-	if err != nil {
-		h.handleErr(w, r, err)
-		return
-	}
-	reg := service.RegistryInput{
-		Provider:            r.FormValue("provider"),
-		RegistryURL:         r.FormValue("registry_url"),
-		CredentialSecretRef: r.FormValue("credential_secret_ref"),
-	}
-	_, err = h.client.CreateRegistry(r.Context(), token, newIdemKey(), org.ID, reg)
-	if err != nil {
-		regs, _ := h.client.ListRegistries(r.Context(), token, org.ID)
-		render(w, r, settingspages.Registries(regs, user, org, nil, err.Error()))
-		return
-	}
-	redirectWithFlash(w, r, "/settings/registries", "success", "Registry added.")
-}
-
-func (h *Handler) deleteRegistry(w http.ResponseWriter, r *http.Request) {
-	token := ui.TokenFromContext(r.Context())
-	id := chi.URLParam(r, "id")
-	err := h.client.DeleteRegistry(r.Context(), token, newIdemKey(), id)
-	if err != nil {
-		redirectWithFlash(w, r, "/settings/registries", "error", "Delete failed: "+err.Error())
-		return
-	}
-	redirectWithFlash(w, r, "/settings/registries", "success", "Registry deleted.")
 }
 
 func (h *Handler) getWebhooks(w http.ResponseWriter, r *http.Request) {
