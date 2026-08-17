@@ -33,6 +33,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000008_github_repository_cursor_generation.up.sql",
 		"000009_registry_canonical_identity.down.sql",
 		"000009_registry_canonical_identity.up.sql",
+		"000010_github_webhook_routing.down.sql",
+		"000010_github_webhook_routing.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)

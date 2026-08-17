@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,6 +50,49 @@ func TestBuildRecoveryAdaptersUsesSuccessfullyConstructedAdapters(t *testing.T) 
 	}
 	if !adapters.Capabilities.GitHub || !adapters.Capabilities.Kubernetes {
 		t.Fatalf("capabilities = %+v", adapters.Capabilities)
+	}
+}
+
+func TestNewGitHubWebhookPayloadCodecUsesConfiguredKeyring(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keyring.json")
+	if err := os.WriteFile(path, []byte(`{"active_version":"k2","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg==","k2":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	codec, err := newGitHubWebhookPayloadCodec(config.Webhook{PayloadEncryptionKeyFile: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	context := store.GitHubWebhookPayloadContext{DeliveryID: "delivery", Event: "push", Action: "", OrgID: "org", PayloadDigest: "digest", InstallationID: 1}
+	ciphertext, nonce, version, err := codec.Encrypt([]byte("payload"), context)
+	if err != nil || version != "k2" {
+		t.Fatalf("Encrypt() version=%q error=%v", version, err)
+	}
+	if plaintext, err := codec.Decrypt(ciphertext, nonce, version, context); err != nil || string(plaintext) != "payload" {
+		t.Fatalf("Decrypt() = %q, %v", plaintext, err)
+	}
+}
+
+func TestNewGitHubWebhookPayloadCodecRejectsUnsafeOrMalformedKeyring(t *testing.T) {
+	for _, test := range []struct {
+		name, contents string
+		mode           os.FileMode
+	}{
+		{name: "group readable", contents: `{"active_version":"k1","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg=="}}`, mode: 0o640},
+		{name: "unknown field", contents: `{"active_version":"k1","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg=="},"extra":true}`, mode: 0o600},
+		{name: "duplicate field", contents: `{"active_version":"k1","active_version":"k2","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg=="}}`, mode: 0o600},
+		{name: "duplicate version after trim", contents: `{"active_version":"k1","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg=="," k1 ":"MDEyMzQ1Njc4OWFiY2RlZg=="}}`, mode: 0o600},
+		{name: "base64 whitespace", contents: `{"active_version":"k1","keys":{"k1":" MDEyMzQ1Njc4OWFiY2RlZg=="}}`, mode: 0o600},
+		{name: "wrong key length", contents: `{"active_version":"k1","keys":{"k1":"c2hvcnQ="}}`, mode: 0o600},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "keyring.json")
+			if err := os.WriteFile(path, []byte(test.contents), test.mode); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := newGitHubWebhookPayloadCodec(config.Webhook{PayloadEncryptionKeyFile: path}); err == nil {
+				t.Fatal("newGitHubWebhookPayloadCodec() error = nil")
+			}
+		})
 	}
 }
 

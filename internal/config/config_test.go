@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ func TestLoadPrecedence(t *testing.T) {
 
 	cfg, err := Load(
 		[]string{"--config", path, "--http-address", "127.0.0.1:9000"},
-		[]string{"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example", "CYCLOPUS_HTTP_ADDRESS=127.0.0.1:8000", "CYCLOPUS_LOG_LEVEL=warn", "CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"},
+		withWebhookEncryption([]string{"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example", "CYCLOPUS_HTTP_ADDRESS=127.0.0.1:8000", "CYCLOPUS_LOG_LEVEL=warn", "CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus", "CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef", "CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef"}),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -78,6 +79,24 @@ func TestLoadWebhookAllowedSecretRefs(t *testing.T) {
 	}
 	if len(cfg.Webhook.AllowedSecretRefs) != 2 {
 		t.Fatalf("AllowedSecretRefs = %v", cfg.Webhook.AllowedSecretRefs)
+	}
+}
+
+func TestLoadWebhookPayloadEncryptionKeyring(t *testing.T) {
+	path := writeWebhookKeyring(t, 0o600, `{"active_version":"k2","keys":{"k1":"`+base64.StdEncoding.EncodeToString([]byte("0123456789abcdef"))+`","k2":"`+base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))+`"}}`)
+	cfg, err := Load(nil, append(baseValidEnvWithoutWebhook(), "CYCLOPUS_WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE="+path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Webhook.PayloadEncryptionKeyFile != path {
+		t.Fatalf("webhook encryption config = %+v", cfg.Webhook)
+	}
+}
+
+func TestLoadRejectsInvalidWebhookPayloadEncryptionKeyring(t *testing.T) {
+	_, err := Load(nil, baseValidEnvWithoutWebhook())
+	if err == nil || !strings.Contains(err.Error(), "webhook.payload_encryption_key_file") {
+		t.Fatalf("Load() error = %v", err)
 	}
 }
 
@@ -149,13 +168,13 @@ func TestLoadCertManagerClusterIssuerRejectsInvalid(t *testing.T) {
 func TestLoadGitHubConfigPrecedence(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--external-url", "https://cyclopus.example/", "--github-api-version", "2026-03-10", "--github-run-poll-interval", "5s"},
-		[]string{
+		withWebhookEncryption([]string{
 			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_EXTERNAL_URL=https://env.example",
 			"CYCLOPUS_GITHUB_RUN_POLL_INTERVAL=10s",
-		},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -283,13 +302,13 @@ func TestLoadRejectsInvalidNetworkEgressExcludedCIDR(t *testing.T) {
 }
 
 func TestLoadNetworkEgressExcludedCIDRsFromEnvSplits(t *testing.T) {
-	cfg, err := Load(nil, []string{
+	cfg, err := Load(nil, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS=203.0.113.0/24,198.51.100.0/24",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -306,13 +325,13 @@ func TestLoadNetworkEgressExcludedCIDRsFromEnvSplits(t *testing.T) {
 }
 
 func TestLoadTrustedHostsFromEnvSplits(t *testing.T) {
-	cfg, err := Load(nil, []string{
+	cfg, err := Load(nil, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_GITHUB_TRUSTED_HOSTS=api.github.com,uploads.github.com",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -329,13 +348,13 @@ func TestLoadTrustedHostsFromEnvSplits(t *testing.T) {
 }
 
 func TestLoadSingleValueEnvSliceYieldsSingleElement(t *testing.T) {
-	cfg, err := Load(nil, []string{
+	cfg, err := Load(nil, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS=203.0.113.0/24",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -348,12 +367,12 @@ func TestLoadSingleValueEnvSliceYieldsSingleElement(t *testing.T) {
 func TestLoadUnsetEnvSliceDoesNotClobberFlag(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", "203.0.113.5/32"},
-		[]string{
+		withWebhookEncryption([]string{
 			"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-		},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -370,13 +389,13 @@ func TestLoadUnsetEnvSliceDoesNotClobberFlag(t *testing.T) {
 }
 
 func TestLoadNetworkEgressExcludedCIDRsTrimsWhitespaceAndEmpties(t *testing.T) {
-	cfg, err := Load(nil, []string{
+	cfg, err := Load(nil, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_KUBERNETES_NETWORK_EGRESS_EXCLUDED_CIDRS= 203.0.113.0/24 , 198.51.100.0/24 ,",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -395,12 +414,12 @@ func TestLoadNetworkEgressExcludedCIDRsTrimsWhitespaceAndEmpties(t *testing.T) {
 func TestLoadNetworkEgressExcludedCIDRsFlagTrimsWhitespace(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--kubernetes-network-egress-excluded-cidrs", " 203.0.113.0/24 , 198.51.100.0/24 "},
-		[]string{
+		withWebhookEncryption([]string{
 			"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 			"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 			"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 			"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-		},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -418,12 +437,12 @@ func TestLoadNetworkEgressExcludedCIDRsFlagTrimsWhitespace(t *testing.T) {
 }
 
 func TestGitHubEnabledUsesRuntimeOnboardingConfiguration(t *testing.T) {
-	cfg, err := Load(nil, []string{
+	cfg, err := Load(nil, withWebhookEncryption([]string{
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -498,36 +517,36 @@ func TestLoadRejectsPublicPlaintextAndLongSession(t *testing.T) {
 }
 
 func TestLoadAllowsSevenDaySessionTTL(t *testing.T) {
-	cfg, err := Load([]string{"--auth-session-ttl", "168h"}, []string{
+	cfg, err := Load([]string{"--auth-session-ttl", "168h"}, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-	})
+	}))
 	if err != nil || cfg.Auth.SessionTTL != 7*24*time.Hour {
 		t.Fatalf("Load() = %+v, %v", cfg.Auth, err)
 	}
 }
 
 func TestLoadAllowsExplicitDevelopmentPublicPlaintext(t *testing.T) {
-	cfg, err := Load([]string{"--http-address", "0.0.0.0:8080", "--insecure-public-listeners"}, []string{
+	cfg, err := Load([]string{"--http-address", "0.0.0.0:8080", "--insecure-public-listeners"}, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-	})
+	}))
 	if err != nil || !cfg.InsecurePublicListeners {
 		t.Fatalf("Load() = %+v, %v", cfg, err)
 	}
 }
 
 func TestLoadListenerSecurityDefaults(t *testing.T) {
-	cfg, err := Load(nil, []string{
+	cfg, err := Load(nil, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -595,12 +614,12 @@ func TestLoadAllowsPublicTLSListeners(t *testing.T) {
 		"--grpc-address", "[::]:9443",
 		"--grpc-tls-cert-file", "grpc.crt",
 		"--grpc-tls-key-file", "grpc.key",
-	}, []string{
+	}, withWebhookEncryption([]string{
 		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -610,12 +629,43 @@ func TestLoadAllowsPublicTLSListeners(t *testing.T) {
 	}
 }
 
-var baseValidEnv = []string{
+var baseValidEnv = withWebhookEncryption([]string{
 	"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
 	"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
 	"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
 	"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
 	"CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE=cyclopus",
+})
+
+func withWebhookEncryption(environ []string) []string {
+	file, err := os.CreateTemp("", "cyclopus-webhook-keyring-*.json")
+	if err != nil {
+		panic(err)
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	if err := os.WriteFile(file.Name(), []byte(`{"active_version":"k1","keys":{"k1":"`+encoded+`"}}`), 0o600); err != nil {
+		panic(err)
+	}
+	return append(environ, "CYCLOPUS_WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE="+file.Name())
+}
+
+func baseValidEnvWithoutWebhook() []string {
+	return []string{
+		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",
+		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
+		"CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE=cyclopus",
+	}
+}
+
+func writeWebhookKeyring(t *testing.T, mode os.FileMode, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "keyring.json")
+	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestMetricsEnabledRequiresURLAndCredential(t *testing.T) {

@@ -159,8 +159,9 @@ type GitHub struct {
 }
 
 type Webhook struct {
-	AllowedSecretRefs []string
-	ReleaseName       string
+	AllowedSecretRefs        []string
+	ReleaseName              string
+	PayloadEncryptionKeyFile string
 }
 
 type Kubernetes struct {
@@ -214,6 +215,7 @@ func Load(args, environ []string) (Config, error) {
 	flags.StringSlice("github-trusted-hosts", nil, "trusted GitHub API and upload hosts")
 	flags.StringSlice("webhook-allowed-secret-refs", nil, "exact Kubernetes Secret references allowed for webhook signing")
 	flags.String("webhook-release-name", "", "Helm release name that owns webhook signing Secrets")
+	flags.String("webhook-payload-encryption-key-file", "", "path to the GitHub webhook payload encryption keyring file")
 	flags.String("kubeconfig", "", "path to a Kubernetes client configuration file")
 	flags.String("kubernetes-instance-namespace", "", "namespace containing Cyclopus-managed source credentials")
 	flags.Duration("kubernetes-recovery-poll-interval", 0, "Kubernetes deployment recovery observation interval")
@@ -286,6 +288,7 @@ func Load(args, environ []string) (Config, error) {
 		"github-trusted-hosts":                        "github.trusted_hosts",
 		"webhook-allowed-secret-refs":                 "webhook.allowed_secret_refs",
 		"webhook-release-name":                        "webhook.release_name",
+		"webhook-payload-encryption-key-file":         "webhook.payload_encryption_key_file",
 		"kubeconfig":                                  "kubernetes.kubeconfig",
 		"kubernetes-instance-namespace":               "kubernetes.instance_namespace",
 		"kubernetes-recovery-poll-interval":           "kubernetes.recovery_poll_interval",
@@ -365,8 +368,9 @@ func Load(args, environ []string) (Config, error) {
 			TrustedHosts:                normalizeSliceValues(v.GetStringSlice("github.trusted_hosts")),
 		},
 		Webhook: Webhook{
-			AllowedSecretRefs: normalizeSliceValues(v.GetStringSlice("webhook.allowed_secret_refs")),
-			ReleaseName:       strings.TrimSpace(v.GetString("webhook.release_name")),
+			AllowedSecretRefs:        normalizeSliceValues(v.GetStringSlice("webhook.allowed_secret_refs")),
+			ReleaseName:              strings.TrimSpace(v.GetString("webhook.release_name")),
+			PayloadEncryptionKeyFile: strings.TrimSpace(v.GetString("webhook.payload_encryption_key_file")),
 		},
 		Kubernetes: Kubernetes{
 			InstanceNamespace:          strings.TrimSpace(v.GetString("kubernetes.instance_namespace")),
@@ -469,6 +473,7 @@ func environment(environ []string) map[string]string {
 		"GITHUB_TRUSTED_HOSTS":                        "github.trusted_hosts",
 		"WEBHOOK_ALLOWED_SECRET_REFS":                 "webhook.allowed_secret_refs",
 		"WEBHOOK_RELEASE_NAME":                        "webhook.release_name",
+		"WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE":         "webhook.payload_encryption_key_file",
 		"KUBECONFIG":                                  "kubernetes.kubeconfig",
 		"KUBERNETES_INSTANCE_NAMESPACE":               "kubernetes.instance_namespace",
 		"KUBERNETES_RECOVERY_POLL_INTERVAL":           "kubernetes.recovery_poll_interval",
@@ -645,6 +650,9 @@ func (c Config) Validate() error {
 	}
 	if len(c.Webhook.AllowedSecretRefs) > 0 && strings.TrimSpace(c.Webhook.ReleaseName) == "" {
 		errs = append(errs, fmt.Errorf("webhook.release_name is required when webhook.allowed_secret_refs is configured"))
+	}
+	if c.Webhook.PayloadEncryptionKeyFile == "" {
+		errs = append(errs, fmt.Errorf("webhook.payload_encryption_key_file is required"))
 	}
 	if c.Kubernetes.RecoveryPollInterval <= 0 {
 		errs = append(errs, fmt.Errorf("kubernetes.recovery_poll_interval must be greater than zero"))

@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000009 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000010 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 9 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:9 dirty:false", version, dirty)
+		if version != 10 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:10 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -80,7 +80,7 @@ func TestPostgres18Migrations(t *testing.T) {
 		}
 		defer epochDB.Close()
 		if err := ValidateSchemaEpoch(context.Background(), epochDB); err != nil {
-			t.Fatalf("ValidateSchemaEpoch() after 000009: %v", err)
+			t.Fatalf("ValidateSchemaEpoch() after 000010: %v", err)
 		}
 	})
 

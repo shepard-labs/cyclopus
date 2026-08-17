@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -71,7 +76,11 @@ func run(args, environ []string) error {
 	}
 
 	owner := recoveryOwner()
-	dataStore := store.New(pool)
+	webhookCodec, err := newGitHubWebhookPayloadCodec(cfg.Webhook)
+	if err != nil {
+		return fmt.Errorf("construct GitHub webhook payload encryption keyring: %w", err)
+	}
+	dataStore := store.New(pool).WithGitHubWebhookPayloadCodec(webhookCodec)
 	if err := auth.SetMaxConcurrentHashes(cfg.Auth.MaxConcurrentHashes); err != nil {
 		return fmt.Errorf("configure password hash concurrency: %w", err)
 	}
@@ -158,6 +167,102 @@ func run(args, environ []string) error {
 	err = runLifecycle(ctx, apiServer, recovery, &ready)
 	logger.Info("server stopped")
 	return err
+}
+
+func newGitHubWebhookPayloadCodec(cfg config.Webhook) (store.GitHubWebhookPayloadCodec, error) {
+	path := cfg.PayloadEncryptionKeyFile
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat keyring file: %w", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("keyring file permissions must not allow group or world access")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read keyring file: %w", err)
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		return nil, fmt.Errorf("parse keyring file: %w", err)
+	}
+	var file struct {
+		ActiveVersion string            `json:"active_version"`
+		Keys          map[string]string `json:"keys"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&file); err != nil {
+		return nil, fmt.Errorf("parse keyring file: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("parse keyring file: trailing JSON value")
+	}
+	activeVersion := strings.TrimSpace(file.ActiveVersion)
+	keys := make(map[string][]byte, len(file.Keys))
+	for version, encoded := range file.Keys {
+		version = strings.TrimSpace(version)
+		if version == "" {
+			return nil, fmt.Errorf("parse keyring file: key version must not be blank")
+		}
+		key, err := base64.StdEncoding.Strict().DecodeString(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("parse keyring file: key version %q is not standard base64", version)
+		}
+		if len(key) != 16 && len(key) != 24 && len(key) != 32 {
+			return nil, fmt.Errorf("parse keyring file: key version %q must decode to 16, 24, or 32 bytes", version)
+		}
+		if _, exists := keys[version]; exists {
+			return nil, fmt.Errorf("parse keyring file: duplicate key version %q", version)
+		}
+		keys[version] = key
+	}
+	return store.NewAESGCMGitHubWebhookPayloadKeyring(activeVersion, keys)
+}
+
+func rejectDuplicateJSONFields(raw []byte) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	var walk func() error
+	walk = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := map[string]struct{}{}
+			for decoder.More() {
+				nameToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				name := nameToken.(string)
+				if _, exists := seen[name]; exists {
+					return fmt.Errorf("duplicate field %q", name)
+				}
+				seen[name] = struct{}{}
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		case '[':
+			for decoder.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		default:
+			return fmt.Errorf("unexpected JSON delimiter")
+		}
+	}
+	return walk()
 }
 
 // buildTelemetryProvider assembles the OpenObserve and Beszel proxy clients from

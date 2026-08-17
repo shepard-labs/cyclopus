@@ -40,7 +40,8 @@ type DB interface {
 }
 
 type Store struct {
-	db DB
+	db                  DB
+	webhookPayloadCodec GitHubWebhookPayloadCodec
 }
 
 func New(db DB) *Store {
