@@ -251,6 +251,19 @@ test_verified_installation_is_executable_and_current() {
   fi
 }
 
+test_ensure_env_var_is_idempotent_and_non_clobbering() {
+  local env_file="$TEST_TMP_ROOT/env"
+
+  printf "export CYCLOPUS_EXTERNAL_URL='https://custom.example'\n" > "$env_file"
+  ensure_env_var "$env_file" CYCLOPUS_EXTERNAL_URL http://127.0.0.1:8081
+  ensure_env_var "$env_file" CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE cyclopus
+  ensure_env_var "$env_file" CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE cyclopus
+
+  assert_eq 1 "$(grep -c '^export CYCLOPUS_EXTERNAL_URL=' "$env_file")" 'existing env key is not duplicated'
+  assert_eq "export CYCLOPUS_EXTERNAL_URL='https://custom.example'" "$(grep '^export CYCLOPUS_EXTERNAL_URL=' "$env_file")" 'existing env value is not clobbered'
+  assert_eq 1 "$(grep -c '^export CYCLOPUS_KUBERNETES_INSTANCE_NAMESPACE=' "$env_file")" 'new env key is appended once'
+}
+
 run_test() {
   local name="$1"
   if "$name"; then
@@ -268,6 +281,7 @@ run_test test_version_matching_is_exact
 run_test test_existing_executable_with_wrong_checksum_is_reinstalled
 run_test test_checksum_mismatch_preserves_existing_binary
 run_test test_verified_installation_is_executable_and_current
+run_test test_ensure_env_var_is_idempotent_and_non_clobbering
 
 if ((TEST_FAILURES > 0)); then
   printf '%s test group(s) failed\n' "$TEST_FAILURES" >&2

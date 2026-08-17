@@ -692,7 +692,16 @@ func normalizeExternalURL(raw string) (string, error) {
 		return "", fmt.Errorf("external_url is required")
 	}
 	u, err := url.ParseRequestURI(raw)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("external_url must be an absolute HTTPS URL without userinfo, query, or fragment")
+	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !isLoopbackExternalHost(u.Hostname()) {
+			return "", fmt.Errorf("external_url must be an absolute HTTPS URL without userinfo, query, or fragment")
+		}
+	default:
 		return "", fmt.Errorf("external_url must be an absolute HTTPS URL without userinfo, query, or fragment")
 	}
 	if u.Path != "" && u.Path != "/" {
@@ -700,6 +709,16 @@ func normalizeExternalURL(raw string) (string, error) {
 	}
 	u.Path, u.RawPath = "", ""
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func isLoopbackExternalHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
 }
 
 // LogsEnabled reports whether OpenObserve-backed logs/traces proxying is

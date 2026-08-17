@@ -257,10 +257,21 @@ automatic `templ`/Go/CSS rebuilds:
 ./scripts/dev/run.sh
 ```
 
-Open `http://127.0.0.1:8080`. Local workload hostnames use
-`*.127.0.0.1.sslip.io`. The setup maps the `gvisor` RuntimeClass to k3d's `runc`
-handler because nested gVisor is unavailable on macOS; production installations
-continue to use real gVisor.
+Open `http://127.0.0.1:8081`. Local workload hostnames use
+`*.127.0.0.1.sslip.io`.
+
+The setup installs the production-pinned Traefik, Kyverno, cert-manager, KEDA,
+KEDA HTTP Add-on, OpenObserve, Beszel, and OpenTelemetry Collector charts and
+manifests from public registries. `run.sh` keeps OpenObserve and Beszel private
+by port-forwarding their ClusterIP Services to the same `.svc` hostnames used in
+production; setup adds those hostnames to `/etc/hosts` with a macOS administrator
+prompt.
+
+Local macOS differences are intentional: `gvisor` is mapped to k3d's `runc`,
+Traefik uses its LoadBalancer Service instead of production host networking,
+Let's Encrypt issuers and WAL-G are not configured, and Beszel host registration
+is skipped. Production installations continue to use real gVisor, host-network
+Traefik, cert-manager issuers, and WAL-G.
 
 ## 🤝 Contributing
 

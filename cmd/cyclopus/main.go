@@ -334,12 +334,15 @@ func productionAdapterConstructors(dataStore *store.Store, owner string, logger 
 			if err != nil {
 				return nil, fmt.Errorf("create Kubernetes client: %w", err)
 			}
-			provisionerConfig := rest.CopyConfig(clientConfig)
-			provisionerConfig.BearerToken = ""
-			provisionerConfig.BearerTokenFile = "/var/run/secrets/cyclopus-provisioner/token"
-			provisioner, err := kubernetes.NewForConfig(provisionerConfig)
-			if err != nil {
-				return nil, fmt.Errorf("create Kubernetes provisioner client: %w", err)
+			provisioner := client
+			if cfg.Kubeconfig == "" {
+				provisionerConfig := rest.CopyConfig(clientConfig)
+				provisionerConfig.BearerToken = ""
+				provisionerConfig.BearerTokenFile = "/var/run/secrets/cyclopus-provisioner/token"
+				provisioner, err = kubernetes.NewForConfig(provisionerConfig)
+				if err != nil {
+					return nil, fmt.Errorf("create Kubernetes provisioner client: %w", err)
+				}
 			}
 			dynamicClient, err := dynamic.NewForConfig(clientConfig)
 			if err != nil {

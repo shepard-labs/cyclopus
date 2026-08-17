@@ -29,7 +29,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-for command in air templ; do
+for command in air templ kubectl; do
   if ! command -v "$command" >/dev/null 2>&1; then
     printf 'missing required command: %s\n' "$command" >&2
     exit 1
@@ -49,6 +49,8 @@ cd "$ROOT"
 
 tailwind_pid=''
 air_pid=''
+openobserve_pid=''
+beszel_pid=''
 
 terminate_children() {
   local pid
@@ -85,12 +87,38 @@ trap cleanup EXIT
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
-$ROOT/.cyclopus-dev/bin/tailwindcss -i "$ROOT/internal/ui/static/css/input.css" -o "$ROOT/internal/ui/static/css/output.css" --minify --watch &
+for port in 5080 8090; do
+  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    printf 'local port %s is already in use; stop the conflicting process and retry\n' "$port" >&2
+    exit 1
+  fi
+done
+
+kubectl --kubeconfig "$CYCLOPUS_KUBECONFIG" -n cyclopus port-forward svc/openobserve 5080:5080 >/dev/null 2>&1 &
+openobserve_pid=$!
+kubectl --kubeconfig "$CYCLOPUS_KUBECONFIG" -n cyclopus port-forward svc/beszel 8090:8090 >/dev/null 2>&1 &
+beszel_pid=$!
+
+deadline=$((SECONDS + 30))
+while ((SECONDS < deadline)); do
+  kill -0 "$openobserve_pid" 2>/dev/null || { printf 'OpenObserve port-forward failed; rerun scripts/dev/setup.sh\n' >&2; exit 1; }
+  kill -0 "$beszel_pid" 2>/dev/null || { printf 'Beszel port-forward failed; rerun scripts/dev/setup.sh\n' >&2; exit 1; }
+  if (echo >/dev/tcp/127.0.0.1/5080) >/dev/null 2>&1 && (echo >/dev/tcp/127.0.0.1/8090) >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+(echo >/dev/tcp/127.0.0.1/5080) >/dev/null 2>&1 || { printf 'OpenObserve port-forward did not become ready\n' >&2; exit 1; }
+(echo >/dev/tcp/127.0.0.1/8090) >/dev/null 2>&1 || { printf 'Beszel port-forward did not become ready\n' >&2; exit 1; }
+
+$ROOT/.cyclopus-dev/bin/tailwindcss -i "$ROOT/internal/ui/static/css/input.css" -o "$ROOT/internal/ui/static/css/output.css" --minify --watch=always &
 tailwind_pid=$!
 air -c .air.toml &
 air_pid=$!
 
 while kill -0 "$tailwind_pid" 2>/dev/null && kill -0 "$air_pid" 2>/dev/null; do
+  kill -0 "$openobserve_pid" 2>/dev/null || { printf 'OpenObserve port-forward stopped; restart run.sh\n' >&2; exit 1; }
+  kill -0 "$beszel_pid" 2>/dev/null || { printf 'Beszel port-forward stopped; restart run.sh\n' >&2; exit 1; }
   sleep 1
 done
 
