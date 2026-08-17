@@ -218,6 +218,7 @@ func (a *LifecycleAdapter) ExecuteEnvironmentLifecycle(ctx context.Context, job 
 
 func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentLifecycleJob) error {
 	labels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: job.EnvironmentID, OrgIDLabel: job.OrgID, AppIDLabel: job.App.ID, PoliciesPendingLabel: "true"}
+	ownershipLabels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: job.EnvironmentID, OrgIDLabel: job.OrgID, AppIDLabel: job.App.ID}
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: job.Namespace, Labels: labels, Annotations: map[string]string{NamespaceOwnerAnnotation: job.EnvironmentID}}}
 	current, err := a.client.CoreV1().Namespaces().Get(ctx, job.Namespace, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -260,7 +261,7 @@ func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentL
 	// exceed replica counts, so production namespaces get no quota — and the
 	// diagnostic checkpoint is only recorded when bounds were really applied.
 	if job.EnvironmentKind == "preview" {
-		if err := a.applyPreviewBounds(ctx, job, labels); err != nil {
+		if err := a.applyPreviewBounds(ctx, job, ownershipLabels); err != nil {
 			return err
 		}
 		if err := a.store.CheckpointEnvironmentLifecycle(ctx, job, "resource_bounds_applied"); err != nil {
@@ -381,6 +382,7 @@ func (a *LifecycleAdapter) applyPreviewBounds(ctx context.Context, job store.Env
 			return ErrResourceOwnership
 		}
 		candidate := current.DeepCopy()
+		candidate.Labels = labels
 		candidate.Spec = quota.Spec
 		if _, err = a.client.CoreV1().ResourceQuotas(job.Namespace).Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
 			return err
@@ -400,6 +402,7 @@ func (a *LifecycleAdapter) applyPreviewBounds(ctx context.Context, job store.Env
 			return ErrResourceOwnership
 		}
 		candidate := current.DeepCopy()
+		candidate.Labels = labels
 		candidate.Spec = limitRange.Spec
 		_, err = a.client.CoreV1().LimitRanges(job.Namespace).Update(ctx, candidate, metav1.UpdateOptions{})
 		return err

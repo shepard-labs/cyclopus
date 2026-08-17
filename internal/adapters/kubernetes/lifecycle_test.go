@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,7 +12,10 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func TestPreviewProvisionBlockedKeepsPendingLabelAndResourceBounds(t *testing.T) {
@@ -33,14 +37,99 @@ func TestPreviewProvisionBlockedKeepsPendingLabelAndResourceBounds(t *testing.T)
 		t.Fatalf("namespace=%v block=%s completed=%d", namespace.Labels, persisted.blockCode, persisted.completedProvision)
 	}
 	quota, err := client.CoreV1().ResourceQuotas(job.Namespace).Get(context.Background(), "cyclopus-preview", metav1.GetOptions{})
+	wantBoundsLabels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: job.EnvironmentID, OrgIDLabel: job.OrgID, AppIDLabel: job.App.ID}
 	limitCPU := quota.Spec.Hard["limits.cpu"]
 	requestCPU := quota.Spec.Hard["requests.cpu"]
 	if err != nil || quota.Spec.Hard.Pods().Value() != 1 || limitCPU.MilliValue() != 200 || requestCPU.MilliValue() != 100 {
 		t.Fatalf("quota=%+v err=%v", quota.Spec.Hard, err)
 	}
+	if !reflect.DeepEqual(quota.Labels, wantBoundsLabels) {
+		t.Fatalf("quota labels = %v, want exactly %v", quota.Labels, wantBoundsLabels)
+	}
 	limits, err := client.CoreV1().LimitRanges(job.Namespace).Get(context.Background(), "cyclopus-preview", metav1.GetOptions{})
 	if err != nil || limits.Spec.Limits[0].Default.Cpu().MilliValue() != 200 || limits.Spec.Limits[0].DefaultRequest.Cpu().MilliValue() != 100 {
 		t.Fatalf("limit range=%+v err=%v", limits.Spec, err)
+	}
+	if !reflect.DeepEqual(limits.Labels, wantBoundsLabels) {
+		t.Fatalf("limit range labels = %v, want exactly %v", limits.Labels, wantBoundsLabels)
+	}
+}
+
+func TestPreviewBoundsAreCreatedAfterNamespaceOwnershipIsUIDBound(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	type observedAction struct {
+		verb         string
+		resource     string
+		namespace    string
+		uid          types.UID
+		annotatedUID string
+		owned        bool
+	}
+	var observed []observedAction
+	client.PrependReactor("*", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+		observation := observedAction{verb: action.GetVerb(), resource: action.GetResource().Resource, namespace: action.GetNamespace()}
+		switch {
+		case action.Matches("create", "namespaces"):
+			namespace := action.(ktesting.CreateAction).GetObject().(*corev1.Namespace)
+			namespace.UID = types.UID("preview-namespace-uid")
+			observation.uid = namespace.UID
+		case action.Matches("update", "namespaces"):
+			namespace := action.(ktesting.UpdateAction).GetObject().(*corev1.Namespace)
+			observation.uid = namespace.UID
+			observation.annotatedUID = namespace.Annotations[NamespaceUIDAnnotation]
+			observation.owned = ownedNamespace(namespace, previewLifecycleJob().EnvironmentID)
+		}
+		observed = append(observed, observation)
+		return false, nil, nil
+	})
+	adapter, err := NewLifecycleAdapter(client, &fakeLifecycleStore{}, successfulPolicy{}, staticHostname("preview.example.test"), time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := previewLifecycleJob()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		result <- adapter.ExecuteEnvironmentLifecycle(ctx, job)
+	}()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("preview provisioning did not complete before timeout: %v", ctx.Err())
+	}
+
+	namespaceCreate := -1
+	namespaceUpdate := -1
+	for index, action := range observed {
+		if action.verb == "create" && action.resource == "namespaces" {
+			namespaceCreate = index
+			if action.uid == "" {
+				t.Fatal("namespace create did not receive an API-assigned UID")
+			}
+		}
+		if action.verb == "update" && action.resource == "namespaces" && action.uid != "" && action.annotatedUID == string(action.uid) && action.owned {
+			namespaceUpdate = index
+			break
+		}
+	}
+	if namespaceCreate < 0 || namespaceUpdate <= namespaceCreate {
+		t.Fatalf("namespace UID-bound ownership update index %d, want after create index %d; actions=%+v", namespaceUpdate, namespaceCreate, observed)
+	}
+	for _, resourceName := range []string{"resourcequotas", "limitranges"} {
+		resourceCreate := -1
+		for index, action := range observed {
+			if action.verb == "create" && action.resource == resourceName && action.namespace == job.Namespace {
+				resourceCreate = index
+				break
+			}
+		}
+		if resourceCreate <= namespaceUpdate {
+			t.Fatalf("%s create action index %d, want after UID-bound namespace update index %d; actions=%+v", resourceName, resourceCreate, namespaceUpdate, observed)
+		}
 	}
 }
 

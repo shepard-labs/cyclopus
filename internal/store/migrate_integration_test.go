@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000005 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000006 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 5 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:5 dirty:false", version, dirty)
+		if version != 6 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:6 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -80,7 +80,7 @@ func TestPostgres18Migrations(t *testing.T) {
 		}
 		defer epochDB.Close()
 		if err := ValidateSchemaEpoch(context.Background(), epochDB); err != nil {
-			t.Fatalf("ValidateSchemaEpoch() after 000005: %v", err)
+			t.Fatalf("ValidateSchemaEpoch() after 000006: %v", err)
 		}
 	})
 
@@ -422,6 +422,90 @@ func TestMigration000005ExpiresProtocolIncompatibleSetupSessions(t *testing.T) {
 	}
 	if _, err := conn.Exec(t.Context(), `INSERT INTO github_setup_sessions(state_hash,state_generation,flow_kind,initiating_user_id,initiating_session_hash,status,checkpoint,expires_at) VALUES(repeat('c',64),repeat('d',64),'app_setup',$1,repeat('e',64),'active','created',now()+interval '10 minutes')`, userID); err != nil {
 		t.Fatalf("immediate replacement setup: %v", err)
+	}
+}
+
+func TestMigration000006BackfillsGitHubInstallationAuditIDs(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration6_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(5); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var orgID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orgs(name,slug) VALUES('Legacy','legacy') RETURNING id::text`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	for installationID, accountID := range map[int64]int64{101: 1001, 102: 1002} {
+		if _, err := conn.Exec(t.Context(), `INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,$2,$3,'acme','Organization','selected','active',1,1)`, installationID, orgID, accountID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrator.Migrate(6); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := conn.Query(t.Context(), `SELECT id::text FROM github_installations ORDER BY github_installation_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] == "" || ids[1] == "" || ids[0] == ids[1] {
+		t.Fatalf("backfilled GitHub installation IDs = %v, want two non-empty unique IDs", ids)
+	}
+	if ids[0][14] != '7' || ids[1][14] != '7' {
+		t.Fatalf("backfilled GitHub installation IDs = %v, want UUIDv7 IDs", ids)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO github_installations(id,github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(NULL,103,$1,1003,'acme','Organization','selected','active',1,1)`, orgID); err == nil {
+		t.Fatal("GitHub installation with null internal ID succeeded")
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO github_installations(id,github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,103,$2,1003,'acme','Organization','selected','active',1,1)`, ids[0], orgID); err == nil {
+		t.Fatal("GitHub installation with duplicate internal ID succeeded")
+	}
+	if err := ValidateSchemaEpoch(t.Context(), db); err != nil {
+		t.Fatalf("ValidateSchemaEpoch() after 000006: %v", err)
 	}
 }
 

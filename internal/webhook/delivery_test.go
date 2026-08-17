@@ -74,35 +74,119 @@ type fakeSecretResolver struct {
 }
 
 type fakeSecretAuthorizer struct {
-	calls []string
-	err   error
+	mu           sync.Mutex
+	calls        []string
+	resolveCalls int
+	cleanupCalls int
+	err          error
+	secret       []byte
+	lastResult   *fakeAuthorizedSecret
 }
 
 type mutableReferenceAuthorizer struct {
-	calls   int
-	allowed bool
+	mu           sync.Mutex
+	calls        int
+	resolveCalls int
+	allowed      bool
 }
 
-func (a *mutableReferenceAuthorizer) Authorize(context.Context, string, string) error { return nil }
-func (a *mutableReferenceAuthorizer) AuthorizeReference(context.Context, string) error {
+type fakeAuthorizedSecret struct {
+	mu       sync.Mutex
+	snapshot []byte
+	resolved []byte
+	cleanup  func()
+}
+
+func (s *fakeAuthorizedSecret) Resolve() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value := append([]byte(nil), s.snapshot...)
+	clear(s.snapshot)
+	s.snapshot = nil
+	s.resolved = value
+	return value
+}
+
+func (s *fakeAuthorizedSecret) Cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clear(s.snapshot)
+	s.snapshot = nil
+	if s.cleanup != nil {
+		s.cleanup()
+		s.cleanup = nil
+	}
+}
+
+func (s *fakeAuthorizedSecret) cleared() (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.snapshot) == 0, allZero(s.resolved)
+}
+
+func allZero(value []byte) bool {
+	for _, b := range value {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *mutableReferenceAuthorizer) AuthorizeReference(context.Context, string) (AuthorizedSecret, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.calls++
 	if !a.allowed {
-		return errors.New("revoked")
+		return nil, errors.New("revoked")
 	}
-	return nil
+	result := &fakeAuthorizedSecret{snapshot: []byte("receiver-secret")}
+	return &countingAuthorizedSecret{AuthorizedSecret: result, onResolve: func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.resolveCalls++
+	}}, nil
 }
 
-func (f *fakeSecretAuthorizer) Authorize(_ context.Context, namespace, name string) error {
-	f.calls = append(f.calls, namespace+"/"+name)
-	return f.err
+func (f *fakeSecretAuthorizer) AuthorizeReference(_ context.Context, reference string) (AuthorizedSecret, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, reference)
+	if f.err != nil {
+		return nil, f.err
+	}
+	result := &fakeAuthorizedSecret{snapshot: append([]byte(nil), f.secret...)}
+	result.cleanup = func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.cleanupCalls++
+	}
+	f.lastResult = result
+	return &countingAuthorizedSecret{AuthorizedSecret: result, onResolve: func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.resolveCalls++
+	}}, nil
+}
+
+type countingAuthorizedSecret struct {
+	AuthorizedSecret
+	onResolve func()
+}
+
+func (s *countingAuthorizedSecret) Resolve() []byte {
+	s.onResolve()
+	return s.AuthorizedSecret.Resolve()
 }
 
 func (f *fakeSecretResolver) Resolve(context.Context, string) ([]byte, error) {
 	f.calls++
-	return f.secret, f.err
+	return append([]byte(nil), f.secret...), f.err
 }
 
 type capturedRequest struct {
+	mu          sync.Mutex
+	calls       int
 	method      string
 	contentType string
 	event       string
@@ -120,6 +204,9 @@ func newReceiver(t *testing.T, status int) (*httptest.Server, *capturedRequest) 
 		if err != nil {
 			t.Errorf("read request body: %v", err)
 		}
+		captured.mu.Lock()
+		defer captured.mu.Unlock()
+		captured.calls++
 		captured.method = r.Method
 		captured.contentType = r.Header.Get("Content-Type")
 		captured.event = r.Header.Get("X-Cyclopus-Event")
@@ -180,7 +267,7 @@ func TestAuthorizedWebhookDeliveryAuthorizesBeforeSecretRead(t *testing.T) {
 	server, _ := newReceiver(t, http.StatusOK)
 	dataStore := &fakeDeliveryStore{}
 	resolver := &fakeSecretResolver{secret: []byte("receiver-secret")}
-	authorizer := &fakeSecretAuthorizer{}
+	authorizer := &fakeSecretAuthorizer{secret: []byte("receiver-secret")}
 	sender := newTestSender(dataStore, resolver, server)
 	sender.authorizer = authorizer
 	sender.secretNamespace = "cyclopus"
@@ -188,8 +275,18 @@ func TestAuthorizedWebhookDeliveryAuthorizesBeforeSecretRead(t *testing.T) {
 	if _, err := sender.Deliver(context.Background(), testDelivery("https://hooks.example.com/webhook", []byte(`{}`))); err != nil {
 		t.Fatalf("Deliver() error = %v", err)
 	}
-	if len(authorizer.calls) != 1 || authorizer.calls[0] != "cyclopus/hooks" || resolver.calls != 1 {
+	if len(authorizer.calls) != 1 || authorizer.calls[0] != "k8s-secret://cyclopus/hooks#secret" || resolver.calls != 0 {
 		t.Fatalf("authorization calls = %v, resolver calls = %d", authorizer.calls, resolver.calls)
+	}
+	if authorizer.resolveCalls != 1 {
+		t.Fatalf("authorized value resolutions = %d, want 1", authorizer.resolveCalls)
+	}
+	if authorizer.cleanupCalls != 1 {
+		t.Fatalf("authorized value cleanups = %d, want 1", authorizer.cleanupCalls)
+	}
+	internalCleared, returnedCleared := authorizer.lastResult.cleared()
+	if !internalCleared || !returnedCleared {
+		t.Fatalf("authorized buffers cleared = internal:%t returned:%t, want true/true", internalCleared, returnedCleared)
 	}
 }
 
@@ -197,7 +294,7 @@ func TestAuthorizedWebhookDeliveryRejectsCrossNamespaceBeforeKubernetesCalls(t *
 	server, _ := newReceiver(t, http.StatusOK)
 	dataStore := &fakeDeliveryStore{}
 	resolver := &fakeSecretResolver{secret: []byte("receiver-secret")}
-	authorizer := &fakeSecretAuthorizer{}
+	authorizer := &fakeSecretAuthorizer{secret: []byte("receiver-secret")}
 	sender := newTestSender(dataStore, resolver, server)
 	sender.authorizer = authorizer
 	sender.secretNamespace = "cyclopus"
@@ -288,7 +385,7 @@ func TestWebhookSignatureRetryReusesPersistedTimestampAndSignature(t *testing.T)
 	dataStore := &fakeDeliveryStore{}
 	resolver := &fakeSecretResolver{err: errors.New("secret backend down")}
 	sender := newTestSender(dataStore, resolver, server)
-	authorizer := &fakeSecretAuthorizer{}
+	authorizer := &fakeSecretAuthorizer{secret: []byte("first-attempt-secret")}
 	sender.authorizer = authorizer
 	sender.secretNamespace = "cyclopus"
 	body := []byte(`{"event":"deploy.failed"}`)
@@ -309,6 +406,16 @@ func TestWebhookSignatureRetryReusesPersistedTimestampAndSignature(t *testing.T)
 	if len(authorizer.calls) != 1 {
 		t.Fatalf("Authorize calls = %d, want 1 for cached retry", len(authorizer.calls))
 	}
+	if authorizer.resolveCalls != 0 {
+		t.Fatalf("authorized value resolutions = %d, want 0 for cached retry", authorizer.resolveCalls)
+	}
+	if authorizer.cleanupCalls != 1 {
+		t.Fatalf("authorized value cleanups = %d, want 1 for cached retry", authorizer.cleanupCalls)
+	}
+	internalCleared, _ := authorizer.lastResult.cleared()
+	if !internalCleared {
+		t.Fatal("cached retry left authorized snapshot uncleared")
+	}
 	persisted, results := dataStore.snapshot()
 	if len(persisted) != 0 {
 		t.Fatalf("PersistWebhookSignature calls = %d, want 0", len(persisted))
@@ -318,6 +425,29 @@ func TestWebhookSignatureRetryReusesPersistedTimestampAndSignature(t *testing.T)
 	}
 	if len(results) != 1 || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("CompleteWebhookAttempt results = %+v", results)
+	}
+}
+
+func TestWebhookSignatureSigningErrorClearsAuthorizedBuffers(t *testing.T) {
+	secretValue := "signing-error-secret"
+	dataStore := &fakeDeliveryStore{}
+	authorizer := &fakeSecretAuthorizer{secret: []byte(secretValue)}
+	sender := &Sender{store: dataStore, authorizer: authorizer, secretNamespace: "cyclopus", client: &http.Client{}, now: time.Now,
+		sign: func(secret []byte, _ int64, _ []byte) (string, error) {
+			if string(secret) != secretValue {
+				t.Fatalf("sign secret = %q, want expected value", secret)
+			}
+			return "", errors.New("signer failed")
+		}}
+
+	if _, _, err := sender.signature(context.Background(), testDelivery("https://hooks.example.com/webhook", []byte(`{}`))); err == nil {
+		t.Fatal("signature() succeeded after signing error")
+	} else if strings.Contains(err.Error(), secretValue) {
+		t.Fatalf("signature error exposed Secret value: %v", err)
+	}
+	internalCleared, returnedCleared := authorizer.lastResult.cleared()
+	if !internalCleared || !returnedCleared || authorizer.cleanupCalls != 1 {
+		t.Fatalf("signing error cleanup = internal:%t returned:%t calls:%d", internalCleared, returnedCleared, authorizer.cleanupCalls)
 	}
 }
 
@@ -341,15 +471,21 @@ func TestWebhookSignatureRetryRevokedBeforeCachedSignatureSend(t *testing.T) {
 	if _, err := sender.Deliver(context.Background(), delivery); err != nil {
 		t.Fatal(err)
 	}
-	if authorizer.calls != 2 || resolver.calls != 1 {
-		t.Fatalf("Authorize calls = %d, Resolve calls = %d, want 2/1", authorizer.calls, resolver.calls)
+	if authorizer.calls != 2 || authorizer.resolveCalls != 1 || resolver.calls != 0 {
+		t.Fatalf("Authorize calls = %d, authorized value resolutions = %d, Resolve calls = %d, want 2/1/0", authorizer.calls, authorizer.resolveCalls, resolver.calls)
 	}
 	if captured.signature != persisted[0].signature {
 		t.Fatalf("first request signature = %q", captured.signature)
 	}
+	if captured.calls != 1 {
+		t.Fatalf("network sends = %d, want 1 after revoked retry", captured.calls)
+	}
 	_, results := dataStore.snapshot()
 	if len(results) != 2 || !strings.Contains(results[1].Error, "authorize webhook secret") {
 		t.Fatalf("retry results = %+v", results)
+	}
+	if strings.Contains(results[1].Error, "receiver-secret") {
+		t.Fatalf("retry error exposed Secret value: %q", results[1].Error)
 	}
 }
 

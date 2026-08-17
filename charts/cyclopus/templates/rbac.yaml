@@ -12,8 +12,11 @@ metadata:
     {{- include "cyclopus.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: [services, configmaps, serviceaccounts, pods, resourcequotas, limitranges]
+    resources: [services, configmaps, serviceaccounts, pods]
     verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [resourcequotas, limitranges]
+    verbs: [get, list, watch]
   - apiGroups: ["apps"]
     resources: [deployments, replicasets]
     verbs: [get, list, watch, create, update, patch, delete]
@@ -119,9 +122,11 @@ spec:
           !has(object.metadata.annotations["cyclopus.dev/namespace-owner"]) &&
           !has(object.metadata.annotations["cyclopus.dev/namespace-uid"]) :
          request.operation == "DELETE" ||
-          (object.metadata.labels["app.kubernetes.io/managed-by"] == oldObject.metadata.labels["app.kubernetes.io/managed-by"] &&
-           object.metadata.labels["cyclopus.dev/environment-id"] == oldObject.metadata.labels["cyclopus.dev/environment-id"] &&
-           object.metadata.annotations["cyclopus.dev/namespace-owner"] == oldObject.metadata.annotations["cyclopus.dev/namespace-owner"] &&
+           (object.metadata.labels["app.kubernetes.io/managed-by"] == oldObject.metadata.labels["app.kubernetes.io/managed-by"] &&
+            object.metadata.labels["cyclopus.dev/environment-id"] == oldObject.metadata.labels["cyclopus.dev/environment-id"] &&
+            object.metadata.labels["cyclopus.dev/org-id"] == oldObject.metadata.labels["cyclopus.dev/org-id"] &&
+            object.metadata.labels["cyclopus.dev/app-id"] == oldObject.metadata.labels["cyclopus.dev/app-id"] &&
+            object.metadata.annotations["cyclopus.dev/namespace-owner"] == oldObject.metadata.annotations["cyclopus.dev/namespace-owner"] &&
            object.metadata.annotations["cyclopus.dev/namespace-uid"] == oldObject.metadata.annotations["cyclopus.dev/namespace-uid"]))
       message: Only the Cyclopus provisioner may establish or change namespace ownership identity.
     - expression: >-
@@ -134,6 +139,9 @@ spec:
     - expression: >-
         request.userInfo.username != {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }} || request.operation == "CREATE" ||
         (oldObject.metadata.annotations["cyclopus.dev/namespace-owner"] == oldObject.metadata.labels["cyclopus.dev/environment-id"] &&
+         object.metadata.labels["cyclopus.dev/environment-id"] == oldObject.metadata.labels["cyclopus.dev/environment-id"] &&
+         object.metadata.labels["cyclopus.dev/org-id"] == oldObject.metadata.labels["cyclopus.dev/org-id"] &&
+         object.metadata.labels["cyclopus.dev/app-id"] == oldObject.metadata.labels["cyclopus.dev/app-id"] &&
          (!has(oldObject.metadata.annotations["cyclopus.dev/namespace-uid"]) ?
            object.metadata.annotations["cyclopus.dev/namespace-uid"] == string(oldObject.metadata.uid) :
            oldObject.metadata.annotations["cyclopus.dev/namespace-uid"] == string(oldObject.metadata.uid) &&
@@ -148,6 +156,100 @@ metadata:
   name: {{ include "cyclopus.fullname" . }}-namespace-provisioner
 spec:
   policyName: {{ include "cyclopus.fullname" . }}-namespace-provisioner
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-preview-resource-bounds
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["resourcequotas", "limitranges"]
+  matchConditions:
+    - name: cyclopus-preview-bounds
+      expression: >-
+        request.userInfo.username == {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }} ||
+        object.metadata.name == "cyclopus-preview" ||
+        (has(object.metadata.labels) &&
+         "app.kubernetes.io/managed-by" in object.metadata.labels &&
+         object.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus") ||
+        (namespaceObject != null &&
+         namespaceObject.metadata.name.matches('^preview-[a-z0-9]([-a-z0-9]*[a-z0-9])?$') &&
+         has(namespaceObject.metadata.labels) &&
+         "app.kubernetes.io/managed-by" in namespaceObject.metadata.labels &&
+         namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus")
+  validations:
+    - expression: >-
+        request.userInfo.username == {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "cyclopus.provisionerServiceAccountName" .) | quote }}
+      message: Only the Cyclopus provisioner may mutate preview resource bounds.
+    - expression: >-
+        namespaceObject != null &&
+        namespaceObject.metadata.name.matches('^preview-[a-z0-9]([-a-z0-9]*[a-z0-9])?$') &&
+        namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] == "cyclopus" &&
+        namespaceObject.metadata.labels["cyclopus.dev/environment-id"].size() > 0 &&
+        namespaceObject.metadata.labels["cyclopus.dev/org-id"].size() > 0 &&
+        namespaceObject.metadata.labels["cyclopus.dev/app-id"].size() > 0 &&
+        namespaceObject.metadata.annotations["cyclopus.dev/namespace-owner"] == namespaceObject.metadata.labels["cyclopus.dev/environment-id"] &&
+        namespaceObject.metadata.annotations["cyclopus.dev/namespace-uid"] == string(namespaceObject.metadata.uid)
+      message: Preview resource bounds require an existing Cyclopus-owned preview namespace with UID-bound ownership.
+    - expression: >-
+        object.metadata.name == "cyclopus-preview" &&
+        object.metadata.namespace == namespaceObject.metadata.name &&
+        object.metadata.labels["app.kubernetes.io/managed-by"] == namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] &&
+         object.metadata.labels["cyclopus.dev/environment-id"] == namespaceObject.metadata.labels["cyclopus.dev/environment-id"] &&
+         object.metadata.labels["cyclopus.dev/org-id"] == namespaceObject.metadata.labels["cyclopus.dev/org-id"] &&
+         object.metadata.labels["cyclopus.dev/app-id"] == namespaceObject.metadata.labels["cyclopus.dev/app-id"] &&
+         object.metadata.labels.size() == 4 &&
+          (request.operation != "UPDATE" ||
+           ((oldObject.metadata.labels.size() == 4 ||
+             (oldObject.metadata.labels.size() == 5 &&
+                "cyclopus.app/policies-pending" in oldObject.metadata.labels)) &&
+            oldObject.metadata.labels["app.kubernetes.io/managed-by"] == object.metadata.labels["app.kubernetes.io/managed-by"] &&
+           oldObject.metadata.labels["cyclopus.dev/environment-id"] == object.metadata.labels["cyclopus.dev/environment-id"] &&
+           oldObject.metadata.labels["cyclopus.dev/org-id"] == object.metadata.labels["cyclopus.dev/org-id"] &&
+          oldObject.metadata.labels["cyclopus.dev/app-id"] == object.metadata.labels["cyclopus.dev/app-id"]))
+      message: Preview resource bounds must use the fixed name and immutable namespace-matching ownership labels.
+    - expression: >-
+        request.resource.resource != "resourcequotas" ||
+        (!has(object.spec.scopes) &&
+         !has(object.spec.scopeSelector) &&
+         object.spec.hard.size() == 5 &&
+         object.spec.hard["pods"] == quantity("1") &&
+         object.spec.hard["requests.cpu"] > quantity("0") &&
+         object.spec.hard["limits.cpu"] >= object.spec.hard["requests.cpu"] &&
+         object.spec.hard["requests.memory"] > quantity("0") &&
+         object.spec.hard["limits.memory"] >= object.spec.hard["requests.memory"])
+      message: The preview ResourceQuota may bound only one pod and positive CPU/memory requests and limits.
+    - expression: >-
+        request.resource.resource != "limitranges" ||
+        (object.spec.limits.size() == 1 &&
+         object.spec.limits[0].type == "Container" &&
+         object.spec.limits[0].defaultRequest.size() == 2 &&
+         object.spec.limits[0].default.size() == 2 &&
+         !has(object.spec.limits[0].min) &&
+         !has(object.spec.limits[0].max) &&
+         !has(object.spec.limits[0].maxLimitRequestRatio) &&
+         object.spec.limits[0].defaultRequest["cpu"] > quantity("0") &&
+         object.spec.limits[0].default["cpu"] >= object.spec.limits[0].defaultRequest["cpu"] &&
+         object.spec.limits[0].defaultRequest["memory"] > quantity("0") &&
+         object.spec.limits[0].default["memory"] >= object.spec.limits[0].defaultRequest["memory"])
+      message: The preview LimitRange may set only positive container CPU/memory defaults and requests.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "cyclopus.fullname" . }}-preview-resource-bounds
+  labels:
+    {{- include "cyclopus.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "cyclopus.fullname" . }}-preview-resource-bounds
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1

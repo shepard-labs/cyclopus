@@ -26,12 +26,13 @@ type SecretResolver interface {
 	Resolve(context.Context, string) ([]byte, error)
 }
 
-type SecretAuthorizer interface {
-	Authorize(context.Context, string, string) error
+type AuthorizedSecret interface {
+	Resolve() []byte
+	Cleanup()
 }
 
-type secretReferenceAuthorizer interface {
-	AuthorizeReference(context.Context, string) error
+type SecretAuthorizer interface {
+	AuthorizeReference(context.Context, string) (AuthorizedSecret, error)
 }
 
 type Store interface {
@@ -46,6 +47,7 @@ type Sender struct {
 	secretNamespace string
 	client          *http.Client
 	now             func() time.Time
+	sign            func([]byte, int64, []byte) (string, error)
 }
 
 func NewSender(dataStore Store, secrets SecretResolver) *Sender {
@@ -79,7 +81,7 @@ func newSender(dataStore Store, secrets SecretResolver, authorizer SecretAuthori
 		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 	}
 	return &Sender{store: dataStore, secrets: secrets, authorizer: authorizer, secretNamespace: secretNamespace, client: &http.Client{Timeout: RequestTimeout, Transport: transport,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, now: time.Now}
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, now: time.Now, sign: sign}
 }
 
 func (s *Sender) Deliver(ctx context.Context, delivery store.WebhookDelivery) (store.WebhookDeliveryOutcome, error) {
@@ -114,30 +116,41 @@ func (s *Sender) Deliver(ctx context.Context, delivery store.WebhookDelivery) (s
 }
 
 func (s *Sender) signature(ctx context.Context, delivery store.WebhookDelivery) (int64, string, error) {
-	var reference secretref.Reference
+	var authorized AuthorizedSecret
 	if s.authorizer != nil {
 		parsed, err := secretref.Parse(delivery.SecretRef)
 		if err != nil || parsed.Namespace != s.secretNamespace {
 			return 0, "", fmt.Errorf("webhook Secret reference must be valid and use control-plane namespace %q", s.secretNamespace)
 		}
-		reference = parsed
-		if exact, ok := s.authorizer.(secretReferenceAuthorizer); ok {
-			if err := exact.AuthorizeReference(ctx, delivery.SecretRef); err != nil {
-				return 0, "", fmt.Errorf("authorize webhook secret: %w", err)
-			}
-		} else if err := s.authorizer.Authorize(ctx, reference.Namespace, reference.Name); err != nil {
+		authorized, err = s.authorizer.AuthorizeReference(ctx, delivery.SecretRef)
+		if err != nil {
 			return 0, "", fmt.Errorf("authorize webhook secret: %w", err)
 		}
+		defer authorized.Cleanup()
 	}
 	if delivery.FirstSendTimestamp != nil && delivery.Signature != nil {
 		return *delivery.FirstSendTimestamp, *delivery.Signature, nil
 	}
-	secret, err := s.secrets.Resolve(ctx, delivery.SecretRef)
-	if err != nil {
-		return 0, "", fmt.Errorf("resolve webhook secret: %w", err)
+	var secret []byte
+	if s.authorizer == nil {
+		var err error
+		secret, err = s.secrets.Resolve(ctx, delivery.SecretRef)
+		if err != nil {
+			return 0, "", fmt.Errorf("resolve webhook secret: %w", err)
+		}
+	} else {
+		secret = authorized.Resolve()
 	}
 	timestamp := s.now().Unix()
-	signature := Sign(secret, timestamp, delivery.RawBody)
+	signPayload := s.sign
+	if signPayload == nil {
+		signPayload = sign
+	}
+	signature, err := signPayload(secret, timestamp, delivery.RawBody)
+	clear(secret)
+	if err != nil {
+		return 0, "", fmt.Errorf("sign webhook payload: %w", err)
+	}
 	if err := s.store.PersistWebhookSignature(context.WithoutCancel(ctx), delivery, timestamp, signature); err != nil {
 		return 0, "", err
 	}
@@ -171,11 +184,16 @@ func sanitizeError(cause error) string {
 }
 
 func Sign(secret []byte, timestamp int64, body []byte) string {
+	signature, _ := sign(secret, timestamp, body)
+	return signature
+}
+
+func sign(secret []byte, timestamp int64, body []byte) (string, error) {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(strconv.FormatInt(timestamp, 10)))
 	_, _ = mac.Write([]byte("."))
 	_, _ = mac.Write(body)
-	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 func validateTarget(value string) error {
