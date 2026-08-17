@@ -127,3 +127,42 @@ type OperatorMetric struct {
 	Unit       string
 	ObservedAt time.Time
 }
+
+// SystemStatPoint is one time-series sample for a system/node from Beszel.
+type SystemStatPoint struct {
+	Timestamp   time.Time
+	CPU         float64
+	CPUUser     float64
+	CPUSystem   float64
+	CPUIOWait   float64
+	Memory      float64
+	MemoryMB    float64
+	MemoryUsed  float64
+	Disk        float64
+	DiskRead    float64
+	DiskWrite   float64
+	Bandwidth   float64
+	Load1       float64
+	Load5       float64
+	Load15      float64
+	Temperature float64
+}
+
+// NodeSystemDetail holds live info and recent timeseries samples for one node.
+type NodeSystemDetail struct {
+	ID          string
+	Name        string
+	Host        string
+	Port        string
+	Status      string
+	Updated     time.Time
+	CPUPercent  float64
+	MemoryUsed  float64
+	DiskPercent float64
+	Bandwidth   float64
+	Load1       float64
+	Load5       float64
+	Load15      float64
+	Temperature float64
+	History     []SystemStatPoint
+}

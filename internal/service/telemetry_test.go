@@ -46,6 +46,11 @@ func (r *recordingTelemetry) GetOperatorMetrics(context.Context) ([]observabilit
 	return r.metrics, r.err
 }
 
+func (r *recordingTelemetry) GetNodeSystemDetails(context.Context) ([]observability.NodeSystemDetail, error) {
+	r.called = true
+	return nil, r.err
+}
+
 func TestBoundTelemetryLimit(t *testing.T) {
 	if limit, err := boundTelemetryLimit(0); err != nil || limit != defaultTelemetryLimit {
 		t.Fatalf("default limit = %d, %v", limit, err)

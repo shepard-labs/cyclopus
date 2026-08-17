@@ -1,0 +1,334 @@
+package admin
+
+import (
+	"fmt"
+	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
+)
+
+templ Metrics(nodes []observability.NodeSystemDetail, errMessage string, user store.User, org store.Organization, flash *ui.FlashMessage) {
+	@components.PageWide("Metrics", user, org, flash, "/admin/metrics", nil, metricsContent(nodes, errMessage))
+}
+
+templ MetricsFragment(nodes []observability.NodeSystemDetail, errMessage string) {
+	@metricsGrid(nodes, errMessage)
+}
+
+templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) {
+	<style>
+		#metrics-container.htmx-swapping,
+		#metrics-container.htmx-settling {
+			opacity: 1 !important;
+			transition: none !important;
+		}
+	</style>
+	<div class="w-full space-y-6">
+		<div class="flex items-center justify-end">
+			<span class="inline-flex items-center gap-1.5 text-xs text-base-content/60">
+				<span class="size-2 rounded-full bg-success animate-pulse"></span>
+				Auto-refreshes every 10s
+			</span>
+		</div>
+
+		<div id="metrics-container" hx-get="/admin/metrics?fragment=true" hx-trigger="every 10s" hx-swap="innerHTML settle:0s swap:0s transition:false">
+			@MetricsFragment(nodes, errMessage)
+		</div>
+	</div>
+
+	<script>
+		function formatUserLocalTime(isoStr) {
+			if (!isoStr) return "";
+			try {
+				const d = new Date(isoStr);
+				if (isNaN(d.getTime())) return isoStr;
+				return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			} catch (e) {
+				return isoStr;
+			}
+		}
+
+		function relTimeClient(isoStr) {
+			if (!isoStr) return "";
+			try {
+				const d = new Date(isoStr);
+				const diffMs = Date.now() - d.getTime();
+				const diffSec = Math.floor(diffMs / 1000);
+				if (diffSec < 60) return "just now";
+				const diffMin = Math.floor(diffSec / 60);
+				if (diffMin < 60) return diffMin + "m ago";
+				const diffHr = Math.floor(diffMin / 60);
+				if (diffHr < 24) return diffHr + "h ago";
+				return Math.floor(diffHr / 24) + "d ago";
+			} catch (e) {
+				return "";
+			}
+		}
+
+		function syncMetricTimestamps(root) {
+			const scope = root || document;
+			scope.querySelectorAll('[data-iso-time-rel]').forEach(el => {
+				const iso = el.getAttribute('data-iso-time-rel');
+				if (iso) {
+					const rel = relTimeClient(iso);
+					if (rel) el.textContent = "Updated " + rel;
+				}
+			});
+		}
+
+		function initChartInteractions(root) {
+			const scope = root || document;
+			syncMetricTimestamps(scope);
+			scope.querySelectorAll('.metric-chart-card').forEach(card => {
+				const svg = card.querySelector('svg.metric-chart-svg');
+				const crosshair = card.querySelector('.metric-crosshair');
+				const tooltip = card.querySelector('.metric-tooltip');
+				const currentValEl = card.querySelector('.metric-current-val');
+				const rawPayload = card.getAttribute('data-chart-payload');
+				if (!rawPayload || !svg || !crosshair || !tooltip) return;
+
+				let data = null;
+				try {
+					data = JSON.parse(rawPayload);
+				} catch (e) {
+					console.error("JSON parse failed", e);
+					return;
+				}
+				if (!data || !data.times || data.times.length === 0) return;
+
+				const defaultVal = currentValEl ? currentValEl.textContent : '';
+
+				card.onmousemove = function(e) {
+					const rect = svg.getBoundingClientRect();
+					if (rect.width <= 0) return;
+					if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+						crosshair.style.display = 'none';
+						tooltip.style.display = 'none';
+						if (currentValEl) currentValEl.textContent = defaultVal;
+						return;
+					}
+
+					const mouseX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+					const ratio = mouseX / rect.width;
+					const n = data.times.length;
+					const idx = Math.min(n - 1, Math.max(0, Math.round(ratio * (n - 1))));
+
+					// SVG coordinate system is viewBox 0 0 300 80
+					const svgX = (idx / (n === 1 ? 1 : n - 1)) * 300;
+					crosshair.setAttribute('x1', svgX.toFixed(1));
+					crosshair.setAttribute('x2', svgX.toFixed(1));
+					crosshair.style.display = 'block';
+
+					// Update tooltip content
+					const timeStr = formatUserLocalTime(data.times[idx]);
+					let valHtml = '<div class="font-mono text-xs font-semibold text-base-content/90 mb-1 border-b border-line pb-1">' + timeStr + '</div>';
+					if (data.series && Array.isArray(data.series)) {
+						data.series.forEach(s => {
+							const val = (s.values && s.values[idx] !== undefined) ? Number(s.values[idx]).toFixed(2) : '-';
+							valHtml += '<div class="flex items-center justify-between gap-3 text-xs py-0.5">' +
+								'<span class="inline-flex items-center gap-1.5 text-base-content/70">' +
+								'<span class="size-1.5 rounded-full inline-block" style="background-color: ' + s.color + '"></span>' +
+								s.name +
+								'</span>' +
+								'<span class="font-mono font-medium text-base-content">' + val + ' ' + (data.unit || '') + '</span>' +
+								'</div>';
+						});
+					}
+
+					tooltip.innerHTML = valHtml;
+					tooltip.style.display = 'block';
+
+					// Calculate pixel X relative to container width
+					const pxX = (svgX / 300) * rect.width;
+					// Clamp tooltip within container boundaries
+					const tooltipWidth = tooltip.offsetWidth || 140;
+					const halfW = tooltipWidth / 2;
+					const clampedPx = Math.max(halfW + 4, Math.min(rect.width - halfW - 4, pxX));
+					tooltip.style.left = clampedPx + 'px';
+					tooltip.style.top = '0px';
+				};
+
+				card.onmouseleave = function() {
+					crosshair.style.display = 'none';
+					tooltip.style.display = 'none';
+					if (currentValEl) currentValEl.textContent = defaultVal;
+				};
+			});
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', () => initChartInteractions(document));
+		} else {
+			initChartInteractions(document);
+		}
+		document.addEventListener('htmx:load', (e) => initChartInteractions(e.detail?.elt || e.target || document));
+	</script>
+}
+
+templ metricsGrid(nodes []observability.NodeSystemDetail, errMessage string) {
+	if errMessage != "" {
+		<div class="rounded-box border border-warning/30 bg-warning/10 p-4 text-sm text-base-content">
+			<p class="font-medium text-warning">Metrics unavailable</p>
+			<p class="mt-1 text-xs text-base-content/70">{ errMessage }</p>
+		</div>
+	}
+
+	if len(nodes) == 0 && errMessage == "" {
+		@components.Card("Host Systems") {
+			<div class="py-8 text-center">
+				<p class="text-sm font-medium text-base-content/80">No registered nodes reporting metrics</p>
+				<p class="mt-1 text-xs text-base-content/60">Ensure beszel-agent is running and cluster nodes are registered with the Beszel hub.</p>
+			</div>
+		}
+	} else if len(nodes) > 0 {
+		<!-- Top Stat Overview Cards -->
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			<div class="rounded-box border border-line bg-base-200 p-5">
+				<div class="text-xs font-medium uppercase tracking-wider text-base-content/50">Nodes Online</div>
+				<div class="mt-2 flex items-baseline gap-2">
+					<span class="text-xl font-bold text-base-content">{ fmt.Sprintf("%d", len(nodes)) }</span>
+					<span class="text-xs text-success font-medium">Reporting</span>
+				</div>
+			</div>
+			<div class="rounded-box border border-line bg-base-200 p-5">
+				<div class="text-xs font-medium uppercase tracking-wider text-base-content/50">Avg CPU Usage</div>
+				<div class="mt-2 flex items-baseline gap-2">
+					<span class="text-xl font-bold text-base-content">{ fmt.Sprintf("%.1f%%", avgCPUNodes(nodes)) }</span>
+				</div>
+			</div>
+			<div class="rounded-box border border-line bg-base-200 p-5">
+				<div class="text-xs font-medium uppercase tracking-wider text-base-content/50">Avg Memory Usage</div>
+				<div class="mt-2 flex items-baseline gap-2">
+					<span class="text-xl font-bold text-base-content">{ fmt.Sprintf("%.1f%%", avgMemoryNodes(nodes)) }</span>
+				</div>
+			</div>
+			<div class="rounded-box border border-line bg-base-200 p-5">
+				<div class="text-xs font-medium uppercase tracking-wider text-base-content/50">Avg Disk Usage</div>
+				<div class="mt-2 flex items-baseline gap-2">
+					<span class="text-xl font-bold text-base-content">{ fmt.Sprintf("%.1f%%", avgDiskNodes(nodes)) }</span>
+				</div>
+			</div>
+		</div>
+
+		<!-- Per-Node Full Beszel Suite Dashboard in 2-Column Grid -->
+		<div class="space-y-6 pt-4">
+			for _, node := range nodes {
+				{{ cpu, mem, disk, diskIO, net, load, temp := extractNodeChartData(node) }}
+				<div class="rounded-box border border-line bg-base-200 p-6 space-y-5">
+					<div class="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+						<div class="flex items-center gap-3">
+							<h2 class="text-sm font-semibold text-base-content">{ node.Name }</h2>
+							<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Host }</span>
+							if node.Port != "" {
+								<span class="inline-flex items-center rounded-md border border-line bg-base-300/60 px-1.5 py-0.5 font-mono text-xs text-base-content/60">:{ node.Port }</span>
+							}
+							if node.Status == "up" || node.Status == "online" {
+								@components.OperationalStatus("success", "Online")
+							} else {
+								@components.OperationalStatus("warning", node.Status)
+							}
+						</div>
+						<div class="text-xs text-base-content/50">
+							if !node.Updated.IsZero() {
+								<span data-iso-time-rel={ node.Updated.UTC().Format("2006-01-02T15:04:05Z") }>Updated { relTimeAdmin(node.Updated) }</span>
+							}
+						</div>
+					</div>
+
+					<!-- 2-Column Grid (2x2 / 2x3 layout) for Node Metric Charts -->
+					<div class="grid grid-cols-1 gap-5 md:grid-cols-2">
+						<!-- 1. CPU Usage -->
+						@RenderSVGChart(cpu)
+
+						<!-- 2. Memory Usage -->
+						@RenderSVGChart(mem)
+
+						<!-- 3. Disk Space -->
+						@RenderSVGChart(disk)
+
+						<!-- 4. Disk I/O -->
+						@RenderSVGChart(diskIO)
+
+						<!-- 5. Bandwidth / Network -->
+						@RenderSVGChart(net)
+
+						<!-- 6. Load Average -->
+						@RenderSVGChart(load)
+
+						<!-- 7. Core Temperature -->
+						if temp.CurrentVal != "0.0 °C" && temp.CurrentVal != "0" {
+							@RenderSVGChart(temp)
+						}
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ RenderSVGChart(chart SVGChartData) {
+	<div class="metric-chart-card relative rounded-box border border-line bg-base-300/60 p-4 flex flex-col justify-between" data-chart={ chart.Title } data-chart-payload={ chart.DataJSON }>
+		<div class="flex items-center justify-between mb-3">
+			<div>
+				<div class="text-xs font-semibold text-base-content/85">{ chart.Title }</div>
+				if len(chart.Series) > 0 {
+					<div class="flex items-center gap-2 mt-1">
+						for _, s := range chart.Series {
+							<span class="inline-flex items-center gap-1 text-xs text-base-content/60">
+								<span class="size-1.5 rounded-full" style={ fmt.Sprintf("background-color: %s", s.Color) }></span>
+								{ s.Name }
+							</span>
+						}
+					</div>
+				}
+			</div>
+			<div class="text-right">
+				<span class="metric-current-val font-mono text-xs font-bold text-base-content">{ chart.CurrentVal }</span>
+			</div>
+		</div>
+
+		<div class="relative w-full h-24 pt-1 cursor-crosshair">
+			<!-- Floating Hover Tooltip -->
+			<div style="display: none;" class="metric-tooltip pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full mb-1 rounded-box border border-line bg-base-200/95 backdrop-blur px-3 py-2 shadow-lg min-w-36"></div>
+
+			<svg viewBox="0 0 300 80" preserveAspectRatio="none" class="metric-chart-svg w-full h-full overflow-visible">
+				<defs>
+					if chart.FillColor != "" {
+						<linearGradient id={ "grad-" + chart.ID } x1="0" y1="0" x2="0" y2="1">
+							<stop offset="0%" stop-color={ chart.FillColor } stop-opacity="0.28"></stop>
+							<stop offset="100%" stop-color={ chart.FillColor } stop-opacity="0.0"></stop>
+						</linearGradient>
+					}
+				</defs>
+
+				<!-- Grid guidelines -->
+				<line x1="0" y1="8" x2="300" y2="8" stroke="var(--tw-color-line)" stroke-width="0.75" stroke-dasharray="3 3"></line>
+				<line x1="0" y1="40" x2="300" y2="40" stroke="var(--tw-color-line)" stroke-width="0.75" stroke-dasharray="3 3"></line>
+				<line x1="0" y1="72" x2="300" y2="72" stroke="var(--tw-color-line)" stroke-width="0.75"></line>
+
+				<!-- Area fill -->
+				if chart.AreaPath != "" {
+					<path d={ chart.AreaPath } fill={ fmt.Sprintf("url(#grad-%s)", chart.ID) }></path>
+				}
+
+				<!-- Lines with consistent stroke-width vector effect -->
+				for i, path := range chart.LinePaths {
+					{{ stroke := chart.StrokeColor }}
+					if len(chart.Series) > i && chart.Series[i].Color != "" {
+						{{ stroke = chart.Series[i].Color }}
+					}
+					<path d={ path } fill="none" stroke={ stroke } stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path>
+				}
+
+				<!-- Interactive Crosshair -->
+				<line style="display: none;" class="metric-crosshair" x1="0" y1="0" x2="0" y2="80" stroke="var(--tw-color-primary)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2 2"></line>
+			</svg>
+		</div>
+
+		<div class="flex items-center justify-between mt-3 pt-2 border-t border-line text-xs text-base-content/45 font-mono">
+			<span>{ fmt.Sprintf("%.0f %s", chart.MinVal, chart.Unit) }</span>
+			<span>{ fmt.Sprintf("%.0f %s", chart.MaxVal, chart.Unit) }</span>
+		</div>
+	</div>
+}

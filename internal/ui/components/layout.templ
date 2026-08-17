@@ -7,14 +7,18 @@ import (
 
 // Page renders the full-page shell with sidebar, topbar, content area, and flash.
 templ Page(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, content templ.Component) {
-	@pageShell(title, user, org, flash, currentPath, nil, content)
+	@pageShell(title, user, org, flash, currentPath, nil, false, content)
+}
+
+templ PageWide(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, breadcrumbs []BreadcrumbItem, content templ.Component) {
+	@pageShell(title, user, org, flash, currentPath, breadcrumbs, true, content)
 }
 
 templ PageWithBreadcrumbs(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, breadcrumbs []BreadcrumbItem, content templ.Component) {
-	@pageShell(title, user, org, flash, currentPath, breadcrumbs, content)
+	@pageShell(title, user, org, flash, currentPath, breadcrumbs, false, content)
 }
 
-templ pageShell(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, breadcrumbs []BreadcrumbItem, content templ.Component) {
+templ pageShell(title string, user store.User, org store.Organization, flash *ui.FlashMessage, currentPath string, breadcrumbs []BreadcrumbItem, wide bool, content templ.Component) {
 	<!DOCTYPE html>
 	<html lang="en" class="h-full">
 		<head>
@@ -30,26 +34,51 @@ templ pageShell(title string, user store.User, org store.Organization, flash *ui
 			@Sidebar(org, user, currentPath)
 			<div class="min-w-0 lg:pl-56">
 				<header class="sticky top-0 z-30 flex h-14 items-center border-b border-line bg-base-100">
-					<div class="relative mx-auto h-full w-full max-w-5xl px-4 sm:px-6 lg:px-8">
-						<div class="absolute inset-y-0 left-4 right-1/2 flex min-w-0 items-center pr-8 sm:left-6 lg:left-8">
-							<div class="shrink-0 lg:hidden">
-								@MobileNavTrigger()
-							</div>
-							if len(breadcrumbs) > 0 {
-								<div class="min-w-0 overflow-hidden">
-								@Breadcrumbs(breadcrumbs)
+					if wide {
+						<div class="relative mx-auto h-full w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+							<div class="absolute inset-y-0 left-4 right-1/2 flex min-w-0 items-center pr-8 sm:left-6 lg:left-8">
+								<div class="shrink-0 lg:hidden">
+									@MobileNavTrigger()
 								</div>
-							}
+								if len(breadcrumbs) > 0 {
+									<div class="min-w-0 overflow-hidden">
+									@Breadcrumbs(breadcrumbs)
+									</div>
+								}
+							</div>
+							<span class="absolute left-1/2 top-1/2 max-w-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-sm font-medium text-base-content/70">{ title }</span>
 						</div>
-						<span class="absolute left-1/2 top-1/2 max-w-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-sm font-medium text-base-content/70">{ title }</span>
-					</div>
-				</header>
-				<main class="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
-					if flash != nil {
-						@Flash(flash)
+					} else {
+						<div class="relative mx-auto h-full w-full max-w-5xl px-4 sm:px-6 lg:px-8">
+							<div class="absolute inset-y-0 left-4 right-1/2 flex min-w-0 items-center pr-8 sm:left-6 lg:left-8">
+								<div class="shrink-0 lg:hidden">
+									@MobileNavTrigger()
+								</div>
+								if len(breadcrumbs) > 0 {
+									<div class="min-w-0 overflow-hidden">
+									@Breadcrumbs(breadcrumbs)
+									</div>
+								}
+							</div>
+							<span class="absolute left-1/2 top-1/2 max-w-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-sm font-medium text-base-content/70">{ title }</span>
+						</div>
 					}
-					@content
-				</main>
+				</header>
+				if wide {
+					<main class="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
+						if flash != nil {
+							@Flash(flash)
+						}
+						@content
+					</main>
+				} else {
+					<main class="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+						if flash != nil {
+							@Flash(flash)
+						}
+						@content
+					</main>
+				}
 			</div>
 		</body>
 	</html>

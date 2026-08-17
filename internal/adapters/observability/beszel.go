@@ -91,13 +91,164 @@ type beszelListResponse struct {
 }
 
 type beszelSystem struct {
+	ID      string          `json:"id"`
 	Name    string          `json:"name"`
+	Host    string          `json:"host"`
+	Port    string          `json:"port"`
+	Status  string          `json:"status"`
 	Updated string          `json:"updated"`
 	Info    json.RawMessage `json:"info"`
 }
 
+type beszelStatsListResponse struct {
+	Items []beszelStatRecord `json:"items"`
+}
+
+type beszelStatRecord struct {
+	Created string          `json:"created"`
+	System  string          `json:"system"`
+	Type    string          `json:"type"`
+	Stats   json.RawMessage `json:"stats"`
+}
+
 type beszelAuthResponse struct {
 	Token string `json:"token"`
+}
+
+// GetNodeSystemDetails fetches all systems and their recent time-series samples
+// from Beszel to power the full cluster metrics dashboard.
+func (c *BeszelClient) GetNodeSystemDetails(ctx context.Context) ([]NodeSystemDetail, error) {
+	token, err := c.token(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	details, unauthorized, err := c.fetchNodeSystemDetails(ctx, token)
+	if err != nil && unauthorized {
+		token, err = c.token(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		details, _, err = c.fetchNodeSystemDetails(ctx, token)
+	}
+	return details, err
+}
+
+func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string) ([]NodeSystemDetail, bool, error) {
+	systemsURL := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/systems/records?perPage=200"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, systemsURL, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", token)
+	response, err := c.client.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("observability: Beszel request failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		return nil, true, fmt.Errorf("observability: Beszel returned HTTP 401")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, false, fmt.Errorf("observability: Beszel returned HTTP %d", response.StatusCode)
+	}
+	var decoded beszelListResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, MaxResponseBytes)).Decode(&decoded); err != nil {
+		return nil, false, fmt.Errorf("observability: decode Beszel systems response")
+	}
+
+	statsURL := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/system_stats/records?perPage=500&sort=-created"
+	reqStats, err := http.NewRequestWithContext(ctx, http.MethodGet, statsURL, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	reqStats.Header.Set("Accept", "application/json")
+	reqStats.Header.Set("Authorization", token)
+	respStats, err := c.client.Do(reqStats)
+	if err != nil {
+		return nil, false, fmt.Errorf("observability: Beszel stats request failed")
+	}
+	defer respStats.Body.Close()
+	if respStats.StatusCode == http.StatusUnauthorized {
+		return nil, true, fmt.Errorf("observability: Beszel stats returned HTTP 401")
+	}
+	var decodedStats beszelStatsListResponse
+	if respStats.StatusCode >= 200 && respStats.StatusCode < 300 {
+		_ = json.NewDecoder(io.LimitReader(respStats.Body, MaxResponseBytes)).Decode(&decodedStats)
+	}
+
+	systemStatsMap := make(map[string][]SystemStatPoint)
+	for _, item := range decodedStats.Items {
+		ts := parseBeszelTime(item.Created)
+		raw := map[string]any{}
+		if len(item.Stats) > 0 {
+			_ = json.Unmarshal(item.Stats, &raw)
+		}
+		var pt SystemStatPoint
+		pt.Timestamp = ts
+		pt.CPU = floatField(raw["cpu"])
+		if cpub, ok := raw["cpub"].([]any); ok && len(cpub) >= 3 {
+			pt.CPUUser = floatField(cpub[0])
+			pt.CPUSystem = floatField(cpub[1])
+			pt.CPUIOWait = floatField(cpub[2])
+		}
+		pt.Memory = floatField(raw["mp"])
+		pt.MemoryMB = floatField(raw["m"])
+		pt.MemoryUsed = floatField(raw["mu"])
+		pt.Disk = floatField(raw["dp"])
+		pt.DiskRead = floatField(raw["dr"])
+		pt.DiskWrite = floatField(raw["dw"])
+		if b, ok := raw["b"].([]any); ok && len(b) >= 2 {
+			pt.Bandwidth = (floatField(b[0]) + floatField(b[1])) / 1024.0 / 1024.0 // MB/s
+		} else if bVal, ok := raw["b"].(float64); ok {
+			pt.Bandwidth = bVal
+		}
+		if la, ok := raw["la"].([]any); ok && len(la) >= 3 {
+			pt.Load1 = floatField(la[0])
+			pt.Load5 = floatField(la[1])
+			pt.Load15 = floatField(la[2])
+		}
+		pt.Temperature = floatField(raw["t"])
+
+		systemStatsMap[item.System] = append(systemStatsMap[item.System], pt)
+	}
+
+	nodes := make([]NodeSystemDetail, 0, len(decoded.Items))
+	for _, sys := range decoded.Items {
+		info := map[string]any{}
+		if len(sys.Info) > 0 {
+			_ = json.Unmarshal(sys.Info, &info)
+		}
+		detail := NodeSystemDetail{
+			ID:          sys.ID,
+			Name:        sys.Name,
+			Host:        sys.Host,
+			Port:        sys.Port,
+			Status:      sys.Status,
+			Updated:     parseBeszelTime(sys.Updated),
+			CPUPercent:  floatField(info["cpu"]),
+			MemoryUsed:  floatField(info["mp"]),
+			DiskPercent: floatField(info["dp"]),
+			Temperature: floatField(info["t"]),
+		}
+		if b, ok := info["b"].(float64); ok {
+			detail.Bandwidth = b
+		}
+		if la, ok := info["la"].([]any); ok && len(la) >= 3 {
+			detail.Load1 = floatField(la[0])
+			detail.Load5 = floatField(la[1])
+			detail.Load15 = floatField(la[2])
+		}
+		hist := systemStatsMap[sys.ID]
+		// Reverse to chronological order (oldest -> newest) for plotting
+		for i, j := 0, len(hist)-1; i < j; i, j = i+1, j-1 {
+			hist[i], hist[j] = hist[j], hist[i]
+		}
+		detail.History = hist
+		nodes = append(nodes, detail)
+	}
+
+	return nodes, false, nil
 }
 
 // GetOperatorMetrics fetches the operator's host systems and projects only the

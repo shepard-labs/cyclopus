@@ -495,6 +495,22 @@ func (b *Backend) StartReconciliation(ctx context.Context, token, idemKey, orgID
 	return err
 }
 
+func (b *Backend) GetOperatorMetrics(ctx context.Context, token string) ([]observability.OperatorMetric, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return b.svc.GetOperatorMetrics(ctx, actor)
+}
+
+func (b *Backend) GetNodeSystemDetails(ctx context.Context, token string) ([]observability.NodeSystemDetail, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return b.svc.GetNodeSystemDetails(ctx, actor)
+}
+
 // ── Update-mask mechanics ───────────────────────────────────────────────────
 
 // appInputFromStore lifts a stored app into a full update input — the in-process

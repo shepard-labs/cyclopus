@@ -115,6 +115,7 @@ func newHandler(client *ui.Backend, loadLogs logsPageLoader) http.Handler {
 		// Admin
 		r.Get("/admin/reconcile", h.getReconcile)
 		r.Post("/admin/reconcile", h.postReconcile)
+		r.Get("/admin/metrics", h.getMetrics)
 	})
 
 	return r
@@ -870,4 +871,24 @@ func (h *Handler) postReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectWithFlash(w, r, "/admin/reconcile", "success", "Reconciliation started.")
+}
+
+func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {
+	token := ui.TokenFromContext(r.Context())
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	nodes, metricsErr := h.client.GetNodeSystemDetails(r.Context(), token)
+	var errMessage string
+	if metricsErr != nil {
+		errMessage = metricsErr.Error()
+	}
+
+	if r.URL.Query().Get("fragment") == "true" {
+		render(w, r, adminpages.MetricsFragment(nodes, errMessage))
+		return
+	}
+	render(w, r, adminpages.Metrics(nodes, errMessage, user, org, flashFromCookie(w, r)))
 }

@@ -290,6 +290,43 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 		assertContainsAll(t, body, `create failed`, `document.getElementById('create-application-dialog')`, `dialog.showModal()`)
 	})
 
+	t.Run("admin metrics page renders nodes and polling container", func(t *testing.T) {
+		nodes := []observability.NodeSystemDetail{
+			{
+				ID: "sys-1", Name: "node-1", Host: "192.168.1.10", Port: "45876", Status: "up", Updated: time.Now(),
+				CPUPercent: 12.5, MemoryUsed: 45.2, DiskPercent: 20.1, Bandwidth: 1.5,
+				History: []observability.SystemStatPoint{
+					{Timestamp: time.Now().Add(-1 * time.Minute), CPU: 10.0, Memory: 40.0, Disk: 20.0},
+					{Timestamp: time.Now(), CPU: 12.5, Memory: 45.2, Disk: 20.1},
+				},
+			},
+		}
+		body := renderComponent(t, context.Background(), adminpages.Metrics(nodes, "", store.User{}, store.Organization{Name: "Acme"}, nil))
+		assertContainsAll(t, body,
+			`id="metrics-container"`,
+			`hx-get="/admin/metrics?fragment=true"`,
+			`hx-trigger="every 10s"`,
+			`node-1`,
+			`12.5%`,
+			`45.2%`,
+			`20.1%`,
+			`CPU Usage`,
+			`Memory Usage`,
+			`Disk Space`,
+		)
+
+		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, ""))
+		assertContainsAll(t, fragmentBody,
+			`node-1`,
+			`12.5%`,
+			`45.2%`,
+			`20.1%`,
+		)
+		if strings.Contains(strings.ToLower(fragmentBody), "<!doctype html") {
+			t.Fatalf("fragment contains full-page HTML:\n%s", fragmentBody)
+		}
+	})
+
 	t.Run("user fields preserve current values", func(t *testing.T) {
 		user := store.User{Email: "operator@example.com", AvatarKey: avatar.DefaultKey}
 		body := renderComponent(t, context.Background(), settingspages.User(user, store.Organization{}, nil, "", "", ""))

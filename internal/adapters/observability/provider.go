@@ -53,3 +53,10 @@ func (p *Provider) GetOperatorMetrics(ctx context.Context) ([]OperatorMetric, er
 	}
 	return p.metrics.GetOperatorMetrics(ctx)
 }
+
+func (p *Provider) GetNodeSystemDetails(ctx context.Context) ([]NodeSystemDetail, error) {
+	if p.metrics == nil {
+		return nil, ErrBackendUnavailable
+	}
+	return p.metrics.GetNodeSystemDetails(ctx)
+}

@@ -45,7 +45,10 @@ templ sidebarContent(org store.Organization, user store.User, currentPath, title
 					<li>@navLink("/settings/tokens", "API Tokens", currentPath, IconKey("size-5 shrink-0"))</li>
 					<li>@navLink("/settings/audit", "Audit Log", currentPath, IconList("size-5 shrink-0"))</li>
 				</ul></li>
-				<li><div class="px-2 text-xs font-semibold uppercase tracking-wide text-base-content/40">Admin</div><ul role="list" class="mt-2 space-y-1"><li>@navLink("/admin/reconcile", "Reconcile", currentPath, IconArrowPath("size-5 shrink-0"))</li></ul></li>
+				<li><div class="px-2 text-xs font-semibold uppercase tracking-wide text-base-content/40">Admin</div><ul role="list" class="mt-2 space-y-1">
+					<li>@navLink("/admin/reconcile", "Reconcile", currentPath, IconArrowPath("size-5 shrink-0"))</li>
+					<li>@navLink("/admin/metrics", "Metrics", currentPath, IconChartBar("size-5 shrink-0"))</li>
+				</ul></li>
 			<li class="mt-auto">
 				@Dropdown(accountTriggerID, accountMenuID, userAccountName(user), accountTriggerLeading(user)) {
 					<div class="px-4 py-3"><p class="text-sm text-base-content/60">Signed in as</p><p class="truncate text-sm font-medium text-base-content">{ user.Email }</p></div>

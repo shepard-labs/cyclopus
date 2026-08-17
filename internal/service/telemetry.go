@@ -46,6 +46,7 @@ type TelemetryProvider interface {
 	ListTraces(ctx context.Context, scope observability.TenantScope, window observability.TimeRange, filter observability.TraceFilter) (observability.TracePage, error)
 	GetTrace(ctx context.Context, scope observability.TenantScope, window observability.TimeRange, traceID string) (observability.TraceSummary, bool, error)
 	GetOperatorMetrics(ctx context.Context) ([]observability.OperatorMetric, error)
+	GetNodeSystemDetails(ctx context.Context) ([]observability.NodeSystemDetail, error)
 }
 
 // LogQueryInput is the caller-supplied, pre-validation shape for a log query.
@@ -189,6 +190,22 @@ func (s *Service) GetOperatorMetrics(ctx context.Context, actor ActorContext) ([
 		return nil, mapTelemetryError(err)
 	}
 	return metrics, nil
+}
+
+// GetNodeSystemDetails returns detailed system metrics and time-series history
+// for all registered host nodes.
+func (s *Service) GetNodeSystemDetails(ctx context.Context, actor ActorContext) ([]observability.NodeSystemDetail, error) {
+	if err := validateActor(actor); err != nil {
+		return nil, err
+	}
+	if s.telemetry == nil {
+		return nil, ErrTelemetryUnavailable
+	}
+	details, err := s.telemetry.GetNodeSystemDetails(ctx)
+	if err != nil {
+		return nil, mapTelemetryError(err)
+	}
+	return details, nil
 }
 
 // resolveTenantScope loads and authorizes the app, and optional environment and
