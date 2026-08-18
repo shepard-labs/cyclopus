@@ -35,6 +35,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000009_registry_canonical_identity.up.sql",
 		"000010_github_webhook_routing.down.sql",
 		"000010_github_webhook_routing.up.sql",
+		"000011_github_unverified_revocation.down.sql",
+		"000011_github_unverified_revocation.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -95,6 +97,30 @@ func TestEmbeddedMigrations(t *testing.T) {
 		if !strings.Contains(string(stateGeneration), want) {
 			t.Errorf("state generation migration does not contain %q", want)
 		}
+	}
+}
+
+func TestMigration000010CommittedCheckpoint(t *testing.T) {
+	for name, want := range map[string]string{
+		"000010_github_webhook_routing.up.sql":   "68341a5325e7d1b34a985e5193dc309184593bf935db0ad9c16271e8e4711415",
+		"000010_github_webhook_routing.down.sql": "86de886fd2376f9f1db4dec3c46aea4f3398e4ad59116a4e160daaa4756804bd",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want committed efef5cb checkpoint %s", name, got, want)
+		}
+	}
+	fixture, err := os.ReadFile("testdata/000010_github_webhook_routing.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(fixture)
+	if got, want := hex.EncodeToString(sum[:]), "68341a5325e7d1b34a985e5193dc309184593bf935db0ad9c16271e8e4711415"; got != want {
+		t.Fatalf("committed 000010 upgrade fixture checksum = %s, want efef5cb checkpoint %s", got, want)
 	}
 }
 

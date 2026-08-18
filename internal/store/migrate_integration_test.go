@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000010 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000011 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 10 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:10 dirty:false", version, dirty)
+		if version != 11 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:11 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -962,6 +962,92 @@ func TestMigration000006BackfillsGitHubInstallationAuditIDs(t *testing.T) {
 	}
 	if err := ValidateSchemaEpoch(t.Context(), db); err != nil {
 		t.Fatalf("ValidateSchemaEpoch() after 000006: %v", err)
+	}
+}
+
+func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration11_restore_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(context.Background())
+	migrator := githubWebhookMigrator(t, testURL)
+	if err := migrator.Migrate(9); err != nil {
+		t.Fatal(err)
+	}
+	if sourceErr, databaseErr := migrator.Close(); sourceErr != nil || databaseErr != nil {
+		t.Fatalf("close baseline migrator: source=%v database=%v", sourceErr, databaseErr)
+	}
+	committedV10, err := os.ReadFile("testdata/000010_github_webhook_routing.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), string(committedV10)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), `UPDATE schema_migrations SET version=10,dirty=false WHERE version=9 AND dirty=false`); err != nil {
+		t.Fatal(err)
+	}
+	seedGitHubWebhookFixtureConn(t, db)
+	if _, err := db.Exec(t.Context(), `SET session_replication_role=replica`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), `INSERT INTO github_repository_routing_state(repository_id,org_id,repository_node_id,repository_generation,lifecycle_generation) VALUES(999999,$1,'missing-node',1,1)`, githubWebhookOrg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), `SET session_replication_role=origin`); err != nil {
+		t.Fatal(err)
+	}
+	err = Migrate(t.Context(), integrationConfig(testURL))
+	if err == nil || !strings.Contains(err.Error(), "installation backfill blocked") {
+		t.Fatalf("failed 000011 migration error = %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 10 || dirty {
+		t.Fatalf("migration state after restored failure = %d/%t, %v", version, dirty, err)
+	}
+	var guardCount int
+	if err := db.QueryRow(t.Context(), `SELECT count(*) FROM pg_trigger WHERE tgrelid='schema_migrations'::regclass AND tgname='guard_github_webhook_v10_down' AND NOT tgisinternal`).Scan(&guardCount); err != nil || guardCount != 1 {
+		t.Fatalf("restored v10 guard count = %d, %v", guardCount, err)
+	}
+	if _, err := db.Exec(t.Context(), `INSERT INTO github_webhook_deliveries(delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version) VALUES('30000000-0000-0000-0000-000000000099','push',90001,$1,'R_node',$2,repeat('a',64),decode(repeat('00',18),'hex'),decode(repeat('00',12),'hex'),'k1')`, githubWebhookRepo, githubWebhookOrg); err != nil {
+		t.Fatal(err)
+	}
+	down := githubWebhookMigrator(t, testURL)
+	if err := down.Steps(-1); err == nil || !strings.Contains(err.Error(), "000010 rollback blocked") {
+		t.Fatalf("unsafe rollback after failed 000011 error = %v", err)
+	}
+	if sourceErr, databaseErr := down.Close(); sourceErr != nil || databaseErr != nil {
+		t.Fatalf("close rollback migrator: source=%v database=%v", sourceErr, databaseErr)
+	}
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 10 || dirty {
+		t.Fatalf("migration state after blocked rollback = %d/%t, %v", version, dirty, err)
+	}
+	if _, err := db.Exec(t.Context(), `DELETE FROM github_repository_routing_state WHERE repository_id=999999;
+		UPDATE github_webhook_deliveries SET status='completed',result_code='processed',terminal_at=clock_timestamp(),verified_payload=NULL,payload_nonce=NULL,payload_redacted_at=clock_timestamp()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
+		t.Fatalf("repaired 000011 migration: %v", err)
+	}
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 11 || dirty {
+		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
+	}
+	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
+		t.Fatalf("idempotent repaired migration: %v", err)
 	}
 }
 

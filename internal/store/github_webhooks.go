@@ -149,6 +149,7 @@ type GitHubWebhookDelivery struct {
 	InstallationID                                                  *int64
 	LeaseEpoch                                                      int64
 	RepositoryID                                                    *int64
+	IngestionSequence                                               int64
 	Attempts                                                        int
 	Status                                                          string
 	NextAttemptAt, ReceivedAt                                       time.Time
@@ -296,10 +297,10 @@ func (s *Store) ReceiveGitHubWebhook(ctx context.Context, p ReceiveGitHubWebhook
 // remains confined to worker claims and does not require active encryption.
 func receiveGitHubWebhookExisting(ctx context.Context, tx pgx.Tx, p ReceiveGitHubWebhookParams, disposition *GitHubWebhookReceiveDisposition, delivery *GitHubWebhookDelivery) (bool, error) {
 	err := tx.QueryRow(ctx, `SELECT id::text,delivery_id::text,event,action,installation_id,repository_id,repository_node_id,org_id::text,
-		payload_digest,key_version,status,attempts,next_attempt_at,received_at FROM github_webhook_deliveries WHERE delivery_id=$1 FOR SHARE`, p.DeliveryID).Scan(
+			payload_digest,key_version,status,attempts,next_attempt_at,received_at,ingestion_sequence FROM github_webhook_deliveries WHERE delivery_id=$1 FOR SHARE`, p.DeliveryID).Scan(
 		&delivery.ID, &delivery.DeliveryID, &delivery.Event, &delivery.Action, &delivery.InstallationID, &delivery.RepositoryID,
 		&delivery.RepositoryNodeID, &delivery.OrgID, &delivery.PayloadDigest, &delivery.KeyVersion, &delivery.Status,
-		&delivery.Attempts, &delivery.NextAttemptAt, &delivery.ReceivedAt)
+		&delivery.Attempts, &delivery.NextAttemptAt, &delivery.ReceivedAt, &delivery.IngestionSequence)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -322,14 +323,14 @@ func equalStringPointers(a, b *string) bool {
 }
 
 const deliverySelect = `SELECT id::text,delivery_id::text,event,action,installation_id,repository_id,repository_node_id,org_id::text,
-	payload_digest,verified_payload,payload_nonce,key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,received_at FROM github_webhook_deliveries`
+		payload_digest,verified_payload,payload_nonce,key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,received_at,ingestion_sequence FROM github_webhook_deliveries`
 
 func (s *Store) scanGitHubWebhookDelivery(row pgx.Row, d *GitHubWebhookDelivery) error {
 	var owner *string
 	var expires *time.Time
 	var ciphertext, nonce []byte
 	if err := row.Scan(&d.ID, &d.DeliveryID, &d.Event, &d.Action, &d.InstallationID, &d.RepositoryID, &d.RepositoryNodeID, &d.OrgID,
-		&d.PayloadDigest, &ciphertext, &nonce, &d.KeyVersion, &d.Status, &d.Attempts, &d.NextAttemptAt, &owner, &d.LeaseEpoch, &expires, &d.ReceivedAt); err != nil {
+		&d.PayloadDigest, &ciphertext, &nonce, &d.KeyVersion, &d.Status, &d.Attempts, &d.NextAttemptAt, &owner, &d.LeaseEpoch, &expires, &d.ReceivedAt, &d.IngestionSequence); err != nil {
 		return err
 	}
 	if ciphertext != nil {
@@ -358,7 +359,7 @@ func (s *Store) ClaimGitHubWebhookDeliveries(ctx context.Context, owner string, 
 			UPDATE github_webhook_deliveries d SET status='leased',attempts=d.attempts+1,lease_owner=$2,lease_epoch=d.lease_epoch+1,
 			lease_expires_at=clock_timestamp()+($3 * interval '1 microsecond'),updated_at=clock_timestamp() FROM selected WHERE d.id=selected.id
 			RETURNING d.id::text,d.delivery_id::text,d.event,d.action,d.installation_id,d.repository_id,d.repository_node_id,d.org_id::text,
-			d.payload_digest,d.verified_payload,d.payload_nonce,d.key_version,d.status,d.attempts,d.next_attempt_at,d.lease_owner,d.lease_epoch,d.lease_expires_at,d.received_at`, limit, owner, leaseDuration.Microseconds())
+				d.payload_digest,d.verified_payload,d.payload_nonce,d.key_version,d.status,d.attempts,d.next_attempt_at,d.lease_owner,d.lease_epoch,d.lease_expires_at,d.received_at,d.ingestion_sequence`, limit, owner, leaseDuration.Microseconds())
 		if err != nil {
 			return err
 		}
@@ -485,8 +486,9 @@ type GitHubRoutingIntentParams struct {
 
 func (s *Store) PersistGitHubRoutingIntent(ctx context.Context, p GitHubRoutingIntentParams) (string, bool, error) {
 	var id string
-	err := s.db.QueryRow(ctx, `INSERT INTO github_routing_intents(delivery_id,org_id,repository_id,repository_node_id,app_id,environment_id,ref,commit_sha,event_kind,routing_generation,repository_generation,ref_lifecycle_generation,config_generation,workflow_path,production_ref)
-		VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7,NULLIF($8,''),$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(delivery_id,app_id,ref,event_kind,routing_generation) DO NOTHING RETURNING id::text`, p.DeliveryID, p.OrgID, p.RepositoryID, p.RepositoryNodeID, p.AppID, p.EnvironmentID, p.Ref, p.CommitSHA, p.EventKind, p.RoutingGeneration, p.RepositoryGeneration, p.RefLifecycleGeneration, p.ConfigGeneration, p.WorkflowPath, p.ProductionRef).Scan(&id)
+	err := s.db.QueryRow(ctx, `INSERT INTO github_routing_intents(delivery_id,org_id,repository_id,repository_node_id,installation_id,app_id,environment_id,ref,commit_sha,event_kind,routing_generation,repository_generation,ref_lifecycle_generation,config_generation,workflow_path,production_ref)
+		SELECT $1,$2,$3,$4,state.installation_id,$5,NULLIF($6,'')::uuid,$7,NULLIF($8,''),$9,$10,$11,$12,$13,$14,$15 FROM github_repository_routing_state state WHERE state.repository_id=$3 AND state.repository_node_id=$4
+		ON CONFLICT(delivery_id,app_id,ref,event_kind,routing_generation) DO NOTHING RETURNING id::text`, p.DeliveryID, p.OrgID, p.RepositoryID, p.RepositoryNodeID, p.AppID, p.EnvironmentID, p.Ref, p.CommitSHA, p.EventKind, p.RoutingGeneration, p.RepositoryGeneration, p.RefLifecycleGeneration, p.ConfigGeneration, p.WorkflowPath, p.ProductionRef).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var existing GitHubRoutingIntentParams
 		err = s.db.QueryRow(ctx, `SELECT id::text,delivery_id::text,org_id::text,repository_id,repository_node_id,app_id::text,COALESCE(environment_id::text,''),ref,COALESCE(commit_sha,''),event_kind,routing_generation,repository_generation,ref_lifecycle_generation,config_generation,workflow_path,production_ref FROM github_routing_intents WHERE delivery_id=$1 AND app_id=$2 AND ref=$3 AND event_kind=$4 AND routing_generation=$5`, p.DeliveryID, p.AppID, p.Ref, p.EventKind, p.RoutingGeneration).Scan(&id, &existing.DeliveryID, &existing.OrgID, &existing.RepositoryID, &existing.RepositoryNodeID, &existing.AppID, &existing.EnvironmentID, &existing.Ref, &existing.CommitSHA, &existing.EventKind, &existing.RoutingGeneration, &existing.RepositoryGeneration, &existing.RefLifecycleGeneration, &existing.ConfigGeneration, &existing.WorkflowPath, &existing.ProductionRef)
@@ -505,26 +507,28 @@ func (s *Store) AdvanceGitHubRoutingGeneration(ctx context.Context, orgID string
 	var generation int64
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		var authoritativeNode string
-		if err := tx.QueryRow(ctx, `SELECT node_id FROM github_repositories WHERE org_id=$1 AND github_repository_id=$2 FOR UPDATE`, orgID, repositoryID).Scan(&authoritativeNode); err != nil {
+		var installationID int64
+		if err := tx.QueryRow(ctx, `SELECT node_id,github_installation_id FROM github_repositories WHERE org_id=$1 AND github_repository_id=$2 FOR UPDATE`, orgID, repositoryID).Scan(&authoritativeNode, &installationID); err != nil {
 			return err
 		}
 		if authoritativeNode != nodeID {
 			return ErrConflict
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO github_repository_routing_state(repository_id,org_id,repository_node_id,repository_generation,lifecycle_generation) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, repositoryID, orgID, nodeID, repositoryGeneration, lifecycleGeneration)
+		tag, err := tx.Exec(ctx, `INSERT INTO github_repository_routing_state(repository_id,org_id,repository_node_id,installation_id,repository_generation,lifecycle_generation) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, repositoryID, orgID, nodeID, installationID, repositoryGeneration, lifecycleGeneration)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
 			var storedNode string
+			var storedInstallation int64
 			var storedRepository, storedLifecycle int64
-			if err := tx.QueryRow(ctx, `SELECT repository_node_id,repository_generation,lifecycle_generation FROM github_repository_routing_state WHERE repository_id=$1 FOR UPDATE`, repositoryID).Scan(&storedNode, &storedRepository, &storedLifecycle); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT repository_node_id,installation_id,repository_generation,lifecycle_generation FROM github_repository_routing_state WHERE repository_id=$1 FOR UPDATE`, repositoryID).Scan(&storedNode, &storedInstallation, &storedRepository, &storedLifecycle); err != nil {
 				return err
 			}
-			if storedNode != nodeID || repositoryGeneration < storedRepository || lifecycleGeneration < storedLifecycle {
+			if storedNode != nodeID || repositoryGeneration < storedRepository || storedInstallation == installationID && lifecycleGeneration < storedLifecycle {
 				return ErrConflict
 			}
-			if _, err = tx.Exec(ctx, `UPDATE github_repository_routing_state SET repository_generation=$2,lifecycle_generation=$3,updated_at=clock_timestamp() WHERE repository_id=$1`, repositoryID, repositoryGeneration, lifecycleGeneration); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE github_repository_routing_state SET installation_id=$2,repository_generation=$3,lifecycle_generation=$4,updated_at=clock_timestamp() WHERE repository_id=$1`, repositoryID, installationID, repositoryGeneration, lifecycleGeneration); err != nil {
 				return err
 			}
 		}

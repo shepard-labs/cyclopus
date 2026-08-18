@@ -19,6 +19,19 @@ type ClientFactory interface {
 	Client(installationID int64) (*gh.Client, error)
 }
 
+// Refresh evicts a cached installation client so the next request obtains a
+// fresh installation token from the current app credential.
+func (f *InstallationClientFactory) Refresh(installationID int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for key := range f.clients {
+		if key.installationID == installationID {
+			delete(f.clients, key)
+		}
+	}
+	clear(f.apps)
+}
+
 type AppCredential struct {
 	AppID           int64
 	PrivateKey      []byte
@@ -38,11 +51,17 @@ type InstallationClientFactory struct {
 
 	mu      sync.Mutex
 	clients map[clientKey]*gh.Client
+	apps    map[appClientKey]*gh.Client
 }
 
 type clientKey struct {
 	appID, installationID int64
 	resourceVersion       string
+}
+
+type appClientKey struct {
+	appID           int64
+	resourceVersion string
 }
 
 func NewInstallationClientFactory(credentials AppCredentialProvider, apiBaseURL, uploadURL, apiVersion string, base http.RoundTripper) (*InstallationClientFactory, error) {
@@ -53,7 +72,26 @@ func NewInstallationClientFactory(credentials AppCredentialProvider, apiBaseURL,
 		base = http.DefaultTransport
 	}
 	return &InstallationClientFactory{credentials: credentials, base: base, apiBaseURL: ensureTrailingSlash(apiBaseURL),
-		uploadURL: ensureTrailingSlash(uploadURL), apiVersion: apiVersion, clients: make(map[clientKey]*gh.Client)}, nil
+		uploadURL: ensureTrailingSlash(uploadURL), apiVersion: apiVersion, clients: make(map[clientKey]*gh.Client), apps: make(map[appClientKey]*gh.Client)}, nil
+}
+
+func (f *InstallationClientFactory) AppClient(ctx context.Context) (*gh.Client, error) {
+	credential, err := f.credentials.AppCredential(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load GitHub App credential: %w", err)
+	}
+	key := appClientKey{appID: credential.AppID, resourceVersion: credential.ResourceVersion}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if client := f.apps[key]; client != nil {
+		return client, nil
+	}
+	client, err := NewAppClient(credential, f.apiBaseURL, f.uploadURL, f.apiVersion, f.base)
+	if err != nil {
+		return nil, err
+	}
+	f.apps = map[appClientKey]*gh.Client{key: client}
+	return client, nil
 }
 
 func (f *InstallationClientFactory) Client(installationID int64) (*gh.Client, error) {

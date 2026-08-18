@@ -356,6 +356,69 @@ func TestDispatchHangingServerTimesOutAfterReconciliationBegins(t *testing.T) {
 	}
 }
 
+func TestGetBranchRefRejectsMalformedSHA(t *testing.T) {
+	for _, sha := range []string{strings.Repeat("A", 40), strings.Repeat("a", 39), strings.Repeat("g", 40), ""} {
+		t.Run(sha, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/repositories/99":
+					writeJSON(t, writer, `{"name":"widget","owner":{"login":"acme"}}`)
+				case "/repos/acme/widget/git/ref/heads/main":
+					writeJSON(t, writer, `{"ref":"refs/heads/main","object":{"sha":"`+sha+`"}}`)
+				default:
+					t.Fatalf("unexpected request %s", request.URL.Path)
+				}
+			}))
+			defer server.Close()
+			apiURL := server.URL + "/"
+			client, err := gh.NewClient(gh.WithURLs(&apiURL, &apiURL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := &EventClient{clients: staticEventClientFactory{client: client}}
+			_, _, err = events.GetBranchRef(t.Context(), 42, 99, "main")
+			var permanent *PermanentJobError
+			if !errors.As(err, &permanent) || permanent.Code != "malformed_response" {
+				t.Fatalf("error = %#v", err)
+			}
+		})
+	}
+}
+
+func TestClassifyRateLimitRetryDelay(t *testing.T) {
+	future := time.Now().Add(2 * time.Minute)
+	past := time.Now().Add(-time.Minute)
+	positive := 30 * time.Second
+	zero := time.Duration(0)
+	for _, test := range []struct {
+		name        string
+		err         error
+		wantDefault bool
+		want        time.Duration
+	}{
+		{name: "rate reset absent", err: &gh.RateLimitError{}, wantDefault: true},
+		{name: "rate reset elapsed", err: &gh.RateLimitError{Rate: gh.Rate{Reset: gh.Timestamp{Time: past}}}, wantDefault: true},
+		{name: "rate reset future", err: &gh.RateLimitError{Rate: gh.Rate{Reset: gh.Timestamp{Time: future}}}, want: 2 * time.Minute},
+		{name: "abuse retry absent", err: &gh.AbuseRateLimitError{}, wantDefault: true},
+		{name: "abuse retry zero", err: &gh.AbuseRateLimitError{RetryAfter: &zero}, wantDefault: true},
+		{name: "abuse retry positive", err: &gh.AbuseRateLimitError{RetryAfter: &positive}, want: positive},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var api *APIError
+			if err := classifyError("test", test.err); !errors.As(err, &api) {
+				t.Fatalf("error = %#v", err)
+			}
+			if test.wantDefault {
+				if api.RetryAfter != defaultRetryDelay {
+					t.Fatalf("retry after = %v, want %v", api.RetryAfter, defaultRetryDelay)
+				}
+			} else if delta := api.RetryAfter - test.want; delta < -time.Second || delta > time.Second {
+				t.Fatalf("retry after = %v, want approximately %v", api.RetryAfter, test.want)
+			}
+		})
+	}
+}
+
 func newTestAdapter(t *testing.T, orchestrationStore OrchestrationStore, baseURL string, now func() time.Time) *Adapter {
 	return newTestAdapterWithTimeout(t, orchestrationStore, baseURL, now, time.Second)
 }
@@ -380,6 +443,14 @@ func newTestAdapterWithTimeout(t *testing.T, orchestrationStore OrchestrationSto
 type staticFactory struct{ client *gh.Client }
 
 func (f staticFactory) Client(int64) (*gh.Client, error) { return f.client, nil }
+
+type staticEventClientFactory struct{ client *gh.Client }
+
+func (f staticEventClientFactory) AppClient(context.Context) (*gh.Client, error) {
+	return f.client, nil
+}
+func (f staticEventClientFactory) Client(int64) (*gh.Client, error) { return f.client, nil }
+func (f staticEventClientFactory) Refresh(int64)                    {}
 
 type fakeStore struct {
 	beginCalls            int

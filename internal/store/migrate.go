@@ -12,6 +12,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -87,10 +88,70 @@ func Migrate(ctx context.Context, cfg MigrationConfig) error {
 	}
 	defer m.Close()
 
+	prepared11, err := prepareMigration11Upgrade(ctx, conn)
+	if err != nil {
+		return err
+	}
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		if prepared11 {
+			restoreMigration10Guard(context.WithoutCancel(ctx), conn)
+		}
 		return fmt.Errorf("apply migrations: database is old, missing, or partially applied; back up the database and apply all migrations through 000005 before starting Cyclopus: %w", err)
 	}
 	return ValidateSchemaEpoch(ctx, conn)
+}
+
+func prepareMigration11Upgrade(ctx context.Context, conn *sql.Conn) (bool, error) {
+	var version int
+	var dirty bool
+	err := conn.QueryRowContext(ctx, `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty)
+	if errors.Is(err, sql.ErrNoRows) || isUndefinedTable(err) || version != 10 || dirty {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect migration 000011 upgrade checkpoint: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `DROP TRIGGER IF EXISTS guard_github_webhook_v10_down ON schema_migrations`); err != nil {
+		return false, fmt.Errorf("prepare migration 000011 upgrade: remove 000010 schema_migrations guard: %w", err)
+	}
+	return true, nil
+}
+
+func restoreMigration10Guard(ctx context.Context, conn *sql.Conn) {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	var version int
+	var dirty bool
+	if err := tx.QueryRowContext(ctx, `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 10 && !(version == 11 && dirty) {
+		return
+	}
+	var partialV11 bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND
+		((table_name='github_repository_routing_state' OR table_name='github_routing_intents') AND column_name='installation_id'
+		 OR table_name='github_webhook_deliveries' AND column_name='ingestion_sequence'))`).Scan(&partialV11); err != nil || partialV11 {
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE OR REPLACE FUNCTION guard_github_webhook_v10_down() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF EXISTS(SELECT 1 FROM github_webhook_deliveries WHERE status IN('pending','leased') OR verified_payload IS NOT NULL) OR EXISTS(SELECT 1 FROM github_routing_intents WHERE status IN('pending','leased')) THEN RAISE EXCEPTION '000010 rollback blocked: drain webhook deliveries/intents and redact retained payloads before retrying' USING ERRCODE='check_violation'; END IF; RETURN NULL; END $$;
+DROP TRIGGER IF EXISTS guard_github_webhook_v10_down ON schema_migrations;
+CREATE TRIGGER guard_github_webhook_v10_down BEFORE TRUNCATE ON schema_migrations FOR EACH STATEMENT EXECUTE FUNCTION guard_github_webhook_v10_down();`); err != nil {
+		return
+	}
+	if version == 11 {
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_migrations SET version=10,dirty=false WHERE version=11 AND dirty=true`); err != nil {
+			return
+		}
+	}
+	_ = tx.Commit()
+}
+
+func isUndefinedTable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
 }
 
 type schemaEpochQuerier interface {
