@@ -5,10 +5,13 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +48,50 @@ func TestGitHubWebhookHandlerCommitsBefore202AndRejectsWithoutInsertPostgres18(t
 	if count != 1 || deliveryID != webhookDelivery || keyVersion != "payload-k1" {
 		t.Fatalf("committed rows = %d delivery=%q key=%q", count, deliveryID, keyVersion)
 	}
+	var signatureKeyVersion string
+	if err := pool.QueryRow(t.Context(), `SELECT signature_key_version FROM github_webhook_deliveries WHERE delivery_id=$1`, webhookDelivery).Scan(&signatureKeyVersion); err != nil || signatureKeyVersion != "hmac-v1" {
+		t.Fatalf("signature key version = %q, %v", signatureKeyVersion, err)
+	}
+	rotatedSecret := "integration-hmac-secret-v2"
+	rotatedHandler := NewGitHubWebhookHandler(config.Webhook{GitHubActiveSecretRef: "active-v2-ref", GitHubActiveKeyVersion: "hmac-v2", GitHubPreviousSecretRef: "active-ref", GitHubPreviousKeyVersion: "hmac-v1", GitHubSecretOverlapUntil: time.Now().Add(time.Hour), GitHubBodyLimit: 1024, GitHubMaxConcurrent: 1, GitHubBodyReadTimeout: time.Second}, integrationWebhookSecrets{values: map[string][]byte{"active-v2-ref": []byte(rotatedSecret), "active-ref": []byte(secret)}}, dataStore)
+	replay := webhookRequest(body, "push", rotatedSecret)
+	requireEmptyWebhookResponse(t, serveWebhook(rotatedHandler, replay), http.StatusAccepted)
+	if err := pool.QueryRow(t.Context(), `SELECT count(*),min(signature_key_version) FROM github_webhook_deliveries`).Scan(&count, &signatureKeyVersion); err != nil || count != 1 || signatureKeyVersion != "hmac-v1" {
+		t.Fatalf("rotated replay rows = %d signature=%q, %v", count, signatureKeyVersion, err)
+	}
+	conflictBody := []byte(`{"installation":{"id":42},"repository":{"id":91,"node_id":"R_91"},"ref":"changed"}`)
+	conflict := webhookRequest(conflictBody, "push", rotatedSecret)
+	requireEmptyWebhookResponse(t, serveWebhook(rotatedHandler, conflict), http.StatusConflict)
+	activeDelivery := webhookRequest(body, "push", rotatedSecret)
+	activeDelivery.Header.Set("X-GitHub-Delivery", "20000000-0000-0000-0000-000000000003")
+	requireEmptyWebhookResponse(t, serveWebhook(rotatedHandler, activeDelivery), http.StatusAccepted)
+	previousDelivery := webhookRequest(body, "push", secret)
+	previousDelivery.Header.Set("X-GitHub-Delivery", "20000000-0000-0000-0000-000000000004")
+	requireEmptyWebhookResponse(t, serveWebhook(rotatedHandler, previousDelivery), http.StatusAccepted)
+	rows, err := pool.Query(t.Context(), `SELECT delivery_id::text,key_version,signature_key_version FROM github_webhook_deliveries ORDER BY delivery_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	versions := map[string][2]string{}
+	for rows.Next() {
+		var id, payloadVersion, signatureVersion string
+		if err := rows.Scan(&id, &payloadVersion, &signatureVersion); err != nil {
+			t.Fatal(err)
+		}
+		versions[id] = [2]string{payloadVersion, signatureVersion}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	wantVersions := map[string][2]string{
+		webhookDelivery:                        {"payload-k1", "hmac-v1"},
+		"20000000-0000-0000-0000-000000000003": {"payload-k1", "hmac-v2"},
+		"20000000-0000-0000-0000-000000000004": {"payload-k1", "hmac-v1"},
+	}
+	if !reflect.DeepEqual(versions, wantVersions) {
+		t.Fatalf("payload/signature versions = %v, want %v", versions, wantVersions)
+	}
 	rejected := webhookRequest([]byte(`{"installation":{"id":42},"repository":{"id":91,"node_id":"R_91"}}`), "push", secret)
 	rejected.Header.Set("X-GitHub-Delivery", "20000000-0000-0000-0000-000000000002")
 	rejected.Header.Set("X-GitHub-Signature-256", "sha256="+strings.Repeat("0", 64))
@@ -52,7 +99,7 @@ func TestGitHubWebhookHandlerCommitsBefore202AndRejectsWithoutInsertPostgres18(t
 	rejectedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(rejectedResponse, rejected)
 	requireEmptyWebhookResponse(t, rejectedResponse, http.StatusUnauthorized)
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_webhook_deliveries`).Scan(&count); err != nil || count != 1 {
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_webhook_deliveries`).Scan(&count); err != nil || count != 3 {
 		t.Fatalf("rows after rejected request = %d, %v", count, err)
 	}
 }
@@ -166,8 +213,72 @@ func TestGitHubWebhookHandlerInactiveIdentityConflictAndUnknownPostgres18(t *tes
 	}
 }
 
+func TestGitHubWebhookConfiguredLimitsDurabilityPostgres18(t *testing.T) {
+	dataStore, pool := newGitHubServerStore(t)
+	actor := seedGitHubServerActor(t, pool)
+	codec, err := store.NewAESGCMGitHubWebhookPayloadCodec("payload-k1", []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore.WithGitHubWebhookPayloadCodec(codec)
+	if _, err := dataStore.UpsertGitHubInstallation(t.Context(), actor.OrgID, store.GitHubInstallation{GitHubInstallationID: 42, AccountID: 7, AccountLogin: "acme", AccountType: "Organization", RepositorySelection: "selected", AccessState: "active"}, store.GitHubAuditContext{OrgID: actor.OrgID, Event: &store.AuditEvent{ID: "00000000-0000-7000-8000-000000000205"}, Source: "test"}, actor.OrgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(91,$1,42,'R_91','acme','api','acme/api','private','main','active',1,1)`, actor.OrgID); err != nil {
+		t.Fatal(err)
+	}
+	secret := "integration-hmac-secret"
+	h := NewGitHubWebhookHandler(config.Webhook{GitHubActiveSecretRef: "active-ref", GitHubActiveKeyVersion: "hmac-v1", GitHubBodyLimit: 128, GitHubMaxConcurrent: 2, GitHubBodyReadTimeout: time.Second, GitHubRateLimitEnabled: true, GitHubRateLimitPerMinute: 60, GitHubRateLimitBurst: 2}, integrationWebhookSecret{value: []byte(secret)}, dataStore)
+	body := []byte(`{"installation":{"id":42},"repository":{"id":91,"node_id":"R_91"}}`)
+	var wg sync.WaitGroup
+	statuses := make(chan int, 6)
+	for i := range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := webhookRequest(body, "push", secret)
+			r.RemoteAddr = "192.0.2.44:1234"
+			r.Header.Set("X-GitHub-Delivery", fmt.Sprintf("20000000-0000-0000-0000-%012d", i+100))
+			statuses <- serveWebhook(h, r).Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	accepted, rejected := 0, 0
+	for status := range statuses {
+		if status == http.StatusAccepted {
+			accepted++
+		} else if status == http.StatusTooManyRequests {
+			rejected++
+		} else {
+			t.Fatalf("status = %d", status)
+		}
+	}
+	if accepted != 2 || rejected != 4 {
+		t.Fatalf("accepted/rejected = %d/%d, want 2/4", accepted, rejected)
+	}
+	var count int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_webhook_deliveries`).Scan(&count); err != nil || count != accepted {
+		t.Fatalf("durable backlog = %d, accepted=%d err=%v", count, accepted, err)
+	}
+	oversized := webhookRequest([]byte(strings.Repeat("x", 129)), "push", secret)
+	oversized.RemoteAddr = "198.51.100.99:1"
+	if got := serveWebhook(h, oversized).Code; got != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized status = %d", got)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_webhook_deliveries`).Scan(&count); err != nil || count != accepted {
+		t.Fatalf("oversized added DB row: %d err=%v", count, err)
+	}
+}
+
 type integrationWebhookSecret struct{ value []byte }
 
 func (s integrationWebhookSecret) Resolve(context.Context, string) ([]byte, error) {
 	return append([]byte(nil), s.value...), nil
+}
+
+type integrationWebhookSecrets struct{ values map[string][]byte }
+
+func (s integrationWebhookSecrets) Resolve(_ context.Context, ref string) ([]byte, error) {
+	return append([]byte(nil), s.values[ref]...), nil
 }

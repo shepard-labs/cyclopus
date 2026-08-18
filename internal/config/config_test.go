@@ -33,8 +33,11 @@ func TestLoadPrecedence(t *testing.T) {
 	if cfg.HTTP.Address != "127.0.0.1:9000" {
 		t.Fatalf("address = %q, want flag value", cfg.HTTP.Address)
 	}
-	if cfg.GRPC.Address != "127.0.0.1:9090" {
+	if cfg.GRPC.Address != "127.0.0.1:9091" {
 		t.Fatalf("gRPC address = %q, want default value", cfg.GRPC.Address)
+	}
+	if cfg.Metrics.Address != "127.0.0.1:9090" || cfg.Metrics.AllowPublic {
+		t.Fatalf("metrics config = %+v, want loopback default", cfg.Metrics)
 	}
 	if cfg.HTTP.ReadTimeout != 20*time.Second {
 		t.Fatalf("read timeout = %s, want file value", cfg.HTTP.ReadTimeout)
@@ -62,6 +65,9 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 	if cfg.Auth.MaxConcurrentHashes != 4 || cfg.Auth.RateLimitPerMinute != 10 || cfg.Auth.RequestBodyBytes != 65536 {
 		t.Fatalf("auth limits = %+v, want default values", cfg.Auth)
+	}
+	if !cfg.Webhook.GitHubRateLimitEnabled || cfg.Webhook.GitHubRateLimitPerMinute != 120 || cfg.Webhook.GitHubRateLimitBurst != 30 {
+		t.Fatalf("GitHub webhook rate limits = %+v, want enabled 120/min burst 30", cfg.Webhook)
 	}
 	if cfg.GitHub.APIBaseURL != "https://api.github.com/" || cfg.GitHub.UploadURL != "https://uploads.github.com/" ||
 		cfg.GitHub.APIVersion != "2026-03-10" || cfg.GitHub.DispatchObservationInterval != 90*time.Second ||
@@ -96,6 +102,48 @@ func TestLoadWebhookPayloadEncryptionKeyring(t *testing.T) {
 	}
 	if cfg.Webhook.PayloadEncryptionKeyFile != path {
 		t.Fatalf("webhook encryption config = %+v", cfg.Webhook)
+	}
+}
+
+func TestLoadRejectsInvalidGitHubWebhookKeyVersions(t *testing.T) {
+	for _, value := range []string{strings.Repeat("v", 129), " padded", "padded ", "\t"} {
+		_, err := Load(nil, append(baseValidEnv, "CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_KEY_VERSION="+value))
+		if err == nil || !strings.Contains(err.Error(), "key version") {
+			t.Fatalf("Load(%q) error = %v", value, err)
+		}
+	}
+	for _, value := range []string{strings.Repeat("v", 129), " padded", "padded ", "\t"} {
+		env := append(baseValidEnv,
+			"CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_SECRET_REF=k8s-secret://default/cyclopus-webhook-old#secret",
+			"CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_KEY_VERSION="+value,
+			"CYCLOPUS_WEBHOOK_GITHUB_SECRET_OVERLAP_UNTIL=2030-01-01T00:00:00Z")
+		_, err := Load(nil, env)
+		if err == nil || !strings.Contains(err.Error(), "key version") {
+			t.Fatalf("Load(previous %q) error = %v", value, err)
+		}
+	}
+}
+
+func TestLoadMetricsPublicBindRequiresExplicitOptIn(t *testing.T) {
+	if _, err := Load([]string{"--metrics-address", "0.0.0.0:9090"}, baseValidEnv); err == nil || !strings.Contains(err.Error(), "metrics.allow_public") {
+		t.Fatalf("public metrics bind error = %v", err)
+	}
+	cfg, err := Load([]string{"--metrics-address", "0.0.0.0:9090", "--metrics-allow-public"}, baseValidEnv)
+	if err != nil || !cfg.Metrics.AllowPublic {
+		t.Fatalf("explicit public metrics config = %+v, %v", cfg.Metrics, err)
+	}
+}
+
+func TestLoadRejectsDisabledOrInvalidGitHubWebhookRateLimit(t *testing.T) {
+	for _, value := range []string{
+		"CYCLOPUS_WEBHOOK_GITHUB_RATE_LIMIT_ENABLED=false",
+		"CYCLOPUS_WEBHOOK_GITHUB_RATE_LIMIT_PER_MINUTE=0",
+		"CYCLOPUS_WEBHOOK_GITHUB_RATE_LIMIT_BURST=121",
+	} {
+		_, err := Load(nil, append(baseValidEnv, value))
+		if err == nil || !strings.Contains(err.Error(), "rate limiting must be enabled") {
+			t.Fatalf("Load(%q) error = %v", value, err)
+		}
 	}
 }
 
@@ -597,8 +645,8 @@ func TestLoadListenerSecurityDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.HTTP.Address != "127.0.0.1:8080" || cfg.GRPC.Address != "127.0.0.1:9090" {
-		t.Fatalf("listener defaults = HTTP %q, gRPC %q", cfg.HTTP.Address, cfg.GRPC.Address)
+	if cfg.HTTP.Address != "127.0.0.1:8080" || cfg.GRPC.Address != "127.0.0.1:9091" || cfg.Metrics.Address != "127.0.0.1:9090" {
+		t.Fatalf("listener defaults = HTTP %q, gRPC %q, metrics %q", cfg.HTTP.Address, cfg.GRPC.Address, cfg.Metrics.Address)
 	}
 	if cfg.InsecurePublicListeners {
 		t.Fatal("insecure_public_listeners defaulted to true")

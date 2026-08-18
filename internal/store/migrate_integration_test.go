@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000011 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000012 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 11 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:11 dirty:false", version, dirty)
+		if version != 12 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:12 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1043,7 +1043,7 @@ func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("repaired 000011 migration: %v", err)
 	}
-	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 11 || dirty {
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 12 || dirty {
 		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {

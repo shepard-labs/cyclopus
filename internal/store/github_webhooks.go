@@ -143,25 +143,26 @@ type LeaseToken struct {
 }
 
 type GitHubWebhookDelivery struct {
-	ID, DeliveryID, Event, Action, OrgID, PayloadDigest, KeyVersion string
-	RepositoryNodeID                                                *string
-	Payload                                                         []byte
-	InstallationID                                                  *int64
-	LeaseEpoch                                                      int64
-	RepositoryID                                                    *int64
-	IngestionSequence                                               int64
-	Attempts                                                        int
-	Status                                                          string
-	NextAttemptAt, ReceivedAt                                       time.Time
-	Lease                                                           *LeaseToken
+	ID, DeliveryID, Event, Action, OrgID, PayloadDigest string
+	PayloadKeyVersion, SignatureKeyVersion              string
+	RepositoryNodeID                                    *string
+	Payload                                             []byte
+	InstallationID                                      *int64
+	LeaseEpoch                                          int64
+	RepositoryID                                        *int64
+	IngestionSequence                                   int64
+	Attempts                                            int
+	Status                                              string
+	NextAttemptAt, ReceivedAt                           time.Time
+	Lease                                               *LeaseToken
 }
 
 type ReceiveGitHubWebhookParams struct {
-	DeliveryID, Event, Action, OrgID, PayloadDigest, KeyVersion string
-	RepositoryNodeID                                            *string
-	Payload                                                     []byte
-	InstallationID                                              *int64
-	RepositoryID                                                *int64
+	DeliveryID, Event, Action, OrgID, PayloadDigest, SignatureKeyVersion string
+	RepositoryNodeID                                                     *string
+	Payload                                                              []byte
+	InstallationID                                                       *int64
+	RepositoryID                                                         *int64
 }
 
 type GitHubWebhookIdentity struct {
@@ -277,9 +278,9 @@ func (s *Store) ReceiveGitHubWebhook(ctx context.Context, p ReceiveGitHubWebhook
 			return err
 		}
 		tag, err := tx.Exec(ctx, `INSERT INTO github_webhook_deliveries
-			(delivery_id,event,action,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(delivery_id) DO NOTHING`,
-			p.DeliveryID, p.Event, p.Action, p.InstallationID, p.RepositoryID, p.RepositoryNodeID, p.OrgID, p.PayloadDigest, ciphertext, nonce, keyVersion)
+				(delivery_id,event,action,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version,signature_key_version)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(delivery_id) DO NOTHING`,
+			p.DeliveryID, p.Event, p.Action, p.InstallationID, p.RepositoryID, p.RepositoryNodeID, p.OrgID, p.PayloadDigest, ciphertext, nonce, keyVersion, p.SignatureKeyVersion)
 		if err != nil {
 			return err
 		}
@@ -297,9 +298,9 @@ func (s *Store) ReceiveGitHubWebhook(ctx context.Context, p ReceiveGitHubWebhook
 // remains confined to worker claims and does not require active encryption.
 func receiveGitHubWebhookExisting(ctx context.Context, tx pgx.Tx, p ReceiveGitHubWebhookParams, disposition *GitHubWebhookReceiveDisposition, delivery *GitHubWebhookDelivery) (bool, error) {
 	err := tx.QueryRow(ctx, `SELECT id::text,delivery_id::text,event,action,installation_id,repository_id,repository_node_id,org_id::text,
-			payload_digest,key_version,status,attempts,next_attempt_at,received_at,ingestion_sequence FROM github_webhook_deliveries WHERE delivery_id=$1 FOR SHARE`, p.DeliveryID).Scan(
+				payload_digest,key_version,signature_key_version,status,attempts,next_attempt_at,received_at,ingestion_sequence FROM github_webhook_deliveries WHERE delivery_id=$1 FOR SHARE`, p.DeliveryID).Scan(
 		&delivery.ID, &delivery.DeliveryID, &delivery.Event, &delivery.Action, &delivery.InstallationID, &delivery.RepositoryID,
-		&delivery.RepositoryNodeID, &delivery.OrgID, &delivery.PayloadDigest, &delivery.KeyVersion, &delivery.Status,
+		&delivery.RepositoryNodeID, &delivery.OrgID, &delivery.PayloadDigest, &delivery.PayloadKeyVersion, &delivery.SignatureKeyVersion, &delivery.Status,
 		&delivery.Attempts, &delivery.NextAttemptAt, &delivery.ReceivedAt, &delivery.IngestionSequence)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -323,7 +324,7 @@ func equalStringPointers(a, b *string) bool {
 }
 
 const deliverySelect = `SELECT id::text,delivery_id::text,event,action,installation_id,repository_id,repository_node_id,org_id::text,
-		payload_digest,verified_payload,payload_nonce,key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,received_at,ingestion_sequence FROM github_webhook_deliveries`
+			payload_digest,verified_payload,payload_nonce,key_version,signature_key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,received_at,ingestion_sequence FROM github_webhook_deliveries`
 
 type GitHubEventLeaseStatus struct {
 	Deliveries, Intents int64
@@ -364,7 +365,7 @@ func (s *Store) scanGitHubWebhookDelivery(row pgx.Row, d *GitHubWebhookDelivery)
 	var expires *time.Time
 	var ciphertext, nonce []byte
 	if err := row.Scan(&d.ID, &d.DeliveryID, &d.Event, &d.Action, &d.InstallationID, &d.RepositoryID, &d.RepositoryNodeID, &d.OrgID,
-		&d.PayloadDigest, &ciphertext, &nonce, &d.KeyVersion, &d.Status, &d.Attempts, &d.NextAttemptAt, &owner, &d.LeaseEpoch, &expires, &d.ReceivedAt, &d.IngestionSequence); err != nil {
+		&d.PayloadDigest, &ciphertext, &nonce, &d.PayloadKeyVersion, &d.SignatureKeyVersion, &d.Status, &d.Attempts, &d.NextAttemptAt, &owner, &d.LeaseEpoch, &expires, &d.ReceivedAt, &d.IngestionSequence); err != nil {
 		return err
 	}
 	if ciphertext != nil {
@@ -372,7 +373,7 @@ func (s *Store) scanGitHubWebhookDelivery(row pgx.Row, d *GitHubWebhookDelivery)
 		if err != nil {
 			return err
 		}
-		d.Payload, err = codec.Decrypt(ciphertext, nonce, d.KeyVersion, d.payloadContext())
+		d.Payload, err = codec.Decrypt(ciphertext, nonce, d.PayloadKeyVersion, d.payloadContext())
 		if err != nil {
 			return err
 		}
@@ -393,7 +394,7 @@ func (s *Store) ClaimGitHubWebhookDeliveries(ctx context.Context, owner string, 
 			UPDATE github_webhook_deliveries d SET status='leased',attempts=d.attempts+1,lease_owner=$2,lease_epoch=d.lease_epoch+1,
 			lease_expires_at=clock_timestamp()+($3 * interval '1 microsecond'),updated_at=clock_timestamp() FROM selected WHERE d.id=selected.id
 			RETURNING d.id::text,d.delivery_id::text,d.event,d.action,d.installation_id,d.repository_id,d.repository_node_id,d.org_id::text,
-				d.payload_digest,d.verified_payload,d.payload_nonce,d.key_version,d.status,d.attempts,d.next_attempt_at,d.lease_owner,d.lease_epoch,d.lease_expires_at,d.received_at,d.ingestion_sequence`, limit, owner, leaseDuration.Microseconds())
+				d.payload_digest,d.verified_payload,d.payload_nonce,d.key_version,d.signature_key_version,d.status,d.attempts,d.next_attempt_at,d.lease_owner,d.lease_epoch,d.lease_expires_at,d.received_at,d.ingestion_sequence`, limit, owner, leaseDuration.Microseconds())
 		if err != nil {
 			return err
 		}

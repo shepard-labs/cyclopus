@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	githubadapter "github.com/shepard-labs/cyclopus/internal/adapters/github"
@@ -22,6 +23,7 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	"github.com/shepard-labs/cyclopus/internal/auth"
 	"github.com/shepard-labs/cyclopus/internal/config"
+	"github.com/shepard-labs/cyclopus/internal/githubmetrics"
 	"github.com/shepard-labs/cyclopus/internal/logging"
 	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/server"
@@ -126,7 +128,14 @@ func run(args, environ []string) error {
 	services.RequestBodyBytes = cfg.Auth.RequestBodyBytes
 	services.GitHubBrowser = server.NewGitHubBrowser(domainService, authenticator, cfg.ExternalURL, []byte(cfg.Auth.TokenPepper))
 	services.UIHandler = server.LoginContinuationMiddleware(uihandler.New(ui.NewBackend(domainService, authService, cfg.Auth.SessionTTL)))
-	services.GitHubWebhook = server.NewGitHubWebhookHandler(cfg.Webhook, secretref.NewKubernetesResolver(kubernetesClient), dataStore)
+	githubMetrics := githubmetrics.New()
+	services.Metrics = githubMetrics
+	githubWebhookSecrets := secretref.NewKubernetesResolver(kubernetesClient)
+	services.GitHubWebhook = server.NewGitHubWebhookHandler(cfg.Webhook, githubWebhookSecrets, dataStore, githubMetrics)
+	githubWebhookSecretChecker := server.NewGitHubWebhookSecretChecker(githubWebhookSecrets, cfg.Webhook.GitHubActiveSecretRef, 30*time.Second, 2*time.Second)
+	if err := githubWebhookSecretChecker.Check(ctx); err != nil {
+		return fmt.Errorf("probe GitHub webhook active secret: %w", err)
+	}
 	adapters, err := buildRecoveryAdapters(cfg, dataStore, productionAdapterConstructors(dataStore, owner, logger, githubOnboarding))
 	if err != nil {
 		return err
@@ -150,7 +159,7 @@ func run(args, environ []string) error {
 		PayloadRetention: cfg.GitHubEventWorker.PayloadRetention, CleanupInterval: cfg.GitHubEventWorker.CleanupInterval,
 		CleanupBatch: cfg.GitHubEventWorker.CleanupBatch, ShutdownGrace: cfg.GitHubEventWorker.ShutdownGrace,
 		MaxIntents: cfg.GitHubEventWorker.MaxIntents, Owner: owner,
-	}, logger, dataStore, eventProcessor)
+	}, logger, dataStore, eventProcessor, githubMetrics)
 	if provider, err := buildTelemetryProvider(ctx, cfg.Observability, cfg.Kubernetes.InstanceNamespace, adapters); err != nil {
 		return err
 	} else if provider != nil {
@@ -167,14 +176,17 @@ func run(args, environ []string) error {
 		if !ready.Load() {
 			return errors.New("startup recovery is incomplete")
 		}
-		return pool.Ping(ctx)
+		if err := pool.Ping(ctx); err != nil {
+			return err
+		}
+		return githubWebhookSecretChecker.Check(ctx)
 	}
 	if err := githubOnboarding.Reconcile(ctx); err != nil {
 		return fmt.Errorf("reconcile GitHub App credentials: %w", err)
 	}
 
 	logger.Info("server starting", "address", cfg.HTTP.Address, "worker_owner", owner)
-	apiServer, err := server.New(cfg.HTTP, cfg.GRPC, logger, readiness, services)
+	apiServer, err := server.New(cfg.HTTP, cfg.GRPC, cfg.Metrics, logger, readiness, services)
 	if err != nil {
 		return err
 	}

@@ -9,10 +9,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,6 +57,13 @@ type fakeGitHubWebhookStore struct {
 	params        store.ReceiveGitHubWebhookParams
 	blockIdentity chan struct{}
 }
+
+type countingBody struct {
+	reads atomic.Int32
+}
+
+func (b *countingBody) Read([]byte) (int, error) { b.reads.Add(1); return 0, io.EOF }
+func (*countingBody) Close() error               { return nil }
 
 func (f *fakeGitHubWebhookStore) LookupGitHubWebhook(_ context.Context, p store.LookupGitHubWebhookParams) (store.GitHubWebhookLookupDisposition, store.GitHubWebhookIdentity, error) {
 	f.lookupCalls.Add(1)
@@ -124,11 +133,11 @@ func TestGitHubWebhookAcceptsActiveAndPreviousSignaturesAndPersistsExactBytes(t 
 			response := serveWebhook(handler, webhookRequest(body, "push", values[0]))
 			requireEmptyWebhookResponse(t, response, http.StatusAccepted)
 			digest := sha256.Sum256(body)
-			if inbox.receiveCalls.Load() != 1 || !bytes.Equal(inbox.params.Payload, body) || inbox.params.PayloadDigest != hex.EncodeToString(digest[:]) || inbox.params.KeyVersion != values[1] || inbox.params.InstallationID == nil || *inbox.params.InstallationID != 42 || inbox.params.RepositoryID == nil || *inbox.params.RepositoryID != 91 || inbox.params.RepositoryNodeID == nil || *inbox.params.RepositoryNodeID != "R_91" {
+			if inbox.receiveCalls.Load() != 1 || !bytes.Equal(inbox.params.Payload, body) || inbox.params.PayloadDigest != hex.EncodeToString(digest[:]) || inbox.params.SignatureKeyVersion != values[1] || inbox.params.InstallationID == nil || *inbox.params.InstallationID != 42 || inbox.params.RepositoryID == nil || *inbox.params.RepositoryID != 91 || inbox.params.RepositoryNodeID == nil || *inbox.params.RepositoryNodeID != "R_91" {
 				t.Fatalf("persisted params = %+v", inbox.params)
 			}
-			if strings.Contains(inbox.params.KeyVersion, "secret") || strings.Contains(inbox.params.KeyVersion, "ref") {
-				t.Fatalf("persisted secret material as key version %q", inbox.params.KeyVersion)
+			if strings.Contains(inbox.params.SignatureKeyVersion, "secret") || strings.Contains(inbox.params.SignatureKeyVersion, "ref") {
+				t.Fatalf("persisted secret material as key version %q", inbox.params.SignatureKeyVersion)
 			}
 		})
 	}
@@ -245,6 +254,76 @@ func TestGitHubWebhookTransportAndMediaTypeBoundary(t *testing.T) {
 	}
 }
 
+func TestGitHubWebhookRateLimitUsesRemoteIPBeforeSecretsStoreOrBody(t *testing.T) {
+	h, secrets, inbox := webhookFixture()
+	h.cfg.GitHubRateLimitPerMinute, h.cfg.GitHubRateLimitBurst = 60, 1
+	h.limiter = newWebhookRateLimiter(60, 1)
+
+	first := webhookRequest([]byte(`{}`), "push", "active-secret")
+	first.RemoteAddr = "192.0.2.10:1000"
+	first.Header.Del("X-GitHub-Signature-256")
+	requireEmptyWebhookResponse(t, serveWebhook(h, first), http.StatusUnauthorized)
+	body := &countingBody{}
+	second := webhookRequest(nil, "push", "active-secret")
+	second.RemoteAddr = "192.0.2.10:2000"
+	second.Header.Set("X-Forwarded-For", "198.51.100.20")
+	second.Body = body
+	requireEmptyWebhookResponse(t, serveWebhook(h, second), http.StatusTooManyRequests)
+	if body.reads.Load() != 0 || secrets.calls.Load() != 0 || inbox.lookupCalls.Load() != 0 || inbox.identityCalls.Load() != 0 || inbox.receiveCalls.Load() != 0 {
+		t.Fatalf("limited flood reached body/secrets/store: reads=%d secrets=%d store=%d/%d/%d", body.reads.Load(), secrets.calls.Load(), inbox.lookupCalls.Load(), inbox.identityCalls.Load(), inbox.receiveCalls.Load())
+	}
+
+	other := webhookRequest([]byte(`{}`), "ping", "active-secret")
+	other.RemoteAddr = "198.51.100.20:3000"
+	requireEmptyWebhookResponse(t, serveWebhook(h, other), http.StatusAccepted)
+}
+
+func TestWebhookRateLimiterBoundedSprayAndConcurrentRace(t *testing.T) {
+	limiter := newWebhookRateLimiter(60, 1)
+	limiter.maxEntries = 2
+	now := time.Unix(100, 0)
+	limiter.now = func() time.Time { return now }
+	if ok, _ := limiter.allowKey("192.0.2.1"); !ok {
+		t.Fatal("first key rejected")
+	}
+	if ok, _ := limiter.allowKey("192.0.2.2"); !ok {
+		t.Fatal("second key rejected")
+	}
+	if ok, _ := limiter.allowKey("192.0.2.3"); ok {
+		t.Fatal("spray evicted an exhausted bucket")
+	}
+	if len(limiter.perKey) != 2 {
+		t.Fatalf("entries = %d", len(limiter.perKey))
+	}
+	if ok, _ := limiter.allowKey("192.0.2.1"); ok {
+		t.Fatal("spray reset exhausted bucket")
+	}
+	now = now.Add(time.Second)
+	if ok, _ := limiter.allowKey("192.0.2.3"); !ok {
+		t.Fatal("refill did not reclaim LRU capacity")
+	}
+
+	tracing := newWebhookRateLimiter(60, 1)
+	var wg sync.WaitGroup
+	var accepted atomic.Int32
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, _ := tracing.allowKey("203.0.113.9"); ok {
+				accepted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if accepted.Load() != 1 {
+		t.Fatalf("concurrent accepted = %d, want 1", accepted.Load())
+	}
+	if len(tracing.perKey) > webhookRateLimiterMaxEntries {
+		t.Fatalf("entries = %d", len(tracing.perKey))
+	}
+}
+
 func TestGitHubWebhookBodyLimitsLengthMismatchTimeoutAndCancellation(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -340,6 +419,115 @@ func testWebhookContentLengthFraming(t *testing.T, length int, body string) {
 	if response.StatusCode == http.StatusAccepted {
 		t.Fatalf("mismatched Content-Length accepted: %d", response.StatusCode)
 	}
+}
+
+func TestGitHubWebhookRawProductionTransportBoundaries(t *testing.T) {
+	h, _, _ := webhookFixture()
+	h.cfg.GitHubBodyLimit = 64
+	server := newRawWebhookServer(t, h, 512, 80*time.Millisecond)
+
+	t.Run("oversized headers rejected before handler", func(t *testing.T) {
+		response := rawWebhookExchange(t, server.Listener.Addr().String(), "POST /webhooks/github HTTP/1.1\r\nHost: test\r\nX-Oversized: "+strings.Repeat("x", 8192)+"\r\n\r\n")
+		if response.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
+			t.Fatalf("status = %d", response.StatusCode)
+		}
+	})
+
+	t.Run("slowloris header times out", func(t *testing.T) {
+		started := make(chan struct{})
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(time.Second))
+		if _, err := io.WriteString(conn, "POST /webhooks/github HTTP/1.1\r\nHost: test\r\nX-Slow: "); err != nil {
+			t.Fatal(err)
+		}
+		close(started)
+		<-started
+		before := time.Now()
+		_ = conn.SetReadDeadline(before.Add(40 * time.Millisecond))
+		if _, err := bufio.NewReader(conn).Peek(1); err == nil {
+			t.Fatal("slowloris connection produced a response before the header timeout")
+		} else if networkErr, ok := err.(net.Error); !ok || !networkErr.Timeout() {
+			t.Fatalf("connection closed before ReadHeaderTimeout: %v", err)
+		}
+		_ = conn.SetReadDeadline(before.Add(500 * time.Millisecond))
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err == nil {
+			defer response.Body.Close()
+			if response.StatusCode < 400 {
+				t.Fatalf("status = %d", response.StatusCode)
+			}
+		} else if networkErr, ok := err.(net.Error); ok && networkErr.Timeout() {
+			t.Fatalf("slowloris connection remained open too long: %v", err)
+		}
+		elapsed := time.Since(before)
+		if elapsed < 60*time.Millisecond || elapsed > 500*time.Millisecond {
+			t.Fatalf("slowloris close elapsed = %s, want 60ms..500ms", elapsed)
+		}
+	})
+
+	t.Run("transfer encoding plus content length rejected", func(t *testing.T) {
+		raw := signedRawWebhook([]byte(`{}`), "Transfer-Encoding: chunked\r\nContent-Length: 2\r\nContent-Length: 3\r\n", "2\r\n{}\r\n0\r\n\r\n")
+		response := rawWebhookExchange(t, server.Listener.Addr().String(), raw)
+		if response.StatusCode == http.StatusAccepted {
+			t.Fatal("ambiguous framing accepted")
+		}
+	})
+
+	t.Run("valid chunk extensions and trailers preserve signed raw body", func(t *testing.T) {
+		body := []byte(`{}`)
+		raw := signedRawWebhook(body, "Transfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n", "1;foo=bar\r\n{\r\n1\r\n}\r\n0\r\nX-Checksum: ok\r\n\r\n")
+		response := rawWebhookExchange(t, server.Listener.Addr().String(), raw)
+		if response.StatusCode != http.StatusAccepted {
+			t.Fatalf("status = %d", response.StatusCode)
+		}
+	})
+
+	t.Run("oversized chunked body rejected despite extensions and trailers", func(t *testing.T) {
+		body := []byte(strings.Repeat("x", 65))
+		raw := signedRawWebhook(body, "Transfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n", fmt.Sprintf("41;foo=bar\r\n%s\r\n0\r\nX-Checksum: ok\r\n\r\n", body))
+		response := rawWebhookExchange(t, server.Listener.Addr().String(), raw)
+		if response.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d", response.StatusCode)
+		}
+	})
+}
+
+func newRawWebhookServer(t *testing.T, handler http.Handler, maxHeaders int, headerTimeout time.Duration) *httptest.Server {
+	t.Helper()
+	server := httptest.NewUnstartedServer(handler)
+	server.EnableHTTP2 = false
+	server.Config.MaxHeaderBytes = maxHeaders
+	server.Config.ReadHeaderTimeout = headerTimeout
+	server.Start()
+	t.Cleanup(server.Close)
+	return server
+}
+
+func rawWebhookExchange(t *testing.T, address, request string) *http.Response {
+	t.Helper()
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.WriteString(conn, request); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = response.Body.Close() })
+	return response
+}
+
+func signedRawWebhook(body []byte, framing, encodedBody string) string {
+	return fmt.Sprintf("POST /webhooks/github HTTP/1.1\r\nHost: test\r\nContent-Type: application/json\r\nX-GitHub-Delivery: %s\r\nX-GitHub-Event: ping\r\nX-GitHub-Signature-256: %s\r\n%sConnection: close\r\n\r\n%s", webhookDelivery, webhookSignature(body, "active-secret"), framing, encodedBody)
 }
 
 func TestGitHubWebhookRejectsMalformedAndAmbiguousJSONBeforeDatabase(t *testing.T) {

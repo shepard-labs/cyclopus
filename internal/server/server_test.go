@@ -69,6 +69,42 @@ func TestHealthAndReadiness(t *testing.T) {
 	}
 }
 
+func TestMainHandlerDoesNotExposeMetrics(t *testing.T) {
+	called := atomic.Int32{}
+	handler, err := Handler(nil, Services{Metrics: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Add(1)
+		if r.URL.Path != "/metrics" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, "bounded_metric 1\n")
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if response.Code != http.StatusNotFound || called.Load() != 0 {
+		t.Fatalf("response=%d %q calls=%d", response.Code, response.Body.String(), called.Load())
+	}
+}
+
+func TestOperatorListenerServesConfiguredMetrics(t *testing.T) {
+	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 1 << 20},
+		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, config.Metrics{Address: "127.0.0.1:0"},
+		slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Services{Metrics: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "bounded_metric 1\n")
+		})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	server.metricsServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "bounded_metric 1\n" {
+		t.Fatalf("operator metrics response = %d %q", response.Code, response.Body.String())
+	}
+}
+
 func TestNativeGRPCHealthStartsNotServing(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
 	grpcServer := newGRPCServer(Services{})
@@ -123,7 +159,7 @@ func TestGRPCHealthTransitionsWithReadinessAndShutdown(t *testing.T) {
 	ready := false
 	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
 		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 1 << 20},
-		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, config.Metrics{Address: "127.0.0.1:0"}, slog.New(slog.NewTextHandler(io.Discard, nil)),
 		func(context.Context) error {
 			if !ready {
 				return errors.New("recovering")
@@ -167,7 +203,7 @@ func TestTLSConfigurationRequiresTLS12(t *testing.T) {
 	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
 		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, TLSCertFile: "http.crt",
 		TLSKeyFile: "http.key", MaxBodyBytes: 1 << 20}, config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Services{})
+		config.Metrics{Address: "127.0.0.1:0"}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Services{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +251,7 @@ func TestHTTPBodyLimit(t *testing.T) {
 func TestProductionHTTPBodyLimitsSeparateGlobalAndAuthCaps(t *testing.T) {
 	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
 		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 128},
-		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil,
+		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, config.Metrics{Address: "127.0.0.1:0"}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil,
 		Services{Authentication: rateLimitAuthenticationService{}, RequestBodyBytes: 32})
 	if err != nil {
 		t.Fatal(err)
@@ -559,7 +595,7 @@ func TestProductionReadinessRequestsUseCachedProbeState(t *testing.T) {
 	var calls atomic.Int32
 	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
 		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 1 << 20},
-		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20}, config.Metrics{Address: "127.0.0.1:0"}, slog.New(slog.NewTextHandler(io.Discard, nil)),
 		func(context.Context) error { calls.Add(1); return nil }, Services{})
 	if err != nil {
 		t.Fatal(err)
@@ -615,6 +651,17 @@ func TestRunReturnsGRPCStartupError(t *testing.T) {
 	server := newTestServer(t)
 	server.listenHTTP = func(network, _ string) (net.Listener, error) { return net.Listen(network, "127.0.0.1:0") }
 	server.listenGRPC = func(string, string) (net.Listener, error) { return nil, want }
+	if err := server.Run(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("Run() error = %v, want %v", err, want)
+	}
+}
+
+func TestRunReturnsMetricsStartupError(t *testing.T) {
+	want := errors.New("metrics bind failed")
+	server := newTestServer(t)
+	server.listenHTTP = func(network, _ string) (net.Listener, error) { return net.Listen(network, "127.0.0.1:0") }
+	server.listenGRPC = func(network, _ string) (net.Listener, error) { return net.Listen(network, "127.0.0.1:0") }
+	server.listenMetrics = func(string, string) (net.Listener, error) { return nil, want }
 	if err := server.Run(context.Background()); !errors.Is(err, want) {
 		t.Fatalf("Run() error = %v, want %v", err, want)
 	}
@@ -680,7 +727,7 @@ func configureEphemeralListeners(server *Server) <-chan struct{} {
 		listener, err := net.Listen(network, "127.0.0.1:0")
 		if err == nil {
 			listeners++
-			if listeners == 2 {
+			if listeners == 3 {
 				close(started)
 			}
 		}
@@ -688,6 +735,7 @@ func configureEphemeralListeners(server *Server) <-chan struct{} {
 	}
 	server.listenHTTP = listen
 	server.listenGRPC = listen
+	server.listenMetrics = listen
 	return started
 }
 
@@ -695,7 +743,7 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	server, err := New(config.HTTP{Address: "127.0.0.1:0", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
 		WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second, MaxBodyBytes: 1 << 20}, config.GRPC{Address: "127.0.0.1:0", MaxBodyBytes: 1 << 20},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Services{})
+		config.Metrics{Address: "127.0.0.1:0"}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Services{})
 	if err != nil {
 		t.Fatal(err)
 	}

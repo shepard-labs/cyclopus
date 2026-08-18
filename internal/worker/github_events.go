@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/shepard-labs/cyclopus/internal/githubmetrics"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
@@ -46,30 +47,37 @@ type GitHubEventConfig struct {
 }
 
 type GitHubEventRunner struct {
-	config        GitHubEventConfig
-	logger        *slog.Logger
-	store         GitHubEventStore
-	processor     GitHubEventProcessor
-	jitter        func() float64
-	now           func() time.Time
-	ready         atomic.Bool
-	writeOK       atomic.Bool
-	wg            sync.WaitGroup
-	writeWG       sync.WaitGroup
-	delivery      chan struct{}
-	intent        chan struct{}
-	mu            sync.Mutex
-	processCtx    context.Context
-	processCancel context.CancelFunc
-	writeMu       sync.Mutex
-	writeCtx      context.Context
-	writeCancel   context.CancelFunc
-	lastClean     time.Time
+	config          GitHubEventConfig
+	logger          *slog.Logger
+	store           GitHubEventStore
+	processor       GitHubEventProcessor
+	metrics         githubmetrics.Recorder
+	jitter          func() float64
+	now             func() time.Time
+	ready           atomic.Bool
+	writeOK         atomic.Bool
+	delayedDelivery atomic.Int64
+	delayedIntent   atomic.Int64
+	wg              sync.WaitGroup
+	writeWG         sync.WaitGroup
+	delivery        chan struct{}
+	intent          chan struct{}
+	mu              sync.Mutex
+	processCtx      context.Context
+	processCancel   context.CancelFunc
+	writeMu         sync.Mutex
+	writeCtx        context.Context
+	writeCancel     context.CancelFunc
+	lastClean       time.Time
 }
 
-func NewGitHubEventRunner(config GitHubEventConfig, logger *slog.Logger, dataStore GitHubEventStore, processor GitHubEventProcessor) *GitHubEventRunner {
+func NewGitHubEventRunner(config GitHubEventConfig, logger *slog.Logger, dataStore GitHubEventStore, processor GitHubEventProcessor, recorders ...githubmetrics.Recorder) *GitHubEventRunner {
+	metrics := githubmetrics.Noop()
+	if len(recorders) > 0 && recorders[0] != nil {
+		metrics = recorders[0]
+	}
 	return &GitHubEventRunner{config: config, logger: logger, store: dataStore, processor: processor, jitter: rand.Float64, now: time.Now,
-		delivery: make(chan struct{}, config.DeliveryConcurrency), intent: make(chan struct{}, config.IntentConcurrency)}
+		metrics: metrics, delivery: make(chan struct{}, config.DeliveryConcurrency), intent: make(chan struct{}, config.IntentConcurrency)}
 }
 
 func (r *GitHubEventRunner) Ready() bool { return r.ready.Load() }
@@ -77,13 +85,6 @@ func (r *GitHubEventRunner) Ready() bool { return r.ready.Load() }
 func (r *GitHubEventRunner) Startup(ctx context.Context) error {
 	if err := r.validate(); err != nil {
 		return err
-	}
-	delayed, err := r.store.CountUnexpiredGitHubEventLeases(ctx)
-	if err != nil {
-		return fmt.Errorf("inspect unexpired GitHub event leases: %w", err)
-	}
-	if delayed.Deliveries > 0 || delayed.Intents > 0 {
-		r.logger.Info("github event startup delayed by active leases", "result", "delayed", "deliveries", delayed.Deliveries, "intents", delayed.Intents)
 	}
 	root := context.WithoutCancel(ctx)
 	processCtx, processCancel := context.WithCancel(root)
@@ -97,8 +98,7 @@ func (r *GitHubEventRunner) Startup(ctx context.Context) error {
 	r.writeCancel = writeCancel
 	r.writeOK.Store(true)
 	r.writeMu.Unlock()
-	work, err := r.claimScan(ctx, true)
-	r.launch(processCtx, work)
+	err := r.scan(ctx, processCtx, true)
 	if err != nil {
 		r.wg.Wait()
 		processCancel()
@@ -200,6 +200,19 @@ func (r *GitHubEventRunner) claimScan(claimCtx context.Context, startup bool) (g
 func (r *GitHubEventRunner) scan(claimCtx, processCtx context.Context, startup bool) error {
 	work, err := r.claimScan(claimCtx, startup)
 	r.launch(processCtx, work)
+	status, countErr := r.store.CountUnexpiredGitHubEventLeases(claimCtx)
+	if countErr != nil {
+		return errors.Join(err, fmt.Errorf("inspect unexpired GitHub event leases: %w", countErr))
+	}
+	activeDeliveries, activeIntents := int64(len(r.delivery)), int64(len(r.intent))
+	delayedDeliveries := max(status.Deliveries-activeDeliveries, 0)
+	delayedIntents := max(status.Intents-activeIntents, 0)
+	r.delayedDelivery.Store(delayedDeliveries)
+	r.delayedIntent.Store(delayedIntents)
+	r.updateLeaseMetrics()
+	if startup && (delayedDeliveries > 0 || delayedIntents > 0) {
+		r.logger.Info("github event startup delayed by active leases", "result", "delayed", "deliveries", delayedDeliveries, "intents", delayedIntents)
+	}
 	return err
 }
 
@@ -214,10 +227,11 @@ func (r *GitHubEventRunner) launch(processCtx context.Context, work githubEventW
 		r.wg.Add(1)
 		go r.processIntent(processCtx, intent)
 	}
+	r.updateLeaseMetrics()
 }
 
 func (r *GitHubEventRunner) processDelivery(root context.Context, delivery store.GitHubWebhookDelivery) {
-	defer func() { <-r.delivery; r.wg.Done() }()
+	defer func() { <-r.delivery; r.updateLeaseMetrics(); r.wg.Done() }()
 	started := r.now()
 	ctx, cancel := context.WithTimeout(root, r.config.ProcessingTimeout)
 	defer cancel()
@@ -229,20 +243,28 @@ func (r *GitHubEventRunner) processDelivery(root context.Context, delivery store
 	close(done)
 	<-renewedDone
 	if lost.Load() {
+		r.metrics.Delivery(delivery.Event, delivery.Action, "lease_lost", r.now().Sub(started), outcome.IntentCount)
 		r.logDelivery(delivery, "lease_lost", outcome.IntentCount, started)
 		return
 	}
 	writeCtx, writeCancel, ok := r.beginWrite()
 	if !ok {
+		r.metrics.Delivery(delivery.Event, delivery.Action, "failed", r.now().Sub(started), outcome.IntentCount)
 		r.logDelivery(delivery, "shutdown_expired", outcome.IntentCount, started)
 		return
 	}
 	defer r.endWrite(writeCancel)
 	lease, err := r.store.RotateGitHubWebhookDeliveryLease(writeCtx, delivery.ID, *delivery.Lease, r.config.LeaseDuration)
 	if err != nil {
-		r.logDelivery(delivery, "lease_lost", outcome.IntentCount, started)
+		result, logResult := "failed", "database_unavailable"
+		if errors.Is(err, store.ErrLeaseNotOwned) {
+			result, logResult = "lease_lost", "lease_lost"
+		}
+		r.metrics.Delivery(delivery.Event, delivery.Action, result, r.now().Sub(started), outcome.IntentCount)
+		r.logDelivery(delivery, logResult, outcome.IntentCount, started)
 		return
 	}
+	disposition := outcome.Disposition
 	switch outcome.Disposition {
 	case service.GitHubEventComplete:
 		result := outcome.Code
@@ -263,11 +285,12 @@ func (r *GitHubEventRunner) processDelivery(root context.Context, delivery store
 	} else if err != nil {
 		result = "database_unavailable"
 	}
+	r.metrics.Delivery(delivery.Event, delivery.Action, deliveryMetricResult(disposition, result), r.now().Sub(started), outcome.IntentCount)
 	r.logDelivery(delivery, result, outcome.IntentCount, started)
 }
 
 func (r *GitHubEventRunner) processIntent(root context.Context, intent store.GitHubRoutingIntent) {
-	defer func() { <-r.intent; r.wg.Done() }()
+	defer func() { <-r.intent; r.updateLeaseMetrics(); r.wg.Done() }()
 	started := r.now()
 	ctx, cancel := context.WithTimeout(root, r.config.ProcessingTimeout)
 	defer cancel()
@@ -279,25 +302,34 @@ func (r *GitHubEventRunner) processIntent(root context.Context, intent store.Git
 	close(done)
 	<-renewedDone
 	if lost.Load() && outcome.Disposition != service.GitHubEventComplete {
+		r.metrics.Intent(intent.EventKind, "lease_lost", r.now().Sub(started))
 		r.logIntent(intent, "lease_lost", started)
 		return
 	}
 	if outcome.Disposition == service.GitHubEventComplete {
 		// ExecuteGitHubRoutingIntent atomically applies the side effect and terminalizes the intent.
+		r.metrics.Intent(intent.EventKind, intentMetricResult(outcome.Disposition, outcome.Code), r.now().Sub(started))
 		r.logIntent(intent, outcome.Code, started)
 		return
 	}
 	writeCtx, writeCancel, ok := r.beginWrite()
 	if !ok {
+		r.metrics.Intent(intent.EventKind, "failed", r.now().Sub(started))
 		r.logIntent(intent, "shutdown_expired", started)
 		return
 	}
 	defer r.endWrite(writeCancel)
 	lease, err := r.store.RotateGitHubRoutingIntentLease(writeCtx, intent.ID, *intent.Lease, r.config.LeaseDuration)
 	if err != nil {
-		r.logIntent(intent, "lease_lost", started)
+		result, logResult := "failed", "database_unavailable"
+		if errors.Is(err, store.ErrLeaseNotOwned) {
+			result, logResult = "lease_lost", "lease_lost"
+		}
+		r.metrics.Intent(intent.EventKind, result, r.now().Sub(started))
+		r.logIntent(intent, logResult, started)
 		return
 	}
+	disposition := outcome.Disposition
 	switch outcome.Disposition {
 	case service.GitHubEventFail:
 		err = r.store.FailGitHubRoutingIntent(writeCtx, intent.ID, lease, outcome.Code, outcome.Code)
@@ -312,6 +344,7 @@ func (r *GitHubEventRunner) processIntent(root context.Context, intent store.Git
 	} else if err != nil {
 		result = "database_unavailable"
 	}
+	r.metrics.Intent(intent.EventKind, intentMetricResult(disposition, result), r.now().Sub(started))
 	r.logIntent(intent, result, started)
 }
 
@@ -427,4 +460,39 @@ func (r *GitHubEventRunner) logDelivery(d store.GitHubWebhookDelivery, result st
 
 func (r *GitHubEventRunner) logIntent(i store.GitHubRoutingIntent, result string, started time.Time) {
 	r.logger.Info("github routing intent processed", "intent_id", i.ID, "app_id", i.AppID, "ref", i.Ref, "event", i.EventKind, "result", result, "attempt", i.Attempts, "latency_ms", r.now().Sub(started).Milliseconds())
+}
+
+func deliveryMetricResult(disposition service.GitHubEventDisposition, result string) string {
+	if result == "lease_lost" {
+		return "lease_lost"
+	}
+	switch disposition {
+	case service.GitHubEventComplete:
+		return "processed"
+	case service.GitHubEventRetry:
+		return "retry"
+	default:
+		return "failed"
+	}
+}
+
+func intentMetricResult(disposition service.GitHubEventDisposition, result string) string {
+	if result == "lease_lost" {
+		return "lease_lost"
+	}
+	if result == "superseded" {
+		return "superseded"
+	}
+	switch disposition {
+	case service.GitHubEventComplete:
+		return "processed"
+	case service.GitHubEventRetry:
+		return "retry"
+	default:
+		return "failed"
+	}
+}
+
+func (r *GitHubEventRunner) updateLeaseMetrics() {
+	r.metrics.Leases(int64(len(r.delivery)), r.delayedDelivery.Load(), int64(len(r.intent)), r.delayedIntent.Load())
 }

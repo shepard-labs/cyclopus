@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shepard-labs/cyclopus/internal/githubmetrics"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
@@ -90,6 +91,68 @@ func TestGitHubEventScanLaunchesPartialClaimsBeforeReturningError(t *testing.T) 
 				t.Fatal("successfully claimed work was not processed")
 			}
 		})
+	}
+}
+
+func TestGitHubEventLeaseMetricsRefreshEveryScan(t *testing.T) {
+	fake := &fakeGitHubEventStore{leaseStatus: store.GitHubEventLeaseStatus{Deliveries: 3, Intents: 4}}
+	metrics := &fakeGitHubMetrics{}
+	runner := NewGitHubEventRunner(gitHubEventTestConfig(), discardLogger(), fake, &fakeGitHubEventProcessor{}, metrics)
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := metrics.lastLeases(); got != [4]int64{0, 3, 0, 4} {
+		t.Fatalf("startup leases = %v", got)
+	}
+	fake.leaseStatus = store.GitHubEventLeaseStatus{Deliveries: 1, Intents: 2}
+	if err := runner.scan(t.Context(), runner.processCtx, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := metrics.lastLeases(); got != [4]int64{0, 1, 0, 2} {
+		t.Fatalf("refreshed leases = %v", got)
+	}
+	fake.countErr = errors.New("count unavailable")
+	if err := runner.scan(t.Context(), runner.processCtx, false); !errors.Is(err, fake.countErr) {
+		t.Fatalf("count error = %v", err)
+	}
+	if got := metrics.lastLeases(); got != [4]int64{0, 1, 0, 2} {
+		t.Fatalf("count error changed leases = %v", got)
+	}
+}
+
+func TestGitHubEventLeaseMetricsTrackActiveAndDecrementOnCompletion(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	fake := &fakeGitHubEventStore{
+		leaseStatus: store.GitHubEventLeaseStatus{Deliveries: 2},
+		deliveries:  []store.GitHubWebhookDelivery{leasedDelivery("delivery", 1)},
+	}
+	processor := &fakeGitHubEventProcessor{delivery: func(context.Context, store.GitHubWebhookDelivery) service.GitHubEventOutcome {
+		close(started)
+		<-release
+		return service.GitHubEventOutcome{Disposition: service.GitHubEventComplete, Code: "processed"}
+	}}
+	metrics := &fakeGitHubMetrics{}
+	runner := NewGitHubEventRunner(gitHubEventTestConfig(), discardLogger(), fake, processor, metrics)
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if got := metrics.lastLeases(); got != [4]int64{1, 1, 0, 0} {
+		t.Fatalf("in-process leases = %v, want active local plus delayed other", got)
+	}
+	close(release)
+	runner.wg.Wait()
+	if got := metrics.lastLeases(); got != [4]int64{0, 1, 0, 0} {
+		t.Fatalf("completed leases = %v, want active decrement", got)
+	}
+	fake.mu.Lock()
+	fake.leaseStatus = store.GitHubEventLeaseStatus{}
+	fake.mu.Unlock()
+	if err := runner.scan(t.Context(), runner.processCtx, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := metrics.lastLeases(); got != [4]int64{} {
+		t.Fatalf("expired/reclaimed leases = %v", got)
 	}
 }
 
@@ -393,24 +456,52 @@ func TestGitHubEventFinalDeliveryRotationFencesTerminalWrite(t *testing.T) {
 func TestGitHubEventFinalDeliveryRotationFailureSuppressesTerminalWrite(t *testing.T) {
 	secret := "raw database error secret"
 	for _, test := range []struct {
-		name string
-		err  error
+		name, metric string
+		err          error
 	}{
-		{name: "lease not owned", err: store.ErrLeaseNotOwned},
-		{name: "database error", err: errors.New(secret)},
+		{name: "lease not owned", err: store.ErrLeaseNotOwned, metric: "lease_lost"},
+		{name: "database error", err: errors.New(secret), metric: "failed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			fake := &fakeGitHubEventStore{rotateErr: test.err}
-			runner := newGitHubEventTestRunner(fake, &fakeGitHubEventProcessor{deliveryOutcome: service.GitHubEventOutcome{Disposition: service.GitHubEventRetry, Code: "github_unavailable"}}, slog.New(slog.NewJSONHandler(&logs, nil)))
+			metrics := &fakeGitHubMetrics{}
+			runner := NewGitHubEventRunner(gitHubEventTestConfig(), slog.New(slog.NewJSONHandler(&logs, nil)), fake, &fakeGitHubEventProcessor{deliveryOutcome: service.GitHubEventOutcome{Disposition: service.GitHubEventRetry, Code: "github_unavailable"}}, metrics)
 			enableTestWrites(runner)
 			runDeliveryDirect(runner, t.Context(), leasedDelivery("delivery", 1))
 			if fake.rotateCalls != 1 || fake.terminalWrites() != 0 {
 				t.Fatalf("final rotation calls/writes = %d/%d", fake.rotateCalls, fake.terminalWrites())
 			}
 			text := logs.String()
-			if !strings.Contains(text, `"result":"lease_lost"`) || strings.Contains(text, secret) || strings.Contains(text, "raw database error") {
+			wantLog := `"result":"lease_lost"`
+			if test.metric == "failed" {
+				wantLog = `"result":"database_unavailable"`
+			}
+			if !strings.Contains(text, wantLog) || metrics.deliveryResult != test.metric || strings.Contains(text, secret) || strings.Contains(text, "raw database error") {
 				t.Fatalf("final rotation log = %q", text)
+			}
+		})
+	}
+}
+
+func TestGitHubEventFinalIntentRotationErrorClassification(t *testing.T) {
+	secret := "raw database error secret"
+	for _, test := range []struct {
+		name, metric string
+		err          error
+	}{
+		{name: "lease not owned", err: store.ErrLeaseNotOwned, metric: "lease_lost"},
+		{name: "database error", err: errors.New(secret), metric: "failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			metrics := &fakeGitHubMetrics{}
+			fake := &fakeGitHubEventStore{rotateErr: test.err}
+			runner := NewGitHubEventRunner(gitHubEventTestConfig(), slog.New(slog.NewJSONHandler(&logs, nil)), fake, &fakeGitHubEventProcessor{intentOutcome: service.GitHubEventOutcome{Disposition: service.GitHubEventRetry, Code: "github_unavailable"}}, metrics)
+			enableTestWrites(runner)
+			runIntentDirect(runner, t.Context(), leasedIntent("intent", 1))
+			if metrics.intentResult != test.metric || strings.Contains(logs.String(), secret) {
+				t.Fatalf("intent rotation metric/log = %q/%q", metrics.intentResult, logs.String())
 			}
 		})
 	}
@@ -779,6 +870,36 @@ type fakeGitHubEventProcessor struct {
 	intent          func(context.Context, store.GitHubRoutingIntent) service.GitHubEventOutcome
 	deliveryOutcome service.GitHubEventOutcome
 	intentOutcome   service.GitHubEventOutcome
+}
+
+type fakeGitHubMetrics struct {
+	githubmetrics.Recorder
+	mu             sync.Mutex
+	leases         [4]int64
+	deliveryResult string
+	intentResult   string
+}
+
+func (m *fakeGitHubMetrics) Ingress(string, string, string) {}
+func (m *fakeGitHubMetrics) Delivery(_, _, result string, _ time.Duration, _ int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deliveryResult = result
+}
+func (m *fakeGitHubMetrics) Intent(_, result string, _ time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.intentResult = result
+}
+func (m *fakeGitHubMetrics) Leases(a, d, i, di int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.leases = [4]int64{a, d, i, di}
+}
+func (m *fakeGitHubMetrics) lastLeases() [4]int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.leases
 }
 
 func (f *fakeGitHubEventProcessor) ProcessDelivery(ctx context.Context, delivery store.GitHubWebhookDelivery) service.GitHubEventOutcome {

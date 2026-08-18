@@ -74,6 +74,7 @@ type Config struct {
 	ExternalURL             string
 	HTTP                    HTTP
 	GRPC                    GRPC
+	Metrics                 Metrics
 	Auth                    Auth
 	Log                     Log
 	DB                      DB
@@ -135,6 +136,11 @@ type HTTP struct {
 	MaxHeaderBytes    int
 }
 
+type Metrics struct {
+	Address     string
+	AllowPublic bool
+}
+
 type Log struct {
 	Level string
 }
@@ -188,6 +194,9 @@ type Webhook struct {
 	GitHubBodyLimit          int64
 	GitHubMaxConcurrent      int
 	GitHubBodyReadTimeout    time.Duration
+	GitHubRateLimitEnabled   bool
+	GitHubRateLimitPerMinute int
+	GitHubRateLimitBurst     int
 }
 
 type Kubernetes struct {
@@ -208,6 +217,8 @@ func Load(args, environ []string) (Config, error) {
 	flags.String("external-url", "", "canonical public HTTPS URL used for browser callbacks")
 	flags.String("http-address", "", "HTTP listen address")
 	flags.String("grpc-address", "", "gRPC listen address")
+	flags.String("metrics-address", "", "operator metrics listen address")
+	flags.Bool("metrics-allow-public", false, "acknowledge exposing operator metrics on a non-loopback address")
 	flags.String("auth-token-pepper", "", "secret pepper used to hash API credentials")
 	flags.String("auth-bootstrap-secret", "", "high-entropy one-time installation bootstrap secret")
 	flags.Duration("auth-session-ttl", 0, "local login session lifetime")
@@ -263,6 +274,9 @@ func Load(args, environ []string) (Config, error) {
 	flags.Int64("webhook-github-body-limit", 0, "maximum raw GitHub webhook body size")
 	flags.Int("webhook-github-max-concurrent", 0, "maximum concurrent GitHub webhook handlers")
 	flags.Duration("webhook-github-body-read-timeout", 0, "GitHub webhook body read timeout")
+	flags.Bool("webhook-github-rate-limit-enabled", false, "enable per-IP GitHub webhook rate limiting")
+	flags.Int("webhook-github-rate-limit-per-minute", 0, "GitHub webhook requests allowed per source IP per minute")
+	flags.Int("webhook-github-rate-limit-burst", 0, "GitHub webhook burst allowed per source IP")
 	flags.Int("http-max-header-bytes", 0, "maximum HTTP request header bytes")
 	flags.String("kubeconfig", "", "path to a Kubernetes client configuration file")
 	flags.String("kubernetes-instance-namespace", "", "namespace containing Cyclopus-managed source credentials")
@@ -303,6 +317,8 @@ func Load(args, environ []string) (Config, error) {
 		"external-url":                                "external_url",
 		"http-address":                                "http.address",
 		"grpc-address":                                "grpc.address",
+		"metrics-address":                             "metrics.address",
+		"metrics-allow-public":                        "metrics.allow_public",
 		"auth-token-pepper":                           "auth.token_pepper",
 		"auth-bootstrap-secret":                       "auth.bootstrap_secret",
 		"auth-session-ttl":                            "auth.session_ttl",
@@ -358,6 +374,9 @@ func Load(args, environ []string) (Config, error) {
 		"webhook-github-body-limit":                   "webhook.github_body_limit",
 		"webhook-github-max-concurrent":               "webhook.github_max_concurrent",
 		"webhook-github-body-read-timeout":            "webhook.github_body_read_timeout",
+		"webhook-github-rate-limit-enabled":           "webhook.github_rate_limit_enabled",
+		"webhook-github-rate-limit-per-minute":        "webhook.github_rate_limit_per_minute",
+		"webhook-github-rate-limit-burst":             "webhook.github_rate_limit_burst",
 		"http-max-header-bytes":                       "http.max_header_bytes",
 		"kubeconfig":                                  "kubernetes.kubeconfig",
 		"kubernetes-instance-namespace":               "kubernetes.instance_namespace",
@@ -414,6 +433,7 @@ func Load(args, environ []string) (Config, error) {
 		},
 		GRPC: GRPC{Address: v.GetString("grpc.address"), TLSCertFile: v.GetString("grpc.tls_cert_file"),
 			TLSKeyFile: v.GetString("grpc.tls_key_file"), MaxBodyBytes: v.GetInt("grpc.max_body_bytes")},
+		Metrics: Metrics{Address: v.GetString("metrics.address"), AllowPublic: v.GetBool("metrics.allow_public")},
 		Auth: Auth{
 			TokenPepper: v.GetString("auth.token_pepper"), BootstrapSecret: v.GetString("auth.bootstrap_secret"),
 			SessionTTL: v.GetDuration("auth.session_ttl"), MaxConcurrentHashes: v.GetInt("auth.max_concurrent_hashes"),
@@ -452,12 +472,14 @@ func Load(args, environ []string) (Config, error) {
 			ReleaseName:              strings.TrimSpace(v.GetString("webhook.release_name")),
 			PayloadEncryptionKeyFile: strings.TrimSpace(v.GetString("webhook.payload_encryption_key_file")),
 			GitHubActiveSecretRef:    strings.TrimSpace(v.GetString("webhook.github_active_secret_ref")),
-			GitHubActiveKeyVersion:   strings.TrimSpace(v.GetString("webhook.github_active_key_version")),
+			GitHubActiveKeyVersion:   v.GetString("webhook.github_active_key_version"),
 			GitHubPreviousSecretRef:  strings.TrimSpace(v.GetString("webhook.github_previous_secret_ref")),
-			GitHubPreviousKeyVersion: strings.TrimSpace(v.GetString("webhook.github_previous_key_version")),
+			GitHubPreviousKeyVersion: v.GetString("webhook.github_previous_key_version"),
 			GitHubSecretOverlapUntil: v.GetTime("webhook.github_secret_overlap_until"),
 			GitHubBodyLimit:          v.GetInt64("webhook.github_body_limit"), GitHubMaxConcurrent: v.GetInt("webhook.github_max_concurrent"),
-			GitHubBodyReadTimeout: v.GetDuration("webhook.github_body_read_timeout"),
+			GitHubBodyReadTimeout:  v.GetDuration("webhook.github_body_read_timeout"),
+			GitHubRateLimitEnabled: v.GetBool("webhook.github_rate_limit_enabled"), GitHubRateLimitPerMinute: v.GetInt("webhook.github_rate_limit_per_minute"),
+			GitHubRateLimitBurst: v.GetInt("webhook.github_rate_limit_burst"),
 		},
 		Kubernetes: Kubernetes{
 			InstanceNamespace:          strings.TrimSpace(v.GetString("kubernetes.instance_namespace")),
@@ -497,7 +519,8 @@ func Load(args, environ []string) (Config, error) {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("http.address", "127.0.0.1:8080")
-	v.SetDefault("grpc.address", "127.0.0.1:9090")
+	v.SetDefault("grpc.address", "127.0.0.1:9091")
+	v.SetDefault("metrics.address", "127.0.0.1:9090")
 	v.SetDefault("auth.session_ttl", "12h")
 	v.SetDefault("auth.max_concurrent_hashes", 4)
 	v.SetDefault("auth.rate_limit_per_minute", 10)
@@ -538,6 +561,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("webhook.github_body_limit", 1048576)
 	v.SetDefault("webhook.github_max_concurrent", 4)
 	v.SetDefault("webhook.github_body_read_timeout", "10s")
+	v.SetDefault("webhook.github_rate_limit_enabled", true)
+	v.SetDefault("webhook.github_rate_limit_per_minute", 120)
+	v.SetDefault("webhook.github_rate_limit_burst", 30)
 	v.SetDefault("kubernetes.instance_namespace", "default")
 	v.SetDefault("kubernetes.recovery_poll_interval", "2s")
 	v.SetDefault("kubernetes.conflict_retries", 5)
@@ -550,6 +576,8 @@ func environment(environ []string) map[string]string {
 		"EXTERNAL_URL":                                "external_url",
 		"HTTP_ADDRESS":                                "http.address",
 		"GRPC_ADDRESS":                                "grpc.address",
+		"METRICS_ADDRESS":                             "metrics.address",
+		"METRICS_ALLOW_PUBLIC":                        "metrics.allow_public",
 		"AUTH_TOKEN_PEPPER":                           "auth.token_pepper",
 		"AUTH_BOOTSTRAP_SECRET":                       "auth.bootstrap_secret",
 		"AUTH_SESSION_TTL":                            "auth.session_ttl",
@@ -605,6 +633,9 @@ func environment(environ []string) map[string]string {
 		"WEBHOOK_GITHUB_BODY_LIMIT":                   "webhook.github_body_limit",
 		"WEBHOOK_GITHUB_MAX_CONCURRENT":               "webhook.github_max_concurrent",
 		"WEBHOOK_GITHUB_BODY_READ_TIMEOUT":            "webhook.github_body_read_timeout",
+		"WEBHOOK_GITHUB_RATE_LIMIT_ENABLED":           "webhook.github_rate_limit_enabled",
+		"WEBHOOK_GITHUB_RATE_LIMIT_PER_MINUTE":        "webhook.github_rate_limit_per_minute",
+		"WEBHOOK_GITHUB_RATE_LIMIT_BURST":             "webhook.github_rate_limit_burst",
 		"HTTP_MAX_HEADER_BYTES":                       "http.max_header_bytes",
 		"KUBECONFIG":                                  "kubernetes.kubeconfig",
 		"KUBERNETES_INSTANCE_NAMESPACE":               "kubernetes.instance_namespace",
@@ -655,8 +686,14 @@ func (c Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.GRPC.Address); err != nil {
 		errs = append(errs, fmt.Errorf("grpc.address must be a host:port pair: %w", err))
 	}
-	if c.GRPC.Address == c.HTTP.Address {
-		errs = append(errs, fmt.Errorf("grpc.address and http.address must be different"))
+	if _, _, err := net.SplitHostPort(c.Metrics.Address); err != nil {
+		errs = append(errs, fmt.Errorf("metrics.address must be a host:port pair: %w", err))
+	}
+	if c.GRPC.Address == c.HTTP.Address || c.Metrics.Address == c.HTTP.Address || c.Metrics.Address == c.GRPC.Address {
+		errs = append(errs, fmt.Errorf("http.address, grpc.address, and metrics.address must be different"))
+	}
+	if !c.Metrics.AllowPublic && !loopbackAddress(c.Metrics.Address) {
+		errs = append(errs, fmt.Errorf("metrics.address must be loopback unless metrics.allow_public is enabled"))
 	}
 	if len(c.Auth.TokenPepper) < 32 {
 		errs = append(errs, fmt.Errorf("auth.token_pepper must contain at least 32 bytes"))
@@ -808,10 +845,13 @@ func (c Config) Validate() error {
 	if c.Webhook.PayloadEncryptionKeyFile == "" {
 		errs = append(errs, fmt.Errorf("webhook.payload_encryption_key_file is required"))
 	}
-	if c.Webhook.GitHubActiveSecretRef == "" || c.Webhook.GitHubActiveKeyVersion == "" {
+	if c.Webhook.GitHubActiveSecretRef == "" || !validKeyVersion(c.Webhook.GitHubActiveKeyVersion) {
 		errs = append(errs, fmt.Errorf("webhook GitHub active secret reference and key version are required"))
 	} else if _, err := secretref.Parse(c.Webhook.GitHubActiveSecretRef); err != nil {
 		errs = append(errs, fmt.Errorf("webhook.github_active_secret_ref must be a valid Kubernetes Secret reference"))
+	}
+	if c.Webhook.GitHubPreviousKeyVersion != "" && !validKeyVersion(c.Webhook.GitHubPreviousKeyVersion) {
+		errs = append(errs, fmt.Errorf("webhook GitHub key versions must be nonempty, unpadded, and at most 128 bytes"))
 	}
 	if (c.Webhook.GitHubPreviousSecretRef == "") != (c.Webhook.GitHubPreviousKeyVersion == "") || (c.Webhook.GitHubPreviousSecretRef != "" && c.Webhook.GitHubSecretOverlapUntil.IsZero()) {
 		errs = append(errs, fmt.Errorf("webhook GitHub previous secret requires its version and a bounded overlap end"))
@@ -822,6 +862,9 @@ func (c Config) Validate() error {
 	}
 	if c.Webhook.GitHubBodyLimit <= 0 || c.Webhook.GitHubMaxConcurrent <= 0 || c.Webhook.GitHubMaxConcurrent > 64 || c.Webhook.GitHubBodyReadTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("webhook GitHub ingress limits must be positive and concurrency at most 64"))
+	}
+	if !c.Webhook.GitHubRateLimitEnabled || c.Webhook.GitHubRateLimitPerMinute <= 0 || c.Webhook.GitHubRateLimitBurst <= 0 || c.Webhook.GitHubRateLimitBurst > c.Webhook.GitHubRateLimitPerMinute {
+		errs = append(errs, fmt.Errorf("webhook GitHub rate limiting must be enabled with positive rate and burst not exceeding the per-minute rate"))
 	}
 	if c.Kubernetes.RecoveryPollInterval <= 0 {
 		errs = append(errs, fmt.Errorf("kubernetes.recovery_poll_interval must be greater than zero"))
@@ -978,4 +1021,8 @@ func loopbackAddress(address string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func validKeyVersion(value string) bool {
+	return value != "" && len(value) <= 128 && strings.TrimSpace(value) == value
 }

@@ -70,6 +70,12 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if accepted != 1 || replayed != 7 {
 			t.Fatalf("accepted/replayed = %d/%d, want 1/7", accepted, replayed)
 		}
+		rotated := p
+		rotated.SignatureKeyVersion = "hmac-v2"
+		disposition, replay, err := store.ReceiveGitHubWebhook(t.Context(), rotated)
+		if err != nil || disposition != GitHubWebhookReplayed || replay.SignatureKeyVersion != p.SignatureKeyVersion {
+			t.Fatalf("rotated signature replay = %q %+v, %v", disposition, replay, err)
+		}
 		var deliveryCount int
 		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_webhook_deliveries WHERE delivery_id=$1`, p.DeliveryID).Scan(&deliveryCount); err != nil || deliveryCount != 1 {
 			t.Fatalf("replayed delivery rows = %d, %v", deliveryCount, err)
@@ -263,12 +269,12 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		}
 		store.WithGitHubWebhookPayloadCodec(rotated)
 		disposition, replay, err := store.ReceiveGitHubWebhook(t.Context(), old)
-		if err != nil || disposition != GitHubWebhookReplayed || replay.ID != oldDelivery.ID || replay.Payload != nil || replay.KeyVersion != "k1" {
+		if err != nil || disposition != GitHubWebhookReplayed || replay.ID != oldDelivery.ID || replay.Payload != nil || replay.PayloadKeyVersion != "k1" {
 			t.Fatalf("rotated replay = %q %+v, %v", disposition, replay, err)
 		}
 		newDelivery := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000092", strings.Repeat("7", 64), `{"key":"new"}`))
-		if newDelivery.KeyVersion != "k2" {
-			t.Fatalf("new delivery key version = %q", newDelivery.KeyVersion)
+		if newDelivery.PayloadKeyVersion != "k2" {
+			t.Fatalf("new delivery key version = %q", newDelivery.PayloadKeyVersion)
 		}
 		withoutOld, err := NewAESGCMGitHubWebhookPayloadKeyring("k2", map[string][]byte{"k2": []byte("abcdef0123456789abcdef0123456789")})
 		if err != nil {
@@ -1360,8 +1366,8 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 	t.Run("production cardinality planner uses routing indexes", func(t *testing.T) {
 		clearGitHubWebhookWork(t, pool)
 		if _, err := pool.Exec(t.Context(), `
-			INSERT INTO github_webhook_deliveries(delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,result_code,terminal_at,retain_until)
-			SELECT uuidv7(),'push',90001,$1,'R_node',$2,encode(sha256(g::text::bytea),'hex'),decode(repeat('00',18),'hex'),decode(repeat('00',12),'hex'),'k1',
+			INSERT INTO github_webhook_deliveries(delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version,signature_key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,result_code,terminal_at,retain_until)
+			SELECT uuidv7(),'push',90001,$1,'R_node',$2,encode(sha256(g::text::bytea),'hex'),decode(repeat('00',18),'hex'),decode(repeat('00',12),'hex'),'k1','hmac-v1',
 				CASE g%3 WHEN 0 THEN 'pending' WHEN 1 THEN 'leased' ELSE 'completed' END,1,
 				CASE WHEN g%3=0 THEN clock_timestamp()-interval '1 second' ELSE clock_timestamp()+interval '1 day' END,
 				CASE WHEN g%3=1 THEN 'seed' END,g,CASE WHEN g%3=1 THEN clock_timestamp()-interval '1 second' END,CASE WHEN g%3=2 THEN 'processed' END,
@@ -1757,7 +1763,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO github_webhook_deliveries(delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version) VALUES($1,'push',90001,$2,'R_node',$3,$4,$5,decode(repeat('00',12),'hex'),'k1')`, p.DeliveryID, githubWebhookRepo, githubWebhookOrg, p.PayloadDigest, append(p.Payload, make([]byte, 16)...)); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO github_webhook_deliveries(delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,verified_payload,payload_nonce,key_version,signature_key_version) VALUES($1,'push',90001,$2,'R_node',$3,$4,$5,decode(repeat('00',12),'hex'),'k1','hmac-v1')`, p.DeliveryID, githubWebhookRepo, githubWebhookOrg, p.PayloadDigest, append(p.Payload, make([]byte, 16)...)); err != nil {
 			t.Fatal(err)
 		}
 		_ = tx.Rollback(t.Context())
@@ -1839,10 +1845,46 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(url)); err != nil {
-		t.Fatalf("original 000010 to current 000011 upgrade: %v", err)
+		t.Fatalf("original 000010 to current 000012 upgrade: %v", err)
 	}
 	m = githubWebhookMigrator(t, url)
 	defer m.Close()
+	var signatureKeyVersion string
+	if err := db.QueryRow(t.Context(), `SELECT signature_key_version FROM github_webhook_deliveries WHERE id=$1`, deliveryID).Scan(&signatureKeyVersion); err != nil || signatureKeyVersion != "legacy" {
+		t.Fatalf("000012 signature key version backfill = %q, %v", signatureKeyVersion, err)
+	}
+	for _, invalid := range []string{"", " ", "\t", strings.Repeat("v", 129)} {
+		if _, err := db.Exec(t.Context(), `UPDATE github_webhook_deliveries SET signature_key_version=$2 WHERE id=$1`, deliveryID, invalid); err == nil {
+			t.Fatalf("invalid signature key version %q succeeded", invalid)
+		}
+	}
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("000012 down: %v", err)
+	}
+	var signatureColumn int
+	if err := db.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_webhook_deliveries' AND column_name='signature_key_version'`).Scan(&signatureColumn); err != nil || signatureColumn != 0 {
+		t.Fatalf("000011 signature column count = %d, %v", signatureColumn, err)
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("000012 re-up: %v", err)
+	}
+	if err := db.QueryRow(t.Context(), `SELECT signature_key_version FROM github_webhook_deliveries WHERE id=$1`, deliveryID).Scan(&signatureKeyVersion); err != nil || signatureKeyVersion != "legacy" {
+		t.Fatalf("000012 re-up backfill = %q, %v", signatureKeyVersion, err)
+	}
+	if _, err := db.Exec(t.Context(), `UPDATE github_webhook_deliveries SET signature_key_version='hmac-v1' WHERE id=$1`, deliveryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Steps(-1); err == nil {
+		t.Fatal("000012 down succeeded with non-legacy signature key metadata")
+	}
+	var guardedVersion uint
+	var guardedDirty bool
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&guardedVersion, &guardedDirty); err != nil || guardedVersion != 12 || guardedDirty {
+		t.Fatalf("000012 guarded down state = %d/%t, %v", guardedVersion, guardedDirty, err)
+	}
+	if _, err := db.Exec(t.Context(), `UPDATE github_webhook_deliveries SET signature_key_version='legacy' WHERE id=$1`, deliveryID); err != nil {
+		t.Fatal(err)
+	}
 	var stateInstallation, intentInstallation, ingestionSequence int64
 	if err := db.QueryRow(t.Context(), `SELECT state.installation_id,intent.installation_id,delivery.ingestion_sequence FROM github_repository_routing_state state JOIN github_routing_intents intent ON intent.repository_id=state.repository_id JOIN github_webhook_deliveries delivery ON delivery.id=intent.delivery_id WHERE intent.id IS NOT NULL`).Scan(&stateInstallation, &intentInstallation, &ingestionSequence); err != nil {
 		t.Fatal(err)
@@ -1904,6 +1946,12 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 	claimedIntents, err := store.ClaimGitHubRoutingIntents(t.Context(), "migration-router", time.Minute, 10)
 	if err != nil || len(claimedIntents) != 2 {
 		t.Fatalf("current routing claims after committed 000010 upgrade = %+v, %v", claimedIntents, err)
+	}
+	if _, err := db.Exec(t.Context(), `UPDATE github_webhook_deliveries SET signature_key_version='legacy'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("safe 000012 down before 000011 lifecycle: %v", err)
 	}
 	assertDownRejected := func(name string) {
 		t.Helper()
@@ -1979,6 +2027,12 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 	var dirty bool
 	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 11 || dirty {
 		t.Fatalf("re-up state = %d/%t, %v", version, dirty, err)
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("000012 final re-up: %v", err)
+	}
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 12 || dirty {
+		t.Fatalf("final re-up state = %d/%t, %v", version, dirty, err)
 	}
 }
 
@@ -2092,7 +2146,7 @@ func seedGitHubWebhookFixtureExec(t *testing.T, exec func(string, ...any) error)
 func webhookParams(id, digest, payload string) ReceiveGitHubWebhookParams {
 	repositoryID, repositoryNodeID := githubWebhookRepo, "R_node"
 	installationID := int64(90001)
-	return ReceiveGitHubWebhookParams{DeliveryID: id, Event: "push", Action: "", InstallationID: &installationID, RepositoryID: &repositoryID, RepositoryNodeID: &repositoryNodeID, OrgID: githubWebhookOrg, PayloadDigest: digest, Payload: []byte(payload), KeyVersion: "k1"}
+	return ReceiveGitHubWebhookParams{DeliveryID: id, Event: "push", Action: "", InstallationID: &installationID, RepositoryID: &repositoryID, RepositoryNodeID: &repositoryNodeID, OrgID: githubWebhookOrg, PayloadDigest: digest, Payload: []byte(payload), SignatureKeyVersion: "hmac-v1"}
 }
 
 func receiveDelivery(t *testing.T, store *Store, p ReceiveGitHubWebhookParams) GitHubWebhookDelivery {

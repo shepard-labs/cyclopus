@@ -62,12 +62,15 @@ type ReadinessCheck func(context.Context) error
 
 type Server struct {
 	httpServer       *http.Server
+	metricsServer    *http.Server
 	grpcServer       *grpc.Server
 	grpcAddress      string
 	shutdownTimeout  time.Duration
 	listenHTTP       func(network, address string) (net.Listener, error)
+	listenMetrics    func(network, address string) (net.Listener, error)
 	listenGRPC       func(network, address string) (net.Listener, error)
 	shutdownHTTP     func(context.Context) error
+	shutdownMetrics  func(context.Context) error
 	gracefulStopGRPC func()
 	forceStopGRPC    func()
 	httpTLSCertFile  string
@@ -102,7 +105,7 @@ func (r *readinessState) refresh(ctx context.Context) {
 	r.ready.Store(r.probe(probeCtx) == nil)
 }
 
-func New(httpConfig config.HTTP, grpcConfig config.GRPC, logger *slog.Logger, readiness ReadinessCheck, services Services) (*Server, error) {
+func New(httpConfig config.HTTP, grpcConfig config.GRPC, metricsConfig config.Metrics, logger *slog.Logger, readiness ReadinessCheck, services Services) (*Server, error) {
 	services = withDefaults(services)
 	readinessState := newReadinessState(readiness)
 	handler, err := buildHandler(readinessState.check, services, httpConfig.MaxBodyBytes)
@@ -118,15 +121,24 @@ func New(httpConfig config.HTTP, grpcConfig config.GRPC, logger *slog.Logger, re
 	if httpConfig.TLSCertFile != "" {
 		httpServer.TLSConfig = minimumTLSConfig()
 	}
+	metricsMux := http.NewServeMux()
+	if services.Metrics != nil {
+		metricsMux.Handle("/metrics", services.Metrics)
+	}
+	metricsServer := &http.Server{Addr: metricsConfig.Address, Handler: metricsMux,
+		ReadTimeout: httpConfig.ReadTimeout, ReadHeaderTimeout: httpConfig.ReadHeaderTimeout,
+		WriteTimeout: httpConfig.WriteTimeout, IdleTimeout: httpConfig.IdleTimeout,
+		MaxHeaderBytes: httpConfig.MaxHeaderBytes, ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError)}
 	grpcServer, healthServer, err := buildGRPCServer(services, readinessState.check, grpcConfig)
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{httpServer: httpServer, grpcServer: grpcServer, grpcAddress: grpcConfig.Address,
-		shutdownTimeout: httpConfig.ShutdownTimeout, listenHTTP: net.Listen, listenGRPC: net.Listen}
+	server := &Server{httpServer: httpServer, metricsServer: metricsServer, grpcServer: grpcServer, grpcAddress: grpcConfig.Address,
+		shutdownTimeout: httpConfig.ShutdownTimeout, listenHTTP: net.Listen, listenMetrics: net.Listen, listenGRPC: net.Listen}
 	server.httpTLSCertFile, server.httpTLSKeyFile = httpConfig.TLSCertFile, httpConfig.TLSKeyFile
 	server.healthServer, server.readiness = healthServer, readinessState
 	server.shutdownHTTP = httpServer.Shutdown
+	server.shutdownMetrics = metricsServer.Shutdown
 	server.gracefulStopGRPC = grpcServer.GracefulStop
 	server.forceStopGRPC = grpcServer.Stop
 	return server, nil
@@ -288,7 +300,13 @@ func (s *Server) Run(ctx context.Context) error {
 		_ = httpListener.Close()
 		return fmt.Errorf("listen gRPC on %s: %w", s.grpcAddress, err)
 	}
-	serveErr := make(chan error, 2)
+	metricsListener, err := s.listenMetrics("tcp", s.metricsServer.Addr)
+	if err != nil {
+		_ = httpListener.Close()
+		_ = grpcListener.Close()
+		return fmt.Errorf("listen metrics on %s: %w", s.metricsServer.Addr, err)
+	}
+	serveErr := make(chan error, 3)
 	s.refreshHealth(context.Background())
 	go func() {
 		ticker := time.NewTicker(readinessRefreshInterval)
@@ -310,13 +328,14 @@ func (s *Server) Run(ctx context.Context) error {
 		serveErr <- normalizeServeError("HTTP", s.httpServer.Serve(httpListener))
 	}()
 	go func() { serveErr <- normalizeServeError("gRPC", s.grpcServer.Serve(grpcListener)) }()
+	go func() { serveErr <- normalizeServeError("metrics", s.metricsServer.Serve(metricsListener)) }()
 	select {
 	case err := <-serveErr:
 		stopErr := s.stop()
-		return errors.Join(err, <-serveErr, stopErr)
+		return errors.Join(err, <-serveErr, <-serveErr, stopErr)
 	case <-ctx.Done():
 		stopErr := s.stop()
-		return errors.Join(<-serveErr, <-serveErr, stopErr)
+		return errors.Join(<-serveErr, <-serveErr, <-serveErr, stopErr)
 	}
 }
 
@@ -448,12 +467,14 @@ func (s *Server) stop() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
 	httpDone := make(chan error, 1)
+	metricsDone := make(chan error, 1)
 	grpcDone := make(chan struct{})
 	go func() { httpDone <- s.shutdownHTTP(shutdownCtx) }()
+	go func() { metricsDone <- s.shutdownMetrics(shutdownCtx) }()
 	go func() { s.gracefulStopGRPC(); close(grpcDone) }()
 
 	var shutdownErr error
-	for httpDone != nil || grpcDone != nil {
+	for httpDone != nil || metricsDone != nil || grpcDone != nil {
 		select {
 		case err := <-httpDone:
 			httpDone = nil
@@ -461,10 +482,17 @@ func (s *Server) stop() error {
 				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown HTTP: %w", err))
 				_ = s.httpServer.Close()
 			}
+		case err := <-metricsDone:
+			metricsDone = nil
+			if err != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown metrics: %w", err))
+				_ = s.metricsServer.Close()
+			}
 		case <-grpcDone:
 			grpcDone = nil
 		case <-shutdownCtx.Done():
 			_ = s.httpServer.Close()
+			_ = s.metricsServer.Close()
 			s.forceStopGRPC()
 			if httpDone != nil {
 				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown HTTP: %w", shutdownCtx.Err()))
@@ -472,6 +500,9 @@ func (s *Server) stop() error {
 			if grpcDone != nil {
 				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown gRPC: %w", shutdownCtx.Err()))
 				<-grpcDone
+			}
+			if metricsDone != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown metrics: %w", shutdownCtx.Err()))
 			}
 			return shutdownErr
 		}

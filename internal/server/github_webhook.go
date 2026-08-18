@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shepard-labs/cyclopus/internal/config"
+	"github.com/shepard-labs/cyclopus/internal/githubmetrics"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
@@ -35,26 +36,32 @@ type githubWebhookHandler struct {
 	secrets GitHubWebhookSecretResolver
 	store   GitHubWebhookStore
 	sem     chan struct{}
+	limiter *authRateLimiter
+	metrics githubmetrics.Recorder
 	now     func() time.Time
 }
 
 var githubEvent = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
-func NewGitHubWebhookHandler(cfg config.Webhook, secrets GitHubWebhookSecretResolver, inbox GitHubWebhookStore) http.Handler {
-	return &githubWebhookHandler{cfg: cfg, secrets: secrets, store: inbox, sem: make(chan struct{}, cfg.GitHubMaxConcurrent), now: time.Now}
+func NewGitHubWebhookHandler(cfg config.Webhook, secrets GitHubWebhookSecretResolver, inbox GitHubWebhookStore, recorders ...githubmetrics.Recorder) http.Handler {
+	if cfg.GitHubRateLimitPerMinute == 0 && cfg.GitHubRateLimitBurst == 0 {
+		cfg.GitHubRateLimitEnabled, cfg.GitHubRateLimitPerMinute, cfg.GitHubRateLimitBurst = true, 120, 30
+	}
+	metrics := githubmetrics.Noop()
+	if len(recorders) > 0 && recorders[0] != nil {
+		metrics = recorders[0]
+	}
+	var limiter *authRateLimiter
+	if cfg.GitHubRateLimitEnabled {
+		limiter = newWebhookRateLimiter(cfg.GitHubRateLimitPerMinute, cfg.GitHubRateLimitBurst)
+	}
+	return &githubWebhookHandler{cfg: cfg, secrets: secrets, store: inbox, sem: make(chan struct{}, cfg.GitHubMaxConcurrent), limiter: limiter, metrics: metrics, now: time.Now}
 }
 
 func (h *githubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		fixed(w, http.StatusMethodNotAllowed)
-		return
-	}
-	select {
-	case h.sem <- struct{}{}:
-		defer func() { <-h.sem }()
-	default:
-		fixed(w, http.StatusTooManyRequests)
 		return
 	}
 	if r.Header.Get("Content-Encoding") != "" {
@@ -81,8 +88,22 @@ func (h *githubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		fixed(w, http.StatusUnsupportedMediaType)
 		return
 	}
+	if allowed, _ := h.limiter.allowKey(webhookClientIP(r.RemoteAddr)); !allowed {
+		h.metrics.Ingress("", "", "rate_limited")
+		fixed(w, http.StatusTooManyRequests)
+		return
+	}
+	select {
+	case h.sem <- struct{}{}:
+		defer func() { <-h.sem }()
+	default:
+		h.metrics.Ingress("", "", "overload")
+		fixed(w, http.StatusTooManyRequests)
+		return
+	}
 	delivery, event, signature, ok := authHeaders(r.Header)
 	if !ok {
+		h.metrics.Ingress("", "", "auth_invalid")
 		fixed(w, http.StatusUnauthorized)
 		return
 	}
@@ -115,6 +136,7 @@ func (h *githubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if matched == "" {
+		h.metrics.Ingress(event, "", "auth_invalid")
 		fixed(w, http.StatusUnauthorized)
 		return
 	}
@@ -127,6 +149,7 @@ func (h *githubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	// sufficient; replay and conflict semantics do not apply because no inbox row
 	// is created.
 	if event == "ping" {
+		h.metrics.Ingress(event, canonical.action, "accepted")
 		fixed(w, http.StatusAccepted)
 		return
 	}
@@ -139,9 +162,11 @@ func (h *githubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 	switch lookup {
 	case store.GitHubWebhookReplay:
+		h.metrics.Ingress(event, canonical.action, "replayed")
 		fixed(w, http.StatusAccepted)
 		return
 	case store.GitHubWebhookMismatch:
+		h.metrics.Ingress(event, canonical.action, "conflict")
 		fixed(w, http.StatusConflict)
 		return
 	case store.GitHubWebhookNotFound:
@@ -154,15 +179,20 @@ func (h *githubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		fixed(w, http.StatusServiceUnavailable)
 		return
 	}
-	disposition, _, err := h.store.ReceiveGitHubWebhook(parentCtx, store.ReceiveGitHubWebhookParams{DeliveryID: delivery, Event: event, Action: canonical.action, OrgID: identity.OrgID, PayloadDigest: payloadDigest, KeyVersion: matched, Payload: body, InstallationID: identity.InstallationID, RepositoryID: identity.RepositoryID, RepositoryNodeID: identity.RepositoryNodeID})
+	disposition, _, err := h.store.ReceiveGitHubWebhook(parentCtx, store.ReceiveGitHubWebhookParams{DeliveryID: delivery, Event: event, Action: canonical.action, OrgID: identity.OrgID, PayloadDigest: payloadDigest, SignatureKeyVersion: matched, Payload: body, InstallationID: identity.InstallationID, RepositoryID: identity.RepositoryID, RepositoryNodeID: identity.RepositoryNodeID})
 	if err != nil {
 		fixed(w, http.StatusServiceUnavailable)
 		return
 	}
 	switch disposition {
-	case store.GitHubWebhookAccepted, store.GitHubWebhookReplayed:
+	case store.GitHubWebhookAccepted:
+		h.metrics.Ingress(event, canonical.action, "accepted")
+		fixed(w, http.StatusAccepted)
+	case store.GitHubWebhookReplayed:
+		h.metrics.Ingress(event, canonical.action, "replayed")
 		fixed(w, http.StatusAccepted)
 	case store.GitHubWebhookConflict:
+		h.metrics.Ingress(event, canonical.action, "conflict")
 		fixed(w, http.StatusConflict)
 	default:
 		fixed(w, http.StatusServiceUnavailable)

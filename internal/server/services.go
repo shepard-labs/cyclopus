@@ -29,6 +29,7 @@ type Services struct {
 	RequestBodyBytes int64
 	GitHubBrowser    http.Handler
 	GitHubWebhook    http.Handler
+	Metrics          http.Handler
 }
 
 func DefaultServices() Services {

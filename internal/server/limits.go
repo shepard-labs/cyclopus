@@ -14,7 +14,10 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-const authRateLimiterMaxEntries = 4096
+const (
+	authRateLimiterMaxEntries    = 4096
+	webhookRateLimiterMaxEntries = 4096
+)
 
 type rateBucket struct {
 	tokens  float64
@@ -39,6 +42,36 @@ func newAuthRateLimiter(limit int) *authRateLimiter {
 
 func NewAuthRateLimiter(limit int) *authRateLimiter {
 	return newAuthRateLimiter(limit)
+}
+
+func newWebhookRateLimiter(perMinute, burst int) *authRateLimiter {
+	return &authRateLimiter{rate: float64(perMinute) / time.Minute.Seconds(), burst: float64(burst),
+		maxEntries: webhookRateLimiterMaxEntries, perKey: make(map[string]*list.Element), recency: list.New(), now: time.Now}
+}
+
+func (l *authRateLimiter) allowKey(key string) (bool, time.Duration) {
+	if l == nil || key == "" {
+		return false, time.Minute
+	}
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	protected := map[string]struct{}{key: {}}
+	missing := 0
+	if _, ok := l.perKey[key]; !ok {
+		missing = 1
+	}
+	if retry := l.reserveCapacity(now, missing, protected); retry > 0 {
+		return false, retry
+	}
+	bucket := l.loadBucket(key, now)
+	if bucket.tokens < 1 {
+		l.storeBucket(bucket)
+		return false, time.Duration(math.Ceil((1-bucket.tokens)/l.rate*1000)) * time.Millisecond
+	}
+	bucket.tokens--
+	l.storeBucket(bucket)
+	return true, 0
 }
 
 func (l *authRateLimiter) allow(client, account string) (bool, time.Duration) {
@@ -204,6 +237,14 @@ func clientFromRemoteAddr(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		return remoteAddr
+	}
+	return host
+}
+
+func webhookClientIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil || net.ParseIP(host) == nil {
+		return ""
 	}
 	return host
 }
