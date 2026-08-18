@@ -12,6 +12,54 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 )
 
+func selectedNode(nodes []observability.NodeSystemDetail, selectedID string) (observability.NodeSystemDetail, bool) {
+	if len(nodes) == 0 {
+		return observability.NodeSystemDetail{}, false
+	}
+	for _, n := range nodes {
+		if n.ID == selectedID {
+			return n, true
+		}
+	}
+	return nodes[0], true
+}
+
+func resolveNodeID(nodes []observability.NodeSystemDetail, selectedID string) string {
+	n, ok := selectedNode(nodes, selectedID)
+	if !ok {
+		return selectedID
+	}
+	return n.ID
+}
+
+// formatNodeUptime matches Beszel's secondsToUptimeString: minutes under an hour,
+// hours under 100 hours, otherwise whole days.
+func formatNodeUptime(seconds float64) string {
+	if seconds < 1 {
+		return ""
+	}
+	switch {
+	case seconds < 3600:
+		n := int(seconds / 60)
+		if n <= 1 {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", n)
+	case seconds < 360000:
+		n := int(seconds / 3600)
+		if n == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", n)
+	default:
+		n := int(seconds / 86400)
+		if n <= 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", n)
+	}
+}
+
 func avgCPUNodes(nodes []observability.NodeSystemDetail) float64 {
 	if len(nodes) == 0 {
 		return 0

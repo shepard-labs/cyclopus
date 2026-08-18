@@ -294,6 +294,7 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 		nodes := []observability.NodeSystemDetail{
 			{
 				ID: "sys-1", Name: "node-1", Host: "192.168.1.10", Port: "45876", Status: "up", Updated: time.Now(),
+				OS: "Debian GNU/Linux 13 (trixie)", CPUModel: "Intel Core Processor (Haswell, no TSX)", UptimeSec: 604800,
 				CPUPercent: 12.5, MemoryUsed: 45.2, DiskPercent: 20.1, Bandwidth: 1.5,
 				History: []observability.SystemStatPoint{
 					{Timestamp: time.Now().Add(-1 * time.Minute), CPU: 10.0, Memory: 40.0, Disk: 20.0},
@@ -301,11 +302,12 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 				},
 			},
 		}
-		body := renderComponent(t, context.Background(), adminpages.Metrics(nodes, "", store.User{}, store.Organization{Name: "Acme"}, nil))
+		body := renderComponent(t, context.Background(), adminpages.Metrics(nodes, "", "", store.User{}, store.Organization{Name: "Acme"}, nil))
 		assertContainsAll(t, body,
 			`id="metrics-container"`,
-			`hx-get="/admin/metrics?fragment=true"`,
+			`hx-get="/admin/metrics?fragment=true&amp;node=sys-1"`,
 			`hx-trigger="every 10s"`,
+			`hx-swap="outerHTML settle:0s swap:0s transition:false"`,
 			`node-1`,
 			`12.5%`,
 			`45.2%`,
@@ -313,17 +315,73 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 			`CPU Usage`,
 			`Memory Usage`,
 			`Disk Space`,
+			`h-48`,
+			`7 days`,
+			`Debian GNU/Linux 13 (trixie)`,
+			`Intel Core Processor (Haswell, no TSX)`,
+			`192.168.1.10`,
+			`45876`,
+			`Online`,
 		)
 
-		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, ""))
+		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "", ""))
 		assertContainsAll(t, fragmentBody,
 			`node-1`,
 			`12.5%`,
 			`45.2%`,
 			`20.1%`,
+			`hx-get="/admin/metrics?fragment=true&amp;node=sys-1"`,
+			`7 days`,
+			`Debian GNU/Linux 13 (trixie)`,
+			`Intel Core Processor (Haswell, no TSX)`,
+			`192.168.1.10`,
+			`45876`,
+			`Online`,
 		)
 		if strings.Contains(strings.ToLower(fragmentBody), "<!doctype html") {
 			t.Fatalf("fragment contains full-page HTML:\n%s", fragmentBody)
+		}
+		if strings.Contains(fragmentBody, "Updated ") {
+			t.Fatalf("fragment still shows relative updated text:\n%s", fragmentBody)
+		}
+		if strings.Contains(fragmentBody, "bg-base-300/60") {
+			t.Fatalf("fragment still nests charts inside a muted inner card:\n%s", fragmentBody)
+		}
+	})
+
+	t.Run("admin metrics fragment shows one selected node", func(t *testing.T) {
+		nodes := []observability.NodeSystemDetail{
+			{
+				ID: "sys-1", Name: "node-1", Host: "192.168.1.10", Port: "45876", Status: "up",
+				CPUPercent: 12.5, MemoryUsed: 45.2, DiskPercent: 20.1,
+			},
+			{
+				ID: "sys-2", Name: "node-2", Host: "192.168.1.11", Port: "45876", Status: "up",
+				CPUPercent: 80.0, MemoryUsed: 90.0, DiskPercent: 70.0,
+			},
+		}
+		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-1", ""))
+		assertContainsAll(t, fragmentBody,
+			`id="metrics-node"`,
+			`value="sys-1"`,
+			`<el-option value="sys-1"`,
+			`<el-option value="sys-2"`,
+			`node-1`,
+			`node-2`,
+			`192.168.1.10`,
+			`hx-get="/admin/metrics?fragment=true&amp;node=sys-1"`,
+		)
+		if strings.Contains(fragmentBody, "192.168.1.11") {
+			t.Fatalf("unselected node host appeared in fragment:\n%s", fragmentBody)
+		}
+
+		otherBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-2", ""))
+		assertContainsAll(t, otherBody,
+			`192.168.1.11`,
+			`hx-get="/admin/metrics?fragment=true&amp;node=sys-2"`,
+		)
+		if strings.Contains(otherBody, "192.168.1.10") {
+			t.Fatalf("unselected node host appeared in fragment:\n%s", otherBody)
 		}
 	})
 

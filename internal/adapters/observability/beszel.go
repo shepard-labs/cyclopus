@@ -100,6 +100,17 @@ type beszelSystem struct {
 	Info    json.RawMessage `json:"info"`
 }
 
+type beszelDetailsListResponse struct {
+	Items []beszelSystemDetails `json:"items"`
+}
+
+type beszelSystemDetails struct {
+	ID     string `json:"id"`
+	System string `json:"system"`
+	CPU    string `json:"cpu"`
+	OSName string `json:"os_name"`
+}
+
 type beszelStatsListResponse struct {
 	Items []beszelStatRecord `json:"items"`
 }
@@ -177,6 +188,34 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string)
 		_ = json.NewDecoder(io.LimitReader(respStats.Body, MaxResponseBytes)).Decode(&decodedStats)
 	}
 
+	detailsURL := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/system_details/records?perPage=200"
+	reqDetails, err := http.NewRequestWithContext(ctx, http.MethodGet, detailsURL, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	reqDetails.Header.Set("Accept", "application/json")
+	reqDetails.Header.Set("Authorization", token)
+	respDetails, err := c.client.Do(reqDetails)
+	if err != nil {
+		return nil, false, fmt.Errorf("observability: Beszel details request failed")
+	}
+	defer respDetails.Body.Close()
+	if respDetails.StatusCode == http.StatusUnauthorized {
+		return nil, true, fmt.Errorf("observability: Beszel details returned HTTP 401")
+	}
+	var decodedDetails beszelDetailsListResponse
+	if respDetails.StatusCode >= 200 && respDetails.StatusCode < 300 {
+		_ = json.NewDecoder(io.LimitReader(respDetails.Body, MaxResponseBytes)).Decode(&decodedDetails)
+	}
+	detailsBySystem := make(map[string]beszelSystemDetails, len(decodedDetails.Items))
+	for _, item := range decodedDetails.Items {
+		key := item.System
+		if key == "" {
+			key = item.ID
+		}
+		detailsBySystem[key] = item
+	}
+
 	systemStatsMap := make(map[string][]SystemStatPoint)
 	for _, item := range decodedStats.Items {
 		ts := parseBeszelTime(item.Created)
@@ -221,6 +260,7 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string)
 		if len(sys.Info) > 0 {
 			_ = json.Unmarshal(sys.Info, &info)
 		}
+		hostDetails := detailsBySystem[sys.ID]
 		detail := NodeSystemDetail{
 			ID:          sys.ID,
 			Name:        sys.Name,
@@ -228,6 +268,9 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string)
 			Port:        sys.Port,
 			Status:      sys.Status,
 			Updated:     parseBeszelTime(sys.Updated),
+			OS:          firstNonEmpty(hostDetails.OSName, jsonString(info["o"])),
+			CPUModel:    firstNonEmpty(hostDetails.CPU, jsonString(info["m"])),
+			UptimeSec:   floatField(info["u"]),
 			CPUPercent:  floatField(info["cpu"]),
 			MemoryUsed:  floatField(info["mp"]),
 			DiskPercent: floatField(info["dp"]),
@@ -420,4 +463,21 @@ func parseBeszelTime(value string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func jsonString(value any) string {
+	s, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

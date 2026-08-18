@@ -2,21 +2,26 @@ package admin
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui"
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ Metrics(nodes []observability.NodeSystemDetail, errMessage string, user store.User, org store.Organization, flash *ui.FlashMessage) {
-	@components.PageWide("Metrics", user, org, flash, "/admin/metrics", nil, metricsContent(nodes, errMessage))
+templ Metrics(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string, user store.User, org store.Organization, flash *ui.FlashMessage) {
+	@components.PageWide("Metrics", user, org, flash, "/admin/metrics", nil, metricsContent(nodes, selectedNodeID, errMessage))
 }
 
-templ MetricsFragment(nodes []observability.NodeSystemDetail, errMessage string) {
-	@metricsGrid(nodes, errMessage)
+templ MetricsFragment(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string) {
+	{{ id := resolveNodeID(nodes, selectedNodeID) }}
+	<div id="metrics-container" hx-get={ metricsFragmentURL(id) } hx-trigger="every 10s" hx-swap="outerHTML settle:0s swap:0s transition:false">
+		@metricsGrid(nodes, id, errMessage)
+	</div>
 }
 
-templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) {
+templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string) {
 	<style>
 		#metrics-container.htmx-swapping,
 		#metrics-container.htmx-settling {
@@ -32,9 +37,7 @@ templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) 
 			</span>
 		</div>
 
-		<div id="metrics-container" hx-get="/admin/metrics?fragment=true" hx-trigger="every 10s" hx-swap="innerHTML settle:0s swap:0s transition:false">
-			@MetricsFragment(nodes, errMessage)
-		</div>
+		@MetricsFragment(nodes, selectedNodeID, errMessage)
 	</div>
 
 	<script>
@@ -61,37 +64,8 @@ templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) 
 			}
 		}
 
-		function relTimeClient(isoStr) {
-			if (!isoStr) return "";
-			try {
-				const d = new Date(isoStr);
-				const diffMs = Date.now() - d.getTime();
-				const diffSec = Math.floor(diffMs / 1000);
-				if (diffSec < 60) return "just now";
-				const diffMin = Math.floor(diffSec / 60);
-				if (diffMin < 60) return diffMin + "m ago";
-				const diffHr = Math.floor(diffMin / 60);
-				if (diffHr < 24) return diffHr + "h ago";
-				return Math.floor(diffHr / 24) + "d ago";
-			} catch (e) {
-				return "";
-			}
-		}
-
-		function syncMetricTimestamps(root) {
-			const scope = root || document;
-			scope.querySelectorAll('[data-iso-time-rel]').forEach(el => {
-				const iso = el.getAttribute('data-iso-time-rel');
-				if (iso) {
-					const rel = relTimeClient(iso);
-					if (rel) el.textContent = "Updated " + rel;
-				}
-			});
-		}
-
 		function initChartInteractions(root) {
 			const scope = root || document;
-			syncMetricTimestamps(scope);
 			scope.querySelectorAll('.metric-chart-card').forEach(card => {
 				const svg = card.querySelector('svg.metric-chart-svg');
 				const crosshair = card.querySelector('.metric-crosshair');
@@ -180,10 +154,20 @@ templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) 
 			initChartInteractions(document);
 		}
 		document.addEventListener('htmx:load', (e) => initChartInteractions(e.detail?.elt || e.target || document));
+		document.addEventListener('htmx:afterRequest', (e) => {
+			const elt = e.detail && e.detail.elt;
+			if (!elt || elt.id !== 'metrics-node' || !e.detail.successful) return;
+			const nodeId = elt.value;
+			if (!nodeId) return;
+			const url = new URL(window.location.href);
+			url.searchParams.set('node', nodeId);
+			url.searchParams.delete('fragment');
+			history.replaceState(null, '', url.pathname + url.search);
+		});
 	</script>
 }
 
-templ metricsGrid(nodes []observability.NodeSystemDetail, errMessage string) {
+templ metricsGrid(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string) {
 	if errMessage != "" {
 		<div class="rounded-box border border-warning/30 bg-warning/10 p-4 text-sm text-base-content">
 			<p class="font-medium text-warning">Metrics unavailable</p>
@@ -228,64 +212,81 @@ templ metricsGrid(nodes []observability.NodeSystemDetail, errMessage string) {
 			</div>
 		</div>
 
-		<!-- Per-Node Full Beszel Suite Dashboard in 2-Column Grid -->
-		<div class="space-y-6 pt-4">
-			for _, node := range nodes {
+		<!-- Selected-node dashboard -->
+		<div class="space-y-4 pt-4">
+			{{ node, ok := selectedNode(nodes, selectedNodeID) }}
+			if ok {
 				{{ cpu, mem, disk, diskIO, net, load, temp := extractNodeChartData(node) }}
-				<div class="rounded-box border border-line bg-base-200 p-6 space-y-5">
-					<div class="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
-						<div class="flex items-center gap-3">
-							<h2 class="text-sm font-semibold text-base-content">{ node.Name }</h2>
-							<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Host }</span>
-							if node.Port != "" {
-								<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Port }</span>
-							}
-							if node.Status == "up" || node.Status == "online" {
-								@components.OperationalStatus("success", "Online")
-							} else {
-								@components.OperationalStatus("warning", node.Status)
-							}
+				{{ uptime := formatNodeUptime(node.UptimeSec) }}
+				<div class="rounded-box border border-line bg-base-200 p-6 space-y-3">
+					<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+						<div>
+							<label id="metrics-node-label" for="metrics-node" class="sr-only">Node</label>
+							<el-select
+								id="metrics-node"
+								name="node"
+								value={ node.ID }
+								aria-labelledby="metrics-node-label"
+								hx-get="/admin/metrics?fragment=true"
+								hx-target="#metrics-container"
+								hx-swap="outerHTML settle:0s swap:0s transition:false"
+								hx-trigger="change"
+								hx-vals={ metricsNodeSelectVals }
+								class="relative block w-52"
+							>
+								<button id="metrics-node-trigger" type="button" aria-haspopup="listbox" aria-controls="metrics-node-options" aria-labelledby="metrics-node-label metrics-node-selected" class="grid w-full cursor-pointer grid-cols-1 rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-left text-sm font-medium text-base-content outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary">
+									<el-selectedcontent id="metrics-node-selected" class="col-start-1 row-start-1 truncate">{ node.Name }</el-selectedcontent>
+									@components.IconChevronDown("pointer-events-none col-start-1 row-start-1 size-4 self-center justify-self-end text-base-content/50")
+								</button>
+								<el-options id="metrics-node-options" role="listbox" anchor="bottom start" popover class="max-h-60 w-(--button-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete data-closed:scale-95 data-closed:opacity-0">
+									for _, option := range nodes {
+										<el-option value={ option.ID } class="group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-medium">
+											<span class="block flex-1 truncate">{ option.Name }</span>
+											<span class="ml-3 hidden group-aria-selected/option:block in-[el-selectedcontent]:hidden">@components.IconCheck("size-4")</span>
+										</el-option>
+									}
+								</el-options>
+							</el-select>
 						</div>
-						<div class="text-xs text-base-content/50">
-							if !node.Updated.IsZero() {
-								<span data-iso-time-rel={ node.Updated.UTC().Format("2006-01-02T15:04:05Z") }>Updated { relTimeAdmin(node.Updated) }</span>
-							}
-						</div>
+						if uptime != "" {
+							<span class="text-xs text-base-content/65">{ uptime }</span>
+						}
+						if node.OS != "" {
+							<span class="text-xs text-base-content/65">{ node.OS }</span>
+						}
+						if node.CPUModel != "" {
+							<span class="text-xs text-base-content/65">{ node.CPUModel }</span>
+						}
 					</div>
-
-				<!-- Single-Column Grid for Node Metric Charts -->
-				<div class="grid grid-cols-1 gap-5">
-						<!-- 1. CPU Usage -->
-						@RenderSVGChart(cpu)
-
-						<!-- 2. Memory Usage -->
-						@RenderSVGChart(mem)
-
-						<!-- 3. Disk Space -->
-						@RenderSVGChart(disk)
-
-						<!-- 4. Disk I/O -->
-						@RenderSVGChart(diskIO)
-
-						<!-- 5. Bandwidth / Network -->
-						@RenderSVGChart(net)
-
-						<!-- 6. Load Average -->
-						@RenderSVGChart(load)
-
-						<!-- 7. Core Temperature -->
-						if temp.CurrentVal != "0.0 °C" && temp.CurrentVal != "0" {
-							@RenderSVGChart(temp)
+					<div class="flex flex-wrap items-center gap-3">
+						<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Host }</span>
+						if node.Port != "" {
+							<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Port }</span>
+						}
+						if node.Status == "up" || node.Status == "online" {
+							@components.OperationalStatus("success", "Online")
+						} else {
+							@components.OperationalStatus("warning", node.Status)
 						}
 					</div>
 				</div>
+
+				@RenderSVGChart(cpu)
+				@RenderSVGChart(mem)
+				@RenderSVGChart(disk)
+				@RenderSVGChart(diskIO)
+				@RenderSVGChart(net)
+				@RenderSVGChart(load)
+				if temp.CurrentVal != "0.0 °C" && temp.CurrentVal != "0" {
+					@RenderSVGChart(temp)
+				}
 			}
 		</div>
 	}
 }
 
 templ RenderSVGChart(chart SVGChartData) {
-	<div class="metric-chart-card relative rounded-box border border-line bg-base-300/60 p-4 flex flex-col justify-between" data-chart={ chart.Title } data-chart-payload={ chart.DataJSON }>
+	<div class="metric-chart-card relative rounded-box border border-line bg-base-200 p-6 flex flex-col justify-between" data-chart={ chart.Title } data-chart-payload={ chart.DataJSON }>
 		<div class="flex items-center justify-between mb-3">
 			<div>
 				<div class="text-xs font-semibold text-base-content/85">{ chart.Title }</div>
@@ -304,14 +305,14 @@ templ RenderSVGChart(chart SVGChartData) {
 
 		<div class="flex w-full">
 			<!-- Y axis ticks -->
-			<div class="relative w-14 shrink-0 h-24 pt-1">
+			<div class="relative w-14 shrink-0 h-48 pt-1">
 				if len(chart.YTicks) > 0 {
 					for _, t := range chart.YTicks {
 						<span class="absolute right-1 -translate-y-1/2 text-xs font-mono text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("top: %.1f%%", tickTopPct(chart.MinVal, chart.MaxVal, t)) }>{ formatTickValue(t, chart.Unit) }</span>
 					}
 				}
 			</div>
-			<div class="relative flex-1 h-24 cursor-crosshair">
+			<div class="relative flex-1 h-48 cursor-crosshair">
 				<!-- Floating Hover Tooltip -->
 				<div style="display: none;" class="metric-tooltip pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full mb-1 rounded-box border border-line bg-base-200/95 backdrop-blur px-3 py-2 shadow-lg min-w-36"></div>
 
@@ -368,3 +369,14 @@ templ RenderSVGChart(chart SVGChartData) {
 
 	</div>
 }
+
+func metricsFragmentURL(nodeID string) templ.SafeURL {
+	values := url.Values{"fragment": {"true"}}
+	if nodeID != "" {
+		values.Set("node", nodeID)
+	}
+	return templ.SafeURL("/admin/metrics?" + values.Encode())
+}
+
+const metricsNodeSelectVals = "js:{node: this.value}"
+

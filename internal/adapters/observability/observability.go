@@ -156,6 +156,9 @@ type NodeSystemDetail struct {
 	Port        string
 	Status      string
 	Updated     time.Time
+	OS          string
+	CPUModel    string
+	UptimeSec   float64
 	CPUPercent  float64
 	MemoryUsed  float64
 	DiskPercent float64

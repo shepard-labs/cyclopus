@@ -255,3 +255,76 @@ func TestBeszelAuthFailureIsError(t *testing.T) {
 		t.Fatal("expected an error when Beszel rejects the superuser credential")
 	}
 }
+
+func TestBeszelGetNodeSystemDetailsHostIdentity(t *testing.T) {
+	t.Run("from system_details collection", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/api/collections/systems/records"):
+				_, _ = w.Write([]byte(`{"items":[{"id":"sys-1","name":"node-1","host":"192.168.1.10","port":"45876","status":"up","updated":"2026-01-02 03:04:05.000Z","info":{"u":604800,"cpu":12.5}}]}`))
+			case strings.HasPrefix(r.URL.Path, "/api/collections/system_stats/records"):
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			case strings.HasPrefix(r.URL.Path, "/api/collections/system_details/records"):
+				_, _ = w.Write([]byte(`{"items":[{"id":"sys-1","system":"sys-1","os_name":"Debian GNU/Linux 13 (trixie)","cpu":"Intel Core Processor (Haswell, no TSX)"}]}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+		assertHostIdentity(t, unauthedTestClient(server.URL, server.Client()))
+	})
+
+	t.Run("falls back to info o/m", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/api/collections/systems/records"):
+				_, _ = w.Write([]byte(`{"items":[{"id":"sys-1","name":"node-1","host":"192.168.1.10","port":"45876","status":"up","updated":"2026-01-02 03:04:05.000Z","info":{"u":604800,"o":"Debian GNU/Linux 13 (trixie)","m":"Intel Core Processor (Haswell, no TSX)","cpu":12.5,"secret_internal":"leak"}}]}`))
+			case strings.HasPrefix(r.URL.Path, "/api/collections/system_stats/records"):
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+		assertHostIdentity(t, unauthedTestClient(server.URL, server.Client()))
+	})
+
+	t.Run("prefers system_details over info", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/api/collections/systems/records"):
+				_, _ = w.Write([]byte(`{"items":[{"id":"sys-1","name":"node-1","host":"192.168.1.10","port":"45876","status":"up","updated":"2026-01-02 03:04:05.000Z","info":{"u":604800,"o":"old-os","m":"old-cpu"}}]}`))
+			case strings.HasPrefix(r.URL.Path, "/api/collections/system_stats/records"):
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			case strings.HasPrefix(r.URL.Path, "/api/collections/system_details/records"):
+				_, _ = w.Write([]byte(`{"items":[{"id":"sys-1","system":"sys-1","os_name":"Debian GNU/Linux 13 (trixie)","cpu":"Intel Core Processor (Haswell, no TSX)"}]}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+		assertHostIdentity(t, unauthedTestClient(server.URL, server.Client()))
+	})
+}
+
+func assertHostIdentity(t *testing.T, client *BeszelClient) {
+	t.Helper()
+	nodes, err := client.GetNodeSystemDetails(context.Background())
+	if err != nil {
+		t.Fatalf("GetNodeSystemDetails: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("got %d nodes, want 1", len(nodes))
+	}
+	n := nodes[0]
+	if n.OS != "Debian GNU/Linux 13 (trixie)" {
+		t.Errorf("OS = %q", n.OS)
+	}
+	if n.CPUModel != "Intel Core Processor (Haswell, no TSX)" {
+		t.Errorf("CPUModel = %q", n.CPUModel)
+	}
+	if n.UptimeSec != 604800 {
+		t.Errorf("UptimeSec = %v, want 604800", n.UptimeSec)
+	}
+}
+

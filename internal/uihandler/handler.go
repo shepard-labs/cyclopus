@@ -885,10 +885,11 @@ func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {
 	if metricsErr != nil {
 		errMessage = metricsErr.Error()
 	}
+	selectedNodeID := r.URL.Query().Get("node")
 
 	if r.URL.Query().Get("fragment") == "true" {
-		render(w, r, adminpages.MetricsFragment(nodes, errMessage))
+		render(w, r, adminpages.MetricsFragment(nodes, selectedNodeID, errMessage))
 		return
 	}
-	render(w, r, adminpages.Metrics(nodes, errMessage, user, org, flashFromCookie(w, r)))
+	render(w, r, adminpages.Metrics(nodes, selectedNodeID, errMessage, user, org, flashFromCookie(w, r)))
 }
