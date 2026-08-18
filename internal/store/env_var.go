@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/jackc/pgx/v5"
+	"github.com/shepard-labs/cyclopus/internal/secretref"
 )
 
 type MutateEnvVarParams struct {

@@ -920,37 +920,24 @@ func TestGitHubForcedDatabaseRetryMasterMatrixPostgres18(t *testing.T) {
 			dataStore, pool := newGitHubFanoutFixture(t)
 			delivery := receiveDelivery(t, dataStore, webhookParams(fmt.Sprintf("5d000000-0000-0000-0000-%012d", index+1), fmt.Sprintf("%064x", 900+index), `{}`))
 			delivery = claimOne(t, dataStore, "database-retry-worker-one", time.Minute)
-			injected := New(&onceTransactionErrorDB{DB: pool, code: code})
+			injected := New(pool)
 			sha := strings.Repeat(fmt.Sprintf("%x", index+8), 40)
 			params := SnapshotGitHubPushParams{DeliveryID: delivery.ID, DeliveryLease: *delivery.Lease, OrgID: githubWebhookOrg, InstallationID: 90001, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", Ref: fmt.Sprintf("refs/heads/database-retry-%s", code), BeforeSHA: strings.Repeat("0", 40), CommitSHA: sha, AuthoritativeSHA: sha, EventKind: "push", RefExists: true, MaxFanout: 2, FanoutBatch: 2, Audit: &AuditEvent{ID: fmt.Sprintf("5e000000-0000-0000-0000-%012d", index+1)}}
 			type mutationOutcome struct {
 				result SnapshotGitHubPushResult
 				err    error
 			}
-			start := make(chan struct{})
-			outcomes := make(chan mutationOutcome, 2)
-			for _, worker := range []*Store{injected, New(pool)} {
-				go func(worker *Store) {
-					<-start
-					result, err := worker.SnapshotGitHubPush(t.Context(), params)
-					outcomes <- mutationOutcome{result: result, err: err}
-				}(worker)
-			}
-			close(start)
-			retried, succeeded := 0, 0
-			for range 2 {
-				outcome := <-outcomes
-				switch {
-				case isSQLState(outcome.err, code):
-					retried++
-				case outcome.err == nil && outcome.result.TotalCount == 2:
-					succeeded++
-				default:
-					t.Fatalf("concurrent mutation outcome = %+v, %v", outcome.result, outcome.err)
+			var failed atomic.Bool
+			params.Failpoint = func(point string) error {
+				if point == "after_first_intent" && failed.CompareAndSwap(false, true) {
+					return &pgconn.PgError{Code: code, Message: "forced database retry"}
 				}
+				return nil
 			}
-			if retried != 1 || succeeded != 1 {
-				t.Fatalf("concurrent retry/success = %d/%d", retried, succeeded)
+			outcome := mutationOutcome{}
+			outcome.result, outcome.err = injected.SnapshotGitHubPush(t.Context(), params)
+			if outcome.err != nil || outcome.result.TotalCount != 2 {
+				t.Fatalf("retried mutation outcome = %+v, %v", outcome.result, outcome.err)
 			}
 			var attempts, manifests, effects int
 			if err := pool.QueryRow(t.Context(), `SELECT attempts,(SELECT count(*) FROM github_routing_fanout_manifests WHERE delivery_id=$1),(SELECT count(*) FROM github_routing_intents WHERE delivery_id=$1) FROM github_webhook_deliveries WHERE id=$1`, delivery.ID).Scan(&attempts, &manifests, &effects); err != nil {
@@ -996,19 +983,6 @@ func TestGitHubForcedDatabaseRetryMasterMatrixPostgres18(t *testing.T) {
 			t.Fatalf("real serializable conflict error = %v", err)
 		}
 	})
-}
-
-type onceTransactionErrorDB struct {
-	DB
-	code string
-	done atomic.Bool
-}
-
-func (d *onceTransactionErrorDB) BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-	if d.done.CompareAndSwap(false, true) {
-		return nil, &pgconn.PgError{Code: d.code, Message: "forced database retry"}
-	}
-	return d.DB.BeginTx(ctx, options)
 }
 
 func isSQLState(err error, code string) bool {

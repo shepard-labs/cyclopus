@@ -1,0 +1,96 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+type githubEventRetryDB struct {
+	DB
+	commits []error
+	begins  atomic.Int32
+}
+
+func (d *githubEventRetryDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	index := int(d.begins.Add(1)) - 1
+	var commitErr error
+	if index < len(d.commits) {
+		commitErr = d.commits[index]
+	}
+	return &githubEventRetryTx{commitErr: commitErr}, nil
+}
+
+type githubEventRetryTx struct {
+	pgx.Tx
+	commitErr error
+}
+
+func (t *githubEventRetryTx) Commit(context.Context) error { return t.commitErr }
+func (*githubEventRetryTx) Rollback(context.Context) error { return nil }
+
+func TestWithGitHubEventTxRetryFunctionFailureThenSuccess(t *testing.T) {
+	db := &githubEventRetryDB{}
+	dataStore := New(db)
+	var calls atomic.Int32
+	err := dataStore.withGitHubEventTxRetry(t.Context(), pgx.TxOptions{}, func(pgx.Tx) error {
+		if calls.Add(1) == 1 {
+			return &pgconn.PgError{Code: "40001", Message: "retry"}
+		}
+		return nil
+	})
+	if err != nil || calls.Load() != 2 || db.begins.Load() != 2 {
+		t.Fatalf("retry result = %v, calls=%d begins=%d", err, calls.Load(), db.begins.Load())
+	}
+}
+
+func TestWithGitHubEventTxRetryCommitFailureThenSuccess(t *testing.T) {
+	db := &githubEventRetryDB{commits: []error{&pgconn.PgError{Code: "40P01", Message: "retry"}, nil}}
+	dataStore := New(db)
+	var calls atomic.Int32
+	err := dataStore.withGitHubEventTxRetry(t.Context(), pgx.TxOptions{}, func(pgx.Tx) error {
+		calls.Add(1)
+		return nil
+	})
+	if err != nil || calls.Load() != 2 || db.begins.Load() != 2 {
+		t.Fatalf("commit retry result = %v, calls=%d begins=%d", err, calls.Load(), db.begins.Load())
+	}
+}
+
+func TestWithGitHubEventTxRetryExhaustionReturnsPostgresError(t *testing.T) {
+	db := &githubEventRetryDB{}
+	dataStore := New(db)
+	err := dataStore.withGitHubEventTxRetry(t.Context(), pgx.TxOptions{}, func(pgx.Tx) error {
+		return &pgconn.PgError{Code: "40001", Message: "retry"}
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "40001" || db.begins.Load() != githubEventTxAttempts {
+		t.Fatalf("exhaustion error = %v, begins=%d", err, db.begins.Load())
+	}
+}
+
+func TestWithGitHubEventTxRetryDoesNotRetryDomainError(t *testing.T) {
+	db := &githubEventRetryDB{}
+	dataStore := New(db)
+	err := dataStore.withGitHubEventTxRetry(t.Context(), pgx.TxOptions{}, func(pgx.Tx) error { return ErrLeaseNotOwned })
+	if !errors.Is(err, ErrLeaseNotOwned) || db.begins.Load() != 1 {
+		t.Fatalf("domain error = %v, begins=%d", err, db.begins.Load())
+	}
+}
+
+func TestWithGitHubEventTxRetryContextCancellationStopsBackoff(t *testing.T) {
+	db := &githubEventRetryDB{}
+	dataStore := New(db)
+	ctx, cancel := context.WithCancel(t.Context())
+	err := dataStore.withGitHubEventTxRetry(ctx, pgx.TxOptions{}, func(pgx.Tx) error {
+		cancel()
+		return &pgconn.PgError{Code: "40P01", Message: "retry"}
+	})
+	if !errors.Is(err, context.Canceled) || db.begins.Load() != 1 {
+		t.Fatalf("cancellation error = %v, begins=%d", err, db.begins.Load())
+	}
+}
