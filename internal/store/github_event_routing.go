@@ -55,7 +55,8 @@ func (s *Store) ReconcileGitHubEvent(ctx context.Context, p ReconcileGitHubEvent
 	}
 
 	var generation int64
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	err := s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		generation = 0
 		if err := fenceGitHubEventDelivery(ctx, tx, p.DeliveryID, p.DeliveryLease, p.OrgID); err != nil {
 			return err
 		}
@@ -233,7 +234,7 @@ type RevokeGitHubEventParams struct {
 // RevokeGitHubEvent immediately blocks routing while retaining imported metadata.
 // Repeating a destructive event is successful convergence.
 func (s *Store) RevokeGitHubEvent(ctx context.Context, p RevokeGitHubEventParams) error {
-	return s.withTx(ctx, func(tx pgx.Tx) error {
+	return s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 		if err := fenceGitHubEventDelivery(ctx, tx, p.DeliveryID, p.DeliveryLease, p.OrgID); err != nil {
 			return err
 		}
@@ -356,7 +357,8 @@ func (s *Store) SnapshotGitHubPush(ctx context.Context, p SnapshotGitHubPushPara
 		return SnapshotGitHubPushResult{}, ErrFailedPrecondition
 	}
 	var result SnapshotGitHubPushResult
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	err := s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		result = SnapshotGitHubPushResult{}
 		if err := checkGitHubEventDelivery(ctx, tx, p.DeliveryID, p.DeliveryLease, p.OrgID, false); err != nil {
 			return err
 		}
@@ -632,7 +634,7 @@ func (s *Store) RetryGitHubRoutingFanoutManifest(ctx context.Context, id string,
 		return ErrInvalidArgument
 	}
 	detail = sanitizeWebhookDetail(detail)
-	return s.withTx(ctx, func(tx pgx.Tx) error {
+	return s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 		var terminal bool
 		err := tx.QueryRow(ctx, `UPDATE github_routing_fanout_manifests SET status=CASE WHEN attempts=12 THEN 'failed' ELSE 'pending' END,
 			next_attempt_at=clock_timestamp()+($4*interval '1 microsecond'),error_code=CASE WHEN attempts=12 THEN 'attempts_exhausted' ELSE $5 END,error_detail=$6,
@@ -652,7 +654,7 @@ func (s *Store) RetryGitHubRoutingFanoutManifest(ctx context.Context, id string,
 
 func (s *Store) FailGitHubRoutingFanoutManifest(ctx context.Context, id string, token LeaseToken, code, detail string) error {
 	detail = sanitizeWebhookDetail(detail)
-	return s.withTx(ctx, func(tx pgx.Tx) error {
+	return s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE github_routing_fanout_manifests SET status='failed',error_code=$4,error_detail=$5,terminal_at=clock_timestamp(),
 			lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, id, token.Owner, token.Epoch, code, detail)
 		if err != nil {
@@ -671,7 +673,8 @@ func (s *Store) ContinueGitHubPushFanout(ctx context.Context, p ContinueGitHubPu
 		return ContinueGitHubPushFanoutResult{}, ErrInvalidArgument
 	}
 	var result ContinueGitHubPushFanoutResult
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	err := s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		result = ContinueGitHubPushFanoutResult{}
 		var manifestID, deliveryID, orgID, ref, eventKind, status string
 		var repositoryID, routingGeneration, repositoryGeneration, refLifecycleGeneration int64
 		var batchSize, productionDeleteCount int
@@ -828,7 +831,8 @@ func insertGitHubPushFanoutAudit(ctx context.Context, tx pgx.Tx, orgID, delivery
 
 func (s *Store) ExecuteGitHubRoutingIntent(ctx context.Context, id string, token LeaseToken, identities []PreviewIdentity) (string, error) {
 	result := "processed"
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	err := s.withGitHubEventTxRetry(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		result = "processed"
 		var intent GitHubRoutingIntent
 		var valid bool
 		dropped := false

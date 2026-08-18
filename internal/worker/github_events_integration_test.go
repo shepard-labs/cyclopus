@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -344,16 +345,7 @@ func TestGitHubEventRunnerRetriesTransactionalDatabaseFailuresPostgres18(t *test
 
 			first := claimOneGitHubEventDelivery(t, dataStore, "delivery-worker")
 			runDeliveryDirect(runner, t.Context(), first)
-			assertGitHubEventRetryState(t, pool, delivery.ID, 1, "database_unavailable")
-			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 0, 0, 0, 0)
-
-			time.Sleep(3 * time.Millisecond)
-			second := claimOneGitHubEventDelivery(t, dataStore, "delivery-worker")
-			if second.Attempts != 2 || second.Lease.Epoch <= first.Lease.Epoch {
-				t.Fatalf("second claim = %+v, first = %+v", second, first)
-			}
-			runDeliveryDirect(runner, t.Context(), second)
-			assertGitHubEventDelivery(t, pool, delivery.ID, "completed", 2, "fanout_staged")
+			assertGitHubEventDelivery(t, pool, delivery.ID, "completed", 1, "fanout_staged")
 			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 1, 1, 2, 0)
 
 			manifest := claimOneGitHubEventFanout(t, dataStore, "fanout-worker")
@@ -363,13 +355,53 @@ func TestGitHubEventRunnerRetriesTransactionalDatabaseFailuresPostgres18(t *test
 			assertGitHubEventFanout(t, pool, delivery.ID, "completed", 2, 2, 1)
 			assertGitHubEventIntentUniqueness(t, pool, delivery.ID, 2)
 			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 1, 1, 0, 1)
-			if calls := client.callCounts(); calls != [5]int{0, 0, 0, 2, 0} {
-				t.Fatalf("external calls installation/list/repository/ref/refresh = %v, want two branch reads only", calls)
+			if calls := client.callCounts(); calls != [5]int{0, 0, 0, 1, 0} {
+				t.Fatalf("external calls installation/list/repository/ref/refresh = %v, want one branch read only", calls)
 			}
 			claimed, err := dataStore.ClaimGitHubWebhookDeliveries(t.Context(), "unexpected-third-worker", time.Minute, 1)
 			if err != nil || len(claimed) != 0 {
 				t.Fatalf("unexpected third delivery claim = %+v, %v", claimed, err)
 			}
+		})
+	}
+}
+
+func TestGitHubEventRunnerPersistsOneRetryAfterTransactionRetryExhaustionPostgres18(t *testing.T) {
+	for _, sqlstate := range []string{"40001", "40P01"} {
+		t.Run(sqlstate, func(t *testing.T) {
+			dataStore, pool := newGitHubEventIntegrationFixture(t, "github_delivery_tx_exhaustion_"+sqlstate)
+			seedGitHubEventFanoutApps(t, pool, 2, 41000)
+			const ref = "refs/heads/feature/transaction-exhaustion"
+			before, after := strings.Repeat("0", 40), strings.Repeat("f", 40)
+			delivery := receiveGitHubEventPush(t, dataStore, "40000000-0000-0000-0000-000000000033", ref, before, after)
+			var failures atomic.Int32
+			processorStore := &snapshotFailpointGitHubEventStore{Store: dataStore, failpoint: func(point string) error {
+				if point == "after_first_intent" {
+					failures.Add(1)
+					return &pgconn.PgError{Code: sqlstate, Message: "injected transactional retry exhaustion"}
+				}
+				return nil
+			}}
+			client := &recordingGitHubEventClient{sha: after, exists: true}
+			processor, err := service.NewGitHubEventProcessorWithFanout(processorStore, client, 10, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := gitHubEventIntegrationConfig("delivery-worker", 10, 10)
+			config.InitialRetry, config.MaxRetry = time.Millisecond, time.Millisecond
+			runner := NewGitHubEventRunner(config, integrationDiscardLogger(), dataStore, processor)
+			enableTestWrites(runner)
+
+			first := claimOneGitHubEventDelivery(t, dataStore, "delivery-worker")
+			runDeliveryDirect(runner, t.Context(), first)
+			if failures.Load() != 3 {
+				t.Fatalf("transaction failures = %d, want 3", failures.Load())
+			}
+			if calls := client.callCounts(); calls != [5]int{0, 0, 0, 1, 0} {
+				t.Fatalf("external calls installation/list/repository/ref/refresh = %v, want one branch read only", calls)
+			}
+			assertGitHubEventRetryState(t, pool, delivery.ID, 1, "database_unavailable")
+			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 0, 0, 0, 0)
 		})
 	}
 }

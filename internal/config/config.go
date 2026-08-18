@@ -895,6 +895,12 @@ func (c Config) Validate() error {
 	if (c.Webhook.GitHubPreviousSecretRef == "") != (c.Webhook.GitHubPreviousKeyVersion == "") || (c.Webhook.GitHubPreviousSecretRef != "" && c.Webhook.GitHubSecretOverlapUntil.IsZero()) {
 		errs = append(errs, fmt.Errorf("webhook GitHub previous secret requires its version and a bounded overlap end"))
 	} else if c.Webhook.GitHubPreviousSecretRef != "" {
+		if c.Webhook.GitHubPreviousKeyVersion == c.Webhook.GitHubActiveKeyVersion {
+			errs = append(errs, fmt.Errorf("webhook GitHub active and previous key versions must differ"))
+		}
+		if c.Webhook.GitHubPreviousSecretRef == c.Webhook.GitHubActiveSecretRef {
+			errs = append(errs, fmt.Errorf("webhook GitHub active and previous secret references must differ"))
+		}
 		if _, err := secretref.Parse(c.Webhook.GitHubPreviousSecretRef); err != nil {
 			errs = append(errs, fmt.Errorf("webhook.github_previous_secret_ref must be a valid Kubernetes Secret reference"))
 		}

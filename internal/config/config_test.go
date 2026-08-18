@@ -124,6 +124,53 @@ func TestLoadRejectsInvalidGitHubWebhookKeyVersions(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsDuplicateGitHubWebhookRotationProvenance(t *testing.T) {
+	const versionError = "webhook GitHub active and previous key versions must differ"
+	const refError = "webhook GitHub active and previous secret references must differ"
+	activeRef := "k8s-secret://default/cyclopus-webhook-active#secret"
+	previousRef := "k8s-secret://default/cyclopus-webhook-previous#secret"
+	base := append(baseValidEnv,
+		"CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_SECRET_REF="+activeRef,
+		"CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_KEY_VERSION=v2")
+
+	for _, test := range []struct {
+		name    string
+		args    []string
+		env     []string
+		file    string
+		wantErr string
+	}{
+		{name: "environment duplicate version after expired overlap", env: append(base,
+			"CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_SECRET_REF="+previousRef,
+			"CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_KEY_VERSION=v2",
+			"CYCLOPUS_WEBHOOK_GITHUB_SECRET_OVERLAP_UNTIL=2020-01-01T00:00:00Z"), wantErr: versionError},
+		{name: "flag duplicate version", args: []string{
+			"--webhook-github-previous-secret-ref", previousRef,
+			"--webhook-github-previous-key-version", "v2",
+			"--webhook-github-secret-overlap-until", "2030-01-01T00:00:00Z"}, env: base, wantErr: versionError},
+		{name: "config duplicate version", env: base, file: `{"webhook":{"github_previous_secret_ref":"` + previousRef + `","github_previous_key_version":"v2","github_secret_overlap_until":"2030-01-01T00:00:00Z"}}`, wantErr: versionError},
+		{name: "duplicate reference", env: append(base,
+			"CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_SECRET_REF="+activeRef,
+			"CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_KEY_VERSION=v1",
+			"CYCLOPUS_WEBHOOK_GITHUB_SECRET_OVERLAP_UNTIL=2030-01-01T00:00:00Z"), wantErr: refError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := test.args
+			if test.file != "" {
+				path := filepath.Join(t.TempDir(), "cyclopus.json")
+				if err := os.WriteFile(path, []byte(test.file), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				args = append([]string{"--config", path}, args...)
+			}
+			_, err := Load(args, test.env)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Load() error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadMetricsPublicBindRequiresExplicitOptIn(t *testing.T) {
 	if _, err := Load([]string{"--metrics-address", "0.0.0.0:9090"}, baseValidEnv); err == nil || !strings.Contains(err.Error(), "metrics.allow_public") {
 		t.Fatalf("public metrics bind error = %v", err)

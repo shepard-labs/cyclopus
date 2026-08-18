@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -17,6 +20,7 @@ type GitHubWebhookSecretChecker struct {
 	interval time.Duration
 	timeout  time.Duration
 	now      func() time.Time
+	probe    func([]byte) error
 
 	mu      sync.Mutex
 	checked time.Time
@@ -24,7 +28,18 @@ type GitHubWebhookSecretChecker struct {
 }
 
 func NewGitHubWebhookSecretChecker(resolver GitHubWebhookSecretResolver, activeRef string, interval, timeout time.Duration) *GitHubWebhookSecretChecker {
-	return &GitHubWebhookSecretChecker{resolver: resolver, ref: activeRef, interval: interval, timeout: timeout, now: time.Now}
+	return &GitHubWebhookSecretChecker{resolver: resolver, ref: activeRef, interval: interval, timeout: timeout, now: time.Now, probe: probeGitHubWebhookHMAC}
+}
+
+func probeGitHubWebhookHMAC(secret []byte) error {
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte("cyclopus:github-webhook-readiness:v1"))
+	sum := mac.Sum(nil)
+	defer clear(sum)
+	if len(sum) != sha256.Size {
+		return fmt.Errorf("unexpected HMAC-SHA-256 length %d", len(sum))
+	}
+	return nil
 }
 
 func (c *GitHubWebhookSecretChecker) Check(ctx context.Context) error {
@@ -38,6 +53,10 @@ func (c *GitHubWebhookSecretChecker) Check(ctx context.Context) error {
 	secret, err := c.resolver.Resolve(probeCtx, c.ref)
 	cancel()
 	valid := err == nil && len(secret) > 0
+	if valid {
+		err = c.probe(secret)
+		valid = err == nil
+	}
 	clear(secret)
 	c.checked = now
 	if !valid {

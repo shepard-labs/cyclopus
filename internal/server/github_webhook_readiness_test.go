@@ -65,6 +65,11 @@ func TestGitHubWebhookSecretCheckerActiveOnlyZeroesAndSanitizes(t *testing.T) {
 func TestGitHubWebhookSecretCheckerConcurrentCacheFailureAndRecovery(t *testing.T) {
 	resolver := &readinessSecretResolver{secret: []byte("active")}
 	checker := NewGitHubWebhookSecretChecker(resolver, "active-ref", time.Minute, time.Second)
+	var probeCalls atomic.Int32
+	checker.probe = func(secret []byte) error {
+		probeCalls.Add(1)
+		return probeGitHubWebhookHMAC(secret)
+	}
 	if err := checker.Check(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +86,9 @@ func TestGitHubWebhookSecretCheckerConcurrentCacheFailureAndRecovery(t *testing.
 	wg.Wait()
 	if resolver.calls.Load() != 1 {
 		t.Fatalf("resolver calls = %d, want 1", resolver.calls.Load())
+	}
+	if probeCalls.Load() != 1 {
+		t.Fatalf("HMAC probe calls = %d, want 1", probeCalls.Load())
 	}
 	resolver.mu.Lock()
 	resolver.err = errors.New("unavailable")
@@ -100,6 +108,33 @@ func TestGitHubWebhookSecretCheckerConcurrentCacheFailureAndRecovery(t *testing.
 	checker.mu.Unlock()
 	if err := checker.Check(t.Context()); err != nil {
 		t.Fatalf("restored check: %v", err)
+	}
+	if probeCalls.Load() != 2 {
+		t.Fatalf("HMAC probe calls after recovery = %d, want 2", probeCalls.Load())
+	}
+}
+
+func TestGitHubWebhookSecretCheckerProbeFailureIsCachedSanitizedAndRecovers(t *testing.T) {
+	secret := "probe-secret-must-not-leak"
+	resolver := &readinessSecretResolver{secret: []byte(secret)}
+	checker := NewGitHubWebhookSecretChecker(resolver, "active-ref", time.Minute, time.Second)
+	probeCalls := 0
+	checker.probe = func([]byte) error {
+		probeCalls++
+		return errors.New("probe exposed " + secret)
+	}
+	if err := checker.Check(t.Context()); err == nil || err.Error() != errGitHubWebhookSecretUnavailable.Error() || strings.Contains(err.Error(), secret) {
+		t.Fatalf("probe failure = %v", err)
+	}
+	if err := checker.Check(t.Context()); err == nil || probeCalls != 1 || resolver.calls.Load() != 1 {
+		t.Fatalf("cached probe failure = %v, probes=%d resolves=%d", err, probeCalls, resolver.calls.Load())
+	}
+	checker.mu.Lock()
+	checker.checked = time.Time{}
+	checker.mu.Unlock()
+	checker.probe = probeGitHubWebhookHMAC
+	if err := checker.Check(t.Context()); err != nil {
+		t.Fatalf("probe recovery: %v", err)
 	}
 }
 

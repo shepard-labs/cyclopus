@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -49,7 +50,11 @@ func New(db DB) *Store {
 }
 
 func (s *Store) withTx(ctx context.Context, fn func(pgx.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	return s.withTxOptions(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, fn)
+}
+
+func (s *Store) withTxOptions(ctx context.Context, options pgx.TxOptions, fn func(pgx.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, options)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -62,6 +67,47 @@ func (s *Store) withTx(ctx context.Context, fn func(pgx.Tx) error) error {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
+}
+
+const githubEventTxAttempts = 3
+
+func (s *Store) withGitHubEventTxRetry(ctx context.Context, options pgx.TxOptions, fn func(pgx.Tx) error) error {
+	for attempt := 0; attempt < githubEventTxAttempts; attempt++ {
+		tx, err := s.db.BeginTx(ctx, options)
+		if err != nil {
+			return fmt.Errorf("begin transaction: %w", err)
+		}
+		err = fn(tx)
+		if err == nil {
+			err = tx.Commit(ctx)
+			if err != nil {
+				err = fmt.Errorf("commit transaction: %w", err)
+			}
+		}
+		if err == nil {
+			return nil
+		}
+		_ = tx.Rollback(ctx)
+		if !isGitHubEventTxRetryable(err) || attempt == githubEventTxAttempts-1 {
+			return err
+		}
+		delay := time.Duration(attempt+1)*time.Millisecond + time.Duration(rand.IntN(3))*time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	panic("unreachable")
+}
+
+func isGitHubEventTxRetryable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01")
 }
 
 func rowsAffected(commandTag pgconnCommandTag, notFound error) error {
