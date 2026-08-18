@@ -193,7 +193,9 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string)
 			pt.CPUIOWait = floatField(cpub[2])
 		}
 		pt.Memory = floatField(raw["mp"])
-		pt.MemoryMB = floatField(raw["m"])
+		// Beszel reports memory in GB: "m" is total, "mu" is used.
+		// Store absolute used memory in MB.
+		pt.MemoryMB = floatField(raw["mu"]) * 1024.0
 		pt.MemoryUsed = floatField(raw["mu"])
 		pt.Disk = floatField(raw["dp"])
 		pt.DiskRead = floatField(raw["dr"])

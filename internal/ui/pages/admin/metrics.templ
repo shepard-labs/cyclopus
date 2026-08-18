@@ -43,7 +43,19 @@ templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) 
 			try {
 				const d = new Date(isoStr);
 				if (isNaN(d.getTime())) return isoStr;
-				return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+				return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + " " +
+					d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			} catch (e) {
+				return isoStr;
+			}
+		}
+
+		function formatUserLocalTimeOnly(isoStr) {
+			if (!isoStr) return "";
+			try {
+				const d = new Date(isoStr);
+				if (isNaN(d.getTime())) return isoStr;
+				return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 			} catch (e) {
 				return isoStr;
 			}
@@ -96,6 +108,11 @@ templ metricsContent(nodes []observability.NodeSystemDetail, errMessage string) 
 					return;
 				}
 				if (!data || !data.times || data.times.length === 0) return;
+
+				card.querySelectorAll('.metric-time-tick').forEach(el => {
+					const iso = el.getAttribute('data-iso-time');
+					if (iso) el.textContent = formatUserLocalTimeOnly(iso);
+				});
 
 				const defaultVal = currentValEl ? currentValEl.textContent : '';
 
@@ -236,8 +253,8 @@ templ metricsGrid(nodes []observability.NodeSystemDetail, errMessage string) {
 						</div>
 					</div>
 
-					<!-- 2-Column Grid (2x2 / 2x3 layout) for Node Metric Charts -->
-					<div class="grid grid-cols-1 gap-5 md:grid-cols-2">
+				<!-- Single-Column Grid for Node Metric Charts -->
+				<div class="grid grid-cols-1 gap-5">
 						<!-- 1. CPU Usage -->
 						@RenderSVGChart(cpu)
 
@@ -283,52 +300,71 @@ templ RenderSVGChart(chart SVGChartData) {
 					</div>
 				}
 			</div>
-			<div class="text-right">
-				<span class="metric-current-val font-mono text-xs font-bold text-base-content">{ chart.CurrentVal }</span>
+		</div>
+
+		<div class="flex w-full">
+			<!-- Y axis ticks -->
+			<div class="relative w-14 shrink-0 h-24 pt-1">
+				if len(chart.YTicks) > 0 {
+					for _, t := range chart.YTicks {
+						<span class="absolute right-1 -translate-y-1/2 text-xs font-mono text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("top: %.1f%%", tickTopPct(chart.MinVal, chart.MaxVal, t)) }>{ formatTickValue(t, chart.Unit) }</span>
+					}
+				}
+			</div>
+			<div class="relative flex-1 h-24 cursor-crosshair">
+				<!-- Floating Hover Tooltip -->
+				<div style="display: none;" class="metric-tooltip pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full mb-1 rounded-box border border-line bg-base-200/95 backdrop-blur px-3 py-2 shadow-lg min-w-36"></div>
+
+				<svg viewBox="0 0 300 80" preserveAspectRatio="none" class="metric-chart-svg w-full h-full overflow-visible pt-1 box-border">
+					<defs>
+						if chart.FillColor != "" {
+							<linearGradient id={ "grad-" + chart.ID } x1="0" y1="0" x2="0" y2="1">
+								<stop offset="0%" stop-color={ chart.FillColor } stop-opacity="0.28"></stop>
+								<stop offset="100%" stop-color={ chart.FillColor } stop-opacity="0.0"></stop>
+							</linearGradient>
+						}
+					</defs>
+
+					<!-- Y tick gridlines -->
+					if len(chart.YTicks) > 0 {
+						for _, t := range chart.YTicks {
+							{{ gy := 80.0 - 8.0 }}
+							{{ ratio := (t - chart.MinVal) / (chart.MaxVal - chart.MinVal) }}
+							if ratio >= 0 && ratio <= 1 {
+								{{ gy = 80.0 - 8.0 - ratio*64.0 }}
+								<line x1="0" y1={ fmt.Sprintf("%.1f", gy) } x2="300" y2={ fmt.Sprintf("%.1f", gy) } stroke="var(--tw-color-line)" stroke-width="0.75"></line>
+							}
+						}
+					}
+
+					<!-- Area fill -->
+					if chart.AreaPath != "" {
+						<path d={ chart.AreaPath } fill={ fmt.Sprintf("url(#grad-%s)", chart.ID) }></path>
+					}
+
+					<!-- Lines with consistent stroke-width vector effect -->
+					for i, path := range chart.LinePaths {
+						{{ stroke := chart.StrokeColor }}
+						if len(chart.Series) > i && chart.Series[i].Color != "" {
+							{{ stroke = chart.Series[i].Color }}
+						}
+						<path d={ path } fill="none" stroke={ stroke } stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path>
+					}
+
+					<!-- Interactive Crosshair -->
+					<line style="display: none;" class="metric-crosshair" x1="0" y1="0" x2="0" y2="80" stroke="var(--tw-color-primary)" stroke-width="1.5" vector-effect="non-scaling-stroke"></line>
+				</svg>
+
+				<!-- X axis ticks (times filled client-side) -->
+				<div class="absolute inset-x-0 top-full pt-1 flex">
+					if len(chart.XTicks) > 0 {
+						for _, idx := range chart.XTicks {
+							<span class="metric-time-tick absolute -translate-x-1/2 text-xs font-mono text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("left: %.1f%%", xTickLeftPct(idx, len(chart.Times))) } data-iso-time={ chart.Times[idx] }></span>
+						}
+					}
+				</div>
 			</div>
 		</div>
 
-		<div class="relative w-full h-24 pt-1 cursor-crosshair">
-			<!-- Floating Hover Tooltip -->
-			<div style="display: none;" class="metric-tooltip pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full mb-1 rounded-box border border-line bg-base-200/95 backdrop-blur px-3 py-2 shadow-lg min-w-36"></div>
-
-			<svg viewBox="0 0 300 80" preserveAspectRatio="none" class="metric-chart-svg w-full h-full overflow-visible">
-				<defs>
-					if chart.FillColor != "" {
-						<linearGradient id={ "grad-" + chart.ID } x1="0" y1="0" x2="0" y2="1">
-							<stop offset="0%" stop-color={ chart.FillColor } stop-opacity="0.28"></stop>
-							<stop offset="100%" stop-color={ chart.FillColor } stop-opacity="0.0"></stop>
-						</linearGradient>
-					}
-				</defs>
-
-				<!-- Grid guidelines -->
-				<line x1="0" y1="8" x2="300" y2="8" stroke="var(--tw-color-line)" stroke-width="0.75" stroke-dasharray="3 3"></line>
-				<line x1="0" y1="40" x2="300" y2="40" stroke="var(--tw-color-line)" stroke-width="0.75" stroke-dasharray="3 3"></line>
-				<line x1="0" y1="72" x2="300" y2="72" stroke="var(--tw-color-line)" stroke-width="0.75"></line>
-
-				<!-- Area fill -->
-				if chart.AreaPath != "" {
-					<path d={ chart.AreaPath } fill={ fmt.Sprintf("url(#grad-%s)", chart.ID) }></path>
-				}
-
-				<!-- Lines with consistent stroke-width vector effect -->
-				for i, path := range chart.LinePaths {
-					{{ stroke := chart.StrokeColor }}
-					if len(chart.Series) > i && chart.Series[i].Color != "" {
-						{{ stroke = chart.Series[i].Color }}
-					}
-					<path d={ path } fill="none" stroke={ stroke } stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path>
-				}
-
-				<!-- Interactive Crosshair -->
-				<line style="display: none;" class="metric-crosshair" x1="0" y1="0" x2="0" y2="80" stroke="var(--tw-color-primary)" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="2 2"></line>
-			</svg>
-		</div>
-
-		<div class="flex items-center justify-between mt-3 pt-2 border-t border-line text-xs text-base-content/45 font-mono">
-			<span>{ fmt.Sprintf("%.0f %s", chart.MinVal, chart.Unit) }</span>
-			<span>{ fmt.Sprintf("%.0f %s", chart.MaxVal, chart.Unit) }</span>
-		</div>
 	</div>
 }

@@ -3,7 +3,9 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +72,87 @@ type SVGChartData struct {
 	FillColor   string
 	StrokeColor string
 	DataJSON    string
+	YTicks      []float64
+	XTicks      []int // indices into Times
+}
+
+// niceTicks returns a human-friendly set of tick values spanning [min, max]
+// (inclusive), typically 3-5 ticks.
+func niceTicks(min, max float64) []float64 {
+	if max <= min {
+		return []float64{min}
+	}
+	raw := (max - min) / 4.0
+	mag := math.Pow(10, math.Floor(math.Log10(raw)))
+	norm := raw / mag
+	var step float64
+	switch {
+	case norm >= 5:
+		step = 5 * mag
+	case norm >= 2.5:
+		step = 2 * mag
+	case norm >= 1.5:
+		step = 2 * mag
+	default:
+		step = mag
+	}
+	start := math.Ceil(min/step) * step
+	var ticks []float64
+	for v := start; v <= max+step*1e-9; v += step {
+		ticks = append(ticks, v)
+	}
+	if len(ticks) < 2 {
+		ticks = []float64{min, max}
+	}
+	return ticks
+}
+
+// timeTickIndices picks up to 4 evenly spaced sample indices for the X axis.
+func timeTickIndices(n int) []int {
+	switch {
+	case n <= 1:
+		return []int{0}
+	case n == 2:
+		return []int{0, 1}
+	case n == 3:
+		return []int{0, 1, 2}
+	default:
+		return []int{0, n / 3, (2 * n) / 3, n - 1}
+	}
+}
+
+func formatTickValue(v float64, unit string) string {
+	if unit == "%" {
+		return strconv.FormatFloat(math.Round(v), 'f', -1, 64) + "%"
+	}
+	return strconv.FormatFloat(math.Round(v*10)/10, 'f', -1, 64) + " " + unit
+}
+
+// tickTopPct maps a data value to its vertical position within the plot,
+// expressed as a CSS top percentage. Mirrors the Go path builder: the SVG
+// viewBox is 300x80 with 8 units of padding top and bottom.
+func tickTopPct(min, max, v float64) float64 {
+	if max <= min {
+		return 50
+	}
+	ratio := (v - min) / (max - min)
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	y := 80.0 - 8.0 - ratio*64.0
+	return y / 80.0 * 100.0
+}
+
+// xTickLeftPct maps a sample index to its horizontal position as a CSS left
+// percentage of the plot width.
+func xTickLeftPct(idx, n int) float64 {
+	if n <= 1 {
+		return 50
+	}
+	return float64(idx) / float64(n-1) * 100.0
 }
 
 var nonAlphanumeric = regexp.MustCompile(`[^a-zA-Z0-9]+`)
@@ -175,6 +258,8 @@ func buildSingleSeriesChart(title, unit, strokeColor, fillColor string, times []
 		StrokeColor: strokeColor,
 		FillColor:   fillColor,
 		DataJSON:    string(dataBytes),
+		YTicks:      niceTicks(minV, maxV),
+		XTicks:      timeTickIndices(len(times)),
 	}
 }
 
@@ -261,6 +346,8 @@ func buildMultiSeriesChart(title, unit string, seriesList []ChartSeries, times [
 		LinePaths:  paths,
 		Times:      times,
 		DataJSON:   string(dataBytes),
+		YTicks:     niceTicks(minV, maxV),
+		XTicks:     timeTickIndices(len(times)),
 	}
 }
 
@@ -296,10 +383,21 @@ func extractNodeChartData(node observability.NodeSystemDetail) (cpu SVGChartData
 	l15Vals := make([]float64, len(hist))
 	tempVals := make([]float64, len(hist))
 
+	memUnit, memDiv := "MB", 1.0
+	memMax := 0.0
+	for _, pt := range hist {
+		if pt.MemoryMB > memMax {
+			memMax = pt.MemoryMB
+		}
+	}
+	if memMax >= 1024 {
+		memUnit, memDiv = "GB", 1024.0
+	}
+
 	for i, pt := range hist {
 		times[i] = pt.Timestamp.UTC().Format("2006-01-02T15:04:05Z")
 		cpuVals[i] = pt.CPU
-		memVals[i] = pt.Memory
+		memVals[i] = pt.MemoryMB / memDiv
 		diskVals[i] = pt.Disk
 		diskRVals[i] = pt.DiskRead
 		diskWVals[i] = pt.DiskWrite
@@ -311,7 +409,7 @@ func extractNodeChartData(node observability.NodeSystemDetail) (cpu SVGChartData
 	}
 
 	cpu = buildSingleSeriesChart("CPU Usage", "%", "var(--tw-color-primary)", "var(--tw-color-primary)", times, cpuVals, 100)
-	mem = buildSingleSeriesChart("Memory Usage", "%", "var(--tw-color-info)", "var(--tw-color-info)", times, memVals, 100)
+	mem = buildSingleSeriesChart("Memory Usage", memUnit, "var(--tw-color-info)", "var(--tw-color-info)", times, memVals, 0)
 	disk = buildSingleSeriesChart("Disk Space", "%", "var(--tw-color-accent)", "var(--tw-color-accent)", times, diskVals, 100)
 	diskIO = buildMultiSeriesChart("Disk I/O", "MB/s", []ChartSeries{
 		{Name: "Read", Values: diskRVals, Color: "var(--tw-color-success)"},
