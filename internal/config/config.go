@@ -19,6 +19,8 @@ import (
 
 const envPrefix = "CYCLOPUS_"
 
+const githubEventCallPinSafetyMargin = 5 * time.Second
+
 // clusterIssuerNamePattern is a DNS-1123 subdomain (the shape of a Kubernetes
 // object name such as a cert-manager ClusterIssuer): lowercase alphanumerics,
 // '-' and '.' with alphanumeric start/end, <= 253 chars. An empty issuer is
@@ -820,6 +822,9 @@ func (c Config) Validate() error {
 	}
 	if c.GitHub.RequestTimeout >= c.Worker.LeaseDuration {
 		errs = append(errs, fmt.Errorf("github.request_timeout must be shorter than worker.lease_duration"))
+	}
+	if c.GitHubEventWorker.LeaseDuration < githubEventCallPinSafetyMargin || c.GitHub.RequestTimeout > c.GitHubEventWorker.LeaseDuration-githubEventCallPinSafetyMargin {
+		errs = append(errs, fmt.Errorf("github.request_timeout plus a %s call pin safety margin must not exceed github_event_worker.lease_duration", githubEventCallPinSafetyMargin))
 	}
 	seenWebhookRefs := make(map[string]struct{}, len(c.Webhook.AllowedSecretRefs))
 	for _, value := range c.Webhook.AllowedSecretRefs {

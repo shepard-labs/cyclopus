@@ -333,6 +333,31 @@ func TestGitHubEventRetryAtAttemptTwelveUsesTerminalizingStoreOperation(t *testi
 	}
 }
 
+func TestGitHubEventProcessorLeaseLostSuppressesEveryWrite(t *testing.T) {
+	fake := &fakeGitHubEventStore{}
+	runner := newGitHubEventTestRunner(fake, &fakeGitHubEventProcessor{deliveryOutcome: service.GitHubEventOutcome{Disposition: service.GitHubEventLeaseLost, Code: "lease_lost"}}, discardLogger())
+	enableTestWrites(runner)
+	delivery := leasedDelivery("delivery", 7)
+	runDeliveryDirect(runner, t.Context(), delivery)
+	if fake.deliveryRetryCalls != 0 || fake.deliveryCompleteCalls != 0 || fake.deliveryFailCalls != 0 || fake.rotateCalls != 0 {
+		t.Fatalf("lease-lost writes retry/complete/fail/rotate = %d/%d/%d/%d", fake.deliveryRetryCalls, fake.deliveryCompleteCalls, fake.deliveryFailCalls, fake.rotateCalls)
+	}
+	if delivery.Attempts != 7 {
+		t.Fatalf("processor changed claimed attempt: %d", delivery.Attempts)
+	}
+}
+
+func TestGitHubEventDatabaseRetryDoesNotConsumeAnotherAttempt(t *testing.T) {
+	fake := &fakeGitHubEventStore{}
+	runner := newGitHubEventTestRunner(fake, &fakeGitHubEventProcessor{deliveryOutcome: service.GitHubEventOutcome{Disposition: service.GitHubEventRetry, Code: "database_unavailable"}}, discardLogger())
+	enableTestWrites(runner)
+	delivery := leasedDelivery("delivery", 7)
+	runDeliveryDirect(runner, t.Context(), delivery)
+	if fake.deliveryRetryCalls != 1 || fake.lastCode != "database_unavailable" || delivery.Attempts != 7 {
+		t.Fatalf("retry calls/code/attempts = %d/%s/%d", fake.deliveryRetryCalls, fake.lastCode, delivery.Attempts)
+	}
+}
+
 func TestGitHubEventLeaseRenewalLossCancelsProcessorAndSuppressesWrite(t *testing.T) {
 	for _, test := range []struct {
 		name     string

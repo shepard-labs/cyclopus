@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	githubadapter "github.com/shepard-labs/cyclopus/internal/adapters/github"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
@@ -23,9 +24,11 @@ import (
 type GitHubEventDisposition string
 
 const (
-	GitHubEventComplete GitHubEventDisposition = "complete"
-	GitHubEventRetry    GitHubEventDisposition = "retry"
-	GitHubEventFail     GitHubEventDisposition = "fail"
+	GitHubEventComplete            GitHubEventDisposition = "complete"
+	GitHubEventRetry               GitHubEventDisposition = "retry"
+	GitHubEventFail                GitHubEventDisposition = "fail"
+	GitHubEventLeaseLost           GitHubEventDisposition = "lease_lost"
+	githubEventCallPinSafetyMargin                        = 5 * time.Second
 )
 
 type GitHubEventOutcome struct {
@@ -47,6 +50,7 @@ type GitHubEventClient interface {
 }
 
 type GitHubEventStore interface {
+	PinGitHubEventExternalCall(context.Context, string, store.LeaseToken, string, time.Duration) (store.LeaseToken, error)
 	GetGitHubEventGeneration(context.Context, string, int64) (int64, error)
 	ReconcileGitHubEvent(context.Context, store.ReconcileGitHubEventParams) (int64, error)
 	RevokeGitHubEvent(context.Context, store.RevokeGitHubEventParams) error
@@ -55,16 +59,22 @@ type GitHubEventStore interface {
 }
 
 type GitHubEventProcessor struct {
-	store      GitHubEventStore
-	github     GitHubEventClient
-	maxIntents int
+	store                           GitHubEventStore
+	github                          GitHubEventClient
+	maxIntents                      int
+	callPinDuration, requestTimeout time.Duration
+	now                             func() time.Time
 }
 
-func NewGitHubEventProcessor(dataStore GitHubEventStore, client GitHubEventClient, maxIntents int) (*GitHubEventProcessor, error) {
-	if dataStore == nil || client == nil || maxIntents < 1 || maxIntents > 10000 {
+func NewGitHubEventProcessor(dataStore GitHubEventStore, client GitHubEventClient, maxIntents int, callDurations ...time.Duration) (*GitHubEventProcessor, error) {
+	callPinDuration, requestTimeout := time.Minute, time.Second
+	if len(callDurations) == 2 {
+		callPinDuration, requestTimeout = callDurations[0], callDurations[1]
+	}
+	if dataStore == nil || client == nil || maxIntents < 1 || maxIntents > 10000 || len(callDurations) != 0 && len(callDurations) != 2 || requestTimeout <= 0 || callPinDuration < githubEventCallPinSafetyMargin || requestTimeout > callPinDuration-githubEventCallPinSafetyMargin {
 		return nil, errors.New("github event processor dependencies are invalid")
 	}
-	return &GitHubEventProcessor{store: dataStore, github: client, maxIntents: maxIntents}, nil
+	return &GitHubEventProcessor{store: dataStore, github: client, maxIntents: maxIntents, callPinDuration: callPinDuration, requestTimeout: requestTimeout, now: time.Now}, nil
 }
 
 type githubEventEnvelope struct {
@@ -92,6 +102,8 @@ func (p *GitHubEventProcessor) ProcessDelivery(ctx context.Context, delivery sto
 	if delivery.Lease == nil || len(delivery.Payload) == 0 {
 		return failEvent("invalid_event")
 	}
+	lease := *delivery.Lease
+	delivery.Lease = &lease
 	digest := sha256.Sum256(delivery.Payload)
 	if hex.EncodeToString(digest[:]) != delivery.PayloadDigest {
 		return failEvent("invalid_event")
@@ -126,7 +138,13 @@ func (p *GitHubEventProcessor) ProcessDelivery(ctx context.Context, delivery sto
 			if err := p.store.RevokeGitHubEvent(ctx, revokeEventParams(delivery, "unverified")); err != nil {
 				return storeEventError(err)
 			}
-			if authoritative, err := p.github.GetInstallation(ctx, *delivery.InstallationID); err == nil {
+			authoritative, err, outcome := externalGitHubCall(p, ctx, delivery, func(callCtx context.Context) (GitHubEventInstallation, error) {
+				return p.github.GetInstallation(callCtx, *delivery.InstallationID)
+			})
+			if outcome.Disposition != "" {
+				return outcome
+			}
+			if err == nil {
 				if delivery.Action == "suspend" && authoritative.Suspended {
 					if err := p.store.RevokeGitHubEvent(ctx, revokeEventParams(delivery, kind)); err != nil {
 						return storeEventError(err)
@@ -152,7 +170,12 @@ func (p *GitHubEventProcessor) ProcessDelivery(ctx context.Context, delivery sto
 		switch delivery.Action {
 		case "added":
 			for _, repository := range payload.RepositoriesAdded {
-				authoritative, err := p.github.GetRepository(ctx, *delivery.InstallationID, repository.ID)
+				authoritative, err, outcome := externalGitHubCall(p, ctx, delivery, func(callCtx context.Context) (GitHubEventRepository, error) {
+					return p.github.GetRepository(callCtx, *delivery.InstallationID, repository.ID)
+				})
+				if outcome.Disposition != "" {
+					return outcome
+				}
 				if err != nil {
 					return githubEventError(err)
 				}
@@ -171,7 +194,12 @@ func (p *GitHubEventProcessor) ProcessDelivery(ctx context.Context, delivery sto
 				if err := p.store.RevokeGitHubEvent(ctx, params); err != nil {
 					return storeEventError(err)
 				}
-				authoritative, err := p.github.GetRepository(ctx, *delivery.InstallationID, repository.ID)
+				authoritative, err, callOutcome := externalGitHubCall(p, ctx, delivery, func(callCtx context.Context) (GitHubEventRepository, error) {
+					return p.github.GetRepository(callCtx, *delivery.InstallationID, repository.ID)
+				})
+				if callOutcome.Disposition != "" {
+					return callOutcome
+				}
 				if err == nil {
 					if authoritative.ID != repository.ID || authoritative.NodeID != repository.NodeID || authoritative.InstallationID != *delivery.InstallationID {
 						return failEvent("malformed_response")
@@ -218,7 +246,7 @@ func (p *GitHubEventProcessor) reconcileInstallation(ctx context.Context, delive
 	if err != nil {
 		return storeEventError(err)
 	}
-	installation, repositories, outcome := p.fetchInstallation(ctx, *delivery.InstallationID)
+	installation, repositories, outcome := p.fetchInstallation(ctx, delivery)
 	if outcome.Disposition != "" {
 		if outcome.Code == "permission_revoked" {
 			if err := p.store.RevokeGitHubEvent(ctx, revokeEventParams(delivery, "unverified")); err != nil {
@@ -249,13 +277,13 @@ func (p *GitHubEventProcessor) reconcileInstallation(ctx context.Context, delive
 	return completeEvent("processed", 0)
 }
 
-func (p *GitHubEventProcessor) fetchInstallation(ctx context.Context, id int64) (GitHubEventInstallation, []GitHubEventRepository, GitHubEventOutcome) {
-	installation, err := p.github.GetInstallation(ctx, id)
-	if isGitHubStatus(err, http.StatusUnauthorized) {
-		if refreshErr := p.github.RefreshInstallationCredentials(ctx, id); refreshErr != nil {
-			return GitHubEventInstallation{}, nil, githubEventError(refreshErr)
-		}
-		installation, err = p.github.GetInstallation(ctx, id)
+func (p *GitHubEventProcessor) fetchInstallation(ctx context.Context, delivery store.GitHubWebhookDelivery) (GitHubEventInstallation, []GitHubEventRepository, GitHubEventOutcome) {
+	id := *delivery.InstallationID
+	installation, err, outcome := externalGitHubCall(p, ctx, delivery, func(callCtx context.Context) (GitHubEventInstallation, error) {
+		return p.github.GetInstallation(callCtx, id)
+	})
+	if outcome.Disposition != "" {
+		return GitHubEventInstallation{}, nil, outcome
 	}
 	if err != nil {
 		return GitHubEventInstallation{}, nil, githubEventError(err)
@@ -263,7 +291,12 @@ func (p *GitHubEventProcessor) fetchInstallation(ctx context.Context, id int64) 
 	if installation.ID != id || installation.AccountID <= 0 || installation.AccountLogin == "" {
 		return GitHubEventInstallation{}, nil, failEvent("malformed_response")
 	}
-	repositories, err := p.github.ListInstallationRepositories(ctx, id)
+	repositories, err, outcome := externalGitHubCall(p, ctx, delivery, func(callCtx context.Context) ([]GitHubEventRepository, error) {
+		return p.github.ListInstallationRepositories(callCtx, id)
+	})
+	if outcome.Disposition != "" {
+		return GitHubEventInstallation{}, nil, outcome
+	}
 	if err != nil {
 		return GitHubEventInstallation{}, nil, githubEventError(err)
 	}
@@ -286,7 +319,20 @@ func (p *GitHubEventProcessor) processPush(ctx context.Context, delivery store.G
 		return failEvent("invalid_event")
 	}
 	branch := strings.TrimPrefix(payload.Ref, "refs/heads/")
-	sha, exists, err := p.github.GetBranchRef(ctx, *delivery.InstallationID, *delivery.RepositoryID, branch)
+	branchResult, err, outcome := externalGitHubCall(p, ctx, delivery, func(callCtx context.Context) (struct {
+		sha    string
+		exists bool
+	}, error) {
+		sha, exists, err := p.github.GetBranchRef(callCtx, *delivery.InstallationID, *delivery.RepositoryID, branch)
+		return struct {
+			sha    string
+			exists bool
+		}{sha, exists}, err
+	})
+	if outcome.Disposition != "" {
+		return outcome
+	}
+	sha, exists := branchResult.sha, branchResult.exists
 	if err != nil {
 		outcome := githubEventError(err)
 		if outcome.Disposition == GitHubEventComplete && outcome.Code == "permission_revoked" {
@@ -380,6 +426,74 @@ func isGitHubStatus(err error, status int) bool {
 	return false
 }
 
+func externalGitHubCall[T any](p *GitHubEventProcessor, ctx context.Context, delivery store.GitHubWebhookDelivery, call func(context.Context) (T, error)) (T, error, GitHubEventOutcome) {
+	var zero T
+	lease, err := p.store.PinGitHubEventExternalCall(ctx, delivery.ID, *delivery.Lease, delivery.OrgID, p.callPinDuration)
+	if err != nil {
+		return zero, nil, externalCallAuthorizationError(err)
+	}
+	*delivery.Lease = lease
+	callCtx, cancel, ok := p.externalCallContext(ctx, lease)
+	if !ok {
+		return zero, nil, GitHubEventOutcome{Disposition: GitHubEventLeaseLost, Code: "lease_lost"}
+	}
+	value, err := call(callCtx)
+	cancel()
+	if !isGitHubStatus(err, http.StatusUnauthorized) && !isGitHubStatus(err, http.StatusConflict) && !isGitHubStatus(err, http.StatusUnprocessableEntity) {
+		return value, err, GitHubEventOutcome{}
+	}
+	lease, pinErr := p.store.PinGitHubEventExternalCall(ctx, delivery.ID, *delivery.Lease, delivery.OrgID, p.callPinDuration)
+	if pinErr != nil {
+		return zero, nil, externalCallAuthorizationError(pinErr)
+	}
+	*delivery.Lease = lease
+	refreshCtx, refreshCancel, ok := p.externalCallContext(ctx, lease)
+	if !ok {
+		return zero, nil, GitHubEventOutcome{Disposition: GitHubEventLeaseLost, Code: "lease_lost"}
+	}
+	refreshErr := p.github.RefreshInstallationCredentials(refreshCtx, *delivery.InstallationID)
+	refreshCancel()
+	if refreshErr != nil {
+		return zero, refreshErr, GitHubEventOutcome{}
+	}
+	lease, pinErr = p.store.PinGitHubEventExternalCall(ctx, delivery.ID, *delivery.Lease, delivery.OrgID, p.callPinDuration)
+	if pinErr != nil {
+		return zero, nil, externalCallAuthorizationError(pinErr)
+	}
+	*delivery.Lease = lease
+	retryCtx, retryCancel, ok := p.externalCallContext(ctx, lease)
+	if !ok {
+		return zero, nil, GitHubEventOutcome{Disposition: GitHubEventLeaseLost, Code: "lease_lost"}
+	}
+	value, retryErr := call(retryCtx)
+	retryCancel()
+	if (isGitHubStatus(err, http.StatusConflict) || isGitHubStatus(err, http.StatusUnprocessableEntity)) &&
+		(isGitHubStatus(retryErr, http.StatusConflict) || isGitHubStatus(retryErr, http.StatusUnprocessableEntity)) {
+		return zero, nil, failEvent("github_conflict")
+	}
+	return value, retryErr, GitHubEventOutcome{}
+}
+
+func (p *GitHubEventProcessor) externalCallContext(ctx context.Context, lease store.LeaseToken) (context.Context, context.CancelFunc, bool) {
+	now := p.now()
+	deadline := lease.ExpiresAt.Add(-githubEventCallPinSafetyMargin)
+	if requestDeadline := now.Add(p.requestTimeout); requestDeadline.Before(deadline) {
+		deadline = requestDeadline
+	}
+	if !deadline.After(now) {
+		return nil, nil, false
+	}
+	callCtx, cancel := context.WithDeadline(ctx, deadline)
+	return callCtx, cancel, true
+}
+
+func externalCallAuthorizationError(err error) GitHubEventOutcome {
+	if errors.Is(err, store.ErrLeaseNotOwned) {
+		return GitHubEventOutcome{Disposition: GitHubEventLeaseLost, Code: "lease_lost"}
+	}
+	return storeEventError(err)
+}
+
 func githubEventError(err error) GitHubEventOutcome {
 	if err == nil {
 		return GitHubEventOutcome{}
@@ -392,7 +506,7 @@ func githubEventError(err error) GitHubEventOutcome {
 		case api.Status == http.StatusUnauthorized || api.Status == http.StatusForbidden || api.Status == http.StatusNotFound:
 			return GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "permission_revoked"}
 		case api.Status == http.StatusConflict || api.Status == http.StatusUnprocessableEntity:
-			return failEvent("invalid_event")
+			return failEvent("github_conflict")
 		case api.Status >= 500 || api.Status == 0:
 			return GitHubEventOutcome{Disposition: GitHubEventRetry, Code: "github_unavailable", RetryAfter: api.RetryAfter}
 		default:
@@ -420,8 +534,8 @@ func githubEventError(err error) GitHubEventOutcome {
 		case status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound:
 			return GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "permission_revoked"}
 		case status == http.StatusConflict || status == http.StatusUnprocessableEntity:
-			return failEvent("invalid_event")
-		case retryable:
+			return failEvent("github_conflict")
+		case status >= 500 || status == 0:
 			return GitHubEventOutcome{Disposition: GitHubEventRetry, Code: "github_unavailable", RetryAfter: retryAfter}
 		default:
 			return failEvent("malformed_response")
@@ -446,6 +560,15 @@ func githubEventError(err error) GitHubEventOutcome {
 }
 
 func storeEventError(err error) GitHubEventOutcome {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == "40001" || pgErr.Code == "40P01" || strings.HasPrefix(pgErr.Code, "08") || strings.HasPrefix(pgErr.Code, "53") || pgErr.Code == "57P01" {
+			return GitHubEventOutcome{Disposition: GitHubEventRetry, Code: "database_unavailable"}
+		}
+		if strings.HasPrefix(pgErr.Code, "22") {
+			return failEvent("invalid_event")
+		}
+	}
 	switch {
 	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInvalidArgument):
 		return failEvent("invalid_event")

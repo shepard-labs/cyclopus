@@ -55,6 +55,28 @@ func TestBuildRecoveryAdaptersUsesSuccessfullyConstructedAdapters(t *testing.T) 
 	}
 }
 
+func TestRunRejectsGitHubRequestTimeoutAtConsumerLeaseBoundaryBeforeStartup(t *testing.T) {
+	keyring := filepath.Join(t.TempDir(), "keyring.json")
+	if err := os.WriteFile(keyring, []byte(`{"active_version":"k1","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := run([]string{
+		"--worker-lease-duration", "12s",
+		"--github-event-worker-lease-duration", "14999999999ns",
+		"--github-event-worker-processing-timeout", "1s",
+		"--github-request-timeout", "10s",
+	}, []string{
+		"CYCLOPUS_EXTERNAL_URL=https://cyclopus.example",
+		"CYCLOPUS_DATABASE_URL=postgres://invalid.invalid/cyclopus",
+		"CYCLOPUS_AUTH_TOKEN_PEPPER=0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_AUTH_BOOTSTRAP_SECRET=bootstrap-0123456789abcdef0123456789abcdef",
+		"CYCLOPUS_WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE=" + keyring,
+	})
+	if err == nil || err.Error() != "github.request_timeout plus a 5s call pin safety margin must not exceed github_event_worker.lease_duration" {
+		t.Fatalf("run() error = %v", err)
+	}
+}
+
 func TestNewGitHubWebhookPayloadCodecUsesConfiguredKeyring(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keyring.json")
 	if err := os.WriteFile(path, []byte(`{"active_version":"k2","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg==","k2":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}}`), 0o600); err != nil {

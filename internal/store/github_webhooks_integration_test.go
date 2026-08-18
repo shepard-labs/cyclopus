@@ -1624,6 +1624,122 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		}
 	})
 
+	t.Run("github conflict failure terminalizes delivery", func(t *testing.T) {
+		clearGitHubWebhookWork(t, pool)
+		delivery := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000401", strings.Repeat("c", 64), `{}`))
+		claimed := claimOne(t, store, "conflict-worker", time.Minute)
+		if err := store.FailGitHubWebhookDelivery(t.Context(), delivery.ID, *claimed.Lease, "github_conflict", "persistent 409", time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		var status, code, detail string
+		var terminal, retainUntil time.Time
+		var owner *string
+		var expires *time.Time
+		if err := pool.QueryRow(t.Context(), `SELECT status,error_code,error_detail,terminal_at,retain_until,lease_owner,lease_expires_at FROM github_webhook_deliveries WHERE id=$1`, delivery.ID).Scan(&status, &code, &detail, &terminal, &retainUntil, &owner, &expires); err != nil {
+			t.Fatal(err)
+		}
+		if status != "failed" || code != "github_conflict" || detail != "persistent 409" || terminal.IsZero() || !retainUntil.After(terminal) || owner != nil || expires != nil {
+			t.Fatalf("github conflict terminal state = %s/%s/%s terminal=%s retain=%s owner=%v expires=%v", status, code, detail, terminal, retainUntil, owner, expires)
+		}
+		if claimed, err := store.ClaimGitHubWebhookDeliveries(t.Context(), "retry-worker", time.Minute, 1); err != nil || len(claimed) != 0 {
+			t.Fatalf("terminal conflict reclaim = %+v, %v", claimed, err)
+		}
+	})
+
+	t.Run("external call pin and API block prevent reclaim until pinned expiry", func(t *testing.T) {
+		clearGitHubWebhookWork(t, pool)
+		d := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000498", strings.Repeat("d", 64), `{}`))
+		oldConn, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer oldConn.Release()
+		freshConn, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer freshConn.Release()
+		oldStore := New(oldConn).WithGitHubWebhookPayloadCodec(store.webhookPayloadCodec)
+		freshStore := New(freshConn).WithGitHubWebhookPayloadCodec(store.webhookPayloadCodec)
+		old := claimOne(t, oldStore, "old-worker", 40*time.Millisecond)
+		pinned, err := oldStore.PinGitHubEventExternalCall(t.Context(), d.ID, *old.Lease, old.OrgID, 250*time.Millisecond)
+		if err != nil || pinned.Epoch != old.Lease.Epoch {
+			t.Fatalf("pin = %+v, %v", pinned, err)
+		}
+		apiBlocked := make(chan struct{})
+		apiDone := make(chan struct{})
+		go func() {
+			defer close(apiDone)
+			deadline := pinned.ExpiresAt.Add(-50 * time.Millisecond)
+			callCtx, cancel := context.WithDeadline(t.Context(), deadline)
+			defer cancel()
+			close(apiBlocked)
+			<-callCtx.Done()
+		}()
+		<-apiBlocked
+		time.Sleep(70 * time.Millisecond)
+		claimed, err := freshStore.ClaimGitHubWebhookDeliveries(t.Context(), "new-worker", time.Minute, 1)
+		if err != nil || len(claimed) != 0 {
+			t.Fatalf("claim during pin = %+v, %v", claimed, err)
+		}
+		select {
+		case <-apiDone:
+		case <-time.After(time.Until(pinned.ExpiresAt) + time.Second):
+			t.Fatal("blocked API context was not canceled before pinned expiry")
+		}
+		if time.Until(pinned.ExpiresAt) <= 0 {
+			t.Fatal("API context was not canceled by the pre-expiry safety window")
+		}
+		claimed, err = freshStore.ClaimGitHubWebhookDeliveries(t.Context(), "new-worker", time.Minute, 1)
+		if err != nil || len(claimed) != 0 {
+			t.Fatalf("claim after API cancellation but before pin expiry = %+v, %v", claimed, err)
+		}
+		time.Sleep(time.Until(pinned.ExpiresAt) + 30*time.Millisecond)
+		fresh := claimOne(t, freshStore, "new-worker", time.Minute)
+		if fresh.ID != d.ID || fresh.Lease.Epoch <= pinned.Epoch {
+			t.Fatalf("claim after pin = %+v, pinned=%+v", fresh, pinned)
+		}
+	})
+
+	t.Run("external call authorization fences reclaimed owner epoch expiry and org", func(t *testing.T) {
+		clearGitHubWebhookWork(t, pool)
+		d := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000499", strings.Repeat("e", 64), `{}`))
+		oldConn, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer oldConn.Release()
+		freshConn, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer freshConn.Release()
+		oldStore := New(oldConn).WithGitHubWebhookPayloadCodec(store.webhookPayloadCodec)
+		freshStore := New(freshConn).WithGitHubWebhookPayloadCodec(store.webhookPayloadCodec)
+		old := claimOne(t, oldStore, "old-worker", time.Minute)
+		pinned, err := oldStore.PinGitHubEventExternalCall(t.Context(), d.ID, *old.Lease, old.OrgID, time.Minute)
+		if err != nil || pinned.Epoch != old.Lease.Epoch || !pinned.ExpiresAt.After(old.Lease.ExpiresAt) {
+			t.Fatalf("pin current lease: %+v, %v", pinned, err)
+		}
+		wrongOrg := "30000000-0000-0000-0000-000000000001"
+		if _, err := oldStore.PinGitHubEventExternalCall(t.Context(), d.ID, *old.Lease, wrongOrg, time.Minute); !errors.Is(err, ErrLeaseNotOwned) {
+			t.Fatalf("cross-org authorization = %v", err)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, d.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := oldStore.PinGitHubEventExternalCall(t.Context(), d.ID, *old.Lease, old.OrgID, time.Minute); !errors.Is(err, ErrLeaseNotOwned) {
+			t.Fatalf("expired lease authorization = %v", err)
+		}
+		fresh := claimOne(t, freshStore, "new-worker", time.Minute)
+		if _, err := oldStore.PinGitHubEventExternalCall(t.Context(), d.ID, *old.Lease, old.OrgID, time.Minute); !errors.Is(err, ErrLeaseNotOwned) {
+			t.Fatalf("stale owner authorization = %v", err)
+		}
+		if _, err := freshStore.PinGitHubEventExternalCall(t.Context(), d.ID, *fresh.Lease, fresh.OrgID, time.Minute); err != nil {
+			t.Fatalf("reclaimed owner authorization: %v", err)
+		}
+	})
+
 	t.Run("final delivery rotation immediately fences old token", func(t *testing.T) {
 		for iteration := range 20 {
 			clearGitHubWebhookWork(t, pool)
@@ -1845,10 +1961,13 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(url)); err != nil {
-		t.Fatalf("original 000010 to current 000012 upgrade: %v", err)
+		t.Fatalf("original 000010 to current 000013 upgrade: %v", err)
 	}
 	m = githubWebhookMigrator(t, url)
 	defer m.Close()
+	if err := m.Migrate(12); err != nil {
+		t.Fatalf("migrate to exact 000012 for dedicated lifecycle: %v", err)
+	}
 	var signatureKeyVersion string
 	if err := db.QueryRow(t.Context(), `SELECT signature_key_version FROM github_webhook_deliveries WHERE id=$1`, deliveryID).Scan(&signatureKeyVersion); err != nil || signatureKeyVersion != "legacy" {
 		t.Fatalf("000012 signature key version backfill = %q, %v", signatureKeyVersion, err)
@@ -2033,6 +2152,9 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 	}
 	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 12 || dirty {
 		t.Fatalf("final re-up state = %d/%t, %v", version, dirty, err)
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("000013 final re-up: %v", err)
 	}
 }
 

@@ -147,7 +147,8 @@ func run(args, environ []string) error {
 		Owner:                owner,
 		RequestTimeout:       cfg.GitHub.RequestTimeout,
 	}, logger, dataStore, adapters)
-	eventProcessor, err := service.NewGitHubEventProcessor(dataStore, githubadapter.NewEventClient(githubClients), cfg.GitHubEventWorker.MaxIntents)
+	eventProcessor, err := service.NewGitHubEventProcessor(dataStore, githubadapter.NewEventClient(githubClients), cfg.GitHubEventWorker.MaxIntents,
+		cfg.GitHubEventWorker.LeaseDuration, cfg.GitHub.RequestTimeout)
 	if err != nil {
 		return fmt.Errorf("construct GitHub event processor: %w", err)
 	}

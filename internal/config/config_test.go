@@ -600,6 +600,41 @@ func TestLoadRejectsUntrustedOrInsecureGitHubURLsAndLongTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresGitHubRequestTimeoutShorterThanBothConsumerLeases(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		workerLease      string
+		eventWorkerLease string
+		requestTimeout   string
+		wantError        string
+	}{
+		{name: "request plus margin exactly equals event lease", workerLease: "16s", eventWorkerLease: "15s", requestTimeout: "10s"},
+		{name: "event lease one nanosecond below margin boundary", workerLease: "16s", eventWorkerLease: "14999999999ns", requestTimeout: "10s", wantError: "github.request_timeout plus a 5s call pin safety margin must not exceed github_event_worker.lease_duration"},
+		{name: "legacy worker check is independent", workerLease: "10s", eventWorkerLease: "15s", requestTimeout: "10s", wantError: "github.request_timeout must be shorter than worker.lease_duration"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, err := Load([]string{
+				"--worker-lease-duration", test.workerLease,
+				"--github-event-worker-lease-duration", test.eventWorkerLease,
+				"--github-event-worker-processing-timeout", "1s",
+				"--github-request-timeout", test.requestTimeout,
+			}, baseValidEnv)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if cfg.GitHub.RequestTimeout != 10*time.Second {
+					t.Fatalf("github.request_timeout = %s, want 10s", cfg.GitHub.RequestTimeout)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Load() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsPublicPlaintextAndLongSession(t *testing.T) {
 	_, err := Load([]string{"--http-address", "0.0.0.0:8080", "--auth-session-ttl", "169h"}, []string{
 		"CYCLOPUS_DATABASE_URL=postgres://localhost/cyclopus",

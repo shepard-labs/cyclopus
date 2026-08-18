@@ -416,13 +416,28 @@ func (s *Store) RenewGitHubWebhookDelivery(ctx context.Context, id string, token
 		return LeaseToken{}, ErrInvalidArgument
 	}
 	var renewed LeaseToken
-	err := s.db.QueryRow(ctx, `UPDATE github_webhook_deliveries SET lease_expires_at=clock_timestamp()+($4 * interval '1 microsecond'),updated_at=clock_timestamp()
+	err := s.db.QueryRow(ctx, `UPDATE github_webhook_deliveries SET lease_expires_at=GREATEST(lease_expires_at,clock_timestamp()+($4 * interval '1 microsecond')),updated_at=clock_timestamp()
 		WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()
 		RETURNING lease_owner,lease_epoch,lease_expires_at`, id, token.Owner, token.Epoch, duration.Microseconds()).Scan(&renewed.Owner, &renewed.Epoch, &renewed.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LeaseToken{}, ErrLeaseNotOwned
 	}
 	return renewed, err
+}
+
+func (s *Store) PinGitHubEventExternalCall(ctx context.Context, id string, token LeaseToken, orgID string, duration time.Duration) (LeaseToken, error) {
+	if id == "" || token.Owner == "" || token.Epoch < 1 || orgID == "" || duration <= 0 {
+		return LeaseToken{}, ErrInvalidArgument
+	}
+	var pinned LeaseToken
+	err := s.db.QueryRow(ctx, `UPDATE github_webhook_deliveries
+		SET lease_expires_at=GREATEST(lease_expires_at,clock_timestamp()+($5 * interval '1 microsecond')),updated_at=clock_timestamp()
+		WHERE id=$1 AND org_id=$2 AND status='leased' AND lease_owner=$3 AND lease_epoch=$4 AND lease_expires_at>clock_timestamp()
+		RETURNING lease_owner,lease_epoch,lease_expires_at`, id, orgID, token.Owner, token.Epoch, duration.Microseconds()).Scan(&pinned.Owner, &pinned.Epoch, &pinned.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeaseToken{}, ErrLeaseNotOwned
+	}
+	return pinned, err
 }
 
 func (s *Store) RotateGitHubWebhookDeliveryLease(ctx context.Context, id string, token LeaseToken, duration time.Duration) (LeaseToken, error) {
@@ -506,7 +521,7 @@ func (s *Store) RedactTerminalGitHubWebhookPayloads(ctx context.Context, limit i
 
 func allowedWebhookError(v string) bool {
 	switch v {
-	case "database_unavailable", "github_unavailable", "github_rate_limited", "permission_revoked", "malformed_response", "invalid_event", "fanout_limit", "internal":
+	case "database_unavailable", "github_unavailable", "github_rate_limited", "permission_revoked", "malformed_response", "invalid_event", "github_conflict", "fanout_limit", "internal":
 		return true
 	}
 	return false

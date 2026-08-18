@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000012 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000013 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 12 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:12 dirty:false", version, dirty)
+		if version != 13 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:13 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1043,11 +1043,62 @@ func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("repaired 000011 migration: %v", err)
 	}
-	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 12 || dirty {
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 13 || dirty {
 		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("idempotent repaired migration: %v", err)
+	}
+}
+
+func TestMigration000013ConflictGuardDownAndReUp(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(12); err != nil {
+		t.Fatalf("migrate to 000012: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	seedGitHubWebhookFixtureConn(t, conn)
+	var deliveryID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO github_webhook_deliveries(delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,key_version,signature_key_version,status,result_code,terminal_at,retain_until,payload_redacted_at)
+		VALUES('30000000-0000-0000-0000-000000000013','push',90001,$1,'R_node',$2,repeat('d',64),'k1','legacy','completed','processed',clock_timestamp(),clock_timestamp()+interval '1 hour',clock_timestamp()) RETURNING id::text`, githubWebhookRepo, githubWebhookOrg).Scan(&deliveryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(13); err != nil {
+		t.Fatalf("000012 to 000013: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET status='failed',result_code=NULL,error_code='github_conflict',error_detail='persistent conflict' WHERE id=$1`, deliveryID); err != nil {
+		t.Fatalf("000013 github_conflict row: %v", err)
+	}
+	if err := migrator.Migrate(12); err == nil || !strings.Contains(err.Error(), "000013 rollback blocked") {
+		t.Fatalf("000013 guarded down error = %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 13 || dirty {
+		t.Fatalf("guarded 000013 state = %d/%t, %v", version, dirty, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET error_code='invalid_event' WHERE id=$1`, deliveryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(12); err != nil {
+		t.Fatalf("clean 000013 down: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET error_code='github_conflict' WHERE id=$1`, deliveryID); err == nil {
+		t.Fatal("000012 constraint accepted github_conflict")
+	}
+	if err := migrator.Migrate(13); err != nil {
+		t.Fatalf("000013 re-up: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET error_code='github_conflict' WHERE id=$1`, deliveryID); err != nil {
+		t.Fatalf("000013 re-up rejected github_conflict: %v", err)
 	}
 }
 

@@ -242,6 +242,11 @@ func (r *GitHubEventRunner) processDelivery(root context.Context, delivery store
 	outcome := r.processor.ProcessDelivery(ctx, delivery)
 	close(done)
 	<-renewedDone
+	if outcome.Disposition == service.GitHubEventLeaseLost {
+		r.metrics.Delivery(delivery.Event, delivery.Action, "lease_lost", r.now().Sub(started), outcome.IntentCount)
+		r.logDelivery(delivery, "lease_lost", outcome.IntentCount, started)
+		return
+	}
 	if lost.Load() {
 		r.metrics.Delivery(delivery.Event, delivery.Action, "lease_lost", r.now().Sub(started), outcome.IntentCount)
 		r.logDelivery(delivery, "lease_lost", outcome.IntentCount, started)
