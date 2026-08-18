@@ -138,6 +138,19 @@ func run(args, environ []string) error {
 		Owner:                owner,
 		RequestTimeout:       cfg.GitHub.RequestTimeout,
 	}, logger, dataStore, adapters)
+	eventProcessor, err := service.NewGitHubEventProcessor(dataStore, githubadapter.NewEventClient(githubClients), cfg.GitHubEventWorker.MaxIntents)
+	if err != nil {
+		return fmt.Errorf("construct GitHub event processor: %w", err)
+	}
+	eventRunner := worker.NewGitHubEventRunner(worker.GitHubEventConfig{
+		ScanInterval: cfg.GitHubEventWorker.ScanInterval, DeliveryConcurrency: cfg.GitHubEventWorker.DeliveryConcurrency,
+		IntentConcurrency: cfg.GitHubEventWorker.IntentConcurrency, LeaseDuration: cfg.GitHubEventWorker.LeaseDuration,
+		ProcessingTimeout: cfg.GitHubEventWorker.ProcessingTimeout, MaxAttempts: cfg.GitHubEventWorker.MaxAttempts,
+		InitialRetry: cfg.GitHubEventWorker.InitialRetry, MaxRetry: cfg.GitHubEventWorker.MaxRetry,
+		PayloadRetention: cfg.GitHubEventWorker.PayloadRetention, CleanupInterval: cfg.GitHubEventWorker.CleanupInterval,
+		CleanupBatch: cfg.GitHubEventWorker.CleanupBatch, ShutdownGrace: cfg.GitHubEventWorker.ShutdownGrace,
+		MaxIntents: cfg.GitHubEventWorker.MaxIntents, Owner: owner,
+	}, logger, dataStore, eventProcessor)
 	if provider, err := buildTelemetryProvider(ctx, cfg.Observability, cfg.Kubernetes.InstanceNamespace, adapters); err != nil {
 		return err
 	} else if provider != nil {
@@ -165,7 +178,7 @@ func run(args, environ []string) error {
 	if err != nil {
 		return err
 	}
-	err = runLifecycle(ctx, apiServer, recovery, &ready)
+	err = runLifecycle(ctx, apiServer, recovery, &ready, eventRunner)
 	logger.Info("server stopped")
 	return err
 }
@@ -498,7 +511,8 @@ type lifecycleWorker interface {
 	Run(context.Context) error
 }
 
-func runLifecycle(ctx context.Context, api lifecycleServer, recovery lifecycleWorker, ready *atomic.Bool) error {
+func runLifecycle(ctx context.Context, api lifecycleServer, recovery lifecycleWorker, ready *atomic.Bool, additional ...lifecycleWorker) error {
+	workers := append([]lifecycleWorker{recovery}, additional...)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer func() {
 		ready.Store(false)
@@ -506,29 +520,54 @@ func runLifecycle(ctx context.Context, api lifecycleServer, recovery lifecycleWo
 	}()
 
 	apiErr := make(chan error, 1)
-	go func() { apiErr <- api.Run(runCtx) }()
-
-	if err := recovery.Startup(runCtx); err != nil {
-		ready.Store(false)
+	go func() {
+		apiErr <- api.Run(runCtx)
 		cancel()
-		<-apiErr
-		return fmt.Errorf("startup recovery: %w", err)
+	}()
+
+	workerErr := make(chan error, len(workers))
+	started := 0
+	waitStarted := func() error {
+		var err error
+		for range started {
+			err = errors.Join(err, <-workerErr)
+		}
+		return err
+	}
+	for index, worker := range workers {
+		if worker == nil {
+			ready.Store(false)
+			cancel()
+			apiRunErr := <-apiErr
+			return errors.Join(fmt.Errorf("startup worker %d: unavailable", index), apiRunErr, waitStarted())
+		}
+		if err := worker.Startup(runCtx); err != nil {
+			ready.Store(false)
+			cancel()
+			apiRunErr := <-apiErr
+			return errors.Join(fmt.Errorf("startup worker %d: %w", index, err), apiRunErr, waitStarted())
+		}
+		started++
+		go func(index int, worker lifecycleWorker) {
+			if err := worker.Run(runCtx); err != nil {
+				workerErr <- fmt.Errorf("worker %d: %w", index, err)
+				cancel()
+				return
+			}
+			workerErr <- nil
+			cancel()
+		}(index, worker)
 	}
 	ready.Store(true)
-
-	workerErr := make(chan error, 1)
-	workerStarted := make(chan struct{})
-	go func() {
-		close(workerStarted)
-		workerErr <- recovery.Run(runCtx)
-	}()
-	<-workerStarted
 
 	select {
 	case err := <-apiErr:
 		ready.Store(false)
 		cancel()
-		workerRunErr := <-workerErr
+		var workerRunErr error
+		for range workers {
+			workerRunErr = errors.Join(workerRunErr, <-workerErr)
+		}
 		if err != nil {
 			return err
 		}
@@ -537,8 +576,11 @@ func runLifecycle(ctx context.Context, api lifecycleServer, recovery lifecycleWo
 		ready.Store(false)
 		cancel()
 		apiRunErr := <-apiErr
+		for range len(workers) - 1 {
+			err = errors.Join(err, <-workerErr)
+		}
 		if err != nil {
-			return fmt.Errorf("recovery worker: %w", err)
+			return err
 		}
 		return apiRunErr
 	}

@@ -391,26 +391,52 @@ func TestIdempotencyLeaseExtensionAndNoEarlyStealUseWallClockIntegration(t *test
 	if err != nil || claimed.LeaseExpiresAt == nil {
 		t.Fatalf("initial claim = %+v, %v", claimed, err)
 	}
-	beforeRenew := time.Now()
+	conn, err := pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(t.Context(), "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Exec(context.Background(), "ROLLBACK")
+	var transactionStartedAt, initialRetentionExpiresAt time.Time
+	if err := conn.QueryRow(t.Context(), `SELECT transaction_timestamp(),expires_at FROM api_idempotency_records WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3`, claim.OrgID, claim.Scope, claim.Key).Scan(&transactionStartedAt, &initialRetentionExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	var beforeRenew time.Time
+	if err := conn.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&beforeRenew); err != nil {
+		t.Fatal(err)
+	}
 	claim.LeaseDuration = 4 * time.Second
-	if err := dataStore.RenewIdempotency(t.Context(), claim); err != nil {
+	if err := New(conn).RenewIdempotency(t.Context(), claim); err != nil {
 		t.Fatal(err)
 	}
-	var leaseExpiresAt, retentionExpiresAt, updatedAt time.Time
-	if err := pool.QueryRow(t.Context(), `SELECT lease_expires_at,expires_at,updated_at FROM api_idempotency_records WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3`, claim.OrgID, claim.Scope, claim.Key).Scan(&leaseExpiresAt, &retentionExpiresAt, &updatedAt); err != nil {
+	var leaseExpiresAt, retentionExpiresAt, updatedAt, afterRenew time.Time
+	if err := conn.QueryRow(t.Context(), `SELECT lease_expires_at,expires_at,updated_at,clock_timestamp() FROM api_idempotency_records WHERE org_id=$1 AND scope=$2 AND idempotency_key=$3`, claim.OrgID, claim.Scope, claim.Key).Scan(&leaseExpiresAt, &retentionExpiresAt, &updatedAt, &afterRenew); err != nil {
 		t.Fatal(err)
 	}
-	if leaseExpiresAt.Before(beforeRenew.Add(3500*time.Millisecond)) || updatedAt.Before(beforeRenew) {
-		t.Fatalf("renewed lease/updated time = %s/%s, before %s", leaseExpiresAt, updatedAt, beforeRenew)
+	if beforeRenew.Sub(transactionStartedAt) < 75*time.Millisecond {
+		t.Fatalf("wall-clock test transaction age = %s, want at least 75ms", beforeRenew.Sub(transactionStartedAt))
+	}
+	if updatedAt.Before(beforeRenew) || updatedAt.After(afterRenew) {
+		t.Fatalf("renewed updated time = %s, want between database times %s and %s", updatedAt, beforeRenew, afterRenew)
+	}
+	if leaseExpiresAt.Before(updatedAt.Add(3500*time.Millisecond)) || leaseExpiresAt.After(afterRenew.Add(claim.LeaseDuration)) {
+		t.Fatalf("renewed lease expiry = %s, updated/after times %s/%s", leaseExpiresAt, updatedAt, afterRenew)
+	}
+	if !retentionExpiresAt.Equal(initialRetentionExpiresAt) {
+		t.Fatalf("retention changed during renewal: %s, want %s", retentionExpiresAt, initialRetentionExpiresAt)
+	}
+	if _, err := conn.Exec(t.Context(), "COMMIT"); err != nil {
+		t.Fatal(err)
 	}
 	other := claim
 	other.Owner = "owner-two"
 	inProgress, err := dataStore.ClaimIdempotency(t.Context(), other)
 	if err != nil || inProgress.Disposition != IdempotencyInProgress || inProgress.LeaseExpiresAt == nil || !inProgress.LeaseExpiresAt.Equal(leaseExpiresAt) {
 		t.Fatalf("early takeover = %+v, %v", inProgress, err)
-	}
-	if retentionExpiresAt.Before(claimed.LeaseExpiresAt.Add(-time.Second)) {
-		t.Fatalf("retention unexpectedly shortened: %s", retentionExpiresAt)
 	}
 }
 

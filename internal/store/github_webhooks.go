@@ -325,6 +325,40 @@ func equalStringPointers(a, b *string) bool {
 const deliverySelect = `SELECT id::text,delivery_id::text,event,action,installation_id,repository_id,repository_node_id,org_id::text,
 		payload_digest,verified_payload,payload_nonce,key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,received_at,ingestion_sequence FROM github_webhook_deliveries`
 
+type GitHubEventLeaseStatus struct {
+	Deliveries, Intents int64
+}
+
+func (s *Store) CountUnexpiredGitHubEventLeases(ctx context.Context) (GitHubEventLeaseStatus, error) {
+	var status GitHubEventLeaseStatus
+	err := s.db.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM github_webhook_deliveries WHERE status='leased' AND lease_expires_at>clock_timestamp()),
+		(SELECT count(*) FROM github_routing_intents WHERE status='leased' AND lease_expires_at>clock_timestamp())`).Scan(&status.Deliveries, &status.Intents)
+	return status, err
+}
+
+func (s *Store) FailExpiredExhaustedGitHubEventLeases(ctx context.Context, retention time.Duration, limit int) (GitHubEventLeaseStatus, error) {
+	if retention < 0 || retention > 30*24*time.Hour || limit < 1 || limit > 1000 {
+		return GitHubEventLeaseStatus{}, ErrInvalidArgument
+	}
+	var status GitHubEventLeaseStatus
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		deliveries, err := tx.Exec(ctx, `WITH expired AS MATERIALIZED (SELECT id FROM github_webhook_deliveries WHERE status='leased' AND attempts>=12 AND lease_expires_at<=clock_timestamp() ORDER BY lease_expires_at,received_at,id FOR UPDATE SKIP LOCKED LIMIT $1)
+			UPDATE github_webhook_deliveries d SET status='failed',result_code=NULL,error_code='attempts_exhausted',error_detail='attempts_exhausted',terminal_at=clock_timestamp(),retain_until=clock_timestamp()+($2*interval '1 microsecond'),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() FROM expired WHERE d.id=expired.id`, limit, retention.Microseconds())
+		if err != nil {
+			return err
+		}
+		intents, err := tx.Exec(ctx, `WITH expired AS MATERIALIZED (SELECT id FROM github_routing_intents WHERE status='leased' AND attempts>=12 AND lease_expires_at<=clock_timestamp() ORDER BY lease_expires_at,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1)
+			UPDATE github_routing_intents i SET status='failed',result_code=NULL,error_code='attempts_exhausted',error_detail='attempts_exhausted',terminal_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() FROM expired WHERE i.id=expired.id`, limit)
+		if err != nil {
+			return err
+		}
+		status.Deliveries, status.Intents = deliveries.RowsAffected(), intents.RowsAffected()
+		return nil
+	})
+	return status, err
+}
+
 func (s *Store) scanGitHubWebhookDelivery(row pgx.Row, d *GitHubWebhookDelivery) error {
 	var owner *string
 	var expires *time.Time
@@ -390,17 +424,34 @@ func (s *Store) RenewGitHubWebhookDelivery(ctx context.Context, id string, token
 	return renewed, err
 }
 
-func (s *Store) RetryGitHubWebhookDelivery(ctx context.Context, id string, token LeaseToken, delay time.Duration, code, detail string) error {
+func (s *Store) RotateGitHubWebhookDeliveryLease(ctx context.Context, id string, token LeaseToken, duration time.Duration) (LeaseToken, error) {
+	if duration <= 0 {
+		return LeaseToken{}, ErrInvalidArgument
+	}
+	var rotated LeaseToken
+	err := s.db.QueryRow(ctx, `UPDATE github_webhook_deliveries SET lease_epoch=lease_epoch+1,lease_expires_at=clock_timestamp()+($4 * interval '1 microsecond'),updated_at=clock_timestamp()
+		WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()
+		RETURNING lease_owner,lease_epoch,lease_expires_at`, id, token.Owner, token.Epoch, duration.Microseconds()).Scan(&rotated.Owner, &rotated.Epoch, &rotated.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeaseToken{}, ErrLeaseNotOwned
+	}
+	return rotated, err
+}
+
+func (s *Store) RetryGitHubWebhookDelivery(ctx context.Context, id string, token LeaseToken, delay, retention time.Duration, code, detail string) error {
 	if !allowedWebhookError(code) {
 		return ErrInvalidArgument
 	}
 	if delay < 0 || delay > 24*time.Hour {
 		return ErrInvalidArgument
 	}
+	if retention < 0 || retention > 30*24*time.Hour {
+		return ErrInvalidArgument
+	}
 	detail = sanitizeWebhookDetail(detail)
 	return fencedWebhookUpdate(ctx, s.db, `UPDATE github_webhook_deliveries SET status=CASE WHEN attempts=12 THEN 'failed' ELSE 'pending' END,
 		next_attempt_at=clock_timestamp()+($4*interval '1 microsecond'),error_code=CASE WHEN attempts=12 THEN 'attempts_exhausted' ELSE $5 END,error_detail=$6,result_code=NULL,terminal_at=CASE WHEN attempts=12 THEN clock_timestamp() END,
-		retain_until=CASE WHEN attempts=12 THEN clock_timestamp()+interval '24 hours' END,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, id, token, delay.Microseconds(), code, detail)
+		retain_until=CASE WHEN attempts=12 THEN clock_timestamp()+($7*interval '1 microsecond') END,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, id, token, delay.Microseconds(), code, detail, retention.Microseconds())
 }
 
 func (s *Store) CompleteGitHubWebhookDelivery(ctx context.Context, id string, token LeaseToken, result string, retention time.Duration) error {
@@ -580,6 +631,17 @@ func (s *Store) RenewGitHubRoutingIntent(ctx context.Context, id string, token L
 	}
 	var v LeaseToken
 	err := s.db.QueryRow(ctx, `UPDATE github_routing_intents SET lease_expires_at=clock_timestamp()+($4*interval '1 microsecond'),updated_at=clock_timestamp() WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp() RETURNING lease_owner,lease_epoch,lease_expires_at`, id, token.Owner, token.Epoch, duration.Microseconds()).Scan(&v.Owner, &v.Epoch, &v.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = ErrLeaseNotOwned
+	}
+	return v, err
+}
+func (s *Store) RotateGitHubRoutingIntentLease(ctx context.Context, id string, token LeaseToken, duration time.Duration) (LeaseToken, error) {
+	if duration <= 0 {
+		return LeaseToken{}, ErrInvalidArgument
+	}
+	var v LeaseToken
+	err := s.db.QueryRow(ctx, `UPDATE github_routing_intents SET lease_epoch=lease_epoch+1,lease_expires_at=clock_timestamp()+($4*interval '1 microsecond'),updated_at=clock_timestamp() WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp() RETURNING lease_owner,lease_epoch,lease_expires_at`, id, token.Owner, token.Epoch, duration.Microseconds()).Scan(&v.Owner, &v.Epoch, &v.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = ErrLeaseNotOwned
 	}

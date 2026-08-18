@@ -1411,7 +1411,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 				t.Fatalf("claim attempt %d = %+v, %v", attempt, claimed, err)
 			}
 			delay := time.Duration(attempt) * time.Minute
-			if err := store.RetryGitHubWebhookDelivery(t.Context(), d.ID, *claimed[0].Lease, delay, "github_unavailable", "retry"); err != nil {
+			if err := store.RetryGitHubWebhookDelivery(t.Context(), d.ID, *claimed[0].Lease, delay, 24*time.Hour, "github_unavailable", "retry"); err != nil {
 				t.Fatal(err)
 			}
 			var status string
@@ -1436,7 +1436,154 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		}
 	})
 
-	t.Run("lease fencing reclaim and renewal", func(t *testing.T) {
+	t.Run("attempt twelve uses configured payload retention and database clock", func(t *testing.T) {
+		for index, retention := range []time.Duration{0, 7 * time.Hour, 30 * 24 * time.Hour} {
+			clearGitHubWebhookWork(t, pool)
+			d := receiveDelivery(t, store, webhookParams(fmt.Sprintf("20000000-0000-0000-0002-%012d", index), fmt.Sprintf("%064x", index+700), `{}`))
+			if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET attempts=11 WHERE id=$1`, d.ID); err != nil {
+				t.Fatal(err)
+			}
+			claimed := claimOne(t, store, "retention-worker", time.Minute)
+			var before time.Time
+			if err := pool.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.RetryGitHubWebhookDelivery(t.Context(), d.ID, *claimed.Lease, 0, retention, "github_unavailable", "retry"); err != nil {
+				t.Fatal(err)
+			}
+			var terminal, retainUntil, after time.Time
+			if err := pool.QueryRow(t.Context(), `SELECT terminal_at,retain_until,clock_timestamp() FROM github_webhook_deliveries WHERE id=$1`, d.ID).Scan(&terminal, &retainUntil, &after); err != nil {
+				t.Fatal(err)
+			}
+			if terminal.Before(before) || terminal.After(after) || retainUntil.Before(terminal.Add(retention)) || retainUntil.After(after.Add(retention)) {
+				t.Fatalf("retention %s produced terminal/retain %s/%s outside database clock bounds %s/%s", retention, terminal, retainUntil, before, after)
+			}
+		}
+		if err := store.RetryGitHubWebhookDelivery(t.Context(), "unused", LeaseToken{}, 0, 30*24*time.Hour+time.Nanosecond, "internal", "invalid"); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("over-bound retention error = %v", err)
+		}
+	})
+
+	t.Run("expired exhausted delivery and intent leases are swept exactly once", func(t *testing.T) {
+		clearGitHubWebhookWork(t, pool)
+		const retention = 7 * time.Hour
+		delivery := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0003-000000000001", strings.Repeat("7", 64), `{"secret":"sweep"}`))
+		if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET attempts=11 WHERE id=$1`, delivery.ID); err != nil {
+			t.Fatal(err)
+		}
+		exhaustedDelivery := claimOne(t, store, "crashed-delivery", time.Minute)
+		if exhaustedDelivery.Attempts != 12 {
+			t.Fatalf("exhausted delivery attempt = %d", exhaustedDelivery.Attempts)
+		}
+
+		sha := strings.Repeat("a", 40)
+		generation, err := store.AdvanceGitHubRoutingGeneration(t.Context(), githubWebhookOrg, githubWebhookRepo, "R_node", "refs/heads/main", 3, 4, &sha, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		intentDelivery := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0003-000000000002", strings.Repeat("8", 64), `{}`))
+		intentID, created, err := store.PersistGitHubRoutingIntent(t.Context(), GitHubRoutingIntentParams{DeliveryID: intentDelivery.ID, OrgID: githubWebhookOrg, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", AppID: githubWebhookAppA, EnvironmentID: githubWebhookEnv, Ref: "refs/heads/main", CommitSHA: sha, EventKind: "push", RoutingGeneration: generation, RepositoryGeneration: 3, RefLifecycleGeneration: 4, ConfigGeneration: 7, WorkflowPath: ".github/workflows/deploy.yml", ProductionRef: true})
+		if err != nil || !created {
+			t.Fatalf("persist exhausted intent = %s/%t, %v", intentID, created, err)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE github_routing_intents SET attempts=11 WHERE id=$1`, intentID); err != nil {
+			t.Fatal(err)
+		}
+		intents, err := store.ClaimGitHubRoutingIntents(t.Context(), "crashed-intent", time.Minute, 1)
+		if err != nil || len(intents) != 1 || intents[0].ID != intentID || intents[0].Attempts != 12 {
+			t.Fatalf("exhausted intent claim = %+v, %v", intents, err)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET status='completed',result_code='processed',terminal_at=clock_timestamp(),retain_until=clock_timestamp()+interval '1 day' WHERE id=$1`, intentDelivery.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		unexpired := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0003-000000000003", strings.Repeat("9", 64), `{}`))
+		if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET attempts=11 WHERE id=$1`, unexpired.ID); err != nil {
+			t.Fatal(err)
+		}
+		unexpired = claimOne(t, store, "active-attempt-twelve", time.Hour)
+		reclaimable := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0003-000000000004", strings.Repeat("a", 64), `{}`))
+		reclaimable = claimOne(t, store, "expired-attempt-eleven", time.Minute)
+		if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id IN ($1,$2)`, exhaustedDelivery.ID, reclaimable.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE github_routing_intents SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, intentID); err != nil {
+			t.Fatal(err)
+		}
+
+		start := make(chan struct{})
+		results := make(chan GitHubEventLeaseStatus, 2)
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() {
+				<-start
+				result, err := store.FailExpiredExhaustedGitHubEventLeases(t.Context(), retention, 10)
+				results <- result
+				errs <- err
+			}()
+		}
+		close(start)
+		var swept GitHubEventLeaseStatus
+		for range 2 {
+			sweptResult := <-results
+			swept.Deliveries += sweptResult.Deliveries
+			swept.Intents += sweptResult.Intents
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if swept != (GitHubEventLeaseStatus{Deliveries: 1, Intents: 1}) {
+			t.Fatalf("concurrent sweep total = %+v", swept)
+		}
+		if again, err := store.FailExpiredExhaustedGitHubEventLeases(t.Context(), retention, 10); err != nil || again != (GitHubEventLeaseStatus{}) {
+			t.Fatalf("idempotent sweep = %+v, %v", again, err)
+		}
+
+		var status, code, detail string
+		var attempts int
+		var terminal, retainUntil, databaseNow time.Time
+		var owner *string
+		var expires *time.Time
+		if err := pool.QueryRow(t.Context(), `SELECT status,attempts,error_code,error_detail,terminal_at,retain_until,lease_owner,lease_expires_at,clock_timestamp() FROM github_webhook_deliveries WHERE id=$1`, exhaustedDelivery.ID).Scan(&status, &attempts, &code, &detail, &terminal, &retainUntil, &owner, &expires, &databaseNow); err != nil {
+			t.Fatal(err)
+		}
+		if status != "failed" || attempts != 12 || code != "attempts_exhausted" || detail != "attempts_exhausted" || owner != nil || expires != nil || retainUntil.Before(terminal.Add(retention)) || retainUntil.After(databaseNow.Add(retention)) {
+			t.Fatalf("swept delivery = %s/%d/%s/%s terminal=%s retain=%s owner=%v expires=%v", status, attempts, code, detail, terminal, retainUntil, owner, expires)
+		}
+		if err := pool.QueryRow(t.Context(), `SELECT status,attempts,error_code,error_detail,terminal_at,lease_owner,lease_expires_at FROM github_routing_intents WHERE id=$1`, intentID).Scan(&status, &attempts, &code, &detail, &terminal, &owner, &expires); err != nil {
+			t.Fatal(err)
+		}
+		if status != "failed" || attempts != 12 || code != "attempts_exhausted" || detail != "attempts_exhausted" || terminal.IsZero() || owner != nil || expires != nil {
+			t.Fatalf("swept intent = %s/%d/%s/%s terminal=%s owner=%v expires=%v", status, attempts, code, detail, terminal, owner, expires)
+		}
+		if claimed, err := store.ClaimGitHubWebhookDeliveries(t.Context(), "attempt-13", time.Minute, 10); err != nil || len(claimed) != 1 || claimed[0].ID != reclaimable.ID || claimed[0].Attempts != 2 {
+			t.Fatalf("post-sweep delivery claims = %+v, %v", claimed, err)
+		}
+		if claimed, err := store.ClaimGitHubRoutingIntents(t.Context(), "intent-attempt-13", time.Minute, 10); err != nil || len(claimed) != 0 {
+			t.Fatalf("post-sweep intent claims = %+v, %v", claimed, err)
+		}
+		if err := pool.QueryRow(t.Context(), `SELECT status,attempts FROM github_webhook_deliveries WHERE id=$1`, unexpired.ID).Scan(&status, &attempts); err != nil || status != "leased" || attempts != 12 {
+			t.Fatalf("unexpired attempt twelve = %s/%d, %v", status, attempts, err)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET retain_until=clock_timestamp()-interval '1 second' WHERE id=$1`, exhaustedDelivery.ID); err != nil {
+			t.Fatal(err)
+		}
+		if redacted, err := store.RedactTerminalGitHubWebhookPayloads(t.Context(), 10); err != nil || redacted != 1 {
+			t.Fatalf("swept payload redaction = %d, %v", redacted, err)
+		}
+		var payload []byte
+		if err := pool.QueryRow(t.Context(), `SELECT verified_payload FROM github_webhook_deliveries WHERE id=$1`, exhaustedDelivery.ID).Scan(&payload); err != nil || payload != nil {
+			t.Fatalf("redacted swept payload = %x, %v", payload, err)
+		}
+		if _, err := store.FailExpiredExhaustedGitHubEventLeases(t.Context(), 30*24*time.Hour+time.Nanosecond, 10); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("invalid sweep retention error = %v", err)
+		}
+		if _, err := store.FailExpiredExhaustedGitHubEventLeases(t.Context(), time.Hour, 0); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("invalid sweep batch error = %v", err)
+		}
+	})
+
+	t.Run("periodic delivery renewal preserves epoch", func(t *testing.T) {
 		clearGitHubWebhookWork(t, pool)
 		d := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000400", strings.Repeat("d", 64), `{}`))
 		old := claimOne(t, store, "old-worker", time.Second)
@@ -1457,7 +1604,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 				_, err := store.RenewGitHubWebhookDelivery(t.Context(), d.ID, oldToken, time.Minute)
 				return err
 			}(),
-			store.RetryGitHubWebhookDelivery(t.Context(), d.ID, oldToken, 0, "internal", "old"),
+			store.RetryGitHubWebhookDelivery(t.Context(), d.ID, oldToken, 0, time.Hour, "internal", "old"),
 			store.CompleteGitHubWebhookDelivery(t.Context(), d.ID, oldToken, "processed", time.Hour),
 			store.FailGitHubWebhookDelivery(t.Context(), d.ID, oldToken, "internal", "old", time.Hour),
 		}
@@ -1468,6 +1615,64 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		}
 		if err := store.CompleteGitHubWebhookDelivery(t.Context(), d.ID, *fresh.Lease, "processed", time.Hour); err != nil {
 			t.Fatalf("new owner complete: %v", err)
+		}
+	})
+
+	t.Run("final delivery rotation immediately fences old token", func(t *testing.T) {
+		for iteration := range 20 {
+			clearGitHubWebhookWork(t, pool)
+			delivery := receiveDelivery(t, store, webhookParams(fmt.Sprintf("20000000-0000-0000-0004-%012d", iteration), fmt.Sprintf("%064x", iteration+900), `{}`))
+			claimed := claimOne(t, store, "final-delivery", time.Second)
+			original := *claimed.Lease
+			if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET lease_expires_at=clock_timestamp()+interval '20 milliseconds' WHERE id=$1`, delivery.ID); err != nil {
+				t.Fatal(err)
+			}
+			original.ExpiresAt = databaseTime(t, pool, `SELECT lease_expires_at FROM github_webhook_deliveries WHERE id=$1`, delivery.ID)
+			rotated, err := store.RotateGitHubWebhookDeliveryLease(t.Context(), delivery.ID, original, time.Second)
+			if err != nil || rotated.Epoch != original.Epoch+1 || !rotated.ExpiresAt.After(original.ExpiresAt) {
+				t.Fatalf("iteration %d final delivery rotation = %+v, %v", iteration, rotated, err)
+			}
+			if err := store.CompleteGitHubWebhookDelivery(t.Context(), delivery.ID, original, "processed", time.Hour); !errors.Is(err, ErrLeaseNotOwned) {
+				t.Fatalf("iteration %d original delivery token error = %v", iteration, err)
+			}
+			if err := store.CompleteGitHubWebhookDelivery(t.Context(), delivery.ID, rotated, "processed", time.Hour); err != nil {
+				t.Fatalf("iteration %d rotated delivery token: %v", iteration, err)
+			}
+		}
+	})
+
+	t.Run("final intent rotation immediately fences old token", func(t *testing.T) {
+		for iteration := range 20 {
+			clearGitHubWebhookWork(t, pool)
+			delivery := receiveDelivery(t, store, webhookParams(fmt.Sprintf("20000000-0000-0000-0005-%012d", iteration), fmt.Sprintf("%064x", iteration+1000), `{}`))
+			sha := strings.Repeat("a", 40)
+			generation, err := store.AdvanceGitHubRoutingGeneration(t.Context(), githubWebhookOrg, githubWebhookRepo, "R_node", "refs/heads/main", 3, 4, &sha, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			intentID, created, err := store.PersistGitHubRoutingIntent(t.Context(), GitHubRoutingIntentParams{DeliveryID: delivery.ID, OrgID: githubWebhookOrg, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", AppID: githubWebhookAppA, EnvironmentID: githubWebhookEnv, Ref: "refs/heads/main", CommitSHA: sha, EventKind: "push", RoutingGeneration: generation, RepositoryGeneration: 3, RefLifecycleGeneration: 4, ConfigGeneration: 7, WorkflowPath: ".github/workflows/deploy.yml", ProductionRef: true})
+			if err != nil || !created {
+				t.Fatalf("iteration %d intent = %s/%t, %v", iteration, intentID, created, err)
+			}
+			intents, err := store.ClaimGitHubRoutingIntents(t.Context(), "final-intent", time.Second, 1)
+			if err != nil || len(intents) != 1 || intents[0].ID != intentID {
+				t.Fatalf("iteration %d intent claim = %+v, %v", iteration, intents, err)
+			}
+			original := *intents[0].Lease
+			if _, err := pool.Exec(t.Context(), `UPDATE github_routing_intents SET lease_expires_at=clock_timestamp()+interval '20 milliseconds' WHERE id=$1`, intentID); err != nil {
+				t.Fatal(err)
+			}
+			original.ExpiresAt = databaseTime(t, pool, `SELECT lease_expires_at FROM github_routing_intents WHERE id=$1`, intentID)
+			rotated, err := store.RotateGitHubRoutingIntentLease(t.Context(), intentID, original, time.Second)
+			if err != nil || rotated.Epoch != original.Epoch+1 || !rotated.ExpiresAt.After(original.ExpiresAt) {
+				t.Fatalf("iteration %d final intent rotation = %+v, %v", iteration, rotated, err)
+			}
+			if err := store.RetryGitHubRoutingIntent(t.Context(), intentID, original, 0, "github_unavailable", "retry"); !errors.Is(err, ErrLeaseNotOwned) {
+				t.Fatalf("iteration %d original intent token error = %v", iteration, err)
+			}
+			if err := store.RetryGitHubRoutingIntent(t.Context(), intentID, rotated, 0, "github_unavailable", "retry"); err != nil {
+				t.Fatalf("iteration %d rotated intent token: %v", iteration, err)
+			}
 		}
 	})
 
@@ -1570,6 +1775,15 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			t.Fatalf("failed transaction receipt count = %d, %v", count, err)
 		}
 	})
+}
+
+func databaseTime(t *testing.T, pool *pgxpool.Pool, query string, args ...any) time.Time {
+	t.Helper()
+	var value time.Time
+	if err := pool.QueryRow(t.Context(), query, args...).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 type countingFailingCodec struct{ encrypts, decrypts int }

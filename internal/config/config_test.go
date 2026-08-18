@@ -54,6 +54,12 @@ func TestLoadPrecedence(t *testing.T) {
 	if cfg.Worker.ScanInterval != 30*time.Second || cfg.Worker.LeaseDuration != time.Minute || cfg.Worker.MaxConcurrentDeploys != 4 {
 		t.Fatalf("worker config = %+v, want default values", cfg.Worker)
 	}
+	if cfg.GitHubEventWorker.ScanInterval != time.Second || cfg.GitHubEventWorker.DeliveryConcurrency != 4 || cfg.GitHubEventWorker.IntentConcurrency != 8 ||
+		cfg.GitHubEventWorker.LeaseDuration != time.Minute || cfg.GitHubEventWorker.ProcessingTimeout != 20*time.Second || cfg.GitHubEventWorker.MaxAttempts != 12 ||
+		cfg.GitHubEventWorker.InitialRetry != 5*time.Second || cfg.GitHubEventWorker.MaxRetry != 15*time.Minute || cfg.GitHubEventWorker.PayloadRetention != 24*time.Hour ||
+		cfg.GitHubEventWorker.CleanupInterval != time.Minute || cfg.GitHubEventWorker.CleanupBatch != 100 || cfg.GitHubEventWorker.ShutdownGrace != 30*time.Second || cfg.GitHubEventWorker.MaxIntents != 1000 {
+		t.Fatalf("GitHub event worker config = %+v, want default values", cfg.GitHubEventWorker)
+	}
 	if cfg.Auth.MaxConcurrentHashes != 4 || cfg.Auth.RateLimitPerMinute != 10 || cfg.Auth.RequestBodyBytes != 65536 {
 		t.Fatalf("auth limits = %+v, want default values", cfg.Auth)
 	}
@@ -181,6 +187,47 @@ func TestLoadGitHubConfigPrecedence(t *testing.T) {
 	}
 	if cfg.ExternalURL != "https://cyclopus.example" || cfg.GitHub.RunPollInterval != 5*time.Second {
 		t.Fatalf("external URL/GitHub config = %q %+v", cfg.ExternalURL, cfg.GitHub)
+	}
+}
+
+func TestLoadGitHubEventWorkerPrecedence(t *testing.T) {
+	cfg, err := Load(
+		[]string{"--github-event-worker-scan-interval", "250ms", "--github-event-worker-delivery-concurrency", "7", "--github-event-worker-max-intents", "99"},
+		append(baseValidEnv, "CYCLOPUS_GITHUB_EVENT_WORKER_SCAN_INTERVAL=500ms", "CYCLOPUS_GITHUB_EVENT_WORKER_INTENT_CONCURRENCY=6", "CYCLOPUS_GITHUB_EVENT_WORKER_MAX_INTENTS=88"),
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.GitHubEventWorker.ScanInterval != 250*time.Millisecond || cfg.GitHubEventWorker.DeliveryConcurrency != 7 || cfg.GitHubEventWorker.IntentConcurrency != 6 || cfg.GitHubEventWorker.MaxIntents != 99 {
+		t.Fatalf("GitHub event worker config = %+v", cfg.GitHubEventWorker)
+	}
+}
+
+func TestLoadRejectsInvalidGitHubEventWorkerRelationshipsAndBounds(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "processing timeout equals lease", args: []string{"--github-event-worker-lease-duration", "20s", "--github-event-worker-processing-timeout", "20s"}, want: "processing_timeout"},
+		{name: "retry delays reversed", args: []string{"--github-event-worker-initial-retry", "2m", "--github-event-worker-max-retry", "1m"}, want: "retry delays"},
+		{name: "retry maximum too large", args: []string{"--github-event-worker-max-retry", "15m1s"}, want: "retry delays"},
+		{name: "attempt schema mismatch", args: []string{"--github-event-worker-max-attempts", "13"}, want: "must be 12"},
+		{name: "delivery concurrency zero", args: []string{"--github-event-worker-delivery-concurrency", "0"}, want: "concurrency"},
+		{name: "intent concurrency over maximum", args: []string{"--github-event-worker-intent-concurrency", "101"}, want: "concurrency"},
+		{name: "negative retention", args: []string{"--github-event-worker-payload-retention", "-1s"}, want: "durations"},
+		{name: "retention over maximum", args: []string{"--github-event-worker-payload-retention", "721h"}, want: "out of bounds"},
+		{name: "cleanup batch zero", args: []string{"--github-event-worker-cleanup-batch", "0"}, want: "out of bounds"},
+		{name: "cleanup batch over maximum", args: []string{"--github-event-worker-cleanup-batch", "1001"}, want: "out of bounds"},
+		{name: "max intents zero", args: []string{"--github-event-worker-max-intents", "0"}, want: "out of bounds"},
+		{name: "max intents over maximum", args: []string{"--github-event-worker-max-intents", "10001"}, want: "out of bounds"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Load(test.args, baseValidEnv)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

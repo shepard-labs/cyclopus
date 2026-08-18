@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -372,14 +374,11 @@ func TestRunLifecycleReadinessAndGracefulCancellation(t *testing.T) {
 	recovery := &fakeLifecycleWorker{
 		startup: func(context.Context) error {
 			if ready.Load() {
-				t.Fatal("readiness became true before startup recovery completed")
+				return errors.New("readiness became true before startup recovery completed")
 			}
 			return nil
 		},
 		run: func(ctx context.Context) error {
-			if !ready.Load() {
-				t.Fatal("readiness remained false after startup recovery")
-			}
 			<-ctx.Done()
 			return nil
 		},
@@ -457,9 +456,6 @@ func TestRunLifecycleBlockedPeriodicRecoveryFailsProcessAndCancelsAPI(t *testing
 	recovery := &fakeLifecycleWorker{
 		startup: func(context.Context) error { return nil },
 		run: func(context.Context) error {
-			if !ready.Load() {
-				t.Fatal("readiness remained false after successful startup recovery")
-			}
 			return want
 		},
 	}
@@ -475,6 +471,127 @@ func TestRunLifecycleBlockedPeriodicRecoveryFailsProcessAndCancelsAPI(t *testing
 	case <-api.stopped:
 	default:
 		t.Fatal("periodic recovery failure did not cancel API")
+	}
+}
+
+func TestRunLifecycleStartsAllWorkersBeforeReadiness(t *testing.T) {
+	var ready atomic.Bool
+	var mu sync.Mutex
+	order := []string{}
+	record := func(value string) { mu.Lock(); order = append(order, value); mu.Unlock() }
+	api := &fakeLifecycleServer{started: make(chan struct{}), stopped: make(chan struct{})}
+	eventRunStarted := make(chan struct{}, 1)
+	recovery := &fakeLifecycleWorker{startup: func(context.Context) error { record("recovery startup"); return nil }, run: func(ctx context.Context) error { record("recovery run"); <-ctx.Done(); return nil }}
+	events := &fakeLifecycleWorker{startup: func(context.Context) error {
+		record("event startup")
+		return nil
+	}, run: func(ctx context.Context) error {
+		eventRunStarted <- struct{}{}
+		record("event run")
+		<-ctx.Done()
+		return nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runLifecycle(ctx, api, recovery, &ready, events) }()
+	for !ready.Load() {
+		runtime.Gosched()
+	}
+	<-eventRunStarted
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 4 || order[0] != "recovery startup" || order[1] != "event startup" {
+		t.Fatalf("lifecycle order = %v", order)
+	}
+	if ready.Load() {
+		t.Fatal("readiness remained true after shutdown")
+	}
+}
+
+func TestRunLifecycleStartupRollbackWaitsForStartedRunner(t *testing.T) {
+	want := errors.New("event startup failed")
+	var ready atomic.Bool
+	api := &fakeLifecycleServer{started: make(chan struct{}), stopped: make(chan struct{})}
+	runStarted := make(chan struct{})
+	runCanceled := make(chan struct{})
+	drain := make(chan struct{})
+	recovery := &fakeLifecycleWorker{
+		startup: func(context.Context) error { return nil },
+		run: func(ctx context.Context) error {
+			close(runStarted)
+			<-ctx.Done()
+			close(runCanceled)
+			<-drain
+			return nil
+		},
+	}
+	events := &fakeLifecycleWorker{startup: func(context.Context) error {
+		<-runStarted
+		return want
+	}}
+	done := make(chan error, 1)
+	go func() { done <- runLifecycle(t.Context(), api, recovery, &ready, events) }()
+	<-runCanceled
+	select {
+	case err := <-done:
+		t.Fatalf("runLifecycle returned before recovery drained: %v", err)
+	default:
+	}
+	close(drain)
+	if err := <-done; !errors.Is(err, want) {
+		t.Fatalf("runLifecycle() error = %v, want %v", err, want)
+	}
+	if ready.Load() {
+		t.Fatal("readiness became true during startup rollback")
+	}
+	select {
+	case <-api.stopped:
+	default:
+		t.Fatal("startup rollback did not wait for API shutdown")
+	}
+}
+
+func TestRunLifecycleAdditionalStartupFailurePreventsReadyAndCancelsAPI(t *testing.T) {
+	want := errors.New("event database unavailable")
+	var ready atomic.Bool
+	api := &fakeLifecycleServer{started: make(chan struct{}), stopped: make(chan struct{})}
+	recovery := &fakeLifecycleWorker{}
+	events := &fakeLifecycleWorker{startup: func(context.Context) error { return want }}
+	err := runLifecycle(t.Context(), api, recovery, &ready, events)
+	if !errors.Is(err, want) || ready.Load() {
+		t.Fatalf("runLifecycle() = %v ready=%t", err, ready.Load())
+	}
+	select {
+	case <-api.stopped:
+	default:
+		t.Fatal("event startup failure did not stop API")
+	}
+}
+
+func TestRunLifecycleOneRunnerErrorCancelsAPIAndSibling(t *testing.T) {
+	want := errors.New("event scan unavailable")
+	var ready atomic.Bool
+	siblingStopped := make(chan struct{})
+	api := &fakeLifecycleServer{started: make(chan struct{}), stopped: make(chan struct{})}
+	recovery := &fakeLifecycleWorker{run: func(ctx context.Context) error { <-ctx.Done(); close(siblingStopped); return nil }}
+	events := &fakeLifecycleWorker{run: func(context.Context) error { return want }}
+	err := runLifecycle(t.Context(), api, recovery, &ready, events)
+	if !errors.Is(err, want) || ready.Load() {
+		t.Fatalf("runLifecycle() = %v ready=%t", err, ready.Load())
+	}
+	select {
+	case <-api.stopped:
+	default:
+		t.Fatal("runner error did not stop API")
+	}
+	select {
+	case <-siblingStopped:
+	default:
+		t.Fatal("runner error did not cancel sibling")
 	}
 }
 
