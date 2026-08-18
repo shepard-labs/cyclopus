@@ -41,6 +41,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000012_github_webhook_signature_key_version.up.sql",
 		"000013_github_webhook_conflict_error.down.sql",
 		"000013_github_webhook_conflict_error.up.sql",
+		"000014_github_routing_fanout.down.sql",
+		"000014_github_routing_fanout.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)

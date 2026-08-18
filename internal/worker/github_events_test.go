@@ -101,21 +101,21 @@ func TestGitHubEventLeaseMetricsRefreshEveryScan(t *testing.T) {
 	if err := runner.Startup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if got := metrics.lastLeases(); got != [4]int64{0, 3, 0, 4} {
+	if got := metrics.lastLeases(); got != [6]int64{0, 3, 0, 0, 0, 4} {
 		t.Fatalf("startup leases = %v", got)
 	}
 	fake.leaseStatus = store.GitHubEventLeaseStatus{Deliveries: 1, Intents: 2}
 	if err := runner.scan(t.Context(), runner.processCtx, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := metrics.lastLeases(); got != [4]int64{0, 1, 0, 2} {
+	if got := metrics.lastLeases(); got != [6]int64{0, 1, 0, 0, 0, 2} {
 		t.Fatalf("refreshed leases = %v", got)
 	}
 	fake.countErr = errors.New("count unavailable")
 	if err := runner.scan(t.Context(), runner.processCtx, false); !errors.Is(err, fake.countErr) {
 		t.Fatalf("count error = %v", err)
 	}
-	if got := metrics.lastLeases(); got != [4]int64{0, 1, 0, 2} {
+	if got := metrics.lastLeases(); got != [6]int64{0, 1, 0, 0, 0, 2} {
 		t.Fatalf("count error changed leases = %v", got)
 	}
 }
@@ -137,12 +137,12 @@ func TestGitHubEventLeaseMetricsTrackActiveAndDecrementOnCompletion(t *testing.T
 		t.Fatal(err)
 	}
 	<-started
-	if got := metrics.lastLeases(); got != [4]int64{1, 1, 0, 0} {
+	if got := metrics.lastLeases(); got != [6]int64{1, 1, 0, 0, 0, 0} {
 		t.Fatalf("in-process leases = %v, want active local plus delayed other", got)
 	}
 	close(release)
 	runner.wg.Wait()
-	if got := metrics.lastLeases(); got != [4]int64{0, 1, 0, 0} {
+	if got := metrics.lastLeases(); got != [6]int64{0, 1, 0, 0, 0, 0} {
 		t.Fatalf("completed leases = %v, want active decrement", got)
 	}
 	fake.mu.Lock()
@@ -151,7 +151,7 @@ func TestGitHubEventLeaseMetricsTrackActiveAndDecrementOnCompletion(t *testing.T
 	if err := runner.scan(t.Context(), runner.processCtx, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := metrics.lastLeases(); got != [4]int64{} {
+	if got := metrics.lastLeases(); got != [6]int64{} {
 		t.Fatalf("expired/reclaimed leases = %v", got)
 	}
 }
@@ -677,6 +677,43 @@ func TestGitHubEventCleanupBatchIntervalAndError(t *testing.T) {
 	}
 }
 
+func TestGitHubEventFanoutCandidateCleanupInvokesBatchAndLogsOnlyCounts(t *testing.T) {
+	var logs bytes.Buffer
+	secret := "candidate-cleanup-secret"
+	fake := &fakeGitHubEventStore{candidateCleanupResult: 7}
+	runner := newGitHubEventTestRunner(fake, &fakeGitHubEventProcessor{}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	metrics := &fakeGitHubMetrics{}
+	runner.metrics = metrics
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.candidateCleanupCalls != 1 || fake.candidateCleanupBatch != runner.config.CleanupBatch {
+		t.Fatalf("fanout candidate cleanup = calls:%d batch:%d", fake.candidateCleanupCalls, fake.candidateCleanupBatch)
+	}
+	text := logs.String()
+	for _, want := range []string{`"msg":"github event fanout candidate cleanup"`, `"result":"deleted"`, `"count":7`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("cleanup log %q does not contain %q", text, want)
+		}
+	}
+	if strings.Contains(text, secret) || strings.Contains(text, "manifest_id") || strings.Contains(text, "delivery_id") {
+		t.Fatalf("cleanup log exposed sensitive identifiers: %s", text)
+	}
+	if got := metrics.lastLeases(); got != [6]int64{} {
+		t.Fatalf("cleanup changed lease metrics = %v", got)
+	}
+
+	fake.candidateCleanupErr = errors.New(secret)
+	runner.lastClean = time.Time{}
+	logs.Reset()
+	if err := runner.scan(t.Context(), runner.processCtx, false); !errors.Is(err, fake.candidateCleanupErr) {
+		t.Fatalf("candidate cleanup error = %v", err)
+	}
+	if strings.Contains(logs.String(), secret) {
+		t.Fatalf("candidate cleanup error was logged: %s", logs.String())
+	}
+}
+
 func TestGitHubEventPeriodicClaimErrorDoesNotCancelActiveSibling(t *testing.T) {
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
@@ -855,8 +892,47 @@ func TestGitHubEventStructuredLogsExcludeSensitiveValues(t *testing.T) {
 	}
 }
 
+func TestGitHubEventDeliveryMetricRecordsFinalFanout(t *testing.T) {
+	metrics := &fakeGitHubMetrics{}
+	processor := &fakeGitHubEventProcessor{deliveryOutcome: service.GitHubEventOutcome{Disposition: service.GitHubEventComplete, Code: "processed", IntentCount: 251}}
+	runner := NewGitHubEventRunner(gitHubEventTestConfig(), discardLogger(), &fakeGitHubEventStore{}, processor, metrics)
+	enableTestWrites(runner)
+	runDeliveryDirect(runner, t.Context(), leasedDelivery("fanout-metric", 1))
+	if metrics.deliveryResult != "processed" || metrics.deliveryFanout != 251 {
+		t.Fatalf("delivery metric result/fanout = %q/%d, want processed/251", metrics.deliveryResult, metrics.deliveryFanout)
+	}
+}
+
+func TestGitHubEventFanoutMetricsCoverOutcomes(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		outcome    service.GitHubEventOutcome
+		rotateErr  error
+		wantResult string
+	}{
+		{name: "processed", outcome: service.GitHubEventOutcome{Disposition: service.GitHubEventComplete, Code: "processed"}, wantResult: "processed"},
+		{name: "retry", outcome: service.GitHubEventOutcome{Disposition: service.GitHubEventRetry, Code: "database_unavailable"}, wantResult: "retry"},
+		{name: "failed", outcome: service.GitHubEventOutcome{Disposition: service.GitHubEventFail, Code: "invalid_snapshot"}, wantResult: "failed"},
+		{name: "processor lease lost", outcome: service.GitHubEventOutcome{Disposition: service.GitHubEventLeaseLost, Code: "lease_lost"}, wantResult: "lease_lost"},
+		{name: "rotation lease lost", outcome: service.GitHubEventOutcome{Disposition: service.GitHubEventRetry, Code: "database_unavailable"}, rotateErr: store.ErrLeaseNotOwned, wantResult: "lease_lost"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			metrics := &fakeGitHubMetrics{}
+			fake := &fakeGitHubEventStore{rotateErr: test.rotateErr}
+			runner := NewGitHubEventRunner(gitHubEventTestConfig(), discardLogger(), fake, &fakeGitHubEventProcessor{fanout: func(context.Context, store.GitHubRoutingFanoutManifest) service.GitHubEventOutcome {
+				return test.outcome
+			}}, metrics)
+			enableTestWrites(runner)
+			runFanoutDirect(runner, t.Context(), leasedFanout("fanout", 2))
+			if metrics.fanoutResult != test.wantResult {
+				t.Fatalf("fanout metric = %q, want %q", metrics.fanoutResult, test.wantResult)
+			}
+		})
+	}
+}
+
 func gitHubEventTestConfig() GitHubEventConfig {
-	return GitHubEventConfig{ScanInterval: time.Hour, LeaseDuration: time.Minute, ProcessingTimeout: time.Second, InitialRetry: 5 * time.Second, MaxRetry: 15 * time.Minute, PayloadRetention: time.Hour, CleanupInterval: time.Minute, ShutdownGrace: time.Second, DeliveryConcurrency: 4, IntentConcurrency: 4, MaxAttempts: 12, CleanupBatch: 100, MaxIntents: 1000, Owner: "worker-one"}
+	return GitHubEventConfig{ScanInterval: time.Hour, LeaseDuration: time.Minute, ProcessingTimeout: time.Second, InitialRetry: 5 * time.Second, MaxRetry: 15 * time.Minute, PayloadRetention: time.Hour, CleanupInterval: time.Minute, ShutdownGrace: time.Second, DeliveryConcurrency: 4, FanoutConcurrency: 2, IntentConcurrency: 4, MaxAttempts: 12, CleanupBatch: 100, MaxIntents: 1000, Owner: "worker-one"}
 }
 
 func newGitHubEventTestRunner(dataStore GitHubEventStore, processor GitHubEventProcessor, logger *slog.Logger) *GitHubEventRunner {
@@ -878,6 +954,10 @@ func leasedIntent(id string, attempts int) store.GitHubRoutingIntent {
 	return store.GitHubRoutingIntent{ID: id, AppID: "app", Ref: "refs/heads/main", EventKind: "push", Attempts: attempts, Lease: &store.LeaseToken{Owner: "worker-one", Epoch: 1, ExpiresAt: time.Now().Add(time.Minute)}}
 }
 
+func leasedFanout(id string, attempts int) store.GitHubRoutingFanoutManifest {
+	return store.GitHubRoutingFanoutManifest{ID: id, DeliveryID: id + "-delivery", EventKind: "push", Attempts: attempts, Lease: &store.LeaseToken{Owner: "worker-one", Epoch: 1, ExpiresAt: time.Now().Add(time.Minute)}}
+}
+
 func runDeliveryDirect(runner *GitHubEventRunner, ctx context.Context, delivery store.GitHubWebhookDelivery) {
 	runner.delivery <- struct{}{}
 	runner.wg.Add(1)
@@ -890,8 +970,15 @@ func runIntentDirect(runner *GitHubEventRunner, ctx context.Context, intent stor
 	runner.processIntent(ctx, intent)
 }
 
+func runFanoutDirect(runner *GitHubEventRunner, ctx context.Context, manifest store.GitHubRoutingFanoutManifest) {
+	runner.fanout <- struct{}{}
+	runner.wg.Add(1)
+	runner.processFanout(ctx, manifest)
+}
+
 type fakeGitHubEventProcessor struct {
 	delivery        func(context.Context, store.GitHubWebhookDelivery) service.GitHubEventOutcome
+	fanout          func(context.Context, store.GitHubRoutingFanoutManifest) service.GitHubEventOutcome
 	intent          func(context.Context, store.GitHubRoutingIntent) service.GitHubEventOutcome
 	deliveryOutcome service.GitHubEventOutcome
 	intentOutcome   service.GitHubEventOutcome
@@ -900,28 +987,36 @@ type fakeGitHubEventProcessor struct {
 type fakeGitHubMetrics struct {
 	githubmetrics.Recorder
 	mu             sync.Mutex
-	leases         [4]int64
+	leases         [6]int64
 	deliveryResult string
+	deliveryFanout int
+	fanoutResult   string
 	intentResult   string
 }
 
 func (m *fakeGitHubMetrics) Ingress(string, string, string) {}
-func (m *fakeGitHubMetrics) Delivery(_, _, result string, _ time.Duration, _ int) {
+func (m *fakeGitHubMetrics) Delivery(_, _, result string, _ time.Duration, fanout int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deliveryResult = result
+	m.deliveryFanout = fanout
+}
+func (m *fakeGitHubMetrics) Fanout(_, result string, _ time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fanoutResult = result
 }
 func (m *fakeGitHubMetrics) Intent(_, result string, _ time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.intentResult = result
 }
-func (m *fakeGitHubMetrics) Leases(a, d, i, di int64) {
+func (m *fakeGitHubMetrics) Leases(a, d, f, df, i, di int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.leases = [4]int64{a, d, i, di}
+	m.leases = [6]int64{a, d, f, df, i, di}
 }
-func (m *fakeGitHubMetrics) lastLeases() [4]int64 {
+func (m *fakeGitHubMetrics) lastLeases() [6]int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.leases
@@ -939,28 +1034,36 @@ func (f *fakeGitHubEventProcessor) ProcessIntent(ctx context.Context, intent sto
 	}
 	return f.intentOutcome
 }
+func (f *fakeGitHubEventProcessor) ProcessFanout(ctx context.Context, manifest store.GitHubRoutingFanoutManifest) service.GitHubEventOutcome {
+	if f.fanout != nil {
+		return f.fanout(ctx, manifest)
+	}
+	return service.GitHubEventOutcome{Disposition: service.GitHubEventComplete, Code: "processed"}
+}
 
 type fakeGitHubEventStore struct {
-	mu                                                                                                      sync.Mutex
-	leaseStatus                                                                                             store.GitHubEventLeaseStatus
-	countErr, cleanupErr, sweepErr, deliveryClaimErr, intentClaimErr, renewErr, rotateErr, deliveryWriteErr error
-	deliveries                                                                                              []store.GitHubWebhookDelivery
-	intents                                                                                                 []store.GitHubRoutingIntent
-	countCalls, cleanupCalls, cleanupBatch, sweepCalls, sweepBatch                                          int
-	deliveryClaimCalls, intentClaimCalls                                                                    int
-	deliveryClaimed, intentClaimed, renewCalls, rotateCalls                                                 int
-	deliveryLimits, intentLimits                                                                            []int
-	deliveryRetryCalls, deliveryCompleteCalls, deliveryFailCalls                                            int
-	intentRetryCalls, intentFailCalls, releaseCalls                                                         int
-	cleanupResult                                                                                           int64
-	sweepResult                                                                                             store.GitHubEventLeaseStatus
-	lastMethod, lastCode                                                                                    string
-	lastRetention, sweepRetention                                                                           time.Duration
-	deliveryWrite                                                                                           func(context.Context) error
-	deliveryRenew, intentRenew, deliveryRotate, intentRotate                                                func(context.Context) error
-	intentClaimAttempt                                                                                      chan struct{}
-	renewedToken, rotatedToken, lastRenewToken, lastRotateToken, lastWriteToken                             store.LeaseToken
-	committedWrites                                                                                         int
+	mu                                                                                                                           sync.Mutex
+	leaseStatus                                                                                                                  store.GitHubEventLeaseStatus
+	countErr, cleanupErr, candidateCleanupErr, sweepErr, deliveryClaimErr, intentClaimErr, renewErr, rotateErr, deliveryWriteErr error
+	deliveries                                                                                                                   []store.GitHubWebhookDelivery
+	intents                                                                                                                      []store.GitHubRoutingIntent
+	countCalls, cleanupCalls, cleanupBatch, sweepCalls, sweepBatch                                                               int
+	candidateCleanupCalls, candidateCleanupBatch                                                                                 int
+	deliveryClaimCalls, intentClaimCalls                                                                                         int
+	deliveryClaimed, intentClaimed, renewCalls, rotateCalls                                                                      int
+	deliveryLimits, intentLimits                                                                                                 []int
+	deliveryRetryCalls, deliveryCompleteCalls, deliveryFailCalls                                                                 int
+	intentRetryCalls, intentFailCalls, releaseCalls                                                                              int
+	cleanupResult                                                                                                                int64
+	candidateCleanupResult                                                                                                       int64
+	sweepResult                                                                                                                  store.GitHubEventLeaseStatus
+	lastMethod, lastCode                                                                                                         string
+	lastRetention, sweepRetention                                                                                                time.Duration
+	deliveryWrite                                                                                                                func(context.Context) error
+	deliveryRenew, intentRenew, deliveryRotate, intentRotate                                                                     func(context.Context) error
+	intentClaimAttempt                                                                                                           chan struct{}
+	renewedToken, rotatedToken, lastRenewToken, lastRotateToken, lastWriteToken                                                  store.LeaseToken
+	committedWrites                                                                                                              int
 }
 
 func (f *fakeGitHubEventStore) CountUnexpiredGitHubEventLeases(context.Context) (store.GitHubEventLeaseStatus, error) {
@@ -989,6 +1092,21 @@ func (f *fakeGitHubEventStore) ClaimGitHubWebhookDeliveries(_ context.Context, _
 	f.deliveries = f.deliveries[n:]
 	f.deliveryClaimed += n
 	return out, nil
+}
+func (f *fakeGitHubEventStore) ClaimGitHubRoutingFanoutManifests(context.Context, string, time.Duration, int) ([]store.GitHubRoutingFanoutManifest, error) {
+	return nil, nil
+}
+func (f *fakeGitHubEventStore) RenewGitHubRoutingFanoutManifest(context.Context, string, store.LeaseToken, time.Duration) (store.LeaseToken, error) {
+	return store.LeaseToken{}, nil
+}
+func (f *fakeGitHubEventStore) RotateGitHubRoutingFanoutManifestLease(context.Context, string, store.LeaseToken, time.Duration) (store.LeaseToken, error) {
+	return store.LeaseToken{Owner: "worker-one", Epoch: 2, ExpiresAt: time.Now().Add(time.Minute)}, f.rotateErr
+}
+func (f *fakeGitHubEventStore) RetryGitHubRoutingFanoutManifest(context.Context, string, store.LeaseToken, time.Duration, string, string) error {
+	return nil
+}
+func (f *fakeGitHubEventStore) FailGitHubRoutingFanoutManifest(context.Context, string, store.LeaseToken, string, string) error {
+	return nil
 }
 func (f *fakeGitHubEventStore) RenewGitHubWebhookDelivery(ctx context.Context, _ string, token store.LeaseToken, _ time.Duration) (store.LeaseToken, error) {
 	f.mu.Lock()
@@ -1132,6 +1250,13 @@ func (f *fakeGitHubEventStore) RedactTerminalGitHubWebhookPayloads(_ context.Con
 	f.cleanupCalls++
 	f.cleanupBatch = batch
 	return f.cleanupResult, f.cleanupErr
+}
+func (f *fakeGitHubEventStore) DeleteTerminalGitHubRoutingFanoutCandidates(_ context.Context, batch int) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.candidateCleanupCalls++
+	f.candidateCleanupBatch = batch
+	return f.candidateCleanupResult, f.candidateCleanupErr
 }
 func (f *fakeGitHubEventStore) terminalWrites() int {
 	f.mu.Lock()

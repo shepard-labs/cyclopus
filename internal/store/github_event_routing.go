@@ -320,22 +320,36 @@ type SnapshotGitHubPushParams struct {
 	RefExists                                                                                   bool
 	ReceivedAt                                                                                  time.Time
 	ObservationSequence                                                                         int64
-	MaxIntents                                                                                  int
-	Audit                                                                                       *AuditEvent
-	DeliveryLease                                                                               LeaseToken
-	Failpoint                                                                                   func(string) error
+	MaxFanout, FanoutBatch                                                                      int
+	// MaxIntents is retained as a compatibility alias for callers migrating to MaxFanout.
+	MaxIntents    int
+	Audit         *AuditEvent
+	DeliveryLease LeaseToken
+	Failpoint     func(string) error
 }
 
 type SnapshotGitHubPushResult struct {
 	RoutingGeneration int64
-	IntentCount       int
+	TotalCount        int
+	InsertedCount     int
+	ManifestStatus    string
+	// IntentCount is retained as a compatibility alias for TotalCount.
+	IntentCount int
+	Terminal    bool
+	Superseded  bool
 }
 
 // SnapshotGitHubPush is the accepted consistency boundary: repository/ref
-// authority, generation advancement, eligibility, and intent insertion commit
+// authority, generation advancement, eligibility, and candidate materialization commit
 // together while the repository/ref rows are locked.
 func (s *Store) SnapshotGitHubPush(ctx context.Context, p SnapshotGitHubPushParams) (SnapshotGitHubPushResult, error) {
-	if p.MaxIntents < 1 || p.MaxIntents > 10000 || (p.EventKind != "push" && p.EventKind != "delete") {
+	if p.MaxFanout == 0 {
+		p.MaxFanout = p.MaxIntents
+	}
+	if p.FanoutBatch == 0 {
+		p.FanoutBatch = min(100, p.MaxFanout)
+	}
+	if p.MaxFanout < 1 || p.MaxFanout > 10000 || p.FanoutBatch < 1 || p.FanoutBatch > p.MaxFanout || (p.EventKind != "push" && p.EventKind != "delete") {
 		return SnapshotGitHubPushResult{}, ErrInvalidArgument
 	}
 	if p.EventKind == "push" && (!p.RefExists || p.AuthoritativeSHA != p.CommitSHA) || p.EventKind == "delete" && p.RefExists {
@@ -343,7 +357,29 @@ func (s *Store) SnapshotGitHubPush(ctx context.Context, p SnapshotGitHubPushPara
 	}
 	var result SnapshotGitHubPushResult
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		if err := fenceGitHubEventDelivery(ctx, tx, p.DeliveryID, p.DeliveryLease, p.OrgID); err != nil {
+		if err := checkGitHubEventDelivery(ctx, tx, p.DeliveryID, p.DeliveryLease, p.OrgID, false); err != nil {
+			return err
+		}
+		err := tx.QueryRow(ctx, `SELECT routing_generation,total_count,inserted_count,status FROM github_routing_fanout_manifests WHERE delivery_id=$1`, p.DeliveryID).
+			Scan(&result.RoutingGeneration, &result.TotalCount, &result.InsertedCount, &result.ManifestStatus)
+		if err == nil {
+			result.IntentCount = result.TotalCount
+			result.Terminal = result.ManifestStatus == "completed" || result.ManifestStatus == "superseded" || result.ManifestStatus == "failed"
+			result.Superseded = result.ManifestStatus == "superseded"
+			if result.Terminal {
+				if _, err := tx.Exec(ctx, `DELETE FROM github_routing_fanout_candidates candidate USING github_routing_fanout_manifests manifest
+						WHERE manifest.delivery_id=$1 AND candidate.manifest_id=manifest.id`, p.DeliveryID); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		var existingRoutingGeneration int64
+		err = tx.QueryRow(ctx, `SELECT routing_generation FROM github_ref_routing_state WHERE repository_id=$1 AND ref=$2 FOR UPDATE`, p.RepositoryID, p.Ref).Scan(&existingRoutingGeneration)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		var repositoryGeneration, lifecycleGeneration int64
@@ -420,88 +456,374 @@ func (s *Store) SnapshotGitHubPush(ctx context.Context, p SnapshotGitHubPushPara
 				RETURNING routing_generation,lifecycle_generation`, p.RepositoryID, p.Ref, p.RefExists, sha, p.DeliveryID, receivedAt, observationSequence).Scan(&result.RoutingGeneration, &refLifecycle); err != nil {
 			return err
 		}
-		productionDeleteCount := 0
-		if p.EventKind == "delete" {
-			if err := tx.QueryRow(ctx, `SELECT count(*)
-					FROM apps app JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
-					JOIN git_connections connection ON connection.org_id=project.org_id AND connection.id=project.git_connection_id
-					WHERE app.org_id=$1 AND connection.github_repository_id=$2 AND app.deleted_at IS NULL AND project.deleted_at IS NULL
-					AND connection.state='active' AND connection.access_state='active' AND app.github_workflow_path IS NOT NULL
-					AND app.production_branch IS NOT NULL AND ('refs/heads/'||app.production_branch)=$3
-					AND EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=app.org_id AND environment.app_id=app.id
-						AND environment.kind='production' AND environment.branch=app.production_branch AND environment.lifecycle_status='ready' AND environment.torn_down_at IS NULL)`,
-				p.OrgID, p.RepositoryID, p.Ref).Scan(&productionDeleteCount); err != nil {
-				return err
-			}
-		}
-		rows, err := tx.Query(ctx, `SELECT app.id::text,COALESCE(environment.id::text,''),app.github_workflow_path,app.desired_generation,
-			('refs/heads/'||app.production_branch)=$4 AS production_ref
-			FROM apps app JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
+		if _, err := tx.Exec(ctx, `CREATE TEMP TABLE github_fanout_eligibility ON COMMIT DROP AS
+				SELECT app.id,environment.id AS environment_id,app.github_workflow_path,app.desired_generation,
+				('refs/heads/'||app.production_branch)=$4 AS production_ref,
+				(((('refs/heads/'||app.production_branch)=$4 AND environment.id IS NOT NULL)
+				 OR (('refs/heads/'||app.production_branch)<>$4 AND (app.previews_enabled OR $3='delete')))
+				 AND NOT ($3='delete' AND ('refs/heads/'||app.production_branch)=$4)) AS eligible
+				FROM apps app JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
 			JOIN git_connections connection ON connection.org_id=project.org_id AND connection.id=project.git_connection_id
 			LEFT JOIN LATERAL (SELECT candidate.id FROM environments candidate WHERE candidate.org_id=app.org_id AND candidate.app_id=app.id
 				AND candidate.kind='production' AND candidate.branch=app.production_branch AND candidate.lifecycle_status='ready' AND candidate.torn_down_at IS NULL
 				ORDER BY candidate.id LIMIT 1) environment ON true
 			WHERE app.org_id=$1 AND connection.github_repository_id=$2 AND app.deleted_at IS NULL AND project.deleted_at IS NULL
-			AND connection.state='active' AND connection.access_state='active' AND app.github_workflow_path IS NOT NULL AND app.production_branch IS NOT NULL
-				AND ((('refs/heads/'||app.production_branch)=$4 AND environment.id IS NOT NULL)
-				 OR (('refs/heads/'||app.production_branch)<>$4 AND (app.previews_enabled OR $3='delete')))
-				AND NOT ($3='delete' AND ('refs/heads/'||app.production_branch)=$4)
-				ORDER BY app.id LIMIT $5`, p.OrgID, p.RepositoryID, p.EventKind, p.Ref, p.MaxIntents+1)
-		if err != nil {
+			AND connection.state='active' AND connection.access_state='active' AND app.github_workflow_path IS NOT NULL AND app.production_branch IS NOT NULL`, p.OrgID, p.RepositoryID, p.EventKind, p.Ref); err != nil {
 			return err
 		}
-		type eligibleIntent struct {
-			appID, environmentID, workflow string
-			configGeneration               int64
-			production                     bool
+		if err := tx.QueryRow(ctx, `SELECT least(count(*) FILTER (WHERE eligible),$1)::integer FROM github_fanout_eligibility`, p.MaxFanout+1).Scan(&result.TotalCount); err != nil {
+			return err
 		}
-		var eligible []eligibleIntent
-		for rows.Next() {
-			var intent eligibleIntent
-			if err := rows.Scan(&intent.appID, &intent.environmentID, &intent.workflow, &intent.configGeneration, &intent.production); err != nil {
-				rows.Close()
+		if result.TotalCount > p.MaxFanout {
+			return fmt.Errorf("%w: github routing fanout limit", ErrFailedPrecondition)
+		}
+		result.IntentCount = result.TotalCount
+		productionDeleteCount := 0
+		if p.EventKind == "delete" {
+			if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE production_ref AND environment_id IS NOT NULL)::integer FROM github_fanout_eligibility`).Scan(&productionDeleteCount); err != nil {
 				return err
 			}
-			eligible = append(eligible, intent)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
 		if p.Failpoint != nil {
 			if err := p.Failpoint("after_eligibility"); err != nil {
 				return err
 			}
 		}
-		for _, intent := range eligible {
-			tag, err := tx.Exec(ctx, `INSERT INTO github_routing_intents(delivery_id,org_id,repository_id,repository_node_id,installation_id,app_id,environment_id,ref,commit_sha,event_kind,routing_generation,repository_generation,ref_lifecycle_generation,config_generation,workflow_path,production_ref)
-				VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,'')::uuid,$8,NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16)
-				ON CONFLICT(delivery_id,app_id,ref,event_kind,routing_generation) DO NOTHING`, p.DeliveryID, p.OrgID, p.RepositoryID,
-				p.RepositoryNodeID, p.InstallationID, intent.appID, intent.environmentID, p.Ref, p.CommitSHA, p.EventKind, result.RoutingGeneration,
-				repositoryGeneration, refLifecycle, intent.configGeneration, intent.workflow, intent.production)
-			if err != nil {
+		status := "pending"
+		var terminalAt any
+		var eligibilityCutoff any
+		if result.TotalCount == 0 {
+			status, terminalAt, result.Terminal = "completed", "now", true
+		} else {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM github_fanout_eligibility WHERE eligible ORDER BY id DESC LIMIT 1`).Scan(&eligibilityCutoff); err != nil {
 				return err
 			}
-			result.IntentCount += int(tag.RowsAffected())
-			if result.IntentCount > p.MaxIntents {
-				return fmt.Errorf("%w: github routing fanout limit", ErrFailedPrecondition)
+		}
+		result.ManifestStatus = status
+		var manifestID string
+		if err := tx.QueryRow(ctx, `INSERT INTO github_routing_fanout_manifests(delivery_id,org_id,repository_id,repository_node_id,installation_id,ref,event_kind,commit_sha,routing_generation,repository_generation,ref_lifecycle_generation,status,eligibility_cutoff_app_id,total_count,production_delete_count,batch_size,max_fanout,terminal_at)
+				VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9,$10,$11,$12,$13,$14,$15,$16,$17,CASE WHEN $18::boolean THEN clock_timestamp() END) RETURNING id::text`,
+			p.DeliveryID, p.OrgID, p.RepositoryID, p.RepositoryNodeID, p.InstallationID, p.Ref, p.EventKind, p.CommitSHA,
+			result.RoutingGeneration, repositoryGeneration, refLifecycle, status, eligibilityCutoff, result.TotalCount, productionDeleteCount, p.FanoutBatch, p.MaxFanout, terminalAt != nil).Scan(&manifestID); err != nil {
+			return err
+		}
+		if result.TotalCount > 0 {
+			if _, err := tx.Exec(ctx, `INSERT INTO github_routing_fanout_candidates(manifest_id,org_id,app_id,environment_id,config_generation,workflow_path,production_ref)
+					SELECT $1,$2,id,environment_id,desired_generation,github_workflow_path,production_ref FROM github_fanout_eligibility WHERE eligible ORDER BY id LIMIT $3`, manifestID, p.OrgID, p.MaxFanout); err != nil {
+				return err
 			}
-			if result.IntentCount == 1 && p.Failpoint != nil {
+			if p.Failpoint != nil {
 				if err := p.Failpoint("after_first_intent"); err != nil {
 					return err
 				}
 			}
 		}
-		auditAfter := map[string]any{"repository_id": p.RepositoryID, "routing_generation": result.RoutingGeneration, "intent_count": result.IntentCount}
-		if p.EventKind == "delete" {
-			auditAfter["production_branch_deleted_count"] = productionDeleteCount
-			auditAfter["production_branch_delete_outcome"] = "recorded_no_teardown"
+		if _, err := tx.Exec(ctx, `WITH superseded AS (
+				UPDATE github_routing_fanout_manifests SET status='superseded',terminal_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+				WHERE repository_id=$1 AND ref=$2 AND routing_generation<$3 AND status IN ('pending','leased') RETURNING id
+			) DELETE FROM github_routing_fanout_candidates candidate USING superseded WHERE candidate.manifest_id=superseded.id`, p.RepositoryID, p.Ref, result.RoutingGeneration); err != nil {
+			return err
 		}
-		after, _ := json.Marshal(auditAfter)
-		return insertAuditEvent(ctx, tx, p.OrgID, p.Audit, "github_push.snapshotted", "github_webhook_delivery", p.DeliveryID, nil, after)
+		if err := checkGitHubEventDelivery(ctx, tx, p.DeliveryID, p.DeliveryLease, p.OrgID, true); err != nil {
+			return err
+		}
+		if !result.Terminal {
+			return nil
+		}
+		return insertGitHubPushFanoutAudit(ctx, tx, p.OrgID, p.DeliveryID, p.RepositoryID, result.RoutingGeneration, result.TotalCount, productionDeleteCount, p.EventKind, p.Audit)
 	})
 	return result, err
+}
+
+type ContinueGitHubPushFanoutParams struct {
+	ManifestID    string
+	ManifestLease LeaseToken
+	BatchLimit    int
+	Audit         *AuditEvent
+	Failpoint     func(string) error
+}
+
+type ContinueGitHubPushFanoutResult struct {
+	TotalCount, InsertedCount int
+	Terminal, Superseded      bool
+}
+
+type GitHubRoutingFanoutManifest struct {
+	ID, DeliveryID, OrgID, Ref, EventKind string
+	RepositoryID, RoutingGeneration       int64
+	TotalCount, InsertedCount, Attempts   int
+	Lease                                 *LeaseToken
+}
+
+func scanGitHubRoutingFanoutManifest(row pgx.Row, manifest *GitHubRoutingFanoutManifest) error {
+	var owner *string
+	var expires *time.Time
+	var epoch int64
+	if err := row.Scan(&manifest.ID, &manifest.DeliveryID, &manifest.OrgID, &manifest.RepositoryID, &manifest.Ref, &manifest.EventKind,
+		&manifest.RoutingGeneration, &manifest.TotalCount, &manifest.InsertedCount, &manifest.Attempts, &owner, &epoch, &expires); err != nil {
+		return err
+	}
+	if owner != nil && expires != nil {
+		manifest.Lease = &LeaseToken{Owner: *owner, Epoch: epoch, ExpiresAt: *expires}
+	}
+	return nil
+}
+
+func (s *Store) ClaimGitHubRoutingFanoutManifests(ctx context.Context, owner string, duration time.Duration, limit int) ([]GitHubRoutingFanoutManifest, error) {
+	if owner == "" || duration <= 0 || limit < 1 || limit > 100 {
+		return nil, ErrInvalidArgument
+	}
+	var claimed []GitHubRoutingFanoutManifest
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `WITH due AS MATERIALIZED (
+			SELECT id,CASE WHEN status='pending' THEN next_attempt_at ELSE lease_expires_at END AS due_at FROM github_routing_fanout_manifests
+			WHERE attempts<12 AND (status='pending' AND next_attempt_at<=clock_timestamp() OR status='leased' AND lease_expires_at<=clock_timestamp())
+			ORDER BY due_at,id FOR UPDATE SKIP LOCKED LIMIT $1)
+			UPDATE github_routing_fanout_manifests manifest SET status='leased',attempts=manifest.attempts+1,lease_owner=$2,lease_epoch=manifest.lease_epoch+1,
+			lease_expires_at=clock_timestamp()+($3*interval '1 microsecond'),updated_at=clock_timestamp() FROM due WHERE manifest.id=due.id
+			RETURNING manifest.id::text,manifest.delivery_id::text,manifest.org_id::text,manifest.repository_id,manifest.ref,manifest.event_kind,
+			manifest.routing_generation,manifest.total_count,manifest.inserted_count,manifest.attempts,manifest.lease_owner,manifest.lease_epoch,manifest.lease_expires_at`, limit, owner, duration.Microseconds())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var manifest GitHubRoutingFanoutManifest
+			if err := scanGitHubRoutingFanoutManifest(rows, &manifest); err != nil {
+				return err
+			}
+			claimed = append(claimed, manifest)
+		}
+		return rows.Err()
+	})
+	return claimed, err
+}
+
+func (s *Store) RenewGitHubRoutingFanoutManifest(ctx context.Context, id string, token LeaseToken, duration time.Duration) (LeaseToken, error) {
+	if duration <= 0 {
+		return LeaseToken{}, ErrInvalidArgument
+	}
+	var renewed LeaseToken
+	err := s.db.QueryRow(ctx, `UPDATE github_routing_fanout_manifests SET lease_expires_at=GREATEST(lease_expires_at,clock_timestamp()+($4*interval '1 microsecond')),updated_at=clock_timestamp()
+		WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp() RETURNING lease_owner,lease_epoch,lease_expires_at`,
+		id, token.Owner, token.Epoch, duration.Microseconds()).Scan(&renewed.Owner, &renewed.Epoch, &renewed.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeaseToken{}, ErrLeaseNotOwned
+	}
+	return renewed, err
+}
+
+func (s *Store) RotateGitHubRoutingFanoutManifestLease(ctx context.Context, id string, token LeaseToken, duration time.Duration) (LeaseToken, error) {
+	if duration <= 0 {
+		return LeaseToken{}, ErrInvalidArgument
+	}
+	var rotated LeaseToken
+	err := s.db.QueryRow(ctx, `UPDATE github_routing_fanout_manifests SET lease_epoch=lease_epoch+1,lease_expires_at=clock_timestamp()+($4*interval '1 microsecond'),updated_at=clock_timestamp()
+		WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp() RETURNING lease_owner,lease_epoch,lease_expires_at`,
+		id, token.Owner, token.Epoch, duration.Microseconds()).Scan(&rotated.Owner, &rotated.Epoch, &rotated.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeaseToken{}, ErrLeaseNotOwned
+	}
+	return rotated, err
+}
+
+func (s *Store) RetryGitHubRoutingFanoutManifest(ctx context.Context, id string, token LeaseToken, delay time.Duration, code, detail string) error {
+	if delay < 0 || delay > 24*time.Hour {
+		return ErrInvalidArgument
+	}
+	detail = sanitizeWebhookDetail(detail)
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var terminal bool
+		err := tx.QueryRow(ctx, `UPDATE github_routing_fanout_manifests SET status=CASE WHEN attempts=12 THEN 'failed' ELSE 'pending' END,
+			next_attempt_at=clock_timestamp()+($4*interval '1 microsecond'),error_code=CASE WHEN attempts=12 THEN 'attempts_exhausted' ELSE $5 END,error_detail=$6,
+			terminal_at=CASE WHEN attempts=12 THEN clock_timestamp() END,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+			WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()
+			RETURNING status='failed'`, id, token.Owner, token.Epoch, delay.Microseconds(), code, detail).Scan(&terminal)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLeaseNotOwned
+		}
+		if err != nil || !terminal {
+			return err
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM github_routing_fanout_candidates WHERE manifest_id=$1`, id)
+		return err
+	})
+}
+
+func (s *Store) FailGitHubRoutingFanoutManifest(ctx context.Context, id string, token LeaseToken, code, detail string) error {
+	detail = sanitizeWebhookDetail(detail)
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE github_routing_fanout_manifests SET status='failed',error_code=$4,error_detail=$5,terminal_at=clock_timestamp(),
+			lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, id, token.Owner, token.Epoch, code, detail)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrLeaseNotOwned
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM github_routing_fanout_candidates WHERE manifest_id=$1`, id)
+		return err
+	})
+}
+
+func (s *Store) ContinueGitHubPushFanout(ctx context.Context, p ContinueGitHubPushFanoutParams) (ContinueGitHubPushFanoutResult, error) {
+	if p.ManifestID == "" || p.ManifestLease.Owner == "" || p.BatchLimit < 1 || p.BatchLimit > 10000 {
+		return ContinueGitHubPushFanoutResult{}, ErrInvalidArgument
+	}
+	var result ContinueGitHubPushFanoutResult
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var manifestID, deliveryID, orgID, ref, eventKind, status string
+		var repositoryID, routingGeneration, repositoryGeneration, refLifecycleGeneration int64
+		var batchSize, productionDeleteCount int
+		var commitSHA *string
+		err := tx.QueryRow(ctx, `SELECT delivery_id::text,org_id::text,repository_id,ref FROM github_routing_fanout_manifests WHERE id=$1`, p.ManifestID).Scan(&deliveryID, &orgID, &repositoryID, &ref)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		var currentRouting, currentRepository, currentLifecycle int64
+		var currentDelivery string
+		var currentSHA *string
+		var refExists bool
+		if err := tx.QueryRow(ctx, `SELECT ref.routing_generation,repository.repository_generation,ref.lifecycle_generation,ref.last_delivery_id::text,ref.validated_sha,ref.ref_exists
+			FROM github_ref_routing_state ref JOIN github_repository_routing_state repository ON repository.repository_id=ref.repository_id
+			WHERE ref.repository_id=$1 AND ref.ref=$2 FOR UPDATE OF ref,repository`, repositoryID, ref).Scan(&currentRouting, &currentRepository, &currentLifecycle, &currentDelivery, &currentSHA, &refExists); err != nil {
+			return err
+		}
+		if p.Failpoint != nil {
+			if err := p.Failpoint("after_routing_lock"); err != nil {
+				return err
+			}
+		}
+		err = tx.QueryRow(ctx, `SELECT id::text,event_kind,commit_sha,routing_generation,repository_generation,ref_lifecycle_generation,status,total_count,inserted_count,batch_size,production_delete_count
+			FROM github_routing_fanout_manifests WHERE id=$1 FOR UPDATE`, p.ManifestID).Scan(&manifestID, &eventKind, &commitSHA,
+			&routingGeneration, &repositoryGeneration, &refLifecycleGeneration, &status, &result.TotalCount, &result.InsertedCount, &batchSize, &productionDeleteCount)
+		if err != nil {
+			return err
+		}
+		if status != "leased" {
+			result.Terminal, result.Superseded = status != "pending", status == "superseded"
+			if status == "pending" {
+				return ErrLeaseNotOwned
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM github_routing_fanout_candidates WHERE manifest_id=$1`, manifestID); err != nil {
+				return err
+			}
+			return nil
+		}
+		var owned bool
+		if err := tx.QueryRow(ctx, `SELECT lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp() FROM github_routing_fanout_manifests WHERE id=$1`, manifestID, p.ManifestLease.Owner, p.ManifestLease.Epoch).Scan(&owned); err != nil {
+			return err
+		}
+		if !owned {
+			return ErrLeaseNotOwned
+		}
+		valid := currentRouting == routingGeneration && currentRepository == repositoryGeneration && currentLifecycle == refLifecycleGeneration && currentDelivery == deliveryID
+		if eventKind == "push" {
+			valid = valid && refExists && commitSHA != nil && currentSHA != nil && *commitSHA == *currentSHA
+		} else {
+			valid = valid && !refExists
+		}
+		if !valid {
+			tag, err := tx.Exec(ctx, `UPDATE github_routing_fanout_manifests SET status='superseded',terminal_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+				WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, manifestID, p.ManifestLease.Owner, p.ManifestLease.Epoch)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return ErrLeaseNotOwned
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM github_routing_fanout_candidates WHERE manifest_id=$1`, manifestID); err != nil {
+				return err
+			}
+			result.Terminal, result.Superseded = true, true
+			return nil
+		}
+		limit := min(p.BatchLimit, batchSize)
+		var selectedCount int
+		var lastAppID *string
+		if err := tx.QueryRow(ctx, `WITH selected AS MATERIALIZED (
+			SELECT candidate.* FROM github_routing_fanout_candidates candidate JOIN github_routing_fanout_manifests manifest ON manifest.id=candidate.manifest_id
+			WHERE candidate.manifest_id=$1 AND (manifest.cursor_app_id IS NULL OR candidate.app_id>manifest.cursor_app_id)
+			ORDER BY candidate.app_id LIMIT $2
+		), inserted AS (
+			INSERT INTO github_routing_intents(delivery_id,org_id,repository_id,repository_node_id,installation_id,app_id,environment_id,ref,commit_sha,event_kind,routing_generation,repository_generation,ref_lifecycle_generation,config_generation,workflow_path,production_ref)
+			SELECT manifest.delivery_id,manifest.org_id,manifest.repository_id,manifest.repository_node_id,manifest.installation_id,selected.app_id,selected.environment_id,manifest.ref,manifest.commit_sha,manifest.event_kind,manifest.routing_generation,manifest.repository_generation,manifest.ref_lifecycle_generation,selected.config_generation,selected.workflow_path,selected.production_ref
+			FROM selected JOIN github_routing_fanout_manifests manifest ON manifest.id=selected.manifest_id
+			ON CONFLICT(delivery_id,app_id,ref,event_kind,routing_generation) DO NOTHING RETURNING app_id
+			) SELECT count(*)::integer,max(app_id::text) FROM selected`, manifestID, limit).Scan(&selectedCount, &lastAppID); err != nil {
+			return err
+		}
+		if selectedCount > 0 {
+			result.InsertedCount += selectedCount
+			if _, err := tx.Exec(ctx, `UPDATE github_routing_fanout_manifests SET cursor_app_id=$2,inserted_count=$3,updated_at=clock_timestamp() WHERE id=$1`, manifestID, lastAppID, result.InsertedCount); err != nil {
+				return err
+			}
+			if p.Failpoint != nil {
+				if err := p.Failpoint("after_intent_batch"); err != nil {
+					return err
+				}
+			}
+		}
+		if result.InsertedCount < result.TotalCount {
+			tag, err := tx.Exec(ctx, `UPDATE github_routing_fanout_manifests SET status='pending',attempts=0,next_attempt_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+				WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, manifestID, p.ManifestLease.Owner, p.ManifestLease.Epoch)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 {
+				return ErrLeaseNotOwned
+			}
+			return nil
+		}
+		if p.Failpoint != nil {
+			if err := p.Failpoint("before_manifest_completion"); err != nil {
+				return err
+			}
+		}
+		tag, err := tx.Exec(ctx, `UPDATE github_routing_fanout_manifests SET status='completed',terminal_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+			WHERE id=$1 AND status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()`, manifestID, p.ManifestLease.Owner, p.ManifestLease.Epoch)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return ErrLeaseNotOwned
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM github_routing_fanout_candidates WHERE manifest_id=$1`, manifestID); err != nil {
+			return err
+		}
+		result.Terminal = true
+		return insertGitHubPushFanoutAudit(ctx, tx, orgID, deliveryID, repositoryID, routingGeneration, result.TotalCount, productionDeleteCount, eventKind, p.Audit)
+	})
+	return result, err
+}
+
+func (s *Store) DeleteTerminalGitHubRoutingFanoutCandidates(ctx context.Context, limit int) (int64, error) {
+	if limit < 1 || limit > 1000 {
+		return 0, ErrInvalidArgument
+	}
+	tag, err := s.db.Exec(ctx, `WITH terminal AS MATERIALIZED (
+		SELECT manifest.id FROM github_routing_fanout_manifests manifest
+		WHERE manifest.status IN ('completed','superseded','failed')
+		AND EXISTS (SELECT 1 FROM github_routing_fanout_candidates candidate WHERE candidate.manifest_id=manifest.id)
+		ORDER BY manifest.terminal_at,manifest.id FOR UPDATE SKIP LOCKED LIMIT $1
+	) DELETE FROM github_routing_fanout_candidates candidate USING terminal WHERE candidate.manifest_id=terminal.id`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+func insertGitHubPushFanoutAudit(ctx context.Context, tx pgx.Tx, orgID, deliveryID string, repositoryID, routingGeneration int64, totalCount, productionDeleteCount int, eventKind string, audit *AuditEvent) error {
+	auditAfter := map[string]any{"repository_id": repositoryID, "routing_generation": routingGeneration, "intent_count": totalCount}
+	if eventKind == "delete" {
+		auditAfter["production_branch_deleted_count"] = productionDeleteCount
+		auditAfter["production_branch_delete_outcome"] = "recorded_no_teardown"
+	}
+	after, _ := json.Marshal(auditAfter)
+	return insertAuditEvent(ctx, tx, orgID, audit, "github_push.snapshotted", "github_webhook_delivery", deliveryID, nil, after)
 }
 
 func (s *Store) ExecuteGitHubRoutingIntent(ctx context.Context, id string, token LeaseToken, identities []PreviewIdentity) (string, error) {
@@ -607,9 +929,16 @@ func (s *Store) ExecuteGitHubRoutingIntent(ctx context.Context, id string, token
 }
 
 func fenceGitHubEventDelivery(ctx context.Context, tx pgx.Tx, id string, token LeaseToken, orgID string) error {
+	return checkGitHubEventDelivery(ctx, tx, id, token, orgID, true)
+}
+
+func checkGitHubEventDelivery(ctx context.Context, tx pgx.Tx, id string, token LeaseToken, orgID string, lock bool) error {
 	var owned bool
-	err := tx.QueryRow(ctx, `SELECT status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp()
-		FROM github_webhook_deliveries WHERE id=$1 AND org_id=$4 FOR UPDATE`, id, token.Owner, token.Epoch, orgID).Scan(&owned)
+	query := `SELECT status='leased' AND lease_owner=$2 AND lease_epoch=$3 AND lease_expires_at>clock_timestamp() FROM github_webhook_deliveries WHERE id=$1 AND org_id=$4`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	err := tx.QueryRow(ctx, query, id, token.Owner, token.Epoch, orgID).Scan(&owned)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !owned {
 		return ErrLeaseNotOwned
 	}

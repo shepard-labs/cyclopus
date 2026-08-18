@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000013 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000014 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 13 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:13 dirty:false", version, dirty)
+		if version != 14 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:14 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1043,7 +1043,7 @@ func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("repaired 000011 migration: %v", err)
 	}
-	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 13 || dirty {
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 14 || dirty {
 		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
@@ -1099,6 +1099,89 @@ func TestMigration000013ConflictGuardDownAndReUp(t *testing.T) {
 	}
 	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET error_code='github_conflict' WHERE id=$1`, deliveryID); err != nil {
 		t.Fatalf("000013 re-up rejected github_conflict: %v", err)
+	}
+}
+
+func TestMigration000014FanoutGuardShapeDownAndReUp(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(13); err != nil {
+		t.Fatalf("migrate to 000013: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	for _, table := range []string{"github_routing_fanout_manifests", "github_routing_fanout_candidates"} {
+		var count int
+		if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name=$1`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("000013 table %s count = %d, %v", table, count, err)
+		}
+	}
+	if err := migrator.Migrate(14); err != nil {
+		t.Fatalf("000013 to 000014: %v", err)
+	}
+	var tables, indexes, checks, guard int
+	if err := conn.QueryRow(t.Context(), `SELECT
+		(SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('github_routing_fanout_manifests','github_routing_fanout_candidates')),
+		(SELECT count(*) FROM pg_indexes WHERE schemaname=current_schema() AND indexname IN ('github_routing_fanout_manifests_ref_generation','github_routing_fanout_manifests_pending','github_routing_fanout_manifests_leased','github_routing_fanout_manifests_terminal','github_routing_fanout_candidates_app_identity')),
+		(SELECT count(*) FROM information_schema.table_constraints WHERE constraint_schema=current_schema() AND table_name IN ('github_routing_fanout_manifests','github_routing_fanout_candidates') AND constraint_type IN ('CHECK','UNIQUE','FOREIGN KEY')),
+		(SELECT count(*) FROM pg_trigger WHERE tgrelid='schema_migrations'::regclass AND tgname='guard_github_routing_fanout_v14_down' AND NOT tgisinternal)`).Scan(&tables, &indexes, &checks, &guard); err != nil {
+		t.Fatal(err)
+	}
+	if tables != 2 || indexes != 5 || checks < 15 || guard != 1 {
+		t.Fatalf("000014 shape tables/indexes/constraints/guard = %d/%d/%d/%d", tables, indexes, checks, guard)
+	}
+	seedGitHubWebhookFixtureConn(t, conn)
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO github_webhook_deliveries(id,delivery_id,event,installation_id,repository_id,repository_node_id,org_id,payload_digest,key_version,signature_key_version,status,result_code,terminal_at,payload_redacted_at) VALUES
+			('54000000-0000-0000-0000-000000000001','54000000-0000-0000-0000-000000000011','push',90001,$1,'R_node',$2,repeat('a',64),'k1','legacy','completed','fanout_staged',clock_timestamp(),clock_timestamp()),
+			('54000000-0000-0000-0000-000000000002','54000000-0000-0000-0000-000000000012','push',90001,$1,'R_node',$2,repeat('b',64),'k1','legacy','completed','processed',clock_timestamp(),clock_timestamp()),
+			('54000000-0000-0000-0000-000000000003','54000000-0000-0000-0000-000000000013','push',90001,$1,'R_node',$2,repeat('c',64),'k1','legacy','completed','processed',clock_timestamp(),clock_timestamp())`, []any{githubWebhookRepo, githubWebhookOrg}},
+		{`INSERT INTO github_repository_routing_state(repository_id,org_id,repository_node_id,installation_id,repository_generation,lifecycle_generation) VALUES($1,$2,'R_node',90001,1,1)`, []any{githubWebhookRepo, githubWebhookOrg}},
+		{`INSERT INTO github_ref_routing_state(repository_id,ref,routing_generation,lifecycle_generation,validated_sha,ref_exists) VALUES($1,'refs/heads/main',1,0,repeat('a',40),true)`, []any{githubWebhookRepo}},
+		{`INSERT INTO github_routing_fanout_manifests(id,delivery_id,org_id,repository_id,repository_node_id,installation_id,ref,event_kind,commit_sha,routing_generation,repository_generation,ref_lifecycle_generation,status,total_count,inserted_count,batch_size,max_fanout,error_code,terminal_at) VALUES
+			('54000000-0000-0000-0000-000000000021','54000000-0000-0000-0000-000000000001',$2,$1,'R_node',90001,'refs/heads/main','push',repeat('a',40),1,1,0,'completed',0,0,1,1,NULL,clock_timestamp()),
+			('54000000-0000-0000-0000-000000000022','54000000-0000-0000-0000-000000000002',$2,$1,'R_node',90001,'refs/heads/main','push',repeat('a',40),2,1,0,'superseded',0,0,1,1,NULL,clock_timestamp()),
+			('54000000-0000-0000-0000-000000000023','54000000-0000-0000-0000-000000000003',$2,$1,'R_node',90001,'refs/heads/main','push',repeat('a',40),3,1,0,'failed',0,0,1,1,'attempts_exhausted',clock_timestamp())`, []any{githubWebhookRepo, githubWebhookOrg}},
+	}
+	for _, statement := range statements {
+		if _, err := conn.Exec(t.Context(), statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrator.Migrate(13); err == nil || !strings.Contains(err.Error(), "result_code=fanout_staged") {
+		t.Fatalf("fanout_staged 000014 down error = %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 14 || dirty {
+		t.Fatalf("guarded 000014 state = %d/%t, %v", version, dirty, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET result_code='processed' WHERE result_code='fanout_staged'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(13); err != nil {
+		t.Fatalf("clean 000014 down: %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('github_routing_fanout_manifests','github_routing_fanout_candidates')`).Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("000014 down fanout table count = %d, %v", tables, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE github_webhook_deliveries SET result_code='fanout_staged' WHERE id='54000000-0000-0000-0000-000000000001'`); err == nil {
+		t.Fatal("000013 constraint accepted fanout_staged")
+	}
+	if err := migrator.Migrate(14); err != nil {
+		t.Fatalf("000014 re-up: %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 14 || dirty {
+		t.Fatalf("000014 re-up state = %d/%t, %v", version, dirty, err)
 	}
 }
 

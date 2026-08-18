@@ -240,14 +240,61 @@ func TestLoadGitHubConfigPrecedence(t *testing.T) {
 
 func TestLoadGitHubEventWorkerPrecedence(t *testing.T) {
 	cfg, err := Load(
-		[]string{"--github-event-worker-scan-interval", "250ms", "--github-event-worker-delivery-concurrency", "7", "--github-event-worker-max-intents", "99"},
-		append(baseValidEnv, "CYCLOPUS_GITHUB_EVENT_WORKER_SCAN_INTERVAL=500ms", "CYCLOPUS_GITHUB_EVENT_WORKER_INTENT_CONCURRENCY=6", "CYCLOPUS_GITHUB_EVENT_WORKER_MAX_INTENTS=88"),
+		[]string{"--github-event-worker-scan-interval", "250ms", "--github-event-worker-delivery-concurrency", "7", "--github-event-worker-fanout-concurrency", "5", "--github-event-worker-max-intents", "99"},
+		append(baseValidEnv, "CYCLOPUS_GITHUB_EVENT_WORKER_SCAN_INTERVAL=500ms", "CYCLOPUS_GITHUB_EVENT_WORKER_FANOUT_CONCURRENCY=3", "CYCLOPUS_GITHUB_EVENT_WORKER_INTENT_CONCURRENCY=6", "CYCLOPUS_GITHUB_EVENT_WORKER_MAX_INTENTS=88"),
 	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.GitHubEventWorker.ScanInterval != 250*time.Millisecond || cfg.GitHubEventWorker.DeliveryConcurrency != 7 || cfg.GitHubEventWorker.IntentConcurrency != 6 || cfg.GitHubEventWorker.MaxIntents != 99 {
+	if cfg.GitHubEventWorker.ScanInterval != 250*time.Millisecond || cfg.GitHubEventWorker.DeliveryConcurrency != 7 || cfg.GitHubEventWorker.FanoutConcurrency != 5 || cfg.GitHubEventWorker.IntentConcurrency != 6 || cfg.GitHubEventWorker.MaxIntents != 99 {
 		t.Fatalf("GitHub event worker config = %+v", cfg.GitHubEventWorker)
+	}
+}
+
+func TestLoadGitHubEventWorkerMaxFanoutExplicitPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cyclopus.json")
+	contents := `{"github_event_worker":{"max_intents":77,"max_fanout":66}}`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(
+		[]string{"--config", path, "--github-event-worker-max-intents", "55", "--github-event-worker-max-fanout", "10000"},
+		append(baseValidEnv, "CYCLOPUS_GITHUB_EVENT_WORKER_MAX_INTENTS=44", "CYCLOPUS_GITHUB_EVENT_WORKER_MAX_FANOUT=88"),
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.GitHubEventWorker.MaxIntents != 55 || cfg.GitHubEventWorker.MaxFanout != 10000 {
+		t.Fatalf("GitHub event worker max values = %+v, want explicit max_fanout flag to win", cfg.GitHubEventWorker)
+	}
+}
+
+func TestLoadGitHubEventWorkerLegacyMaxIntentsFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cyclopus.json")
+	if err := os.WriteFile(path, []byte(`{"github_event_worker":{"max_intents":41}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+		env  []string
+	}{
+		{name: "config file", args: []string{"--config", path}, env: baseValidEnv},
+		{name: "environment", env: append(baseValidEnv, "CYCLOPUS_GITHUB_EVENT_WORKER_MAX_INTENTS=43")},
+		{name: "flag", args: []string{"--github-event-worker-max-intents", "42"}, env: baseValidEnv},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, err := Load(test.args, test.env)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.GitHubEventWorker.MaxFanout != cfg.GitHubEventWorker.MaxIntents {
+				t.Fatalf("GitHub event worker max values = %+v, want legacy fallback", cfg.GitHubEventWorker)
+			}
+		})
 	}
 }
 

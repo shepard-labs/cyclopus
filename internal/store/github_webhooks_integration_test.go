@@ -686,6 +686,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if err != nil || result.IntentCount != 1 {
 			t.Fatalf("first snapshot = %+v, %v", result, err)
 		}
+		completeGitHubFanout(t, store, "predecessor-fanout-1", time.Minute, 10, audit(0))
 		delayed := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000612", strings.Repeat("c", 64), `{}`))
 		delayed = claimOne(t, store, "predecessor-delayed", time.Minute)
 		second := receiveDelivery(t, store, webhookParams("20000000-0000-0000-0000-000000000611", strings.Repeat("b", 64), `{}`))
@@ -693,6 +694,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if _, err := store.SnapshotGitHubPush(t.Context(), SnapshotGitHubPushParams{DeliveryID: second.ID, DeliveryLease: *second.Lease, OrgID: githubWebhookOrg, InstallationID: 90001, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", Ref: "refs/heads/main", BeforeSHA: shaA, CommitSHA: shaB, AuthoritativeSHA: shaB, EventKind: "push", RefExists: true, MaxIntents: 10, Audit: audit(1)}); err != nil {
 			t.Fatal(err)
 		}
+		completeGitHubFanout(t, store, "predecessor-fanout-2", time.Minute, 10, audit(1))
 		if _, err := store.SnapshotGitHubPush(t.Context(), SnapshotGitHubPushParams{DeliveryID: delayed.ID, DeliveryLease: *delayed.Lease, OrgID: githubWebhookOrg, InstallationID: 90001, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", Ref: "refs/heads/main", BeforeSHA: strings.Repeat("0", 40), CommitSHA: shaA, AuthoritativeSHA: shaA, EventKind: "push", RefExists: true, MaxIntents: 10, Audit: audit(2)}); !errors.Is(err, ErrFailedPrecondition) {
 			t.Fatalf("older ingestion sequence with authoritative A error = %v", err)
 		}
@@ -702,6 +704,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if _, err := store.SnapshotGitHubPush(t.Context(), SnapshotGitHubPushParams{DeliveryID: gap.ID, DeliveryLease: *gap.Lease, OrgID: githubWebhookOrg, InstallationID: 90001, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", Ref: "refs/heads/main", BeforeSHA: shaA, CommitSHA: shaC, AuthoritativeSHA: shaC, EventKind: "push", RefExists: true, MaxIntents: 10, Audit: audit(6)}); err != nil {
 			t.Fatalf("newer authoritative gap: %v", err)
 		}
+		completeGitHubFanout(t, store, "predecessor-fanout-gap", time.Minute, 10, audit(6))
 		var observationKind string
 		if err := pool.QueryRow(t.Context(), `SELECT observation_kind FROM github_ref_transition_observations WHERE delivery_id=$1`, gap.ID).Scan(&observationKind); err != nil || observationKind != "resynchronized_gap" {
 			t.Fatalf("gap observation = %q, %v", observationKind, err)
@@ -711,6 +714,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if _, err := store.SnapshotGitHubPush(t.Context(), SnapshotGitHubPushParams{DeliveryID: back.ID, DeliveryLease: *back.Lease, OrgID: githubWebhookOrg, InstallationID: 90001, RepositoryID: githubWebhookRepo, RepositoryNodeID: "R_node", Ref: "refs/heads/main", BeforeSHA: shaC, CommitSHA: shaB, AuthoritativeSHA: shaB, EventKind: "push", RefExists: true, MaxIntents: 10, Audit: audit(7)}); err != nil {
 			t.Fatalf("legitimate C to B transition: %v", err)
 		}
+		completeGitHubFanout(t, store, "predecessor-fanout-back", time.Minute, 10, audit(7))
 
 		for i, point := range []string{"after_eligibility", "after_first_intent"} {
 			delivery := receiveDelivery(t, store, webhookParams(fmt.Sprintf("20000000-0000-0000-0000-%012d", 620+i), strings.Repeat("d", 64), `{}`))
@@ -731,8 +735,12 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			if !errors.Is(err, fail) {
 				t.Fatalf("%s error = %v", point, err)
 			}
-			var intents, refs int
-			if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_routing_intents WHERE delivery_id=$1`, delivery.ID).Scan(&intents); err != nil {
+			var manifests, candidates, observations, intents, refs int
+			if err := pool.QueryRow(t.Context(), `SELECT
+				(SELECT count(*) FROM github_routing_fanout_manifests WHERE delivery_id=$1),
+				(SELECT count(*) FROM github_routing_fanout_candidates WHERE manifest_id IN (SELECT id FROM github_routing_fanout_manifests WHERE delivery_id=$1)),
+				(SELECT count(*) FROM github_ref_transition_observations WHERE delivery_id=$1),
+				(SELECT count(*) FROM github_routing_intents WHERE delivery_id=$1)`, delivery.ID).Scan(&manifests, &candidates, &observations, &intents); err != nil {
 				t.Fatal(err)
 			}
 			if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_ref_routing_state WHERE repository_id=$1 AND ref=$2`, githubWebhookRepo, ref).Scan(&refs); err != nil {
@@ -742,8 +750,8 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			if ref == "refs/heads/main" {
 				wantRefs = 1
 			}
-			if intents != 0 || refs != wantRefs {
-				t.Fatalf("%s partial state = intents:%d refs:%d", point, intents, refs)
+			if manifests != 0 || candidates != 0 || observations != 0 || intents != 0 || refs != wantRefs {
+				t.Fatalf("%s partial state = manifests:%d candidates:%d observations:%d intents:%d refs:%d", point, manifests, candidates, observations, intents, refs)
 			}
 		}
 	})
@@ -779,6 +787,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if err != nil || result.IntentCount != 1 {
 			t.Fatalf("ordered production/preview delete snapshot = %+v, %v", result, err)
 		}
+		completeGitHubFanout(t, store, "delete-ordered-fanout", time.Minute, 1, &AuditEvent{ID: "10000000-0000-0000-0000-000000000780"})
 		var appID string
 		var production bool
 		if err := pool.QueryRow(t.Context(), `SELECT app_id::text,production_ref FROM github_routing_intents WHERE delivery_id=(SELECT id FROM github_webhook_deliveries WHERE delivery_id='20000000-0000-0000-0000-000000000680')`).Scan(&appID, &production); err != nil {
@@ -814,6 +823,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 		if err != nil || result.IntentCount != 1 {
 			t.Fatalf("many production delete snapshot = %+v, %v", result, err)
 		}
+		completeGitHubFanout(t, store, "delete-many-production-fanout", time.Minute, 1, &AuditEvent{ID: "10000000-0000-0000-0000-000000000781"})
 		if err := pool.QueryRow(t.Context(), `SELECT (after->>'production_branch_deleted_count')::int FROM audit_events WHERE id='10000000-0000-0000-0000-000000000781'`).Scan(&productionDeletes); err != nil || productionDeletes != 6 {
 			t.Fatalf("many production deletion audit count = %d, %v", productionDeletes, err)
 		}
@@ -874,6 +884,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			if err != nil || result.IntentCount < 1 {
 				t.Fatalf("delete snapshot = %+v, %v", result, err)
 			}
+			completeGitHubFanout(t, store, "delete-authorize-fanout", time.Minute, 10, &AuditEvent{ID: fmt.Sprintf("40000000-0000-0000-0000-%012d", caseNumber)})
 			claimed, err := store.ClaimGitHubRoutingIntents(t.Context(), "delete-authorize-execute", time.Minute, 10)
 			if err != nil {
 				t.Fatal(err)
@@ -970,6 +981,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			if err != nil || snapshot.IntentCount < 1 {
 				t.Fatalf("new owner delete snapshot = %+v, %v", snapshot, err)
 			}
+			completeGitHubFanout(t, store, "delete-new-owner-fanout", time.Minute, 10, &AuditEvent{ID: "40000000-0000-0000-0000-000000000791"})
 			claimed, err := store.ClaimGitHubRoutingIntents(t.Context(), "delete-new-owner-execute", time.Minute, 10)
 			if err != nil {
 				t.Fatal(err)
@@ -1100,6 +1112,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			if err != nil || result.RoutingGeneration != int64(i+1) || result.IntentCount != 1 {
 				t.Fatalf("recurring transition %d snapshot = %+v, %v", i, result, err)
 			}
+			completeGitHubFanout(t, store, fmt.Sprintf("recurring-fanout-%d", i), time.Minute, 10, &AuditEvent{ID: fmt.Sprintf("10000000-0000-0000-0000-%012d", 750+i)})
 			newest = delivery
 		}
 		var currentSHA, lastDelivery string
@@ -1908,6 +1921,27 @@ func databaseTime(t *testing.T, pool *pgxpool.Pool, query string, args ...any) t
 	return value
 }
 
+func completeGitHubFanout(t *testing.T, store *Store, owner string, lease time.Duration, batch int, audits ...*AuditEvent) ContinueGitHubPushFanoutResult {
+	t.Helper()
+	var audit *AuditEvent
+	if len(audits) > 0 {
+		audit = audits[0]
+	}
+	for {
+		claimed, err := store.ClaimGitHubRoutingFanoutManifests(t.Context(), owner, lease, 1)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claim GitHub fanout = %+v, %v", claimed, err)
+		}
+		result, err := store.ContinueGitHubPushFanout(t.Context(), ContinueGitHubPushFanoutParams{ManifestID: claimed[0].ID, ManifestLease: *claimed[0].Lease, BatchLimit: batch, Audit: audit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Terminal {
+			return result
+		}
+	}
+}
+
 type countingFailingCodec struct{ encrypts, decrypts int }
 
 func (c *countingFailingCodec) Encrypt([]byte, GitHubWebhookPayloadContext) ([]byte, []byte, string, error) {
@@ -2035,6 +2069,9 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 	if _, err := db.Exec(t.Context(), `UPDATE github_installations SET access_state='active'; UPDATE github_repositories SET access_state='active'; UPDATE git_connections SET access_state='active'`); err != nil {
 		t.Fatal(err)
 	}
+	if err := m.Migrate(14); err != nil {
+		t.Fatalf("re-up to current fanout schema: %v", err)
+	}
 	pool, err := pgxpool.New(t.Context(), url)
 	if err != nil {
 		t.Fatal(err)
@@ -2062,9 +2099,18 @@ func testGitHubWebhookMigrationLifecycle(t *testing.T) {
 	if err != nil || snapshot.RoutingGeneration != 2 || snapshot.IntentCount != 1 {
 		t.Fatalf("current snapshot after committed 000010 upgrade = %+v, %v", snapshot, err)
 	}
+	completeGitHubFanout(t, store, "migration-fanout", time.Minute, 10, &AuditEvent{ID: "10000000-0000-0000-0000-000000000099"})
 	claimedIntents, err := store.ClaimGitHubRoutingIntents(t.Context(), "migration-router", time.Minute, 10)
 	if err != nil || len(claimedIntents) != 2 {
 		t.Fatalf("current routing claims after committed 000010 upgrade = %+v, %v", claimedIntents, err)
+	}
+	for _, intent := range claimedIntents {
+		if err := store.CompleteGitHubRoutingIntent(t.Context(), intent.ID, *intent.Lease, "processed"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Migrate(12); err != nil {
+		t.Fatalf("return to 000012 rollback lifecycle: %v", err)
 	}
 	if _, err := db.Exec(t.Context(), `UPDATE github_webhook_deliveries SET signature_key_version='legacy'`); err != nil {
 		t.Fatal(err)
@@ -2291,7 +2337,7 @@ func claimOne(t *testing.T, store *Store, owner string, duration time.Duration) 
 
 func clearGitHubWebhookWork(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(t.Context(), `DELETE FROM github_routing_intents; DELETE FROM github_ref_transition_observations; DELETE FROM github_ref_routing_state; DELETE FROM github_repository_routing_state; DELETE FROM github_webhook_deliveries`); err != nil {
+	if _, err := pool.Exec(t.Context(), `DELETE FROM github_routing_intents; DELETE FROM github_routing_fanout_candidates; DELETE FROM github_routing_fanout_manifests; DELETE FROM github_ref_transition_observations; DELETE FROM github_ref_routing_state; DELETE FROM github_repository_routing_state; DELETE FROM github_webhook_deliveries`); err != nil {
 		t.Fatal(err)
 	}
 }

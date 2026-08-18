@@ -147,19 +147,19 @@ func run(args, environ []string) error {
 		Owner:                owner,
 		RequestTimeout:       cfg.GitHub.RequestTimeout,
 	}, logger, dataStore, adapters)
-	eventProcessor, err := service.NewGitHubEventProcessor(dataStore, githubadapter.NewEventClient(githubClients), cfg.GitHubEventWorker.MaxIntents,
+	eventProcessor, err := service.NewGitHubEventProcessorWithFanout(dataStore, githubadapter.NewEventClient(githubClients), cfg.GitHubEventWorker.MaxFanout, cfg.GitHubEventWorker.FanoutBatch,
 		cfg.GitHubEventWorker.LeaseDuration, cfg.GitHub.RequestTimeout)
 	if err != nil {
 		return fmt.Errorf("construct GitHub event processor: %w", err)
 	}
 	eventRunner := worker.NewGitHubEventRunner(worker.GitHubEventConfig{
 		ScanInterval: cfg.GitHubEventWorker.ScanInterval, DeliveryConcurrency: cfg.GitHubEventWorker.DeliveryConcurrency,
-		IntentConcurrency: cfg.GitHubEventWorker.IntentConcurrency, LeaseDuration: cfg.GitHubEventWorker.LeaseDuration,
+		FanoutConcurrency: cfg.GitHubEventWorker.FanoutConcurrency, IntentConcurrency: cfg.GitHubEventWorker.IntentConcurrency, LeaseDuration: cfg.GitHubEventWorker.LeaseDuration,
 		ProcessingTimeout: cfg.GitHubEventWorker.ProcessingTimeout, MaxAttempts: cfg.GitHubEventWorker.MaxAttempts,
 		InitialRetry: cfg.GitHubEventWorker.InitialRetry, MaxRetry: cfg.GitHubEventWorker.MaxRetry,
 		PayloadRetention: cfg.GitHubEventWorker.PayloadRetention, CleanupInterval: cfg.GitHubEventWorker.CleanupInterval,
 		CleanupBatch: cfg.GitHubEventWorker.CleanupBatch, ShutdownGrace: cfg.GitHubEventWorker.ShutdownGrace,
-		MaxIntents: cfg.GitHubEventWorker.MaxIntents, Owner: owner,
+		MaxFanout: cfg.GitHubEventWorker.MaxFanout, FanoutBatch: cfg.GitHubEventWorker.FanoutBatch, Owner: owner,
 	}, logger, dataStore, eventProcessor, githubMetrics)
 	if provider, err := buildTelemetryProvider(ctx, cfg.Observability, cfg.Kubernetes.InstanceNamespace, adapters); err != nil {
 		return err

@@ -61,20 +61,28 @@ type GitHubEventStore interface {
 type GitHubEventProcessor struct {
 	store                           GitHubEventStore
 	github                          GitHubEventClient
-	maxIntents                      int
+	maxFanout, fanoutBatch          int
 	callPinDuration, requestTimeout time.Duration
 	now                             func() time.Time
 }
 
-func NewGitHubEventProcessor(dataStore GitHubEventStore, client GitHubEventClient, maxIntents int, callDurations ...time.Duration) (*GitHubEventProcessor, error) {
+func NewGitHubEventProcessor(dataStore GitHubEventStore, client GitHubEventClient, maxFanout int, callDurations ...time.Duration) (*GitHubEventProcessor, error) {
+	return newGitHubEventProcessor(dataStore, client, maxFanout, min(100, maxFanout), callDurations...)
+}
+
+func NewGitHubEventProcessorWithFanout(dataStore GitHubEventStore, client GitHubEventClient, maxFanout, fanoutBatch int, callDurations ...time.Duration) (*GitHubEventProcessor, error) {
+	return newGitHubEventProcessor(dataStore, client, maxFanout, fanoutBatch, callDurations...)
+}
+
+func newGitHubEventProcessor(dataStore GitHubEventStore, client GitHubEventClient, maxFanout, fanoutBatch int, callDurations ...time.Duration) (*GitHubEventProcessor, error) {
 	callPinDuration, requestTimeout := time.Minute, time.Second
 	if len(callDurations) == 2 {
 		callPinDuration, requestTimeout = callDurations[0], callDurations[1]
 	}
-	if dataStore == nil || client == nil || maxIntents < 1 || maxIntents > 10000 || len(callDurations) != 0 && len(callDurations) != 2 || requestTimeout <= 0 || callPinDuration < githubEventCallPinSafetyMargin || requestTimeout > callPinDuration-githubEventCallPinSafetyMargin {
+	if dataStore == nil || client == nil || maxFanout < 1 || maxFanout > 10000 || fanoutBatch < 1 || fanoutBatch > maxFanout || len(callDurations) != 0 && len(callDurations) != 2 || requestTimeout <= 0 || callPinDuration < githubEventCallPinSafetyMargin || requestTimeout > callPinDuration-githubEventCallPinSafetyMargin {
 		return nil, errors.New("github event processor dependencies are invalid")
 	}
-	return &GitHubEventProcessor{store: dataStore, github: client, maxIntents: maxIntents, callPinDuration: callPinDuration, requestTimeout: requestTimeout, now: time.Now}, nil
+	return &GitHubEventProcessor{store: dataStore, github: client, maxFanout: maxFanout, fanoutBatch: fanoutBatch, callPinDuration: callPinDuration, requestTimeout: requestTimeout, now: time.Now}, nil
 }
 
 type githubEventEnvelope struct {
@@ -363,14 +371,32 @@ func (p *GitHubEventProcessor) processPush(ctx context.Context, delivery store.G
 	result, err := p.store.SnapshotGitHubPush(ctx, store.SnapshotGitHubPushParams{DeliveryID: delivery.ID, OrgID: delivery.OrgID,
 		InstallationID: *delivery.InstallationID, RepositoryID: *delivery.RepositoryID, RepositoryNodeID: *delivery.RepositoryNodeID,
 		Ref: payload.Ref, BeforeSHA: payload.Before, CommitSHA: commit, AuthoritativeSHA: sha, EventKind: eventKind, RefExists: exists, ReceivedAt: delivery.ReceivedAt,
-		ObservationSequence: delivery.IngestionSequence, MaxIntents: p.maxIntents, Audit: eventAudit(), DeliveryLease: *delivery.Lease})
+		ObservationSequence: delivery.IngestionSequence, MaxFanout: p.maxFanout, FanoutBatch: p.fanoutBatch, Audit: eventAudit(), DeliveryLease: *delivery.Lease})
 	if err != nil {
 		return storeEventError(err)
 	}
-	if payload.Deleted && result.IntentCount == 0 {
-		return completeEvent("production_branch_deleted", 0)
+	if result.TotalCount == 0 && result.IntentCount > 0 {
+		result.TotalCount = result.IntentCount
 	}
-	return completeEvent("processed", result.IntentCount)
+	switch result.ManifestStatus {
+	case "completed":
+		if payload.Deleted && result.TotalCount == 0 {
+			return completeEvent("production_branch_deleted", 0)
+		}
+		return completeEvent("processed", result.TotalCount)
+	case "superseded":
+		return completeEvent("superseded", result.InsertedCount)
+	case "pending", "leased":
+		return completeEvent("fanout_staged", result.TotalCount)
+	case "failed":
+		outcome := failEvent("internal")
+		outcome.IntentCount = result.InsertedCount
+		return outcome
+	default:
+		outcome := GitHubEventOutcome{Disposition: GitHubEventRetry, Code: "database_unavailable"}
+		outcome.IntentCount = result.InsertedCount
+		return outcome
+	}
 }
 
 func revokeEventParams(delivery store.GitHubWebhookDelivery, kind string) store.RevokeGitHubEventParams {
@@ -390,6 +416,34 @@ func (p *GitHubEventProcessor) ProcessIntent(ctx context.Context, intent store.G
 		return storeEventError(err)
 	}
 	return completeEvent(result, 0)
+}
+
+func (p *GitHubEventProcessor) ProcessFanout(ctx context.Context, manifest store.GitHubRoutingFanoutManifest) GitHubEventOutcome {
+	if manifest.Lease == nil {
+		return failEvent("invalid_snapshot")
+	}
+	fanoutStore, ok := p.store.(interface {
+		ContinueGitHubPushFanout(context.Context, store.ContinueGitHubPushFanoutParams) (store.ContinueGitHubPushFanoutResult, error)
+	})
+	if !ok {
+		return failEvent("invalid_snapshot")
+	}
+	result, err := fanoutStore.ContinueGitHubPushFanout(ctx, store.ContinueGitHubPushFanoutParams{ManifestID: manifest.ID, ManifestLease: *manifest.Lease, BatchLimit: p.fanoutBatch, Audit: eventAudit()})
+	if err != nil {
+		if errors.Is(err, store.ErrLeaseNotOwned) || errors.Is(err, store.ErrNotFound) {
+			return GitHubEventOutcome{Disposition: GitHubEventLeaseLost, Code: "lease_lost", IntentCount: manifest.InsertedCount}
+		}
+		outcome := storeEventError(err)
+		outcome.IntentCount = manifest.InsertedCount
+		return outcome
+	}
+	if result.Superseded {
+		return completeEvent("superseded", result.InsertedCount)
+	}
+	if result.Terminal {
+		return completeEvent("processed", result.TotalCount)
+	}
+	return completeEvent("fanout_pending", result.InsertedCount)
 }
 
 func routingKey(intent store.GitHubRoutingIntent) string {

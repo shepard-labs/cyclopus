@@ -25,6 +25,11 @@ type GitHubEventStore interface {
 	RetryGitHubWebhookDelivery(context.Context, string, store.LeaseToken, time.Duration, time.Duration, string, string) error
 	CompleteGitHubWebhookDelivery(context.Context, string, store.LeaseToken, string, time.Duration) error
 	FailGitHubWebhookDelivery(context.Context, string, store.LeaseToken, string, string, time.Duration) error
+	ClaimGitHubRoutingFanoutManifests(context.Context, string, time.Duration, int) ([]store.GitHubRoutingFanoutManifest, error)
+	RenewGitHubRoutingFanoutManifest(context.Context, string, store.LeaseToken, time.Duration) (store.LeaseToken, error)
+	RotateGitHubRoutingFanoutManifestLease(context.Context, string, store.LeaseToken, time.Duration) (store.LeaseToken, error)
+	RetryGitHubRoutingFanoutManifest(context.Context, string, store.LeaseToken, time.Duration, string, string) error
+	FailGitHubRoutingFanoutManifest(context.Context, string, store.LeaseToken, string, string) error
 	ClaimGitHubRoutingIntents(context.Context, string, time.Duration, int) ([]store.GitHubRoutingIntent, error)
 	RenewGitHubRoutingIntent(context.Context, string, store.LeaseToken, time.Duration) (store.LeaseToken, error)
 	RotateGitHubRoutingIntentLease(context.Context, string, store.LeaseToken, time.Duration) (store.LeaseToken, error)
@@ -35,14 +40,15 @@ type GitHubEventStore interface {
 
 type GitHubEventProcessor interface {
 	ProcessDelivery(context.Context, store.GitHubWebhookDelivery) service.GitHubEventOutcome
+	ProcessFanout(context.Context, store.GitHubRoutingFanoutManifest) service.GitHubEventOutcome
 	ProcessIntent(context.Context, store.GitHubRoutingIntent) service.GitHubEventOutcome
 }
 
 type GitHubEventConfig struct {
 	ScanInterval, LeaseDuration, ProcessingTimeout, InitialRetry, MaxRetry time.Duration
 	PayloadRetention, CleanupInterval, ShutdownGrace                       time.Duration
-	DeliveryConcurrency, IntentConcurrency, MaxAttempts                    int
-	CleanupBatch, MaxIntents                                               int
+	DeliveryConcurrency, FanoutConcurrency, IntentConcurrency, MaxAttempts int
+	CleanupBatch, MaxFanout, FanoutBatch, MaxIntents                       int
 	Owner                                                                  string
 }
 
@@ -57,10 +63,12 @@ type GitHubEventRunner struct {
 	ready           atomic.Bool
 	writeOK         atomic.Bool
 	delayedDelivery atomic.Int64
+	delayedFanout   atomic.Int64
 	delayedIntent   atomic.Int64
 	wg              sync.WaitGroup
 	writeWG         sync.WaitGroup
 	delivery        chan struct{}
+	fanout          chan struct{}
 	intent          chan struct{}
 	mu              sync.Mutex
 	processCtx      context.Context
@@ -77,7 +85,7 @@ func NewGitHubEventRunner(config GitHubEventConfig, logger *slog.Logger, dataSto
 		metrics = recorders[0]
 	}
 	return &GitHubEventRunner{config: config, logger: logger, store: dataStore, processor: processor, jitter: rand.Float64, now: time.Now,
-		metrics: metrics, delivery: make(chan struct{}, config.DeliveryConcurrency), intent: make(chan struct{}, config.IntentConcurrency)}
+		metrics: metrics, delivery: make(chan struct{}, config.DeliveryConcurrency), fanout: make(chan struct{}, config.FanoutConcurrency), intent: make(chan struct{}, config.IntentConcurrency)}
 }
 
 func (r *GitHubEventRunner) Ready() bool { return r.ready.Load() }
@@ -139,7 +147,13 @@ func (r *GitHubEventRunner) Run(ctx context.Context) error {
 
 func (r *GitHubEventRunner) validate() error {
 	c := r.config
-	if r.store == nil || r.processor == nil || r.logger == nil || r.now == nil || c.Owner == "" || c.ScanInterval <= 0 || c.LeaseDuration <= 0 || c.ProcessingTimeout <= 0 || c.ProcessingTimeout >= c.LeaseDuration || c.InitialRetry <= 0 || c.InitialRetry > c.MaxRetry || c.MaxRetry > 15*time.Minute || c.PayloadRetention < 0 || c.PayloadRetention > 30*24*time.Hour || c.CleanupInterval <= 0 || c.ShutdownGrace <= 0 || c.DeliveryConcurrency < 1 || c.DeliveryConcurrency > 100 || c.IntentConcurrency < 1 || c.IntentConcurrency > 100 || c.MaxAttempts != 12 || c.CleanupBatch < 1 || c.CleanupBatch > 1000 || c.MaxIntents < 1 || c.MaxIntents > 10000 {
+	if c.MaxFanout == 0 {
+		c.MaxFanout = c.MaxIntents
+	}
+	if c.FanoutBatch == 0 {
+		c.FanoutBatch = min(100, c.MaxFanout)
+	}
+	if r.store == nil || r.processor == nil || r.logger == nil || r.now == nil || c.Owner == "" || c.ScanInterval <= 0 || c.LeaseDuration <= 0 || c.ProcessingTimeout <= 0 || c.ProcessingTimeout >= c.LeaseDuration || c.InitialRetry <= 0 || c.InitialRetry > c.MaxRetry || c.MaxRetry > 15*time.Minute || c.PayloadRetention < 0 || c.PayloadRetention > 30*24*time.Hour || c.CleanupInterval <= 0 || c.ShutdownGrace <= 0 || c.DeliveryConcurrency < 1 || c.DeliveryConcurrency > 100 || c.FanoutConcurrency < 1 || c.FanoutConcurrency > 100 || c.IntentConcurrency < 1 || c.IntentConcurrency > 100 || c.MaxAttempts != 12 || c.CleanupBatch < 1 || c.CleanupBatch > 1000 || c.MaxFanout < 1 || c.MaxFanout > 10000 || c.FanoutBatch < 1 || c.FanoutBatch > c.MaxFanout {
 		return errors.New("invalid GitHub event worker configuration")
 	}
 	return nil
@@ -147,6 +161,7 @@ func (r *GitHubEventRunner) validate() error {
 
 type githubEventWork struct {
 	deliveries []store.GitHubWebhookDelivery
+	fanouts    []store.GitHubRoutingFanoutManifest
 	intents    []store.GitHubRoutingIntent
 }
 
@@ -161,13 +176,24 @@ func (r *GitHubEventRunner) claimScan(claimCtx context.Context, startup bool) (g
 		if redacted > 0 {
 			r.logger.Info("github event payload cleanup", "result", "redacted", "count", redacted)
 		}
+		if cleanupStore, ok := r.store.(interface {
+			DeleteTerminalGitHubRoutingFanoutCandidates(context.Context, int) (int64, error)
+		}); ok {
+			deleted, err := cleanupStore.DeleteTerminalGitHubRoutingFanoutCandidates(claimCtx, r.config.CleanupBatch)
+			if err != nil {
+				return work, fmt.Errorf("delete terminal GitHub routing fanout candidates: %w", err)
+			}
+			if deleted > 0 {
+				r.logger.Info("github event fanout candidate cleanup", "result", "deleted", "count", deleted)
+			}
+		}
 	}
 	exhausted, err := r.store.FailExpiredExhaustedGitHubEventLeases(claimCtx, r.config.PayloadRetention, r.config.CleanupBatch)
 	if err != nil {
 		return work, fmt.Errorf("fail expired exhausted GitHub event leases: %w", err)
 	}
-	if exhausted.Deliveries > 0 || exhausted.Intents > 0 {
-		r.logger.Info("github event exhausted lease sweep", "deliveries", exhausted.Deliveries, "intents", exhausted.Intents)
+	if exhausted.Deliveries > 0 || exhausted.Fanouts > 0 || exhausted.Intents > 0 {
+		r.logger.Info("github event exhausted lease sweep", "deliveries", exhausted.Deliveries, "fanouts", exhausted.Fanouts, "intents", exhausted.Intents)
 	}
 	deliverySlots := cap(r.delivery) - len(r.delivery)
 	var claimErr error
@@ -180,6 +206,15 @@ func (r *GitHubEventRunner) claimScan(claimCtx context.Context, startup bool) (g
 			if startup {
 				r.logger.Info("github event startup scan", "kind", "delivery", "result", "claimed", "count", len(deliveries))
 			}
+		}
+	}
+	fanoutSlots := cap(r.fanout) - len(r.fanout)
+	if fanoutSlots > 0 {
+		fanouts, err := r.store.ClaimGitHubRoutingFanoutManifests(claimCtx, r.config.Owner, r.config.LeaseDuration, fanoutSlots)
+		if err != nil {
+			claimErr = errors.Join(claimErr, fmt.Errorf("claim GitHub routing fanouts: %w", err))
+		} else {
+			work.fanouts = fanouts
 		}
 	}
 	intentSlots := cap(r.intent) - len(r.intent)
@@ -204,14 +239,16 @@ func (r *GitHubEventRunner) scan(claimCtx, processCtx context.Context, startup b
 	if countErr != nil {
 		return errors.Join(err, fmt.Errorf("inspect unexpired GitHub event leases: %w", countErr))
 	}
-	activeDeliveries, activeIntents := int64(len(r.delivery)), int64(len(r.intent))
+	activeDeliveries, activeFanouts, activeIntents := int64(len(r.delivery)), int64(len(r.fanout)), int64(len(r.intent))
 	delayedDeliveries := max(status.Deliveries-activeDeliveries, 0)
+	delayedFanouts := max(status.Fanouts-activeFanouts, 0)
 	delayedIntents := max(status.Intents-activeIntents, 0)
 	r.delayedDelivery.Store(delayedDeliveries)
+	r.delayedFanout.Store(delayedFanouts)
 	r.delayedIntent.Store(delayedIntents)
 	r.updateLeaseMetrics()
-	if startup && (delayedDeliveries > 0 || delayedIntents > 0) {
-		r.logger.Info("github event startup delayed by active leases", "result", "delayed", "deliveries", delayedDeliveries, "intents", delayedIntents)
+	if startup && (delayedDeliveries > 0 || delayedFanouts > 0 || delayedIntents > 0) {
+		r.logger.Info("github event startup delayed by active leases", "result", "delayed", "deliveries", delayedDeliveries, "fanouts", delayedFanouts, "intents", delayedIntents)
 	}
 	return err
 }
@@ -221,6 +258,11 @@ func (r *GitHubEventRunner) launch(processCtx context.Context, work githubEventW
 		r.delivery <- struct{}{}
 		r.wg.Add(1)
 		go r.processDelivery(processCtx, delivery)
+	}
+	for _, manifest := range work.fanouts {
+		r.fanout <- struct{}{}
+		r.wg.Add(1)
+		go r.processFanout(processCtx, manifest)
 	}
 	for _, intent := range work.intents {
 		r.intent <- struct{}{}
@@ -353,6 +395,54 @@ func (r *GitHubEventRunner) processIntent(root context.Context, intent store.Git
 	r.logIntent(intent, result, started)
 }
 
+func (r *GitHubEventRunner) processFanout(root context.Context, manifest store.GitHubRoutingFanoutManifest) {
+	defer func() { <-r.fanout; r.updateLeaseMetrics(); r.wg.Done() }()
+	started := r.now()
+	ctx, cancel := context.WithTimeout(root, r.config.ProcessingTimeout)
+	defer cancel()
+	lost := &atomic.Bool{}
+	done, renewedDone := make(chan struct{}), make(chan struct{})
+	go r.renewFanout(ctx, cancel, done, renewedDone, lost, manifest)
+	outcome := r.processor.ProcessFanout(ctx, manifest)
+	close(done)
+	<-renewedDone
+	if lost.Load() || outcome.Disposition == service.GitHubEventLeaseLost {
+		r.metrics.Fanout(manifest.EventKind, "lease_lost", r.now().Sub(started))
+		return
+	}
+	if outcome.Disposition == service.GitHubEventComplete {
+		r.metrics.Fanout(manifest.EventKind, "processed", r.now().Sub(started))
+		return
+	}
+	writeCtx, writeCancel, ok := r.beginWrite()
+	if !ok {
+		r.metrics.Fanout(manifest.EventKind, "failed", r.now().Sub(started))
+		return
+	}
+	defer r.endWrite(writeCancel)
+	lease, err := r.store.RotateGitHubRoutingFanoutManifestLease(writeCtx, manifest.ID, *manifest.Lease, r.config.LeaseDuration)
+	if err != nil {
+		result := "failed"
+		if errors.Is(err, store.ErrLeaseNotOwned) {
+			result = "lease_lost"
+		}
+		r.metrics.Fanout(manifest.EventKind, result, r.now().Sub(started))
+		return
+	}
+	if outcome.Disposition == service.GitHubEventRetry {
+		err = r.store.RetryGitHubRoutingFanoutManifest(writeCtx, manifest.ID, lease, r.retryDelay(manifest.Attempts, outcome.RetryAfter), outcome.Code, outcome.Code)
+	} else {
+		err = r.store.FailGitHubRoutingFanoutManifest(writeCtx, manifest.ID, lease, outcome.Code, outcome.Code)
+	}
+	result := fanoutMetricResult(outcome.Disposition, outcome.Code)
+	if errors.Is(err, store.ErrLeaseNotOwned) {
+		result = "lease_lost"
+	} else if err != nil {
+		result = "failed"
+	}
+	r.metrics.Fanout(manifest.EventKind, result, r.now().Sub(started))
+}
+
 func (r *GitHubEventRunner) renewDelivery(ctx context.Context, cancel context.CancelFunc, done <-chan struct{}, stopped chan<- struct{}, lost *atomic.Bool, delivery store.GitHubWebhookDelivery) {
 	defer close(stopped)
 	ticker := time.NewTicker(r.config.LeaseDuration / 3)
@@ -385,6 +475,26 @@ func (r *GitHubEventRunner) renewIntent(ctx context.Context, cancel context.Canc
 			return
 		case <-ticker.C:
 			if _, err := r.store.RenewGitHubRoutingIntent(ctx, intent.ID, *intent.Lease, r.config.LeaseDuration); err != nil {
+				lost.Store(true)
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+func (r *GitHubEventRunner) renewFanout(ctx context.Context, cancel context.CancelFunc, done <-chan struct{}, stopped chan<- struct{}, lost *atomic.Bool, manifest store.GitHubRoutingFanoutManifest) {
+	defer close(stopped)
+	ticker := time.NewTicker(r.config.LeaseDuration / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			if _, err := r.store.RenewGitHubRoutingFanoutManifest(ctx, manifest.ID, *manifest.Lease, r.config.LeaseDuration); err != nil {
 				lost.Store(true)
 				cancel()
 				return
@@ -498,6 +608,16 @@ func intentMetricResult(disposition service.GitHubEventDisposition, result strin
 	}
 }
 
+func fanoutMetricResult(disposition service.GitHubEventDisposition, result string) string {
+	if result == "lease_lost" {
+		return "lease_lost"
+	}
+	if disposition == service.GitHubEventRetry {
+		return "retry"
+	}
+	return "failed"
+}
+
 func (r *GitHubEventRunner) updateLeaseMetrics() {
-	r.metrics.Leases(int64(len(r.delivery)), r.delayedDelivery.Load(), int64(len(r.intent)), r.delayedIntent.Load())
+	r.metrics.Leases(int64(len(r.delivery)), r.delayedDelivery.Load(), int64(len(r.fanout)), r.delayedFanout.Load(), int64(len(r.intent)), r.delayedIntent.Load())
 }

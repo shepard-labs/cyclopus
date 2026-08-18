@@ -32,12 +32,14 @@ func TestMetricsRecordExactBoundedAndSensitiveFree(t *testing.T) {
 	m := New()
 	m.Ingress("push", "", "accepted")
 	m.Delivery("push", "", "processed", 250*time.Millisecond, 2)
+	m.Fanout("push", "retry", 375*time.Millisecond)
 	m.Intent("push", "superseded", 500*time.Millisecond)
-	m.Leases(1, 2, 3, 4)
+	m.Leases(1, 2, 3, 4, 5, 6)
 	for i := range 10000 {
 		value := fmt.Sprintf("secret-signature-sha-payload-id-%d", i)
 		m.Ingress(value, value, value)
 		m.Delivery(value, value, value, time.Second, i)
+		m.Fanout(value, value, time.Second)
 		m.Intent(value, value, time.Second)
 	}
 	recorder := httptest.NewRecorder()
@@ -46,8 +48,10 @@ func TestMetricsRecordExactBoundedAndSensitiveFree(t *testing.T) {
 	for _, want := range []string{
 		`cyclopus_github_webhook_ingress_total{event="push",action="",result="accepted"} 1`,
 		`cyclopus_github_delivery_total{event="push",action="",result="processed"} 1`,
+		`cyclopus_github_fanout_total{event="push",result="retry"} 1`,
 		`cyclopus_github_intent_total{event="push",result="superseded"} 1`,
-		`cyclopus_github_leases{kind="intent",state="delayed"} 4`,
+		`cyclopus_github_leases{kind="fanout",state="active"} 3`,
+		`cyclopus_github_leases{kind="intent",state="delayed"} 6`,
 		`cyclopus_github_webhook_ingress_total{event="other",action="other",result="other"} 10000`,
 	} {
 		if !strings.Contains(text, want) {
@@ -59,8 +63,8 @@ func TestMetricsRecordExactBoundedAndSensitiveFree(t *testing.T) {
 			t.Fatalf("snapshot exposed %q", forbidden)
 		}
 	}
-	if len(m.ingress) > 2 || len(m.delivery) > 2 || len(m.intent) > 2 {
-		t.Fatalf("unbounded cardinality: %d/%d/%d", len(m.ingress), len(m.delivery), len(m.intent))
+	if len(m.ingress) > 2 || len(m.delivery) > 2 || len(m.fanoutWork) > 2 || len(m.intent) > 2 {
+		t.Fatalf("unbounded cardinality: %d/%d/%d/%d", len(m.ingress), len(m.delivery), len(m.fanoutWork), len(m.intent))
 	}
 }
 

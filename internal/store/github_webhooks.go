@@ -327,14 +327,15 @@ const deliverySelect = `SELECT id::text,delivery_id::text,event,action,installat
 			payload_digest,verified_payload,payload_nonce,key_version,signature_key_version,status,attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,received_at,ingestion_sequence FROM github_webhook_deliveries`
 
 type GitHubEventLeaseStatus struct {
-	Deliveries, Intents int64
+	Deliveries, Fanouts, Intents int64
 }
 
 func (s *Store) CountUnexpiredGitHubEventLeases(ctx context.Context) (GitHubEventLeaseStatus, error) {
 	var status GitHubEventLeaseStatus
 	err := s.db.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM github_webhook_deliveries WHERE status='leased' AND lease_expires_at>clock_timestamp()),
-		(SELECT count(*) FROM github_routing_intents WHERE status='leased' AND lease_expires_at>clock_timestamp())`).Scan(&status.Deliveries, &status.Intents)
+		(SELECT count(*) FROM github_routing_fanout_manifests WHERE status='leased' AND lease_expires_at>clock_timestamp()),
+		(SELECT count(*) FROM github_routing_intents WHERE status='leased' AND lease_expires_at>clock_timestamp())`).Scan(&status.Deliveries, &status.Fanouts, &status.Intents)
 	return status, err
 }
 
@@ -349,12 +350,25 @@ func (s *Store) FailExpiredExhaustedGitHubEventLeases(ctx context.Context, reten
 		if err != nil {
 			return err
 		}
+		var fanouts int64
+		err = tx.QueryRow(ctx, `WITH expired AS MATERIALIZED (
+				SELECT id FROM github_routing_fanout_manifests WHERE status='leased' AND attempts>=12 AND lease_expires_at<=clock_timestamp()
+				ORDER BY lease_expires_at,updated_at,id FOR UPDATE SKIP LOCKED LIMIT $1
+			), failed AS MATERIALIZED (
+				UPDATE github_routing_fanout_manifests manifest SET status='failed',error_code='attempts_exhausted',error_detail='attempts_exhausted',terminal_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+				FROM expired WHERE manifest.id=expired.id RETURNING manifest.id
+			), deleted AS (
+				DELETE FROM github_routing_fanout_candidates candidate USING failed WHERE candidate.manifest_id=failed.id
+			) SELECT count(*) FROM failed`, limit).Scan(&fanouts)
+		if err != nil {
+			return err
+		}
 		intents, err := tx.Exec(ctx, `WITH expired AS MATERIALIZED (SELECT id FROM github_routing_intents WHERE status='leased' AND attempts>=12 AND lease_expires_at<=clock_timestamp() ORDER BY lease_expires_at,created_at,id FOR UPDATE SKIP LOCKED LIMIT $1)
 			UPDATE github_routing_intents i SET status='failed',result_code=NULL,error_code='attempts_exhausted',error_detail='attempts_exhausted',terminal_at=clock_timestamp(),lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() FROM expired WHERE i.id=expired.id`, limit)
 		if err != nil {
 			return err
 		}
-		status.Deliveries, status.Intents = deliveries.RowsAffected(), intents.RowsAffected()
+		status.Deliveries, status.Fanouts, status.Intents = deliveries.RowsAffected(), fanouts, intents.RowsAffected()
 		return nil
 	})
 	return status, err
@@ -528,7 +542,7 @@ func allowedWebhookError(v string) bool {
 }
 func allowedWebhookResult(v string) bool {
 	switch v {
-	case "processed", "ignored", "stale_push", "production_branch_deleted", "exhausted":
+	case "processed", "fanout_staged", "ignored", "stale_push", "production_branch_deleted", "exhausted":
 		return true
 	}
 	return false

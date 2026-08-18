@@ -12,16 +12,18 @@ import (
 type Recorder interface {
 	Ingress(event, action, result string)
 	Delivery(event, action, result string, latency time.Duration, fanout int)
+	Fanout(event, result string, latency time.Duration)
 	Intent(event, result string, latency time.Duration)
-	Leases(activeDeliveries, delayedDeliveries, activeIntents, delayedIntents int64)
+	Leases(activeDeliveries, delayedDeliveries, activeFanouts, delayedFanouts, activeIntents, delayedIntents int64)
 }
 
 type noop struct{}
 
 func (noop) Ingress(string, string, string)                      {}
 func (noop) Delivery(string, string, string, time.Duration, int) {}
+func (noop) Fanout(string, string, time.Duration)                {}
 func (noop) Intent(string, string, time.Duration)                {}
-func (noop) Leases(int64, int64, int64, int64)                   {}
+func (noop) Leases(int64, int64, int64, int64, int64, int64)     {}
 
 func Noop() Recorder { return noop{} }
 
@@ -30,6 +32,7 @@ var (
 	actions         = set("", "added", "created", "deleted", "new_permissions_accepted", "removed", "suspend", "unsuspend")
 	ingressResults  = set("accepted", "replayed", "conflict", "auth_invalid", "overload", "rate_limited")
 	deliveryResults = set("processed", "retry", "failed", "lease_lost")
+	fanoutResults   = set("processed", "retry", "failed", "lease_lost")
 	intentResults   = set("processed", "retry", "failed", "superseded", "lease_lost")
 	latencyBuckets  = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
 	fanoutBuckets   = []float64{0, 1, 2, 5, 10, 25, 100, 1000}
@@ -45,16 +48,18 @@ type Metrics struct {
 	mu              sync.RWMutex
 	ingress         map[string]uint64
 	delivery        map[string]uint64
+	fanoutWork      map[string]uint64
 	intent          map[string]uint64
 	deliveryLatency map[string]*histogram
+	fanoutLatency   map[string]*histogram
 	intentLatency   map[string]*histogram
 	fanout          map[string]*histogram
-	leases          [4]int64
+	leases          [6]int64
 }
 
 func New() *Metrics {
-	return &Metrics{ingress: map[string]uint64{}, delivery: map[string]uint64{}, intent: map[string]uint64{},
-		deliveryLatency: map[string]*histogram{}, intentLatency: map[string]*histogram{}, fanout: map[string]*histogram{}}
+	return &Metrics{ingress: map[string]uint64{}, delivery: map[string]uint64{}, fanoutWork: map[string]uint64{}, intent: map[string]uint64{},
+		deliveryLatency: map[string]*histogram{}, fanoutLatency: map[string]*histogram{}, intentLatency: map[string]*histogram{}, fanout: map[string]*histogram{}}
 }
 
 func (m *Metrics) Ingress(event, action, result string) {
@@ -74,6 +79,15 @@ func (m *Metrics) Delivery(event, action, result string, latency time.Duration, 
 	m.mu.Unlock()
 }
 
+func (m *Metrics) Fanout(event, result string, latency time.Duration) {
+	event, result = normalize(event, events), normalize(result, fanoutResults)
+	k := key(event, result)
+	m.mu.Lock()
+	m.fanoutWork[k]++
+	observe(m.fanoutLatency, k, latency.Seconds(), latencyBuckets)
+	m.mu.Unlock()
+}
+
 func (m *Metrics) Intent(event, result string, latency time.Duration) {
 	event, result = normalize(event, events), normalize(result, intentResults)
 	k := key(event, result)
@@ -83,26 +97,28 @@ func (m *Metrics) Intent(event, result string, latency time.Duration) {
 	m.mu.Unlock()
 }
 
-func (m *Metrics) Leases(activeDeliveries, delayedDeliveries, activeIntents, delayedIntents int64) {
+func (m *Metrics) Leases(activeDeliveries, delayedDeliveries, activeFanouts, delayedFanouts, activeIntents, delayedIntents int64) {
 	m.mu.Lock()
-	m.leases = [4]int64{activeDeliveries, delayedDeliveries, activeIntents, delayedIntents}
+	m.leases = [6]int64{activeDeliveries, delayedDeliveries, activeFanouts, delayedFanouts, activeIntents, delayedIntents}
 	m.mu.Unlock()
 }
 
 func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	m.mu.RLock()
-	ingress, delivery, intent := cloneMap(m.ingress), cloneMap(m.delivery), cloneMap(m.intent)
-	deliveryLatency, intentLatency, fanout := cloneHistograms(m.deliveryLatency), cloneHistograms(m.intentLatency), cloneHistograms(m.fanout)
+	ingress, delivery, fanoutWork, intent := cloneMap(m.ingress), cloneMap(m.delivery), cloneMap(m.fanoutWork), cloneMap(m.intent)
+	deliveryLatency, fanoutLatency, intentLatency, fanout := cloneHistograms(m.deliveryLatency), cloneHistograms(m.fanoutLatency), cloneHistograms(m.intentLatency), cloneHistograms(m.fanout)
 	leases := m.leases
 	m.mu.RUnlock()
 	writeCounters(w, "cyclopus_github_webhook_ingress_total", []string{"event", "action", "result"}, ingress)
 	writeCounters(w, "cyclopus_github_delivery_total", []string{"event", "action", "result"}, delivery)
+	writeCounters(w, "cyclopus_github_fanout_total", []string{"event", "result"}, fanoutWork)
 	writeCounters(w, "cyclopus_github_intent_total", []string{"event", "result"}, intent)
 	writeHistogram(w, "cyclopus_github_delivery_processing_seconds", []string{"event", "action", "result"}, deliveryLatency, latencyBuckets)
+	writeHistogram(w, "cyclopus_github_fanout_processing_seconds", []string{"event", "result"}, fanoutLatency, latencyBuckets)
 	writeHistogram(w, "cyclopus_github_intent_processing_seconds", []string{"event", "result"}, intentLatency, latencyBuckets)
 	writeHistogram(w, "cyclopus_github_delivery_fanout", []string{"event", "action"}, fanout, fanoutBuckets)
-	for i, labels := range []string{`kind="delivery",state="active"`, `kind="delivery",state="delayed"`, `kind="intent",state="active"`, `kind="intent",state="delayed"`} {
+	for i, labels := range []string{`kind="delivery",state="active"`, `kind="delivery",state="delayed"`, `kind="fanout",state="active"`, `kind="fanout",state="delayed"`, `kind="intent",state="active"`, `kind="intent",state="delayed"`} {
 		fmt.Fprintf(w, "cyclopus_github_leases{%s} %d\n", labels, leases[i])
 	}
 }

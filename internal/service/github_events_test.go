@@ -340,7 +340,7 @@ func TestGitHubPushStalenessAndDeletionOutcomes(t *testing.T) {
 		intentCount                     int
 		want                            GitHubEventOutcome
 	}{
-		{"current push", `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + before + `","after":"` + sha + `"}`, sha, true, true, 2, GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "processed", IntentCount: 2}},
+		{"current push", `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + before + `","after":"` + sha + `"}`, sha, true, true, 2, GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "fanout_staged", IntentCount: 2}},
 		{"head mismatch", `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + before + `","after":"` + sha + `"}`, strings.Repeat("b", 40), true, false, 0, GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "stale_push"}},
 		{"normal ref missing", `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + before + `","after":"` + sha + `"}`, "", false, false, 0, GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "stale_push"}},
 		{"stale deletion after recreate", `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + before + `","after":"0000000000000000000000000000000000000000","deleted":true}`, sha, true, false, 0, GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "stale_push"}},
@@ -348,12 +348,83 @@ func TestGitHubPushStalenessAndDeletionOutcomes(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dataStore := &eventStoreStub{snapshotResult: store.SnapshotGitHubPushResult{IntentCount: test.intentCount}}
+			status := "completed"
+			if test.intentCount > 0 {
+				status = "pending"
+			}
+			dataStore := &eventStoreStub{snapshotResult: store.SnapshotGitHubPushResult{IntentCount: test.intentCount, ManifestStatus: status}}
 			client := &eventClientStub{branchSHA: test.authoritativeSHA, branchExists: test.exists}
 			processor, _ := NewGitHubEventProcessor(dataStore, client, 10)
 			got := processor.ProcessDelivery(t.Context(), eventDelivery("push", "", test.payload, true))
 			if got != test.want || dataStore.snapshots != boolInt(test.snapshot) {
 				t.Fatalf("outcome=%+v snapshots=%d, want %+v/%t", got, dataStore.snapshots, test.want, test.snapshot)
+			}
+		})
+	}
+}
+
+func TestGitHubPushDurableFanoutStagesIndependently(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	payload := `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + strings.Repeat("b", 40) + `","after":"` + sha + `"}`
+	t.Run("delivery completes after staging", func(t *testing.T) {
+		dataStore := &eventStoreStub{
+			snapshotResult: store.SnapshotGitHubPushResult{TotalCount: 251, ManifestStatus: "pending"},
+			continuations: []store.ContinueGitHubPushFanoutResult{
+				{TotalCount: 251, InsertedCount: 100},
+				{TotalCount: 251, InsertedCount: 200},
+				{TotalCount: 251, InsertedCount: 251, Terminal: true},
+			},
+		}
+		processor, err := NewGitHubEventProcessorWithFanout(dataStore, &eventClientStub{branchSHA: sha, branchExists: true}, 1000, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcome := processor.ProcessDelivery(t.Context(), eventDelivery("push", "", payload, true))
+		if outcome != (GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "fanout_staged", IntentCount: 251}) || dataStore.continueCalls != 0 {
+			t.Fatalf("outcome=%+v continuation calls=%d", outcome, dataStore.continueCalls)
+		}
+	})
+
+	t.Run("delivery cancellation does not consume fanout continuation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		dataStore := &eventStoreStub{snapshotResult: store.SnapshotGitHubPushResult{TotalCount: 251, ManifestStatus: "pending"}}
+		dataStore.continueFn = func() store.ContinueGitHubPushFanoutResult {
+			cancel()
+			return store.ContinueGitHubPushFanoutResult{TotalCount: 251, InsertedCount: 100}
+		}
+		processor, err := NewGitHubEventProcessorWithFanout(dataStore, &eventClientStub{branchSHA: sha, branchExists: true}, 1000, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcome := processor.ProcessDelivery(ctx, eventDelivery("push", "", payload, true))
+		if outcome != (GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "fanout_staged", IntentCount: 251}) || dataStore.continueCalls != 0 {
+			t.Fatalf("outcome=%+v continuation calls=%d", outcome, dataStore.continueCalls)
+		}
+	})
+}
+
+func TestGitHubPushExistingManifestStatusOutcomes(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	payload := `{"installation":{"id":42},"repository":{"id":99,"node_id":"R_99"},"ref":"refs/heads/main","before":"` + strings.Repeat("b", 40) + `","after":"` + sha + `"}`
+	for _, test := range []struct {
+		status string
+		want   GitHubEventOutcome
+	}{
+		{status: "completed", want: GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "processed", IntentCount: 251}},
+		{status: "superseded", want: GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "superseded", IntentCount: 100}},
+		{status: "pending", want: GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "fanout_staged", IntentCount: 251}},
+		{status: "leased", want: GitHubEventOutcome{Disposition: GitHubEventComplete, Code: "fanout_staged", IntentCount: 251}},
+		{status: "failed", want: GitHubEventOutcome{Disposition: GitHubEventFail, Code: "internal", IntentCount: 100}},
+		{status: "unexpected", want: GitHubEventOutcome{Disposition: GitHubEventRetry, Code: "database_unavailable", IntentCount: 100}},
+	} {
+		t.Run(test.status, func(t *testing.T) {
+			dataStore := &eventStoreStub{snapshotResult: store.SnapshotGitHubPushResult{ManifestStatus: test.status, TotalCount: 251, InsertedCount: 100}}
+			processor, err := NewGitHubEventProcessorWithFanout(dataStore, &eventClientStub{branchSHA: sha, branchExists: true}, 1000, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome := processor.ProcessDelivery(t.Context(), eventDelivery("push", "", payload, true)); outcome != test.want || dataStore.continueCalls != 0 {
+				t.Fatalf("outcome=%+v continuation calls=%d, want %+v/0", outcome, dataStore.continueCalls, test.want)
 			}
 		})
 	}
@@ -537,6 +608,10 @@ type eventStoreStub struct {
 	revokeError     error
 	pinExpiry       time.Time
 	pin             func()
+	continuations   []store.ContinueGitHubPushFanoutResult
+	continueFn      func() store.ContinueGitHubPushFanoutResult
+	continueCalls   int
+	continueLimits  []int
 }
 
 func (s *eventStoreStub) PinGitHubEventExternalCall(_ context.Context, _ string, token store.LeaseToken, _ string, duration time.Duration) (store.LeaseToken, error) {
@@ -582,6 +657,19 @@ func (s *eventStoreStub) SnapshotGitHubPush(_ context.Context, p store.SnapshotG
 	s.snapshots++
 	s.snapshotParams = p
 	return s.snapshotResult, nil
+}
+func (s *eventStoreStub) ContinueGitHubPushFanout(_ context.Context, p store.ContinueGitHubPushFanoutParams) (store.ContinueGitHubPushFanoutResult, error) {
+	s.continueCalls++
+	s.continueLimits = append(s.continueLimits, p.BatchLimit)
+	if s.continueFn != nil {
+		return s.continueFn(), nil
+	}
+	if len(s.continuations) > 0 {
+		result := s.continuations[0]
+		s.continuations = s.continuations[1:]
+		return result, nil
+	}
+	return store.ContinueGitHubPushFanoutResult{TotalCount: s.snapshotResult.IntentCount, InsertedCount: s.snapshotResult.IntentCount, Terminal: true}, nil
 }
 func (s *eventStoreStub) AuthorizeGitHubRoutingIntent(context.Context, store.GitHubRoutingIntent, store.LeaseToken) error {
 	return s.authorizeError
