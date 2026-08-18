@@ -213,10 +213,10 @@ func (g *GitHubOnboarding) deriveState(kind, generation, userID, sessionID strin
 
 func (g *GitHubOnboarding) Manifest() ([]byte, error) {
 	manifest := map[string]any{
-		"name": "Cyclopus", "url": g.config.ExternalURL, "hook_attributes": map[string]any{"url": g.config.ExternalURL + "/github/webhooks", "active": true},
+		"name": "Cyclopus", "url": g.config.ExternalURL, "hook_attributes": map[string]any{"url": g.config.ExternalURL + "/webhooks/github", "active": true},
 		"redirect_url": g.config.ExternalURL + "/github/app-manifest/callback", "setup_url": g.config.ExternalURL + "/github/app/setup", "public": true,
 		"description": "Self-hosted Cyclopus deployment integration", "default_permissions": map[string]string{"metadata": "read", "contents": "read", "actions": "write"},
-		"default_events": []string{"push", "installation", "installation_repositories", "repository"},
+		"default_events": []string{"push", "installation", "installation_repositories"},
 	}
 	return json.Marshal(manifest)
 }
@@ -603,7 +603,7 @@ func (g *GitHubOnboarding) InstallationURL() (string, error) {
 	}
 	return "https://github.com/apps/" + url.PathEscape(app.Slug) + "/installations/new", nil
 }
-func (g *GitHubOnboarding) WebhookURL() string { return g.config.ExternalURL + "/github/webhooks" }
+func (g *GitHubOnboarding) WebhookURL() string { return g.config.ExternalURL + "/webhooks/github" }
 func parseInstallationID(raw string) (int64, error) {
 	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	if err != nil || id <= 0 {

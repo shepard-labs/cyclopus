@@ -84,6 +84,195 @@ flowchart TB
 - 🚀 **Deploy model:** Orchestrates GitHub Actions to build, validates digest-only image refs server-side
 - 🔄 **Worker** handles async deploys, lease recovery, and webhook delivery with all state in Postgres (survives restarts)
 
+## GitHub webhook operations
+
+The complete tracked operator guides are:
+
+- [GitHub App setup](docs/github-app.md) — singleton manifest flow, exact permissions/subscriptions, HMAC rotation, and compatible workflow contract.
+- [GitHub webhook operations](docs/operations.md) — keyring, all runtime defaults, rollout/rollback, signed verification, SQL, metrics, alerts, and troubleshooting.
+
+Configure each Cyclopus GitHub App to send webhooks to
+`https://<cyclopus-host>/webhooks/github`. Subscribe only to **Push**,
+**Installation**, and **Installation repositories**. Cyclopus handles
+`installation` actions `created`, `unsuspend`, `new_permissions_accepted`,
+`suspend`, and `deleted`, plus `installation_repositories` actions `added` and
+`removed`. Pull-request events are not required. An authenticated `ping` returns
+HTTP `202` without creating an inbox row or requiring tenant state.
+
+The endpoint verifies `X-GitHub-Signature-256` before durably storing an
+AES-GCM-encrypted payload. A successful non-ping request returns `202` only
+after that transaction commits. Replays also return `202`; a delivery-ID/content
+mismatch returns `409`. Do not log request bodies, signatures, secret values,
+encrypted payload columns, or decrypted payloads.
+
+### Secrets and key rotation
+
+HMAC signing secrets use Kubernetes references, not inline values. The active
+settings are `CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_SECRET_REF` and
+`CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_KEY_VERSION`. During rotation, also set
+`CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_SECRET_REF`,
+`CYCLOPUS_WEBHOOK_GITHUB_PREVIOUS_KEY_VERSION`, and the RFC3339 cutoff
+`CYCLOPUS_WEBHOOK_GITHUB_SECRET_OVERLAP_UNTIL`. Cyclopus accepts the previous
+secret only before that cutoff. Remove the previous settings after GitHub uses
+the active secret. Secret references must use the control-plane namespace; any
+additional `cyclopus-webhook-*` Secret must be immutable, Helm-owned by the
+release, labeled `cyclopus.app/credential-purpose=webhook-signing`, and listed
+in `CYCLOPUS_WEBHOOK_ALLOWED_SECRET_REFS` so RBAC can grant exact-name access.
+
+Payload encryption is separate from webhook HMAC signing. Set
+`CYCLOPUS_WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE` to a mounted JSON file with this
+shape:
+
+```text
+{
+  "active_version": <version string>,
+  "keys": {
+    <active version>: <standard-base64 AES key>,
+    <retained version>: <standard-base64 AES key>
+  }
+}
+```
+
+Each encoded key must decode to 16, 24, or 32 bytes. The active version must
+exist in `keys`; retain old versions until every payload encrypted with them has
+been terminal and redacted. The file must not permit group or world access
+(`0600` is recommended). Mount it read-only from an existing Secret or external
+secret provider; never put key bytes in Helm values or environment variables.
+
+Example non-secret environment wiring:
+
+```yaml
+env:
+  - name: CYCLOPUS_WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE
+    value: /var/run/secrets/cyclopus-webhook-payload/keyring.json
+  - name: CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_SECRET_REF
+    value: k8s-secret://cyclopus/cyclopus-github-app#webhook-secret
+  - name: CYCLOPUS_WEBHOOK_GITHUB_ACTIVE_KEY_VERSION
+    value: managed
+  - name: CYCLOPUS_WEBHOOK_ALLOWED_SECRET_REFS
+    value: k8s-secret://cyclopus/cyclopus-webhook-previous#webhook-secret
+volumeMounts:
+  - name: github-webhook-payload-keyring
+    mountPath: /var/run/secrets/cyclopus-webhook-payload
+    readOnly: true
+volumes:
+  - name: github-webhook-payload-keyring
+    secret:
+      secretName: cyclopus-webhook-payload-keyring
+      defaultMode: 0600
+```
+
+The stock chart does not own or generate payload-encryption keys. Supply the
+mount and environment settings through your deployment customization. The
+example uses only references and paths; it contains no key material.
+
+### Ingress and worker limits
+
+Defaults and matching environment names are:
+
+| Area | Environment variable | Default |
+|---|---|---:|
+| Webhook body | `CYCLOPUS_WEBHOOK_GITHUB_BODY_LIMIT` | 1 MiB (`1048576`) |
+| Webhook handlers | `CYCLOPUS_WEBHOOK_GITHUB_MAX_CONCURRENT` | 4 |
+| Webhook body-read deadline | `CYCLOPUS_WEBHOOK_GITHUB_BODY_READ_TIMEOUT` | 10s |
+| Per-IP rate / burst | `CYCLOPUS_WEBHOOK_GITHUB_RATE_LIMIT_PER_MINUTE`, `CYCLOPUS_WEBHOOK_GITHUB_RATE_LIMIT_BURST` | 120/min, 30 |
+| HTTP header deadline | `CYCLOPUS_HTTP_READ_HEADER_TIMEOUT` | 5s |
+| HTTP request deadline | `CYCLOPUS_HTTP_READ_TIMEOUT` | 15s |
+| HTTP response deadline | `CYCLOPUS_HTTP_WRITE_TIMEOUT` | 30s |
+| HTTP header limit | `CYCLOPUS_HTTP_MAX_HEADER_BYTES` | 1 MiB (`1048576`) |
+| Worker scan | `CYCLOPUS_GITHUB_EVENT_WORKER_SCAN_INTERVAL` | 1s |
+| Delivery concurrency | `CYCLOPUS_GITHUB_EVENT_WORKER_DELIVERY_CONCURRENCY` | 4 |
+| Fan-out concurrency | `CYCLOPUS_GITHUB_EVENT_WORKER_FANOUT_CONCURRENCY` | 2 |
+| Routing-intent concurrency | `CYCLOPUS_GITHUB_EVENT_WORKER_INTENT_CONCURRENCY` | 8 |
+| Lease / processing timeout | `CYCLOPUS_GITHUB_EVENT_WORKER_LEASE_DURATION` / `CYCLOPUS_GITHUB_EVENT_WORKER_PROCESSING_TIMEOUT` | 60s / 20s |
+| Attempts / retry | `CYCLOPUS_GITHUB_EVENT_WORKER_MAX_ATTEMPTS`, `CYCLOPUS_GITHUB_EVENT_WORKER_INITIAL_RETRY`, `CYCLOPUS_GITHUB_EVENT_WORKER_MAX_RETRY` | 12, 5s, 15m |
+| Payload retention / cleanup | `CYCLOPUS_GITHUB_EVENT_WORKER_PAYLOAD_RETENTION`, `CYCLOPUS_GITHUB_EVENT_WORKER_CLEANUP_INTERVAL`, `CYCLOPUS_GITHUB_EVENT_WORKER_CLEANUP_BATCH` | 24h, 1m, 100 |
+| Shutdown | `CYCLOPUS_GITHUB_EVENT_WORKER_SHUTDOWN_GRACE` | 30s |
+| Fan-out maximum / batch | `CYCLOPUS_GITHUB_EVENT_WORKER_MAX_FANOUT`, `CYCLOPUS_GITHUB_EVENT_WORKER_FANOUT_BATCH` | 10000, 100 |
+| Legacy intent compatibility limit | `CYCLOPUS_GITHUB_EVENT_WORKER_MAX_INTENTS` | 1000 |
+| Metrics listener / public opt-in | `CYCLOPUS_METRICS_ADDRESS`, `CYCLOPUS_METRICS_ALLOW_PUBLIC` | `127.0.0.1:9090`, `false` |
+
+At the edge, enforce a body limit no larger than the application limit, reject
+slow headers within 5s, preserve the three `X-GitHub-*` authentication headers,
+and use a route-specific rate/concurrency limit that sheds excess requests with
+`429`. Give the upstream enough time to exceed the 10s body-read deadline, but
+keep it below the 30s application write timeout. Disable request decompression:
+Cyclopus rejects webhook requests with `Content-Encoding`.
+
+The worker leases durable deliveries and intents, renews leases while
+processing, retries transient database/GitHub failures with bounded exponential
+backoff, and terminally fails exhausted work at attempt 12. Terminal payloads
+remain encrypted for the retention window and are then redacted in bounded
+cleanup batches. Startup performs cleanup and an initial claim scan before
+`/readyz` becomes ready. Shutdown clears readiness, stops processing, waits up
+to the shutdown grace, stops terminal writes, and leaves unfinished leases for
+recovery by the next process.
+
+### Rollout, rollback, and routing semantics
+
+Migrations are embedded and run at boot. Deploy the Phase 5 binary so it applies
+`000010_github_webhook_routing`, `000011_github_unverified_revocation`,
+`000012_github_webhook_signature_key_version`,
+`000013_github_webhook_conflict_error`, and `000014_github_routing_fanout` in
+order. Never run the new binary against a partially applied sequence. Before
+enabling GitHub delivery:
+
+1. Back up Postgres, deploy the binary, and wait for migrations and `/readyz`.
+2. Confirm the pod can read the HMAC Secret references and the `0600` payload
+   keyring file without printing either value.
+3. Set the GitHub App webhook URL and event subscriptions listed above.
+4. Send a GitHub `ping` and confirm HTTP `202`.
+5. Push a production branch and a preview branch, then monitor delivery/intent
+   status, worker retries, fanout, and environment creation.
+
+Lifecycle changes fail closed: an unverified suspension, deletion, repository
+removal, or permission loss blocks routing until authoritative reconciliation
+restores access. Repository routing uses GitHub's stable repository ID and node
+ID, so rename and transfer reconciliation does not key behavior to a mutable
+full name. One repository push may fan out to multiple eligible Cyclopus apps,
+bounded by `MAX_INTENTS`. Before execution, each intent rechecks the current
+repository installation, lifecycle/config generations, production branch, and
+authoritative branch head; stale or superseded intents produce no side effect.
+A non-production branch deletion tears down matching preview environments.
+Deleting a production branch is recorded and audited but never tears down the
+production environment.
+
+Rollback is intentionally guarded. Migration `000014` requires active fan-out
+manifests to drain and every `fanout_staged` delivery to be mapped or cleaned up;
+`000013` blocks while `github_conflict` rows exist; `000012` blocks while
+non-legacy signature-key versions exist. Before reverting `000011`, reconcile every
+`unverified_revocation`, remove or archive ref-transition observations and clear
+their checkpoints, and resolve retained rows whose installation identity no
+longer matches after a repository transfer. Before reverting `000010`, stop
+webhook ingress, drain all `pending`/`leased` deliveries and intents, and wait
+for or run payload redaction so no `verified_payload` remains. Both migrations
+refuse unsafe down-migrations with an explicit `rollback blocked` error; do not
+bypass any guard. See [the full rollback runbook](docs/operations.md#rollback-guards).
+
+Safe status queries (counts only; never select `verified_payload` or
+`payload_nonce`):
+
+```sql
+SELECT status, count(*) FROM github_webhook_deliveries GROUP BY status ORDER BY status;
+SELECT status, count(*) FROM github_routing_intents GROUP BY status ORDER BY status;
+SELECT event, action, result_code, error_code, count(*)
+FROM github_webhook_deliveries
+GROUP BY event, action, result_code, error_code
+ORDER BY event, action, result_code, error_code;
+SELECT count(*) AS retained_payloads
+FROM github_webhook_deliveries WHERE verified_payload IS NOT NULL;
+SELECT access_state, count(*) FROM github_installations GROUP BY access_state;
+SELECT access_state, count(*) FROM github_repositories GROUP BY access_state;
+```
+
+Persistent `pending` work usually indicates database/GitHub availability or
+rate limiting; expired `leased` work should recover on a later scan. A rising
+`failed` count requires inspection of structured `error_code` values and worker
+logs. HTTP `401` means signature/header validation failed, `409` means a reused
+delivery ID carried different content, `413` means the body exceeded the limit,
+`429` means handler/edge concurrency was exhausted, and `503` means secret,
+body-read, identity, or persistence availability failed.
+
 ## Features
 
 ### 🚀 Core Capabilities

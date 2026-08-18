@@ -40,7 +40,7 @@ func TestGitHubManifestUsesOnlyCanonicalExternalURLAndExactPrivileges(t *testing
 		t.Fatalf("manifest URLs/public = %+v", manifest)
 	}
 	hook := manifest["hook_attributes"].(map[string]any)
-	if hook["url"] != "https://cyclopus.example/github/webhooks" || hook["active"] != true {
+	if hook["url"] != "https://cyclopus.example/webhooks/github" || hook["active"] != true {
 		t.Fatalf("hook attributes = %+v", hook)
 	}
 	wantPermissions := map[string]any{"actions": "write", "contents": "read", "metadata": "read"}
@@ -53,7 +53,7 @@ func TestGitHubManifestUsesOnlyCanonicalExternalURLAndExactPrivileges(t *testing
 			t.Fatalf("permission %s = %v, want %v", key, permissions[key], want)
 		}
 	}
-	wantEvents := []string{"push", "installation", "installation_repositories", "repository"}
+	wantEvents := []string{"push", "installation", "installation_repositories"}
 	events := manifest["default_events"].([]any)
 	if len(events) != len(wantEvents) {
 		t.Fatalf("events = %+v", events)

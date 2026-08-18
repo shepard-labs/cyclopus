@@ -8,6 +8,22 @@ Check readiness:
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "cyclopus.fullname" . }}
   kubectl -n {{ .Release.Namespace }} get svc {{ include "cyclopus.fullname" . }}
 
+GitHub App webhook routing:
+{{- if .Values.ingress.enabled }}
+  URL: https://{{ .Values.ingress.host }}/webhooks/github
+{{- else }}
+  URL: https://<public-cyclopus-host>/webhooks/github
+{{- end }}
+  Events: push, installation, installation_repositories (no pull_request event)
+
+The Phase 5 binary also requires a read-only 0600 AES keyring file at
+CYCLOPUS_WEBHOOK_PAYLOAD_ENCRYPTION_KEY_FILE and readable HMAC Secret refs.
+The chart does not generate payload-encryption keys; mount an existing Secret or
+external-secret volume and set only its path/reference in deployment config.
+After rollout and /readyz success, send a GitHub ping and confirm HTTP 202 before
+testing production and preview pushes. See docs/github-app.md and
+docs/operations.md (also linked from README.md).
+
 First run: the only reachable route is account creation; whoever claims it first
 owns the install (§9). Keep the control plane on a private network / VPN.
 
