@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	githubadapter "github.com/shepard-labs/cyclopus/internal/adapters/github"
 	"github.com/shepard-labs/cyclopus/internal/githubmetrics"
@@ -276,6 +277,103 @@ func TestGitHubEventDeliveryRetryUsesExistingManifestStatusPostgres18(t *testing
 	}
 }
 
+func TestGitHubEventProcessorRejectsReclaimedDeliveryBeforeExternalCallPostgres18(t *testing.T) {
+	dataStore, pool := newGitHubEventIntegrationFixture(t, "github_processor_reclaimed")
+	const ref = "refs/heads/feature/reclaimed"
+	before, after := strings.Repeat("0", 40), strings.Repeat("d", 40)
+	delivery := receiveGitHubEventPush(t, dataStore, "40000000-0000-0000-0000-000000000031", ref, before, after)
+	claimed, err := dataStore.ClaimGitHubWebhookDeliveries(t.Context(), "old-worker", time.Minute, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("old claim = %+v, %v", claimed, err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE github_webhook_deliveries SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, delivery.ID); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := dataStore.ClaimGitHubWebhookDeliveries(t.Context(), "replacement-worker", time.Minute, 1)
+	if err != nil || len(reclaimed) != 1 || reclaimed[0].Lease.Epoch != claimed[0].Lease.Epoch+1 {
+		t.Fatalf("replacement claim = %+v, %v; old = %+v", reclaimed, err, claimed[0])
+	}
+	client := &recordingGitHubEventClient{sha: after, exists: true}
+	processor, err := service.NewGitHubEventProcessor(dataStore, client, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := processor.ProcessDelivery(t.Context(), claimed[0])
+	if outcome != (service.GitHubEventOutcome{Disposition: service.GitHubEventLeaseLost, Code: "lease_lost"}) {
+		t.Fatalf("stale ProcessDelivery() = %+v", outcome)
+	}
+	if calls := client.callCounts(); calls != [5]int{} {
+		t.Fatalf("external calls installation/list/repository/ref/refresh = %v, want all zero", calls)
+	}
+	var status string
+	var attempts int
+	var result *string
+	if err := pool.QueryRow(t.Context(), `SELECT status,attempts,result_code FROM github_webhook_deliveries WHERE id=$1`, delivery.ID).Scan(&status, &attempts, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != "leased" || attempts != 2 || result != nil {
+		t.Fatalf("reclaimed delivery = %s/%d/%v, want leased/2/nil", status, attempts, result)
+	}
+}
+
+func TestGitHubEventRunnerRetriesTransactionalDatabaseFailuresPostgres18(t *testing.T) {
+	for _, sqlstate := range []string{"40001", "40P01"} {
+		t.Run(sqlstate, func(t *testing.T) {
+			dataStore, pool := newGitHubEventIntegrationFixture(t, "github_delivery_tx_retry_"+sqlstate)
+			seedGitHubEventFanoutApps(t, pool, 2, 40000)
+			const ref = "refs/heads/feature/transaction-retry"
+			before, after := strings.Repeat("0", 40), strings.Repeat("e", 40)
+			delivery := receiveGitHubEventPush(t, dataStore, "40000000-0000-0000-0000-000000000032", ref, before, after)
+			failed := false
+			processorStore := &snapshotFailpointGitHubEventStore{Store: dataStore, failpoint: func(point string) error {
+				if point == "after_first_intent" && !failed {
+					failed = true
+					return &pgconn.PgError{Code: sqlstate, Message: "injected transactional retry"}
+				}
+				return nil
+			}}
+			client := &recordingGitHubEventClient{sha: after, exists: true}
+			processor, err := service.NewGitHubEventProcessorWithFanout(processorStore, client, 10, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := gitHubEventIntegrationConfig("delivery-worker", 10, 10)
+			config.InitialRetry, config.MaxRetry = time.Millisecond, time.Millisecond
+			runner := NewGitHubEventRunner(config, integrationDiscardLogger(), dataStore, processor)
+			enableTestWrites(runner)
+
+			first := claimOneGitHubEventDelivery(t, dataStore, "delivery-worker")
+			runDeliveryDirect(runner, t.Context(), first)
+			assertGitHubEventRetryState(t, pool, delivery.ID, 1, "database_unavailable")
+			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 0, 0, 0, 0)
+
+			time.Sleep(3 * time.Millisecond)
+			second := claimOneGitHubEventDelivery(t, dataStore, "delivery-worker")
+			if second.Attempts != 2 || second.Lease.Epoch <= first.Lease.Epoch {
+				t.Fatalf("second claim = %+v, first = %+v", second, first)
+			}
+			runDeliveryDirect(runner, t.Context(), second)
+			assertGitHubEventDelivery(t, pool, delivery.ID, "completed", 2, "fanout_staged")
+			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 1, 1, 2, 0)
+
+			manifest := claimOneGitHubEventFanout(t, dataStore, "fanout-worker")
+			fanoutRunner := NewGitHubEventRunner(config, integrationDiscardLogger(), dataStore, processor)
+			enableTestWrites(fanoutRunner)
+			runFanoutDirect(fanoutRunner, t.Context(), manifest)
+			assertGitHubEventFanout(t, pool, delivery.ID, "completed", 2, 2, 1)
+			assertGitHubEventIntentUniqueness(t, pool, delivery.ID, 2)
+			assertGitHubEventSnapshotCounts(t, pool, delivery.ID, 1, 1, 0, 1)
+			if calls := client.callCounts(); calls != [5]int{0, 0, 0, 2, 0} {
+				t.Fatalf("external calls installation/list/repository/ref/refresh = %v, want two branch reads only", calls)
+			}
+			claimed, err := dataStore.ClaimGitHubWebhookDeliveries(t.Context(), "unexpected-third-worker", time.Minute, 1)
+			if err != nil || len(claimed) != 0 {
+				t.Fatalf("unexpected third delivery claim = %+v, %v", claimed, err)
+			}
+		})
+	}
+}
+
 func TestGitHubEventDurableFanoutTwoRunnersAtConfiguredLimitPostgres18(t *testing.T) {
 	dataStore, pool := newGitHubEventIntegrationFixture(t, "github_worker_fanout_limit")
 	seedGitHubEventFanoutApps(t, pool, 1000, 30000)
@@ -363,6 +461,59 @@ func (*persistentConflictClient) RefreshInstallationCredentials(context.Context,
 type githubEventBranchClient struct {
 	sha    string
 	exists bool
+}
+
+type recordingGitHubEventClient struct {
+	mu                                           sync.Mutex
+	sha                                          string
+	exists                                       bool
+	installation, list, repository, ref, refresh int
+}
+
+func (c *recordingGitHubEventClient) GetInstallation(context.Context, int64) (service.GitHubEventInstallation, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.installation++
+	return service.GitHubEventInstallation{}, nil
+}
+func (c *recordingGitHubEventClient) ListInstallationRepositories(context.Context, int64) ([]service.GitHubEventRepository, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.list++
+	return nil, nil
+}
+func (c *recordingGitHubEventClient) GetRepository(context.Context, int64, int64) (service.GitHubEventRepository, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.repository++
+	return service.GitHubEventRepository{}, nil
+}
+func (c *recordingGitHubEventClient) GetBranchRef(context.Context, int64, int64, string) (string, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ref++
+	return c.sha, c.exists, nil
+}
+func (c *recordingGitHubEventClient) RefreshInstallationCredentials(context.Context, int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refresh++
+	return nil
+}
+func (c *recordingGitHubEventClient) callCounts() [5]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return [5]int{c.installation, c.list, c.repository, c.ref, c.refresh}
+}
+
+type snapshotFailpointGitHubEventStore struct {
+	*store.Store
+	failpoint func(string) error
+}
+
+func (s *snapshotFailpointGitHubEventStore) SnapshotGitHubPush(ctx context.Context, params store.SnapshotGitHubPushParams) (store.SnapshotGitHubPushResult, error) {
+	params.Failpoint = s.failpoint
+	return s.Store.SnapshotGitHubPush(ctx, params)
 }
 
 func (*githubEventBranchClient) GetInstallation(context.Context, int64) (service.GitHubEventInstallation, error) {
@@ -478,6 +629,57 @@ func newGitHubEventIntegrationFixture(t *testing.T, prefix string) (*store.Store
 		t.Fatal(err)
 	}
 	return store.New(pool).WithGitHubWebhookPayloadCodec(codec), pool
+}
+
+func claimOneGitHubEventDelivery(t *testing.T, dataStore *store.Store, owner string) store.GitHubWebhookDelivery {
+	t.Helper()
+	claimed, err := dataStore.ClaimGitHubWebhookDeliveries(t.Context(), owner, 20*time.Second, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim delivery = %+v, %v", claimed, err)
+	}
+	return claimed[0]
+}
+
+func claimOneGitHubEventFanout(t *testing.T, dataStore *store.Store, owner string) store.GitHubRoutingFanoutManifest {
+	t.Helper()
+	claimed, err := dataStore.ClaimGitHubRoutingFanoutManifests(t.Context(), owner, 20*time.Second, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim fanout = %+v, %v", claimed, err)
+	}
+	return claimed[0]
+}
+
+func assertGitHubEventRetryState(t *testing.T, pool *pgxpool.Pool, id string, wantAttempts int, wantCode string) {
+	t.Helper()
+	var status, code string
+	var attempts int
+	var owner *string
+	if err := pool.QueryRow(t.Context(), `SELECT status,attempts,error_code,lease_owner FROM github_webhook_deliveries WHERE id=$1`, id).Scan(&status, &attempts, &code, &owner); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" || attempts != wantAttempts || code != wantCode || owner != nil {
+		t.Fatalf("retry state = %s/%d/%s owner=%v, want pending/%d/%s owner=nil", status, attempts, code, owner, wantAttempts, wantCode)
+	}
+}
+
+func assertGitHubEventSnapshotCounts(t *testing.T, pool *pgxpool.Pool, deliveryID string, observations, manifests, candidates, audits int) {
+	t.Helper()
+	var gotObservations, gotManifests, gotCandidates, gotAudits int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_ref_transition_observations WHERE delivery_id=$1`, deliveryID).Scan(&gotObservations); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_routing_fanout_manifests WHERE delivery_id=$1`, deliveryID).Scan(&gotManifests); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM github_routing_fanout_candidates candidate JOIN github_routing_fanout_manifests manifest ON manifest.id=candidate.manifest_id WHERE manifest.delivery_id=$1`, deliveryID).Scan(&gotCandidates); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_events`).Scan(&gotAudits); err != nil {
+		t.Fatal(err)
+	}
+	if gotObservations != observations || gotManifests != manifests || gotCandidates != candidates || gotAudits != audits {
+		t.Fatalf("snapshot observations/manifests/candidates/audits = %d/%d/%d/%d, want %d/%d/%d/%d", gotObservations, gotManifests, gotCandidates, gotAudits, observations, manifests, candidates, audits)
+	}
 }
 
 func seedGitHubEventFanoutApps(t *testing.T, pool *pgxpool.Pool, count, offset int) {
