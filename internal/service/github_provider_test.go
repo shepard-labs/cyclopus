@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -20,7 +21,7 @@ func TestParsePublicGHCRRepositoryCanonicalGrammar(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := ParsePublicGHCRRepository(test.publicRepository)
 			if test.publicAccepted {
-				if err != nil || got != test.publicRepository {
+				if err != nil || got != strings.TrimPrefix(test.publicRepository, "ghcr.io/") {
 					t.Fatalf("ParsePublicGHCRRepository(%q) = %q, %v", test.publicRepository, got, err)
 				}
 			} else if !errors.Is(err, ErrInvalidArgument) {

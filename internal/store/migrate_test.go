@@ -45,6 +45,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000014_github_routing_fanout.up.sql",
 		"000015_oci_ghcr_private_pulls.down.sql",
 		"000015_oci_ghcr_private_pulls.up.sql",
+		"000016_private_resolution_model.down.sql",
+		"000016_private_resolution_model.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -104,6 +106,27 @@ func TestEmbeddedMigrations(t *testing.T) {
 	for _, want := range []string{"ADD COLUMN state_generation", "status = 'expired'", "github_setup_protocol_incompatible", "status <> 'active' OR state_generation IS NOT NULL"} {
 		if !strings.Contains(string(stateGeneration), want) {
 			t.Errorf("state generation migration does not contain %q", want)
+		}
+	}
+}
+
+func TestMigration000016SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000016_private_resolution_model.up.sql":   "aa56432d9ec7b83bc4b88a9fb4df6fc9b707d95f6b51b8f842399be3dbee23e5",
+		"000016_private_resolution_model.down.sql": "1e40f6058aba51246cd712c60f6e13dad69610334b83259372c07474128d739d",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"apps_registry_source_consistency", "phase6_orchestration_valid", "assert_private_resolution_v16_down_safe", "enforce_orchestration_target_and_artifact"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v16 migration fingerprint %s", name, got, want)
 		}
 	}
 }

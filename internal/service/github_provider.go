@@ -290,7 +290,8 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 	if strings.TrimSpace(input.IdempotencyKey) == "" || input.RepositoryID <= 0 || !validWorkflowPath(input.WorkflowPath) {
 		return store.ImportOperation{}, ErrInvalidArgument
 	}
-	if _, err := ParsePublicGHCRRepository(input.ImageRepository); err != nil {
+	imageRepository, err := ParsePublicGHCRRepository(input.ImageRepository)
+	if err != nil {
 		return store.ImportOperation{}, ErrInvalidArgument
 	}
 	if err := validateProject(ProjectInput{Name: input.ProjectName, Slug: input.ProjectSlug}); err != nil {
@@ -367,7 +368,7 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 	appInput := applyAppCreateDefaults(normalizeAppInput(input.App))
 	appInput.ProjectID = newID()
 	appInput.Name, appInput.Slug, appInput.HostnameLabel = input.ApplicationName, input.ApplicationSlug, input.HostnameLabel
-	appInput.ImageRepository, appInput.GitHubWorkflowPath, appInput.ProductionBranch = &input.ImageRepository, &input.WorkflowPath, branch
+	appInput.ImageRepository, appInput.GitHubWorkflowPath, appInput.ProductionBranch = &imageRepository, &input.WorkflowPath, branch
 	runtimeClass := "gvisor"
 	if appInput.RuntimeClass != nil {
 		runtimeClass = *appInput.RuntimeClass
@@ -488,8 +489,8 @@ func importFailureError(code *string) error {
 	}
 }
 
-// ParsePublicGHCRRepository validates and returns a canonical public GHCR
-// repository name. It intentionally never normalizes caller input.
+// ParsePublicGHCRRepository validates a canonical public GHCR reference and
+// returns its canonical hostless repository path.
 func ParsePublicGHCRRepository(value string) (string, error) {
 	if len(value) == 0 || len(value) > 255 || !strings.HasPrefix(value, "ghcr.io/") {
 		return "", ErrInvalidArgument
@@ -498,7 +499,7 @@ func ParsePublicGHCRRepository(value string) (string, error) {
 	if !oci.ValidRepository(path, 2) {
 		return "", ErrInvalidArgument
 	}
-	return value, nil
+	return path, nil
 }
 
 func (s *Service) GetImportOperation(ctx context.Context, actor ActorContext, id string) (store.ImportOperation, error) {

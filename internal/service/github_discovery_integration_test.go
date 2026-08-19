@@ -286,6 +286,48 @@ func TestGitHubImportRevalidatesRepositoryWorkflowBranchAndImageIntegration(t *t
 	}
 }
 
+func TestGitHubImportPersistsHostlessRepositoryAndCompletesImageResolutionIntegration(t *testing.T) {
+	fixture := newGitHubDiscoveryFixture(t)
+	fixture.seedRepository(t, fakeRepository{id: 99, nodeID: "R_99", owner: "acme", name: "api", fullName: "acme/api", defaultBranch: "main"})
+	head := strings.Repeat("a", 40)
+	fixture.api.contents[".github/workflows/deploy.yml@"+head] = fakeContent{sha: strings.Repeat("c", 40), content: compatibleWorkflow}
+	input := ImportGitRepositoryInput{RepositoryID: 99, WorkflowPath: ".github/workflows/deploy.yml", ProjectName: "Imported", ProjectSlug: "imported", ApplicationName: "Imported API", ApplicationSlug: "imported-api", HostnameLabel: "imported-api", ImageRepository: "ghcr.io/acme/api", IdempotencyKey: "hostless-resolution"}
+	operation, err := fixture.service.ImportGitRepository(t.Context(), fixture.actor, input)
+	if err != nil || operation.AppID == nil || operation.EnvironmentID == nil || operation.OrchestrationJobID == nil {
+		t.Fatalf("import = %+v, %v", operation, err)
+	}
+	app, err := fixture.service.store.GetApp(t.Context(), fixture.actor.OrgID, *operation.AppID)
+	if err != nil || app.ImageRepository == nil || *app.ImageRepository != "acme/api" {
+		t.Fatalf("persisted app = %+v, %v", app, err)
+	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE environments SET lifecycle_status='ready' WHERE id=$1`, *operation.EnvironmentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE orchestration_jobs SET status='resolving_image',github_run_status='completed',github_run_conclusion='success',github_run_head_sha=desired_checkout_sha WHERE id=$1`, *operation.OrchestrationJobID); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := fixture.service.store.ClaimImageResolutions(t.Context(), fixture.actor.OrgID, "import-resolution", time.Minute, time.Hour, nil, 1)
+	if err != nil || len(claims) != 1 || claims[0].Job.ID != *operation.OrchestrationJobID {
+		t.Fatalf("claims = %+v, %v", claims, err)
+	}
+	claim := claims[0]
+	digest := "sha256:" + strings.Repeat("d", 64)
+	result, err := fixture.service.store.CompleteImageResolution(t.Context(), store.CompleteImageResolutionParams{
+		OrgID: claim.Job.OrgID, JobID: claim.Job.ID, Repository: "acme/api",
+		TagReference: "ghcr.io/acme/api:" + claim.Job.CommitSHA, Digest: digest, ImmutableReference: "ghcr.io/acme/api@" + digest,
+		ManifestMediaType: "application/vnd.oci.image.manifest.v1+json", ConfigDigest: "sha256:" + strings.Repeat("e", 64), ConfigMediaType: "application/vnd.oci.image.config.v1+json",
+		AnnotationStatus: "absent", DesiredGeneration: claim.Job.DesiredGeneration, CommitSHA: claim.Job.CommitSHA, Visibility: "public", Lease: claim.Lease,
+		RepositoryOwner: claim.RepositoryOwner, RepositoryName: claim.RepositoryName, RepositoryNodeID: claim.RepositoryNodeID, Claim: claim,
+	})
+	if err != nil || result != store.ImageResolutionProcessed {
+		t.Fatalf("complete image resolution = %q, %v", result, err)
+	}
+	var tagReference, immutableReference, status string
+	if err := fixture.pool.QueryRow(t.Context(), `SELECT image_tag_ref,immutable_image_ref,status FROM orchestration_jobs WHERE id=$1`, claim.Job.ID).Scan(&tagReference, &immutableReference, &status); err != nil || tagReference != "ghcr.io/acme/api:"+claim.Job.CommitSHA || immutableReference != "ghcr.io/acme/api@"+digest || status != "deploying" {
+		t.Fatalf("resolved job = %q %q %q, %v", tagReference, immutableReference, status, err)
+	}
+}
+
 func TestGitHubImportOversizedWorkflowFailsDeterministicallyAndReplaysIntegration(t *testing.T) {
 	fixture := newGitHubDiscoveryFixture(t)
 	fixture.seedRepository(t, fakeRepository{id: 99, nodeID: "R_99", owner: "acme", name: "api", fullName: "acme/api", defaultBranch: "main"})
@@ -501,7 +543,7 @@ func TestParsePublicGHCRRepository(t *testing.T) {
 	valid := []string{"ghcr.io/acme/api", "ghcr.io/a/b.c", "ghcr.io/a/b_c", "ghcr.io/a/b__c", "ghcr.io/a/b---c", "ghcr.io/a/b/c"}
 	invalid := []string{"", "ghcr.io/a", "ghcr.io//a/b", "ghcr.io/a//b", "ghcr.io/a/b/", "ghcr.io/a/.", "ghcr.io/a/..", "ghcr.io/A/b", "ghcr.io/a/B", "ghcr.io/a/b-", "ghcr.io/a/_b", "ghcr.io/a/b___c", "ghcr.io/a/b:c", "ghcr.io/a/b@sha256:abc", "https://ghcr.io/a/b", "ghcr.io/a/b?q=1", "ghcr.io/a/b#x", "ghcr.io/a/bé"}
 	for _, value := range valid {
-		if got, err := ParsePublicGHCRRepository(value); err != nil || got != value {
+		if got, err := ParsePublicGHCRRepository(value); err != nil || got != strings.TrimPrefix(value, "ghcr.io/") {
 			t.Errorf("valid %q = %q, %v", value, got, err)
 		}
 	}

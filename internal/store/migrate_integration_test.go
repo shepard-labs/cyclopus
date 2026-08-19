@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000015 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000016 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 15 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:15 dirty:false", version, dirty)
+		if version != 16 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:16 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1315,6 +1315,81 @@ func TestMigration000015UpgradeGuardsConstraintsAndReUp(t *testing.T) {
 		t.Fatal("partial OCI lease succeeded")
 	}
 	_ = firstRegistry
+}
+
+func TestMigration000016CanonicalRepositoryTriggerCatalogDownAndReUp(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(15); err != nil {
+		t.Fatalf("migrate to 000015: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	fixture := seedTenantGraph(t, conn, "migration-sixteen", "main", "", "migration-sixteen-production")
+	var jobID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,
+		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key)
+		SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('b',40),environment.desired_generation,'migration-sixteen-job'
+		FROM git_connections connection,environments environment WHERE connection.id=$4 AND environment.id=$3 RETURNING id::text`,
+		fixture.org, fixture.app, fixture.environment, fixture.repository).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	v15Catalog := schemaCatalogSnapshot(t, conn)
+	if err := migrator.Migrate(16); err != nil {
+		t.Fatalf("000015 to 000016: %v", err)
+	}
+	var repository string
+	if err := conn.QueryRow(t.Context(), `SELECT image_repository FROM apps WHERE id=$1`, fixture.app).Scan(&repository); err != nil || repository != "acme/migration-sixteen" {
+		t.Fatalf("v16 repository = %q, %v", repository, err)
+	}
+	for _, invalid := range []string{"ghcr.io/acme/migration-sixteen", "acme/migration-sixteen:latest", "acme/migration-sixteen@sha256:abc"} {
+		if _, err := conn.Exec(t.Context(), `UPDATE apps SET image_repository=$2 WHERE id=$1`, fixture.app, invalid); err == nil {
+			t.Fatalf("v16 invalid repository %q accepted", invalid)
+		}
+	}
+	tx, err := conn.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `UPDATE orchestration_jobs SET
+		image_tag_ref='ghcr.io/acme/migration-sixteen:'||desired_checkout_sha,
+		resolved_image_digest='sha256:'||repeat('c',64),
+		immutable_image_ref='ghcr.io/acme/migration-sixteen@sha256:'||repeat('c',64)
+		WHERE id=$1`, jobID); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatalf("v16 canonical references rejected: %v", err)
+	}
+	if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(15); err != nil {
+		t.Fatalf("clean 000016 down: %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT image_repository FROM apps WHERE id=$1`, fixture.app).Scan(&repository); err != nil || repository != "ghcr.io/acme/migration-sixteen" {
+		t.Fatalf("v15 repository after down = %q, %v", repository, err)
+	}
+	if got := schemaCatalogSnapshot(t, conn); got != v15Catalog {
+		t.Fatalf("000015 catalog after 000016 down differs from seeded v15 catalog\nwant:\n%s\n\ngot:\n%s", v15Catalog, got)
+	}
+	if err := migrator.Migrate(16); err != nil {
+		t.Fatalf("000016 re-up: %v", err)
+	}
+	var registryID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,'ghcr','ghcr.io') RETURNING id::text`, fixture.org).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE apps SET registry_id=$2,image_visibility='private' WHERE id=$1`, fixture.app, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(15); err == nil || !strings.Contains(err.Error(), "000016 rollback blocked: combined GitHub and registry applications remain") {
+		t.Fatalf("combined app down error = %v", err)
+	}
 }
 
 // schemaCatalogSnapshot covers every schema object whose shape migration 000015
