@@ -511,6 +511,16 @@ func (b *Backend) GetNodeSystemDetails(ctx context.Context, token string) ([]obs
 	return b.svc.GetNodeSystemDetails(ctx, actor)
 }
 
+// GetNodeSystemDetailsInRange is GetNodeSystemDetails for a named chart time
+// range ("1h", "12h", "24h", "1w").
+func (b *Backend) GetNodeSystemDetailsInRange(ctx context.Context, token string, rangeID observability.MetricsTimeRangeID) ([]observability.NodeSystemDetail, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return b.svc.GetNodeSystemDetailsInWindow(ctx, actor, rangeID)
+}
+
 // ── Update-mask mechanics ───────────────────────────────────────────────────
 
 // appInputFromStore lifts a stored app into a full update input — the in-process

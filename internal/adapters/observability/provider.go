@@ -60,3 +60,12 @@ func (p *Provider) GetNodeSystemDetails(ctx context.Context) ([]NodeSystemDetail
 	}
 	return p.metrics.GetNodeSystemDetails(ctx)
 }
+
+// GetNodeSystemDetailsInWindow is GetNodeSystemDetails with an explicit chart
+// time window forwarded to the backend query.
+func (p *Provider) GetNodeSystemDetailsInWindow(ctx context.Context, window TimeRange) ([]NodeSystemDetail, error) {
+	if p.metrics == nil {
+		return nil, ErrBackendUnavailable
+	}
+	return p.metrics.GetNodeSystemDetailsInWindow(ctx, window)
+}

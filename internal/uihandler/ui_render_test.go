@@ -295,17 +295,21 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 			{
 				ID: "sys-1", Name: "node-1", Host: "192.168.1.10", Port: "45876", Status: "up", Updated: time.Now(),
 				OS: "Debian GNU/Linux 13 (trixie)", CPUModel: "Intel Core Processor (Haswell, no TSX)", UptimeSec: 604800,
-				CPUPercent: 12.5, MemoryUsed: 45.2, DiskPercent: 20.1, Bandwidth: 1.5,
+				CPUPercent: 12.5, MemoryUsed: 45.2, DiskPercent: 20.1, DiskTotal: 100, Bandwidth: 1.5,
 				History: []observability.SystemStatPoint{
-					{Timestamp: time.Now().Add(-1 * time.Minute), CPU: 10.0, Memory: 40.0, Disk: 20.0},
-					{Timestamp: time.Now(), CPU: 12.5, Memory: 45.2, Disk: 20.1},
+					{Timestamp: time.Now().Add(-1 * time.Minute), CPU: 10.0, Memory: 40.0, Disk: 20.0, DiskUsed: 20.0, DiskTotal: 100, NetSent: 1.0, NetRecv: 2.0},
+					{Timestamp: time.Now(), CPU: 12.5, Memory: 45.2, Disk: 20.1, DiskUsed: 20.1, DiskTotal: 100, NetSent: 1.5, NetRecv: 2.5},
 				},
 			},
 		}
-		body := renderComponent(t, context.Background(), adminpages.Metrics(nodes, "", "", store.User{}, store.Organization{Name: "Acme"}, nil))
+		body := renderComponent(t, context.Background(), adminpages.Metrics(nodes, "", "", "", store.User{}, store.Organization{Name: "Acme"}, nil))
 		assertContainsAll(t, body,
 			`id="metrics-container"`,
-			`hx-get="/admin/metrics?fragment=true&amp;node=sys-1"`,
+			// The poll lives on #metrics-charts (charts-only fragment), carrying
+			// node+range from the browser URL via hx-vals js.
+			`id="metrics-charts"`,
+			`hx-get="/admin/metrics?fragment=true&amp;part=charts"`,
+			`hx-vals="js:{node: new URLSearchParams(location.search).get('node'), range: new URLSearchParams(location.search).get('range')}"`,
 			`hx-trigger="every 10s"`,
 			`hx-swap="outerHTML settle:0s swap:0s transition:false"`,
 			`node-1`,
@@ -314,30 +318,59 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 			`20.1%`,
 			`CPU Usage`,
 			`Memory Usage`,
-			`Disk Space`,
-			`h-48`,
+			`Disk Usage`,
+			`data-chart="Bandwidth"`,
+			// Series payloads are HTML-escaped inside the data attribute.
+			`&#34;name&#34;:&#34;Sent&#34;`,
+			`&#34;name&#34;:&#34;Received&#34;`,
+			`h-72`,
 			`7 days`,
 			`Debian GNU/Linux 13 (trixie)`,
 			`Intel Core Processor (Haswell, no TSX)`,
 			`192.168.1.10`,
-			`45876`,
-			`Online`,
+			`Up`,
+			// Styled el-select dropdowns (static controls region).
+			`<el-select id="metrics-node"`,
+			`<el-select id="metrics-range"`,
+			`24 hours`,
+			// Selection drives htmx: node -> #metrics-container, range -> #metrics-charts.
+			`target: '#metrics-container'`,
+			`target: '#metrics-charts'`,
+			`/admin/metrics?fragment=true&part=charts&node=`,
 		)
+		// The poll (every Ns trigger) is only on #metrics-charts, NOT on the
+		// static #metrics-container — the controls are not recreated by polls.
+		if strings.Contains(body, `id="metrics-container" hx-trigger`) {
+			t.Fatalf("metrics-container still carries the poll trigger:\n%s", body)
+		}
 
-		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "", ""))
+		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "", "", ""))
 		assertContainsAll(t, fragmentBody,
+			`id="metrics-container"`,
+			`id="metrics-charts"`,
 			`node-1`,
 			`12.5%`,
 			`45.2%`,
 			`20.1%`,
-			`hx-get="/admin/metrics?fragment=true&amp;node=sys-1"`,
 			`7 days`,
 			`Debian GNU/Linux 13 (trixie)`,
 			`Intel Core Processor (Haswell, no TSX)`,
 			`192.168.1.10`,
-			`45876`,
-			`Online`,
+			`24 hours`,
 		)
+
+		chartsBody := renderComponent(t, context.Background(), adminpages.MetricsChartsFragment(nodes, "sys-1", "24h"))
+		assertContainsAll(t, chartsBody,
+			`id="metrics-charts"`,
+			`hx-trigger="every 10s"`,
+			`data-chart="Bandwidth"`,
+		)
+		// Charts-only fragment: no controls, no container wrapper.
+		for _, absent := range []string{`id="metrics-container"`, `id="metrics-node"`, `id="metrics-range"`} {
+			if strings.Contains(chartsBody, absent) {
+				t.Fatalf("charts fragment contains %s:\n%s", absent, chartsBody)
+			}
+		}
 		if strings.Contains(strings.ToLower(fragmentBody), "<!doctype html") {
 			t.Fatalf("fragment contains full-page HTML:\n%s", fragmentBody)
 		}
@@ -346,6 +379,17 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 		}
 		if strings.Contains(fragmentBody, "bg-base-300/60") {
 			t.Fatalf("fragment still nests charts inside a muted inner card:\n%s", fragmentBody)
+		}
+		// Round-4 renames/removals.
+		for _, gone := range []string{
+			`Disk Space`,           // renamed to Disk Usage
+			`Bandwidth Throughput`, // renamed to Bandwidth (Sent/Received)
+			`cursor-crosshair`,     // default pointer now
+			`gap-2 mt-1`,           // series subtitle row under chart titles
+		} {
+			if strings.Contains(body, gone) {
+				t.Fatalf("metrics page still contains %q", gone)
+			}
 		}
 	})
 
@@ -360,29 +404,88 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 				CPUPercent: 80.0, MemoryUsed: 90.0, DiskPercent: 70.0,
 			},
 		}
-		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-1", ""))
+		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-1", "", ""))
 		assertContainsAll(t, fragmentBody,
 			`id="metrics-node"`,
-			`value="sys-1"`,
+			// Styled el-select node picker with options for both nodes.
+			`<el-select id="metrics-node" name="node" value="sys-1"`,
 			`<el-option value="sys-1"`,
 			`<el-option value="sys-2"`,
 			`node-1`,
 			`node-2`,
 			`192.168.1.10`,
-			`hx-get="/admin/metrics?fragment=true&amp;node=sys-1"`,
 		)
 		if strings.Contains(fragmentBody, "192.168.1.11") {
 			t.Fatalf("unselected node host appeared in fragment:\n%s", fragmentBody)
 		}
 
-		otherBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-2", ""))
+		otherBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-2", "", ""))
 		assertContainsAll(t, otherBody,
 			`192.168.1.11`,
-			`hx-get="/admin/metrics?fragment=true&amp;node=sys-2"`,
+			`<el-select id="metrics-node" name="node" value="sys-2"`,
 		)
 		if strings.Contains(otherBody, "192.168.1.10") {
 			t.Fatalf("unselected node host appeared in fragment:\n%s", otherBody)
 		}
+	})
+
+	t.Run("admin metrics range param parsing", func(t *testing.T) {
+		cases := []struct {
+			query     string
+			want      string
+			wantValid bool
+		}{
+			{"", "24h", true}, // missing -> default
+			{"range=1h", "1h", true},
+			{"range=12h", "12h", true},
+			{"range=24h", "24h", true},
+			{"range=1w", "1w", true},
+			{"range=30d", "24h", false}, // invalid -> default
+			{"range=24H", "24h", false}, // case-sensitive
+			{"range=", "24h", true},     // empty -> default
+		}
+		for _, tc := range cases {
+			request := httptest.NewRequest(http.MethodGet, "/admin/metrics?"+tc.query, nil)
+			got, valid := metricsRangeFromRequest(request)
+			if string(got) != tc.want || valid != tc.wantValid {
+				t.Fatalf("metricsRangeFromRequest(?%s) = (%q, %v), want (%q, %v)", tc.query, got, valid, tc.want, tc.wantValid)
+			}
+		}
+	})
+
+	t.Run("admin metrics range selector carries node and range", func(t *testing.T) {
+		nodes := []observability.NodeSystemDetail{
+			{ID: "sys-1", Name: "node-1", Host: "192.168.1.10", Port: "45876", Status: "up", CPUPercent: 12.5},
+		}
+		fragmentBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-1", "1h", ""))
+		assertContainsAll(t, fragmentBody,
+			// Range selector trigger shows the active range label.
+			`id="metrics-range"`,
+			`1 hour`,
+			// Styled el-select range picker with every range option.
+			`<el-select id="metrics-range" name="range" value="1h"`,
+			`<el-option value="1h"`,
+			`<el-option value="12h"`,
+			`<el-option value="24h"`,
+			`<el-option value="1w"`,
+			// The charts region polls every 10s for the 1h window, reading
+			// node+range from the browser URL.
+			`id="metrics-charts"`,
+			`hx-trigger="every 10s"`,
+			`hx-vals="js:{node: new URLSearchParams(location.search).get('node'), range: new URLSearchParams(location.search).get('range')}"`,
+			// Node dropdown present too.
+			`id="metrics-node"`,
+		)
+		if strings.Contains(fragmentBody, `<el-option value="1m"`) {
+			t.Fatalf("1m range option should have been removed:\n%s", fragmentBody)
+		}
+		// An invalid range falls back to 24h (10s poll).
+		fallbackBody := renderComponent(t, context.Background(), adminpages.MetricsFragment(nodes, "sys-1", "bogus", ""))
+		assertContainsAll(t, fallbackBody,
+			`24 hours`,
+			`<el-select id="metrics-range" name="range" value="24h"`,
+			`hx-trigger="every 10s"`,
+		)
 	})
 
 	t.Run("user fields preserve current values", func(t *testing.T) {

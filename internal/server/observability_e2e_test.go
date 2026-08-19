@@ -59,6 +59,11 @@ func (r *e2eTelemetry) GetNodeSystemDetails(context.Context) ([]observability.No
 	return nil, nil
 }
 
+func (r *e2eTelemetry) GetNodeSystemDetailsInWindow(context.Context, observability.TimeRange) ([]observability.NodeSystemDetail, error) {
+	r.called = true
+	return nil, nil
+}
+
 func newTelemetryFixture(t *testing.T, telemetry service.TelemetryProvider) apiFixture {
 	t.Helper()
 	databaseURL := os.Getenv("CYCLOPUS_TEST_DATABASE_URL")

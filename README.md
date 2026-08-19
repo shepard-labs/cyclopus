@@ -449,6 +449,21 @@ automatic `templ`/Go/CSS rebuilds:
 Open `http://127.0.0.1:8081`. Local workload hostnames use
 `*.127.0.0.1.sslip.io`.
 
+To run the dev stack in the background instead of a foreground terminal:
+
+```bash
+# Start Air (with templ/Go rebuilds), Tailwind watch, and the
+# OpenObserve/Beszel port-forwards; logs go to .cyclopus-dev/run.log
+nohup ./scripts/dev/run.sh >> .cyclopus-dev/run.log 2>&1 &
+echo $! > .cyclopus-dev/run.pid
+
+# Verify the UI is up (expect a redirect to login)
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/
+
+# Stop it later
+kill "$(cat .cyclopus-dev/run.pid)"
+```
+
 The setup installs the production-pinned Traefik, Kyverno, cert-manager, KEDA,
 KEDA HTTP Add-on, OpenObserve, Beszel, and OpenTelemetry Collector charts and
 manifests from public registries. `run.sh` keeps OpenObserve and Beszel private

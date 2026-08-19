@@ -2,7 +2,7 @@ package admin
 
 import (
 	"fmt"
-	"net/url"
+	"math"
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	"github.com/shepard-labs/cyclopus/internal/store"
@@ -10,21 +10,47 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ Metrics(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string, user store.User, org store.Organization, flash *ui.FlashMessage) {
-	@components.PageWide("Metrics", user, org, flash, "/admin/metrics", nil, metricsContent(nodes, selectedNodeID, errMessage))
+templ Metrics(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string, errMessage string, user store.User, org store.Organization, flash *ui.FlashMessage) {
+	@components.PageWide("Metrics", user, org, flash, "/admin/metrics", nil, metricsContent(nodes, selectedNodeID, rangeID, errMessage))
 }
 
-templ MetricsFragment(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string) {
+// MetricsFragment renders the full region: STATIC controls (node dropdown,
+// range dropdown, node info header) plus the charts region. It swaps INTO
+// #metrics-container on node changes (the header's host/uptime/os changes per
+// node). The 10s/1s poll does NOT live here — it lives on #metrics-charts so
+// the el-select dropdowns are not recreated (and their popovers orphaned) by
+// every poll.
+templ MetricsFragment(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string, errMessage string) {
 	{{ id := resolveNodeID(nodes, selectedNodeID) }}
-	<div id="metrics-container" hx-get={ metricsFragmentURL(id) } hx-trigger="every 10s" hx-swap="outerHTML settle:0s swap:0s transition:false">
-		@metricsGrid(nodes, id, errMessage)
+	{{ rng := normalizeRangeID(rangeID) }}
+	<div id="metrics-container">
+		@metricsControls(nodes, id, rng, errMessage)
+		@MetricsChartsFragment(nodes, id, rng)
 	</div>
 }
 
-templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string) {
+// MetricsChartsFragment renders ONLY the chart grid wrapped in
+// #metrics-charts. It is the 10s/1s poll target and the range-change target.
+// The poll reads node+range from the browser URL (the afterRequest hook keeps
+// them in sync) so it always tracks the user's current selection.
+templ MetricsChartsFragment(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string) {
+	{{ id := resolveNodeID(nodes, selectedNodeID) }}
+	{{ rng := normalizeRangeID(rangeID) }}
+	<div
+		id="metrics-charts"
+		hx-get="/admin/metrics?fragment=true&amp;part=charts"
+		hx-vals="js:{node: new URLSearchParams(location.search).get('node'), range: new URLSearchParams(location.search).get('range')}"
+		hx-trigger="every 10s"
+		hx-swap="outerHTML settle:0s swap:0s transition:false"
+	>
+		@metricsCharts(nodes, id, rng)
+	</div>
+}
+
+templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string, errMessage string) {
 	<style>
-		#metrics-container.htmx-swapping,
-		#metrics-container.htmx-settling {
+		#metrics-charts.htmx-swapping,
+		#metrics-charts.htmx-settling {
 			opacity: 1 !important;
 			transition: none !important;
 		}
@@ -37,7 +63,7 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 			</span>
 		</div>
 
-		@MetricsFragment(nodes, selectedNodeID, errMessage)
+		@MetricsFragment(nodes, selectedNodeID, rangeID, errMessage)
 	</div>
 
 	<script>
@@ -46,8 +72,8 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 			try {
 				const d = new Date(isoStr);
 				if (isNaN(d.getTime())) return isoStr;
-				return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + " " +
-					d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+			return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ", " +
+				d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 			} catch (e) {
 				return isoStr;
 			}
@@ -58,21 +84,67 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 			try {
 				const d = new Date(isoStr);
 				if (isNaN(d.getTime())) return isoStr;
-				return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+				// hour:'numeric' avoids the leading zero (1:00 PM, not 01:00 PM).
+				return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 			} catch (e) {
 				return isoStr;
 			}
 		}
 
+		// Port of Beszel decimalString: 2 decimal places, keeping trailing zeros.
+		function decimalString(num, digits) {
+			if (digits === undefined) digits = 2;
+			return Number(num).toLocaleString(undefined, {
+				minimumFractionDigits: digits,
+				maximumFractionDigits: digits
+			});
+		}
+
+		// X-axis tick labels: keep them short so they don't crowd. Under a week
+		// show HH:MM (the day is implied by position); a week or more shows
+		// the "Mon D" date.
+		function formatChartTickTime(isoStr, spanMs) {
+			if (spanMs >= 7 * 24 * 60 * 60 * 1000) {
+				const d = new Date(isoStr);
+				if (isNaN(d.getTime())) return isoStr;
+				return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+			}
+			return formatUserLocalTimeOnly(isoStr);
+		}
+
+		// Port of Beszel useYAxisWidth: measure the longest formatted Y label in
+		// an offscreen tabular-nums text-xs element and size the gutter to fit.
+		function sizeYAxisGutter(card) {
+			const gutter = card.querySelector('.metric-y-gutter');
+			if (!gutter) return;
+			let longest = '';
+			card.querySelectorAll('.metric-y-gutter span').forEach(el => {
+				const txt = el.textContent || '';
+				if (txt.length > longest.length) longest = txt;
+			});
+			if (!longest) return;
+			const div = document.createElement('div');
+			div.className = 'text-xs tabular-nums';
+			div.style.position = 'absolute';
+			div.style.visibility = 'hidden';
+			div.style.whiteSpace = 'nowrap';
+			div.style.left = '-9999px';
+			div.textContent = longest;
+			document.body.appendChild(div);
+			const width = div.offsetWidth + 20;
+			document.body.removeChild(div);
+			gutter.style.width = width + 'px';
+		}
+
 		function initChartInteractions(root) {
 			const scope = root || document;
 			scope.querySelectorAll('.metric-chart-card').forEach(card => {
-				const svg = card.querySelector('svg.metric-chart-svg');
-				const crosshair = card.querySelector('.metric-crosshair');
-				const tooltip = card.querySelector('.metric-tooltip');
-				const currentValEl = card.querySelector('.metric-current-val');
-				const rawPayload = card.getAttribute('data-chart-payload');
-				if (!rawPayload || !svg || !crosshair || !tooltip) return;
+			const svg = card.querySelector('svg.metric-chart-svg');
+			const hoverDots = Array.from(card.querySelectorAll('.metric-hover-dot'));
+			const tooltip = card.querySelector('.metric-tooltip');
+			const currentValEl = card.querySelector('.metric-current-val');
+			const rawPayload = card.getAttribute('data-chart-payload');
+			if (!rawPayload || !svg || hoverDots.length === 0 || !tooltip) return;
 
 				let data = null;
 				try {
@@ -83,9 +155,38 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 				}
 				if (!data || !data.times || data.times.length === 0) return;
 
+				sizeYAxisGutter(card);
+
+				// True time scale: per-point Unix-ms timestamps.
+				const n = data.times.length;
+				let timesMs = (data.timesMs && data.timesMs.length === n)
+					? data.timesMs.map(Number)
+					: data.times.map(t => new Date(t).getTime());
+				if (timesMs.some(isNaN)) {
+					// Fall back to even spacing if parsing failed.
+					timesMs = data.times.map((_, i) => i);
+				}
+			// The X axis spans the SELECTED window (window start -> now), not
+			// the data's own extent, matching the server-rendered ticks.
+			const winMin = Number(card.getAttribute('data-time-min')) || 0;
+			const winMax = Number(card.getAttribute('data-time-max')) || 0;
+			const tMin = (winMax > winMin) ? winMin : timesMs[0];
+			const tMax = (winMax > winMin) ? winMax : timesMs[n - 1];
+			const spanMs = (tMax > tMin) ? (tMax - tMin) : 0;
+
+			// Value domain for the dots' y position: same mapping the Go path
+			// builder uses (viewBox 300x80, 8 units padding top/bottom). The
+			// domain comes from the rendered chart's data attributes.
+			const vMin = Number(card.getAttribute('data-min-val')) || 0;
+			const vMax = Number(card.getAttribute('data-max-val')) || 0;
+
+			function setDotsVisible(visible) {
+				hoverDots.forEach(d => { d.style.display = visible ? 'block' : 'none'; });
+			}
+
 				card.querySelectorAll('.metric-time-tick').forEach(el => {
 					const iso = el.getAttribute('data-iso-time');
-					if (iso) el.textContent = formatUserLocalTimeOnly(iso);
+					if (iso) el.textContent = formatChartTickTime(iso, spanMs);
 				});
 
 				const defaultVal = currentValEl ? currentValEl.textContent : '';
@@ -93,30 +194,54 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 				card.onmousemove = function(e) {
 					const rect = svg.getBoundingClientRect();
 					if (rect.width <= 0) return;
-					if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
-						crosshair.style.display = 'none';
-						tooltip.style.display = 'none';
-						if (currentValEl) currentValEl.textContent = defaultVal;
-						return;
-					}
+				if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+					setDotsVisible(false);
+					tooltip.style.display = 'none';
+					if (currentValEl) currentValEl.textContent = defaultVal;
+					return;
+				}
 
 					const mouseX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-					const ratio = mouseX / rect.width;
-					const n = data.times.length;
-					const idx = Math.min(n - 1, Math.max(0, Math.round(ratio * (n - 1))));
+					// Map mouseX -> time on the true time scale, then snap to the
+					// nearest sample.
+					const mouseT = spanMs > 0 ? tMin + (mouseX / rect.width) * spanMs : tMin;
+					let idx = 0;
+					let bestDist = Infinity;
+					for (let i = 0; i < n; i++) {
+						const d = Math.abs(timesMs[i] - mouseT);
+						if (d < bestDist) {
+							bestDist = d;
+							idx = i;
+						} else if (spanMs > 0 && timesMs[i] > mouseT) {
+							break; // sorted; no closer sample later
+						}
+					}
 
-					// SVG coordinate system is viewBox 0 0 300 80
-					const svgX = (idx / (n === 1 ? 1 : n - 1)) * 300;
-					crosshair.setAttribute('x1', svgX.toFixed(1));
-					crosshair.setAttribute('x2', svgX.toFixed(1));
-					crosshair.style.display = 'block';
+			// SVG coordinate system is viewBox 0 0 300 80 (time scale).
+			const svgX = spanMs > 0 ? ((timesMs[idx] - tMin) / spanMs) * 300 : 150;
+
+			// Position one dot per series on its own line at the snapped
+			// sample (same data->SVG mapping as the paths).
+			hoverDots.forEach((dot, i) => {
+				const vals = (data.series && data.series[i] && data.series[i].values) || [];
+				const v = Number(vals[idx]);
+				if (!isNaN(v) && vMax > vMin) {
+					const yRatio = Math.max(0, Math.min(1, (v - vMin) / (vMax - vMin)));
+					const svgY = 80 - 8 - yRatio * 64;
+					dot.setAttribute('cx', svgX.toFixed(1));
+					dot.setAttribute('cy', svgY.toFixed(1));
+					dot.style.display = 'block';
+				} else {
+					dot.style.display = 'none';
+				}
+			});
 
 					// Update tooltip content
 					const timeStr = formatUserLocalTime(data.times[idx]);
 					let valHtml = '<div class="font-mono text-xs font-semibold text-base-content/90 mb-1 border-b border-line pb-1">' + timeStr + '</div>';
 					if (data.series && Array.isArray(data.series)) {
 						data.series.forEach(s => {
-							const val = (s.values && s.values[idx] !== undefined) ? Number(s.values[idx]).toFixed(2) : '-';
+							const val = (s.values && s.values[idx] !== undefined) ? decimalString(Number(s.values[idx]), 2) : '-';
 							valHtml += '<div class="flex items-center justify-between gap-3 text-xs py-0.5">' +
 								'<span class="inline-flex items-center gap-1.5 text-base-content/70">' +
 								'<span class="size-1.5 rounded-full inline-block" style="background-color: ' + s.color + '"></span>' +
@@ -130,44 +255,92 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 					tooltip.innerHTML = valHtml;
 					tooltip.style.display = 'block';
 
-					// Calculate pixel X relative to container width
+					// Position the tooltip at the cursor. The element is anchored to
+					// the bottom of the plot (bottom-full) so it floats above the
+					// cursor; only the horizontal position needs to track the mouse.
 					const pxX = (svgX / 300) * rect.width;
-					// Clamp tooltip within container boundaries
 					const tooltipWidth = tooltip.offsetWidth || 140;
 					const halfW = tooltipWidth / 2;
 					const clampedPx = Math.max(halfW + 4, Math.min(rect.width - halfW - 4, pxX));
 					tooltip.style.left = clampedPx + 'px';
-					tooltip.style.top = '0px';
 				};
 
-				card.onmouseleave = function() {
-					crosshair.style.display = 'none';
-					tooltip.style.display = 'none';
-					if (currentValEl) currentValEl.textContent = defaultVal;
-				};
+			card.onmouseleave = function() {
+				setDotsVisible(false);
+				tooltip.style.display = 'none';
+				if (currentValEl) currentValEl.textContent = defaultVal;
+			};
 			});
 		}
 
+		// Styled el-select dropdowns drive htmx: htmx can't fire a GET off the
+		// custom element's change event (el-select has no form-field semantics),
+		// so we listen for 'change' ourselves and issue the fragment request.
+		// NODE change swaps the FULL region (#metrics-container — the header
+		// node info changes per node); RANGE change swaps only #metrics-charts
+		// with the charts-only fragment (part=charts).
+		function wireMetricsSelects(root) {
+			const scope = root || document;
+			const nodeSel = scope.querySelector ? scope.querySelector('#metrics-node') : null;
+			if (nodeSel && !nodeSel.dataset.metricsHtmx) {
+				nodeSel.dataset.metricsHtmx = '1';
+				nodeSel.addEventListener('change', function() {
+					const params = new URLSearchParams(location.search);
+					const range = params.get('range') || '24h';
+					htmx.ajax('GET', '/admin/metrics?fragment=true&node=' + encodeURIComponent(nodeSel.value) + '&range=' + encodeURIComponent(range), {
+						target: '#metrics-container',
+						swap: 'outerHTML settle:0s swap:0s transition:false'
+					});
+				});
+			}
+			const rangeSel = scope.querySelector ? scope.querySelector('#metrics-range') : null;
+			if (rangeSel && !rangeSel.dataset.metricsHtmx) {
+				rangeSel.dataset.metricsHtmx = '1';
+				rangeSel.addEventListener('change', function() {
+					const params = new URLSearchParams(location.search);
+					const node = params.get('node') || '';
+					htmx.ajax('GET', '/admin/metrics?fragment=true&part=charts&node=' + encodeURIComponent(node) + '&range=' + encodeURIComponent(rangeSel.value), {
+						target: '#metrics-charts',
+						swap: 'outerHTML settle:0s swap:0s transition:false'
+					});
+				});
+			}
+		}
+
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', () => initChartInteractions(document));
+			document.addEventListener('DOMContentLoaded', () => { initChartInteractions(document); wireMetricsSelects(document); });
 		} else {
 			initChartInteractions(document);
+			wireMetricsSelects(document);
 		}
-		document.addEventListener('htmx:load', (e) => initChartInteractions(e.detail?.elt || e.target || document));
+		document.addEventListener('htmx:load', (e) => {
+			const root = e.detail?.elt || e.target || document;
+			initChartInteractions(root);
+			wireMetricsSelects(root);
+		});
 		document.addEventListener('htmx:afterRequest', (e) => {
-			const elt = e.detail && e.detail.elt;
-			if (!elt || elt.id !== 'metrics-node' || !e.detail.successful) return;
-			const nodeId = elt.value;
+			if (!e.detail.successful) return;
+			const requestPath = (e.detail.requestConfig && e.detail.requestConfig.path) || (e.detail.pathInfo && e.detail.pathInfo.requestPath) || '';
+			if (!requestPath || requestPath.indexOf('/admin/metrics') === -1) return;
+			const requestParams = new URL(requestPath, window.location.origin).searchParams;
+			const nodeId = requestParams.get('node') || '';
+			const range = requestParams.get('range') || '';
 			if (!nodeId) return;
 			const url = new URL(window.location.href);
 			url.searchParams.set('node', nodeId);
+			if (range) url.searchParams.set('range', range);
 			url.searchParams.delete('fragment');
 			history.replaceState(null, '', url.pathname + url.search);
 		});
 	</script>
 }
 
-templ metricsGrid(nodes []observability.NodeSystemDetail, selectedNodeID string, errMessage string) {
+// metricsControls is the STATIC controls region: stat overview cards, the
+// node + range el-select dropdowns, and the node info header. It renders once
+// per full load and is only re-rendered on a NODE change (via the
+// #metrics-container swap) — the 10s/1s poll on #metrics-charts never touches
+// it, so the el-select popovers keep working.
+templ metricsControls(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string, errMessage string) {
 	if errMessage != "" {
 		<div class="rounded-box border border-warning/30 bg-warning/10 p-4 text-sm text-base-content">
 			<p class="font-medium text-warning">Metrics unavailable</p>
@@ -212,135 +385,145 @@ templ metricsGrid(nodes []observability.NodeSystemDetail, selectedNodeID string,
 			</div>
 		</div>
 
-		<!-- Selected-node dashboard -->
-		<div class="space-y-4 pt-4">
+		<!-- Selected-node controls + info header -->
+		<div class="pt-4">
 			{{ node, ok := selectedNode(nodes, selectedNodeID) }}
 			if ok {
-				{{ cpu, mem, disk, diskIO, net, load, temp := extractNodeChartData(node) }}
 				{{ uptime := formatNodeUptime(node.UptimeSec) }}
+				{{ memory := formatMemoryGB(node.MemoryBytes) }}
+				{{ cpuLabel := nodeCPUModelLabel(node) }}
 				<div class="rounded-box border border-line bg-base-200 p-6 space-y-3">
-					<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-						<div>
-							<label id="metrics-node-label" for="metrics-node" class="sr-only">Node</label>
-							<el-select
-								id="metrics-node"
-								name="node"
-								value={ node.ID }
-								aria-labelledby="metrics-node-label"
-								hx-get="/admin/metrics?fragment=true"
-								hx-target="#metrics-container"
-								hx-swap="outerHTML settle:0s swap:0s transition:false"
-								hx-trigger="change"
-								hx-vals={ metricsNodeSelectVals }
-								class="relative block w-52"
-							>
-								<button id="metrics-node-trigger" type="button" aria-haspopup="listbox" aria-controls="metrics-node-options" aria-labelledby="metrics-node-label metrics-node-selected" class="grid w-full cursor-pointer grid-cols-1 rounded-field border border-line bg-base-300 py-2 pr-10 pl-3 text-left text-sm font-medium text-base-content outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary">
-									<el-selectedcontent id="metrics-node-selected" class="col-start-1 row-start-1 truncate">{ node.Name }</el-selectedcontent>
-									@components.IconChevronDown("pointer-events-none col-start-1 row-start-1 size-4 self-center justify-self-end text-base-content/50")
-								</button>
-								<el-options id="metrics-node-options" role="listbox" anchor="bottom start" popover class="max-h-60 w-(--button-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete data-closed:scale-95 data-closed:opacity-0">
-									for _, option := range nodes {
-										<el-option value={ option.ID } class="group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-medium">
-											<span class="block flex-1 truncate">{ option.Name }</span>
-											<span class="ml-3 hidden group-aria-selected/option:block in-[el-selectedcontent]:hidden">@components.IconCheck("size-4")</span>
-										</el-option>
-									}
-								</el-options>
-							</el-select>
+					<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+						@metricsNodeSelect(nodes, node.ID, rangeID)
+						<div class="ms-auto">
+							@metricsRangeSelect(node.ID, rangeID)
 						</div>
+					</div>
+					<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-base-content/70">
+						if node.Status == "up" || node.Status == "online" {
+							@components.OperationalStatus("success", "Up")
+						} else if node.Status == "down" || node.Status == "offline" {
+							@components.OperationalStatus("error", "Down")
+						} else {
+							@components.OperationalStatus("warning", titleCase(node.Status))
+						}
+						if node.Host != "" {
+							<span aria-hidden="true" class="h-3.5 w-px bg-line"></span>
+							<span class="inline-flex items-center gap-1.5">
+								@components.IconGlobeAlt("size-4 shrink-0 text-base-content/55")
+								<span class="font-mono text-xs">{ node.Host }</span>
+							</span>
+						}
 						if uptime != "" {
-							<span class="text-xs text-base-content/65">{ uptime }</span>
+							<span aria-hidden="true" class="h-3.5 w-px bg-line"></span>
+							<span class="inline-flex items-center gap-1.5">
+								@components.IconClock("size-4 shrink-0 text-base-content/55")
+								{ uptime }
+							</span>
 						}
 						if node.OS != "" {
-							<span class="text-xs text-base-content/65">{ node.OS }</span>
+							<span aria-hidden="true" class="h-3.5 w-px bg-line"></span>
+							<span class="inline-flex items-center gap-1.5">
+								@components.IconPenguin("size-4 shrink-0 text-base-content/55")
+								{ node.OS }
+							</span>
 						}
-						if node.CPUModel != "" {
-							<span class="text-xs text-base-content/65">{ node.CPUModel }</span>
+						if cpuLabel != "" {
+							<span aria-hidden="true" class="h-3.5 w-px bg-line"></span>
+							<span class="inline-flex items-center gap-1.5">
+								@components.IconCpuChip("size-4 shrink-0 text-base-content/55")
+								{ cpuLabel }
+							</span>
 						}
-					</div>
-					<div class="flex flex-wrap items-center gap-3">
-						<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Host }</span>
-						if node.Port != "" {
-							<span class="inline-flex items-center rounded-md border border-line bg-base-300 px-2 py-0.5 font-mono text-xs font-medium text-base-content/80">{ node.Port }</span>
-						}
-						if node.Status == "up" || node.Status == "online" {
-							@components.OperationalStatus("success", "Online")
-						} else {
-							@components.OperationalStatus("warning", node.Status)
+						if memory != "" {
+							<span aria-hidden="true" class="h-3.5 w-px bg-line"></span>
+							<span class="inline-flex items-center gap-1.5">
+								@components.IconMemoryChip("size-4 shrink-0 text-base-content/55")
+								{ memory }
+							</span>
 						}
 					</div>
 				</div>
-
-				@RenderSVGChart(cpu)
-				@RenderSVGChart(mem)
-				@RenderSVGChart(disk)
-				@RenderSVGChart(diskIO)
-				@RenderSVGChart(net)
-				@RenderSVGChart(load)
-				if temp.CurrentVal != "0.0 °C" && temp.CurrentVal != "0" {
-					@RenderSVGChart(temp)
-				}
 			}
 		</div>
 	}
 }
 
+// metricsCharts renders ONLY the chart cards. It swaps into #metrics-charts
+// (outerHTML) on the poll and on range changes; the controls above it are
+// untouched.
+templ metricsCharts(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string) {
+	<div class="space-y-4 pt-4">
+		{{ node, ok := selectedNode(nodes, selectedNodeID) }}
+		if ok {
+			{{ cpu, mem, disk, diskIO, net, load, temp := extractNodeChartData(node, rangeID) }}
+			@RenderSVGChart(cpu)
+			@RenderSVGChart(mem)
+			@RenderSVGChart(disk)
+			@RenderSVGChart(diskIO)
+			@RenderSVGChart(net)
+			@RenderSVGChart(load)
+			if temp.CurrentVal != "0.0 °C" && temp.CurrentVal != "0" {
+				@RenderSVGChart(temp)
+			}
+		}
+	</div>
+}
+
 templ RenderSVGChart(chart SVGChartData) {
-	<div class="metric-chart-card relative rounded-box border border-line bg-base-200 p-6 flex flex-col justify-between" data-chart={ chart.Title } data-chart-payload={ chart.DataJSON }>
+	<div class="metric-chart-card relative rounded-box border border-line bg-base-200 p-6 flex flex-col justify-between" data-chart={ chart.Title } data-chart-payload={ chart.DataJSON } data-min-val={ fmt.Sprintf("%g", chart.MinVal) } data-max-val={ fmt.Sprintf("%g", chart.MaxVal) } data-time-min={ fmt.Sprintf("%d", chart.TimeMin) } data-time-max={ fmt.Sprintf("%d", chart.TimeMax) }>
 		<div class="flex items-center justify-between mb-3">
 			<div>
 				<div class="text-xs font-semibold text-base-content/85">{ chart.Title }</div>
-				if len(chart.Series) > 0 {
-					<div class="flex items-center gap-2 mt-1">
-						for _, s := range chart.Series {
-							<span class="inline-flex items-center gap-1 text-xs text-base-content/60">
-								<span class="size-1.5 rounded-full" style={ fmt.Sprintf("background-color: %s", s.Color) }></span>
-								{ s.Name }
-							</span>
-						}
-					</div>
-				}
 			</div>
 		</div>
 
 		<div class="flex w-full">
-			<!-- Y axis ticks -->
-			<div class="relative w-14 shrink-0 h-48 pt-1">
+			<!-- Y axis ticks (width measured client-side, port of Beszel useYAxisWidth) -->
+			<div class="metric-y-gutter relative shrink-0 h-72" style="width: 3.5rem">
+			if len(chart.YTicks) > 0 {
+				{{ lastTopPct := math.Inf(1) }}
+				for _, t := range chart.YTicks {
+					{{ topPct := tickTopPct(chart.MinVal, chart.MaxVal, t) }}
+					// Ticks ascend in value but descend in top% (0% → ~90, max → ~10),
+					// so the gap to the previous (lower) label is lastTopPct - topPct.
+					// lastTopPct starts at +Inf so the first label always renders. Skip a
+					// label that would sit within 9% of the previous one; the matching
+					// gridline is skipped identically below.
+					if lastTopPct-topPct < 9.0 {
+						{{ continue }}
+					}
+					{{ lastTopPct = topPct }}
+					<span class="absolute right-2 -translate-y-1/2 text-xs font-mono tabular-nums text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("top: %.1f%%", topPct) }>{ formatTickValue(t, chart.Unit) }</span>
+				}
+			}
+			</div>
+			<div class="relative flex-1 h-72">
+				<!-- Floating Hover Tooltip (anchored to plot bottom; -translate-y-full lifts it to cursor level) -->
+				<div style="display: none;" class="metric-tooltip pointer-events-none absolute bottom-0 z-30 -translate-x-1/2 -translate-y-full mb-2 rounded-box border border-line bg-base-200/95 backdrop-blur px-3 py-2 shadow-lg min-w-36"></div>
+
+				<svg viewBox="0 0 300 80" preserveAspectRatio="none" class="metric-chart-svg w-full h-full overflow-visible">
+					<!-- Y tick gridlines (horizontal only, no axis line / tick marks) -->
 				if len(chart.YTicks) > 0 {
+					{{ lastTopPct := math.Inf(1) }}
 					for _, t := range chart.YTicks {
-						<span class="absolute right-1 -translate-y-1/2 text-xs font-mono text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("top: %.1f%%", tickTopPct(chart.MinVal, chart.MaxVal, t)) }>{ formatTickValue(t, chart.Unit) }</span>
+						// Mirror the Y-axis label skip so gridlines and labels
+						// stay consistent (gap = lastTopPct - topPct; starts at +Inf).
+						{{ topPct := tickTopPct(chart.MinVal, chart.MaxVal, t) }}
+						if lastTopPct-topPct < 9.0 {
+							{{ continue }}
+						}
+					{{ lastTopPct = topPct }}
+					// gy derives from the SAME topPct the label span uses, so
+					// label centers and gridlines align exactly.
+					{{ gy := topPct / 100.0 * 80.0 }}
+					<line x1="0" y1={ fmt.Sprintf("%.2f", gy) } x2="300" y2={ fmt.Sprintf("%.2f", gy) } stroke="var(--tw-color-line)" stroke-width="0.5" vector-effect="non-scaling-stroke"></line>
 					}
 				}
-			</div>
-			<div class="relative flex-1 h-48 cursor-crosshair">
-				<!-- Floating Hover Tooltip -->
-				<div style="display: none;" class="metric-tooltip pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full mb-1 rounded-box border border-line bg-base-200/95 backdrop-blur px-3 py-2 shadow-lg min-w-36"></div>
 
-				<svg viewBox="0 0 300 80" preserveAspectRatio="none" class="metric-chart-svg w-full h-full overflow-visible pt-1 box-border">
-					<defs>
-						if chart.FillColor != "" {
-							<linearGradient id={ "grad-" + chart.ID } x1="0" y1="0" x2="0" y2="1">
-								<stop offset="0%" stop-color={ chart.FillColor } stop-opacity="0.28"></stop>
-								<stop offset="100%" stop-color={ chart.FillColor } stop-opacity="0.0"></stop>
-							</linearGradient>
-						}
-					</defs>
-
-					<!-- Y tick gridlines -->
-					if len(chart.YTicks) > 0 {
-						for _, t := range chart.YTicks {
-							{{ gy := 80.0 - 8.0 }}
-							{{ ratio := (t - chart.MinVal) / (chart.MaxVal - chart.MinVal) }}
-							if ratio >= 0 && ratio <= 1 {
-								{{ gy = 80.0 - 8.0 - ratio*64.0 }}
-								<line x1="0" y1={ fmt.Sprintf("%.1f", gy) } x2="300" y2={ fmt.Sprintf("%.1f", gy) } stroke="var(--tw-color-line)" stroke-width="0.75"></line>
-							}
-						}
-					}
-
-					<!-- Area fill -->
-					if chart.AreaPath != "" {
-						<path d={ chart.AreaPath } fill={ fmt.Sprintf("url(#grad-%s)", chart.ID) }></path>
+					<!-- Area fill (flat, Beszel-style 40% opacity) -->
+					if chart.AreaPath != "" && chart.FillColor != "" {
+						<path d={ chart.AreaPath } fill={ chart.FillColor } fill-opacity="0.4"></path>
 					}
 
 					<!-- Lines with consistent stroke-width vector effect -->
@@ -349,18 +532,38 @@ templ RenderSVGChart(chart SVGChartData) {
 						if len(chart.Series) > i && chart.Series[i].Color != "" {
 							{{ stroke = chart.Series[i].Color }}
 						}
-						<path d={ path } fill="none" stroke={ stroke } stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path>
+						<path d={ path } fill="none" stroke={ stroke } stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path>
 					}
 
-					<!-- Interactive Crosshair -->
-					<line style="display: none;" class="metric-crosshair" x1="0" y1="0" x2="0" y2="80" stroke="var(--tw-color-primary)" stroke-width="1.5" vector-effect="non-scaling-stroke"></line>
+				<!-- Hover dots (time-snapped; one per series, each in its series color) -->
+				if len(chart.Series) > 0 {
+					for _, s := range chart.Series {
+						{{ c := s.Color }}
+						if c == "" {
+							{{ c = "var(--tw-color-primary)" }}
+						}
+						<circle style="display: none;" class="metric-hover-dot" cx="0" cy="0" r="1.5" fill={ c } stroke="none"></circle>
+					}
+				} else {
+					{{ c := chart.StrokeColor }}
+					if c == "" {
+						{{ c = "var(--tw-color-primary)" }}
+					}
+					<circle style="display: none;" class="metric-hover-dot" cx="0" cy="0" r="1.5" fill={ c } stroke="none"></circle>
+				}
 				</svg>
 
-				<!-- X axis ticks (times filled client-side) -->
-				<div class="absolute inset-x-0 top-full pt-1 flex">
+				<!-- X axis ticks (time-based; labels filled client-side). The plot
+				     baseline sits at 90% of the viewBox (8 units of top/bottom padding
+				     in the 300x80 space), so the tick block is anchored at bottom-[10%]
+				     to put the tick marks exactly on the X-axis line; labels hang below. -->
+				<div class="absolute inset-x-0 bottom-[10%] pointer-events-none">
 					if len(chart.XTicks) > 0 {
-						for _, idx := range chart.XTicks {
-							<span class="metric-time-tick absolute -translate-x-1/2 text-xs font-mono text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("left: %.1f%%", xTickLeftPct(idx, len(chart.Times))) } data-iso-time={ chart.Times[idx] }></span>
+						for _, tick := range chart.XTicks {
+							// Tick mark hangs just BELOW the axis line (top edge at the
+							// line), touching it but outside the plot area.
+							<span aria-hidden="true" class="absolute top-full w-px h-1.5 bg-base-content/35 -translate-x-1/2" style={ fmt.Sprintf("left: %.1f%%", tick.LeftPct) }></span>
+							<span class="metric-time-tick absolute top-full -translate-x-1/2 pt-2 text-xs font-mono text-base-content/45 whitespace-nowrap" style={ fmt.Sprintf("left: %.1f%%", tick.LeftPct) } data-iso-time={ tick.ISO }></span>
 						}
 					}
 				</div>
@@ -370,13 +573,58 @@ templ RenderSVGChart(chart SVGChartData) {
 	</div>
 }
 
-func metricsFragmentURL(nodeID string) templ.SafeURL {
-	values := url.Values{"fragment": {"true"}}
-	if nodeID != "" {
-		values.Set("node", nodeID)
-	}
-	return templ.SafeURL("/admin/metrics?" + values.Encode())
+// metricsNodeSelect is the node picker: a styled el-select (components.Select
+// markup — bordered trigger with chevron + el-options popover list). It lives
+// in the STATIC controls region, so the 10s/1s poll never recreates it and
+// its popover keeps working. htmx can't fire a GET off the custom element's
+// change event (no name/value form semantics), so selection drives htmx via a
+// delegated htmx.onLoad: each el-option issues the FULL-region fragment
+// (hx-target #metrics-container — the header node info changes per node).
+templ metricsNodeSelect(nodes []observability.NodeSystemDetail, selectedNodeID string, rangeID string) {
+	<label id="metrics-node-label" for="metrics-node" class="sr-only">Node</label>
+	<el-select id="metrics-node" name="node" value={ selectedNodeID } aria-labelledby="metrics-node-label" class="relative block w-64">
+		<button id="metrics-node-trigger" type="button" aria-haspopup="listbox" aria-controls="metrics-node-options" aria-labelledby="metrics-node-label metrics-node-selected" class="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-field border border-line bg-base-300 py-2 pr-3 pl-3 text-left text-sm font-medium text-base-content outline-none transition-colors hover:border-primary/60 focus:border-primary focus-visible:ring-1 focus-visible:ring-primary">
+			<el-selectedcontent id="metrics-node-selected" class="min-w-0 flex-1 truncate">{ nodeNameForID(nodes, selectedNodeID) }</el-selectedcontent>
+			@components.IconChevronDown("pointer-events-none size-4 shrink-0 text-base-content/50 transition-transform duration-200 group-aria-expanded:rotate-180")
+		</button>
+		<el-options id="metrics-node-options" role="listbox" anchor="bottom start" popover class="max-h-60 w-(--button-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete [--anchor-gap:--spacing(1)] data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in">
+			for _, option := range nodes {
+				<el-option value={ option.ID } class="group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-medium">
+					<span class="block flex-1 truncate">{ option.Name }</span>
+					<span class="ml-3 hidden group-aria-selected/option:block in-[el-selectedcontent]:hidden">@components.IconCheck("size-4")</span>
+				</el-option>
+			}
+		</el-options>
+	</el-select>
 }
 
-const metricsNodeSelectVals = "js:{node: this.value}"
+// metricsRangeSelect is the time-range picker: same el-select pattern as the
+// node picker. Range changes only affect the charts, so its htmx GET targets
+// #metrics-charts with the charts-only fragment (part=charts).
+templ metricsRangeSelect(nodeID string, rangeID string) {
+	<label id="metrics-range-label" for="metrics-range" class="sr-only">Time range</label>
+	<el-select id="metrics-range" name="range" value={ normalizeRangeID(rangeID) } aria-labelledby="metrics-range-label" class="relative block w-36">
+		<button id="metrics-range-trigger" type="button" aria-haspopup="listbox" aria-controls="metrics-range-options" aria-labelledby="metrics-range-label metrics-range-selected" class="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-field border border-line bg-base-300 py-2 pr-3 pl-3 text-left text-sm font-medium text-base-content outline-none transition-colors hover:border-primary/60 focus:border-primary focus-visible:ring-1 focus-visible:ring-primary">
+			<el-selectedcontent id="metrics-range-selected" class="min-w-0 flex-1 truncate">{ rangeLabel(rangeID) }</el-selectedcontent>
+			@components.IconChevronDown("pointer-events-none size-4 shrink-0 text-base-content/50 transition-transform duration-200 group-aria-expanded:rotate-180")
+		</button>
+		<el-options id="metrics-range-options" role="listbox" anchor="bottom end" popover class="max-h-60 w-(--button-width) overflow-auto rounded-box border border-line bg-base-300 p-1 shadow-theme transition transition-discrete [--anchor-gap:--spacing(1)] data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in">
+			for _, option := range metricsRangeOptions() {
+				<el-option value={ option.ID } class="group/option relative flex cursor-default select-none items-center rounded-field px-3 py-2 text-sm font-medium text-base-content/75 focus:bg-primary focus:text-primary-content aria-selected:font-medium">
+					<span class="block flex-1 truncate">{ option.Label }</span>
+					<span class="ml-3 hidden group-aria-selected/option:block in-[el-selectedcontent]:hidden">@components.IconCheck("size-4")</span>
+				</el-option>
+			}
+		</el-options>
+	</el-select>
+}
+
+// nodeNameForID returns the display name of the selected node for the
+// el-select trigger.
+func nodeNameForID(nodes []observability.NodeSystemDetail, selectedNodeID string) string {
+	if node, ok := selectedNode(nodes, selectedNodeID); ok {
+		return node.Name
+	}
+	return ""
+}
 

@@ -47,6 +47,10 @@ type TelemetryProvider interface {
 	GetTrace(ctx context.Context, scope observability.TenantScope, window observability.TimeRange, traceID string) (observability.TraceSummary, bool, error)
 	GetOperatorMetrics(ctx context.Context) ([]observability.OperatorMetric, error)
 	GetNodeSystemDetails(ctx context.Context) ([]observability.NodeSystemDetail, error)
+	// GetNodeSystemDetailsInWindow is GetNodeSystemDetails with an explicit
+	// chart time window. It is a separate method so the existing fakes keep
+	// satisfying the interface unchanged.
+	GetNodeSystemDetailsInWindow(ctx context.Context, window observability.TimeRange) ([]observability.NodeSystemDetail, error)
 }
 
 // LogQueryInput is the caller-supplied, pre-validation shape for a log query.
@@ -202,6 +206,27 @@ func (s *Service) GetNodeSystemDetails(ctx context.Context, actor ActorContext) 
 		return nil, ErrTelemetryUnavailable
 	}
 	details, err := s.telemetry.GetNodeSystemDetails(ctx)
+	if err != nil {
+		return nil, mapTelemetryError(err)
+	}
+	return details, nil
+}
+
+// GetNodeSystemDetailsInWindow is GetNodeSystemDetails for a named chart time
+// range. The range ID is validated and expanded to an absolute window
+// anchored at the service clock before it reaches the provider.
+func (s *Service) GetNodeSystemDetailsInWindow(ctx context.Context, actor ActorContext, rangeID observability.MetricsTimeRangeID) ([]observability.NodeSystemDetail, error) {
+	if err := validateActor(actor); err != nil {
+		return nil, err
+	}
+	if s.telemetry == nil {
+		return nil, ErrTelemetryUnavailable
+	}
+	window, err := observability.MetricsTimeRange(rangeID, s.now())
+	if err != nil {
+		return nil, ErrInvalidArgument
+	}
+	details, err := s.telemetry.GetNodeSystemDetailsInWindow(ctx, window)
 	if err != nil {
 		return nil, mapTelemetryError(err)
 	}

@@ -873,6 +873,21 @@ func (h *Handler) postReconcile(w http.ResponseWriter, r *http.Request) {
 	redirectWithFlash(w, r, "/admin/reconcile", "success", "Reconciliation started.")
 }
 
+// metricsRangeFromRequest validates the `range` query param against the fixed
+// chart windows. An empty or unrecognized value yields the default 24h window
+// (and false for unrecognized, so tests can exercise that path).
+func metricsRangeFromRequest(r *http.Request) (observability.MetricsTimeRangeID, bool) {
+	raw := r.URL.Query().Get("range")
+	if raw == "" {
+		return observability.DefaultMetricsTimeRange, true
+	}
+	switch observability.MetricsTimeRangeID(raw) {
+	case observability.MetricsRange1h, observability.MetricsRange12h, observability.MetricsRange24h, observability.MetricsRange1w:
+		return observability.MetricsTimeRangeID(raw), true
+	}
+	return observability.DefaultMetricsTimeRange, false
+}
+
 func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {
 	token := ui.TokenFromContext(r.Context())
 	user, org, err := h.pageCtx(r.Context(), token)
@@ -880,7 +895,8 @@ func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	nodes, metricsErr := h.client.GetNodeSystemDetails(r.Context(), token)
+	rangeID, _ := metricsRangeFromRequest(r)
+	nodes, metricsErr := h.client.GetNodeSystemDetailsInRange(r.Context(), token, rangeID)
 	var errMessage string
 	if metricsErr != nil {
 		errMessage = metricsErr.Error()
@@ -888,8 +904,12 @@ func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {
 	selectedNodeID := r.URL.Query().Get("node")
 
 	if r.URL.Query().Get("fragment") == "true" {
-		render(w, r, adminpages.MetricsFragment(nodes, selectedNodeID, errMessage))
+		if r.URL.Query().Get("part") == "charts" {
+			render(w, r, adminpages.MetricsChartsFragment(nodes, selectedNodeID, string(rangeID)))
+			return
+		}
+		render(w, r, adminpages.MetricsFragment(nodes, selectedNodeID, string(rangeID), errMessage))
 		return
 	}
-	render(w, r, adminpages.Metrics(nodes, selectedNodeID, errMessage, user, org, flashFromCookie(w, r)))
+	render(w, r, adminpages.Metrics(nodes, selectedNodeID, string(rangeID), errMessage, user, org, flashFromCookie(w, r)))
 }

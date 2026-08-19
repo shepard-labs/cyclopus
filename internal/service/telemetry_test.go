@@ -13,14 +13,15 @@ import (
 // ever called. Service tests assert it stays untouched when validation fails
 // before any upstream query.
 type recordingTelemetry struct {
-	called    bool
-	lastScope observability.TenantScope
-	logPage   observability.LogPage
-	tracePage observability.TracePage
-	trace     observability.TraceSummary
-	found     bool
-	metrics   []observability.OperatorMetric
-	err       error
+	called     bool
+	lastScope  observability.TenantScope
+	lastWindow observability.TimeRange
+	logPage    observability.LogPage
+	tracePage  observability.TracePage
+	trace      observability.TraceSummary
+	found      bool
+	metrics    []observability.OperatorMetric
+	err        error
 }
 
 func (r *recordingTelemetry) QueryLogs(_ context.Context, scope observability.TenantScope, _ observability.TimeRange, _ observability.LogFilter) (observability.LogPage, error) {
@@ -48,6 +49,12 @@ func (r *recordingTelemetry) GetOperatorMetrics(context.Context) ([]observabilit
 
 func (r *recordingTelemetry) GetNodeSystemDetails(context.Context) ([]observability.NodeSystemDetail, error) {
 	r.called = true
+	return nil, r.err
+}
+
+func (r *recordingTelemetry) GetNodeSystemDetailsInWindow(_ context.Context, window observability.TimeRange) ([]observability.NodeSystemDetail, error) {
+	r.called = true
+	r.lastWindow = window
 	return nil, r.err
 }
 
