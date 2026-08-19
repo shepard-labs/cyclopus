@@ -297,11 +297,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 	return value, err
 }
 func appArgs(a App) []any {
-	var workflowPath, productionBranch any = a.GitHubWorkflowPath, a.ProductionBranch
-	if a.RegistryID != nil {
-		workflowPath, productionBranch = nil, nil
-	}
-	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, encodeKEDACronSchedules(a.KEDACronSchedules), a.KEDAHTTPTargetPendingRequests, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, workflowPath, a.GitHubWorkflowRevision, productionBranch, a.AnnotationPolicy, a.ImageVisibility}
+	return []any{a.ID, a.OrgID, a.ProjectID, a.Name, a.Slug, a.HostnameLabel, a.RegistryID, a.ImageRepository, a.ContainerPort, a.HealthCheckPath, a.ScalingMode, a.MinReplicas, a.MaxReplicas, a.HPATargetCPUPercent, encodeKEDACronSchedules(a.KEDACronSchedules), a.KEDAHTTPTargetPendingRequests, a.CPURequestMillicores, a.CPULimitMillicores, a.MemoryRequestMiB, a.MemoryLimitMiB, a.PreviewsEnabled, a.MaxPreviewEnvironments, a.PreviewIdleTTLHours, a.DeployTimeoutSeconds, a.ReleaseRetentionCount, a.RuntimeClass, a.GitHubWorkflowPath, a.GitHubWorkflowRevision, a.ProductionBranch, a.AnnotationPolicy, a.ImageVisibility}
 }
 
 func (s *Store) ListEnvironmentsByOrg(ctx context.Context, orgID string) ([]Environment, error) {

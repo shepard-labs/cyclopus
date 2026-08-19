@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -216,6 +217,7 @@ func validRegistryCredentialField(value []byte, max int) bool {
 
 func validRegistryCredentialInput(input GhcrCredentialInput) bool {
 	return validRegistryCredentialField(input.Username, maxRegistryCredentialUsernameBytes) &&
+		!bytes.Contains(input.Username, []byte{':'}) &&
 		validRegistryCredentialField(input.PersonalAccessToken, maxRegistryCredentialPATBytes)
 }
 

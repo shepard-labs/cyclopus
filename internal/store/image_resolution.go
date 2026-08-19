@@ -478,8 +478,8 @@ func (s *Store) CompleteImageResolution(ctx context.Context, p CompleteImageReso
 			immutable_image_ref='ghcr.io/'||$19||'@'||$5,oci_media_type=$7,oci_config_digest=$8,oci_config_media_type=$9,
 			oci_source=NULLIF($10,''),oci_revision=NULLIF($11,''),oci_annotation_status=$12,
 			resolved_registry_id=NULLIF($13,'')::uuid,resolved_registry_generation=$14,oci_error_code=NULL,oci_resolution_state='resolved',
-			oci_resolved_at=clock_timestamp(),status=CASE WHEN $15='private' THEN 'resolving_image' ELSE 'deploying' END,
-			deployment_state=CASE WHEN $15='private' THEN 'waiting_credential' ELSE 'ready' END,
+			oci_resolved_at=clock_timestamp(),status=CASE WHEN $15='private' AND environment.registry_credential_state='pending' THEN 'resolving_image' ELSE 'deploying' END,
+			deployment_state=CASE WHEN $15='private' AND environment.registry_credential_state='pending' THEN 'waiting_credential' ELSE 'ready' END,
 			oci_lease_owner=NULL,oci_lease_expires_at=NULL,updated_at=clock_timestamp()
 			FROM apps app,environments environment,github_repositories repository
 			LEFT JOIN registries registry ON registry.org_id=$1 AND registry.id=NULLIF($13,'')::uuid
@@ -498,9 +498,9 @@ func (s *Store) CompleteImageResolution(ctx context.Context, p CompleteImageReso
 			AND repository.owner_login=$20 AND repository.name=$21 AND repository.node_id=$22
 		AND (($15='public' AND $13 IS NULL AND $14 IS NULL) OR ($15='private' AND registry.state='ready'
 		AND registry.active_generation=$14 AND generation.state='active'
-		AND environment.registry_credential_state='pending'
 		AND environment.required_registry_credential_generation=$14
-		AND environment.ready_registry_credential_generation IS NULL))`, p.OrgID, p.JobID, p.Lease.Owner,
+		AND ((environment.registry_credential_state='pending' AND environment.ready_registry_credential_generation IS NULL)
+		  OR (environment.registry_credential_state='ready' AND environment.ready_registry_credential_generation=$14))))`, p.OrgID, p.JobID, p.Lease.Owner,
 			p.TagReference, p.Digest, p.ImmutableReference, p.ManifestMediaType, p.ConfigDigest, p.ConfigMediaType,
 			p.Source, p.Revision, p.AnnotationStatus, nonEmptyStringPointer(p.RegistryID), p.RegistryGeneration, p.Visibility,
 			p.Lease.Epoch, p.DesiredGeneration, p.CommitSHA, canonicalRepository, p.RepositoryOwner, p.RepositoryName, p.RepositoryNodeID,

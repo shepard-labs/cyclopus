@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ const maxRegistryCredentialAttempts = 12
 type ReserveRegistryCredentialOperationParams struct {
 	OrgID, RegistryID, Kind, IdempotencyKey string
 	TargetRepository, TargetReference       string
+	CredentialFingerprint                   [32]byte
+	ActorUserID, AuditID                    string
 }
 
 type AttachRegistryCredentialSourceParams struct {
@@ -51,6 +54,11 @@ type RegistryCredentialValidationTarget struct {
 }
 
 type RegistryCredentialMaterial struct {
+	OrgID, RegistryID, OperationID, SecretRef string
+	Generation                                int64
+}
+
+type RegistryCredentialGarbageCollectionCandidate struct {
 	OrgID, RegistryID, OperationID, SecretRef string
 	Generation                                int64
 }
@@ -152,7 +160,10 @@ func (s *Store) GetRegistryCredentialOperation(ctx context.Context, orgID, id st
 
 func (s *Store) ReserveRegistryCredentialOperation(ctx context.Context, p ReserveRegistryCredentialOperationParams) (RegistryCredentialOperation, error) {
 	if p.OrgID == "" || p.RegistryID == "" || strings.TrimSpace(p.IdempotencyKey) == "" ||
-		(p.Kind != "create" && p.Kind != "import_create" && p.Kind != "rotate") || !oci.ValidRepository(p.TargetRepository, 1) || !validValidationReference(p.TargetReference) {
+		p.ActorUserID == "" || p.AuditID == "" || p.CredentialFingerprint == [32]byte{} ||
+		(p.Kind != "create" && p.Kind != "import_create" && p.Kind != "rotate") ||
+		(p.Kind != "rotate" && (!oci.ValidRepository(p.TargetRepository, 1) || !validValidationReference(p.TargetReference))) ||
+		(p.Kind == "rotate" && (p.TargetRepository != "" || p.TargetReference != "")) {
 		return RegistryCredentialOperation{}, ErrInvalidArgument
 	}
 	var result RegistryCredentialOperation
@@ -161,9 +172,19 @@ func (s *Store) ReserveRegistryCredentialOperation(ctx context.Context, p Reserv
 			return err
 		}
 		if err := scanRegistryCredentialOperation(tx.QueryRow(ctx, registryCredentialOperationSelect+` WHERE org_id=$1 AND idempotency_key=$2`, p.OrgID, p.IdempotencyKey), &result); err == nil {
-			if result.RegistryID != p.RegistryID || result.Kind != p.Kind || result.TargetRepository == nil || *result.TargetRepository != p.TargetRepository ||
-				result.TargetReference == nil || *result.TargetReference != p.TargetReference {
+			if result.RegistryID != p.RegistryID || result.Kind != p.Kind || stringPointerValue(result.TargetRepository) != p.TargetRepository ||
+				stringPointerValue(result.TargetReference) != p.TargetReference {
 				return ErrConflict
+			}
+			var matches bool
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(credential_fingerprint=$3,false) FROM registry_credential_operations WHERE org_id=$1 AND id=$2`, p.OrgID, result.ID, p.CredentialFingerprint[:]).Scan(&matches); err != nil {
+				return err
+			}
+			if !matches {
+				return ErrConflict
+			}
+			if result.Status == "failed" || result.Status == "cancelled" {
+				return ErrFailedPrecondition
 			}
 			return nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -179,6 +200,9 @@ func (s *Store) ReserveRegistryCredentialOperation(ctx context.Context, p Reserv
 			return ErrConflict
 		}
 		candidate := active + 1
+		if err := tx.QueryRow(ctx, `SELECT GREATEST($3,COALESCE(max(generation),0)+1) FROM registry_credential_generations WHERE org_id=$1 AND registry_id=$2`, p.OrgID, p.RegistryID, candidate).Scan(&candidate); err != nil {
+			return err
+		}
 		if candidate < 1 {
 			candidate = 1
 		}
@@ -196,7 +220,23 @@ func (s *Store) ReserveRegistryCredentialOperation(ctx context.Context, p Reserv
 		if _, err := tx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,state,operation_id) VALUES($1,$2,$3,'reserved',$4)`, p.OrgID, p.RegistryID, candidate, operationID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,candidate_generation,previous_generation,target_repository,target_reference,idempotency_key) VALUES($1,$2,$3,$4,'awaiting_source','reserved',$5,$6,$7,$8,$9)`, operationID, p.OrgID, p.RegistryID, p.Kind, candidate, previous, p.TargetRepository, p.TargetReference, p.IdempotencyKey); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,candidate_generation,previous_generation,target_repository,target_reference,idempotency_key,credential_fingerprint,actor_user_id) VALUES($1,$2,$3,$4,'awaiting_source','reserved',$5,$6,NULLIF($7,''),NULLIF($8,''),$9,$10,$11)`, operationID, p.OrgID, p.RegistryID, p.Kind, candidate, previous, p.TargetRepository, p.TargetReference, p.IdempotencyKey, p.CredentialFingerprint[:], p.ActorUserID); err != nil {
+			return err
+		}
+		action := "registry.credential.create_requested"
+		if p.Kind == "rotate" {
+			action = "registry.credential.rotation_requested"
+		}
+		after, err := json.Marshal(struct {
+			OperationID string `json:"operation_id"`
+			Kind        string `json:"kind"`
+			Generation  int64  `json:"generation"`
+			Status      string `json:"status"`
+		}{operationID, p.Kind, candidate, "awaiting_source"})
+		if err != nil {
+			return err
+		}
+		if err := insertAuditEvent(ctx, tx, p.OrgID, &AuditEvent{ID: p.AuditID, ActorUserID: &p.ActorUserID}, action, "registry", p.RegistryID, nil, after); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `WITH known AS (
@@ -213,12 +253,12 @@ func (s *Store) ReserveRegistryCredentialOperation(ctx context.Context, p Reserv
 			WHERE app.org_id=$1 AND app.registry_id=$2 AND app.image_visibility='private' AND app.deleted_at IS NULL
 			  AND environment.torn_down_at IS NULL AND release.status='live' AND release.registry_credential_registry_id=$2
 		), latest AS (SELECT DISTINCT ON(repository) repository,reference FROM known WHERE reference IS NOT NULL ORDER BY repository,observed_at DESC),
-		 targets AS (SELECT repository,reference FROM latest UNION SELECT $4,$5)
+		 targets AS (SELECT repository,reference FROM latest UNION SELECT $4,$5 WHERE $4<>'' AND $5<>'')
 		 INSERT INTO registry_credential_validation_targets(operation_id,org_id,registry_id,repository,reference)
 		 SELECT $3,$1,$2,repository,reference FROM targets`, p.OrgID, p.RegistryID, operationID, p.TargetRepository, p.TargetReference); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE registries SET checkpoint='reserved',pending_generation=$3,pending_credential_secret_ref=NULL,operation_id=$4,failure_code=NULL,failure_message=NULL,attempts=0,next_attempt_at=clock_timestamp(),updated_at=clock_timestamp() WHERE org_id=$1 AND id=$2`, p.OrgID, p.RegistryID, candidate, operationID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE registries SET state=CASE WHEN active_generation>0 THEN 'ready' ELSE 'absent' END,checkpoint='reserved',pending_generation=$3,pending_credential_secret_ref=NULL,operation_id=$4,failure_code=NULL,failure_message=NULL,attempts=0,next_attempt_at=clock_timestamp(),updated_at=clock_timestamp() WHERE org_id=$1 AND id=$2`, p.OrgID, p.RegistryID, candidate, operationID); err != nil {
 			return err
 		}
 		return scanRegistryCredentialOperation(tx.QueryRow(ctx, registryCredentialOperationSelect+` WHERE org_id=$1 AND id=$2`, p.OrgID, operationID), &result)
@@ -246,8 +286,12 @@ func (s *Store) AttachRegistryCredentialSource(ctx context.Context, p AttachRegi
 		if err := tx.QueryRow(ctx, `SELECT secret_ref,state FROM registry_credential_generations WHERE org_id=$1 AND registry_id=$2 AND generation=$3 FOR UPDATE`, p.OrgID, result.RegistryID, result.CandidateGeneration).Scan(&existing, &generationState); err != nil {
 			return err
 		}
+		attachedStatus := "pending"
+		if result.Kind == "import_create" {
+			attachedStatus = "awaiting_import"
+		}
 		if existing != nil {
-			if *existing != p.SecretRef || generationState != "pending" || result.Checkpoint != "source_secret_written" || result.Status != "pending" {
+			if *existing != p.SecretRef || generationState != "pending" || result.Checkpoint != "source_secret_written" || result.Status != attachedStatus {
 				return ErrConflict
 			}
 			return nil
@@ -265,7 +309,7 @@ func (s *Store) AttachRegistryCredentialSource(ctx context.Context, p AttachRegi
 		if _, err := tx.Exec(ctx, `UPDATE registries SET state=$3,checkpoint='source_secret_written',pending_credential_secret_ref=$4,updated_at=clock_timestamp() WHERE org_id=$1 AND operation_id=$2`, p.OrgID, result.ID, state, p.SecretRef); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE registry_credential_operations SET status='pending',checkpoint='source_secret_written',next_attempt_at=clock_timestamp(),updated_at=clock_timestamp() WHERE org_id=$1 AND id=$2`, p.OrgID, result.ID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE registry_credential_operations SET status=$3,checkpoint='source_secret_written',next_attempt_at=clock_timestamp(),updated_at=clock_timestamp() WHERE org_id=$1 AND id=$2`, p.OrgID, result.ID, attachedStatus); err != nil {
 			return err
 		}
 		return scanRegistryCredentialOperation(tx.QueryRow(ctx, registryCredentialOperationSelect+` WHERE org_id=$1 AND id=$2`, p.OrgID, result.ID), &result)
@@ -378,7 +422,7 @@ func (s *Store) RescueAwaitingRegistryCredentialSources(ctx context.Context, old
 	}
 	var count int64
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT org_id::text,id::text FROM registry_credential_operations WHERE status='awaiting_source' AND created_at<=$1 ORDER BY created_at,id LIMIT $2 FOR UPDATE SKIP LOCKED`, olderThan, limit)
+		rows, err := tx.Query(ctx, `SELECT org_id::text,id::text FROM registry_credential_operations WHERE status IN ('awaiting_source','awaiting_import') AND updated_at<=$1 ORDER BY updated_at,id LIMIT $2 FOR UPDATE SKIP LOCKED`, olderThan, limit)
 		if err != nil {
 			return err
 		}
@@ -405,6 +449,37 @@ func (s *Store) RescueAwaitingRegistryCredentialSources(ctx context.Context, old
 		return nil
 	})
 	return count, err
+}
+
+func (s *Store) ListRegistryCredentialGarbageCollectionCandidates(ctx context.Context, olderThan time.Time, limit int) ([]RegistryCredentialGarbageCollectionCandidate, error) {
+	if olderThan.IsZero() || limit < 1 {
+		return nil, ErrInvalidArgument
+	}
+	rows, err := s.db.Query(ctx, `SELECT generation.org_id::text,generation.registry_id::text,generation.operation_id::text,
+		generation.generation,COALESCE(generation.secret_ref,'') FROM registry_credential_generations generation
+		JOIN registry_credential_operations operation ON operation.org_id=generation.org_id AND operation.id=generation.operation_id
+		WHERE generation.state='failed' AND operation.terminal_at<=$1
+		AND NOT EXISTS (SELECT 1 FROM registries registry WHERE registry.org_id=generation.org_id AND registry.id=generation.registry_id
+			AND (registry.active_generation=generation.generation OR registry.pending_generation=generation.generation OR registry.previous_generation=generation.generation))
+		AND NOT EXISTS (SELECT 1 FROM apps app JOIN environments environment ON environment.org_id=app.org_id AND environment.app_id=app.id
+			WHERE app.org_id=generation.org_id AND app.registry_id=generation.registry_id AND environment.torn_down_at IS NULL
+			AND (environment.required_registry_credential_generation=generation.generation OR environment.ready_registry_credential_generation=generation.generation))
+		AND NOT EXISTS (SELECT 1 FROM releases release WHERE release.org_id=generation.org_id AND release.registry_credential_registry_id=generation.registry_id
+			AND release.registry_credential_generation=generation.generation AND release.status='live')
+		ORDER BY operation.terminal_at,generation.registry_id,generation.generation LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var values []RegistryCredentialGarbageCollectionCandidate
+	for rows.Next() {
+		var value RegistryCredentialGarbageCollectionCandidate
+		if err := rows.Scan(&value.OrgID, &value.RegistryID, &value.OperationID, &value.Generation, &value.SecretRef); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 func (s *Store) ListRegistryCredentialOperationOrgIDs(ctx context.Context, limit int) ([]string, error) {

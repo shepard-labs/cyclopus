@@ -3,25 +3,62 @@
 package store
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const registryCredentialActorID = "00000000-0000-0000-0000-000000000091"
+
+func seedRegistryCredentialActor(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO users(id,org_id,email,password_hash,display_name,operator) VALUES($1,$2,'registry@example.test','hash','Registry Admin',true)`, registryCredentialActorID, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func credentialReserveParams(orgID, registryID, kind, key, repository, reference string) ReserveRegistryCredentialOperationParams {
+	fingerprint := sha256.Sum256([]byte(key))
+	return ReserveRegistryCredentialOperationParams{OrgID: orgID, RegistryID: registryID, Kind: kind, IdempotencyKey: key,
+		TargetRepository: repository, TargetReference: reference, CredentialFingerprint: fingerprint,
+		ActorUserID: registryCredentialActorID, AuditID: fmt.Sprintf("%08x-0000-7000-8000-%012x", fingerprint[:4], fingerprint[4:10])}
+}
 
 func TestRegistryCredentialReserveAttachAndIdempotencyIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000171"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	request := ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "reserve-one", TargetRepository: "acme/private", TargetReference: commitSHA('a')}
+	request := credentialReserveParams(orgOneID, registryID, "create", "reserve-one", "acme/private", commitSHA('a'))
 	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, request)
 	if err != nil || reserved.Status != "awaiting_source" || reserved.Checkpoint != "reserved" {
 		t.Fatalf("reserve = %+v, %v", reserved, err)
+	}
+	var fingerprint []byte
+	var actorID, action string
+	var after string
+	if err := pool.QueryRow(ctx, `SELECT operation.credential_fingerprint,operation.actor_user_id::text,audit.action,audit.after::text
+		FROM registry_credential_operations operation JOIN audit_events audit ON audit.target_id=operation.registry_id
+		WHERE operation.id=$1 AND audit.actor_user_id=operation.actor_user_id`, reserved.ID).Scan(&fingerprint, &actorID, &action, &after); err != nil {
+		t.Fatal(err)
+	}
+	if len(fingerprint) != 32 || actorID != registryCredentialActorID || action != "registry.credential.create_requested" {
+		t.Fatalf("fingerprint/actor/audit = %d %q %q", len(fingerprint), actorID, action)
+	}
+	for _, forbidden := range []string{"credential_fingerprint", "secret_ref", "dockerconfigjson"} {
+		if strings.Contains(after, forbidden) {
+			t.Fatalf("audit after contains %q: %s", forbidden, after)
+		}
 	}
 	replay, err := dataStore.ReserveRegistryCredentialOperation(ctx, request)
 	if err != nil || replay.ID != reserved.ID {
@@ -30,6 +67,11 @@ func TestRegistryCredentialReserveAttachAndIdempotencyIntegration(t *testing.T) 
 	request.TargetReference = commitSHA('b')
 	if _, err := dataStore.ReserveRegistryCredentialOperation(ctx, request); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed reserve replay = %v, want conflict", err)
+	}
+	request.TargetReference = commitSHA('a')
+	request.CredentialFingerprint = sha256.Sum256([]byte("different credential"))
+	if _, err := dataStore.ReserveRegistryCredentialOperation(ctx, request); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed credential replay = %v, want conflict", err)
 	}
 	secretRef := "k8s-secret://cyclopus-system/credential-one#dockerconfigjson"
 	attached, err := dataStore.AttachRegistryCredentialSource(ctx, AttachRegistryCredentialSourceParams{OrgID: orgOneID, OperationID: reserved.ID, IdempotencyKey: "reserve-one", SecretRef: secretRef})
@@ -55,12 +97,13 @@ func TestRegistryCredentialReserveAttachAndIdempotencyIntegration(t *testing.T) 
 func TestRegistryCredentialReserveAttachThenProcessIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000173"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "process-one", TargetRepository: "acme/private", TargetReference: commitSHA('d')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "process-one", "acme/private", commitSHA('d')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +159,13 @@ func TestRegistryCredentialReserveAttachThenProcessIntegration(t *testing.T) {
 func TestRegistryCredentialRestartAfterLeaseReclaimIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000174"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "restart-one", TargetRepository: "acme/private", TargetReference: commitSHA('e')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "restart-one", "acme/private", commitSHA('e')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,12 +221,13 @@ func TestRegistryCredentialRestartAfterLeaseReclaimIntegration(t *testing.T) {
 func TestRegistryCredentialPermanentTargetTerminatesIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000175"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "permanent-one", TargetRepository: "acme/private", TargetReference: commitSHA('f')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "permanent-one", "acme/private", commitSHA('f')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,12 +274,13 @@ func TestRegistryCredentialPermanentTargetTerminatesIntegration(t *testing.T) {
 func TestRegistryCredentialPriorFailureFinishFailsIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000176"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "prior-one", TargetRepository: "acme/private", TargetReference: commitSHA('7')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "prior-one", "acme/private", commitSHA('7')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,12 +326,13 @@ func TestRegistryCredentialPriorFailureFinishFailsIntegration(t *testing.T) {
 func TestRegistryCredentialTransientTargetRetriesIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000177"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "transient-one", TargetRepository: "acme/private", TargetReference: commitSHA('8')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "transient-one", "acme/private", commitSHA('8')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,12 +373,13 @@ func TestRegistryCredentialTransientTargetRetriesIntegration(t *testing.T) {
 func TestRegistryCredentialAttemptTwelveExhaustionIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000178"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "exhaust-one", TargetRepository: "acme/private", TargetReference: commitSHA('9')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "exhaust-one", "acme/private", commitSHA('9')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,12 +419,13 @@ func TestRegistryCredentialAttemptTwelveExhaustionIntegration(t *testing.T) {
 func TestCheckpointRegistryCredentialSourceRejectsLegacyCheckpointsIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000179"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "checkpoint-one", TargetRepository: "acme/private", TargetReference: commitSHA('a')})
+	reserved, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "checkpoint-one", "acme/private", commitSHA('a')))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,12 +441,13 @@ func TestCheckpointRegistryCredentialSourceRejectsLegacyCheckpointsIntegration(t
 func TestRegistryCredentialValidationReferenceConstraintsIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000180"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "reference-one", TargetRepository: "acme/private", TargetReference: "not-a-reference"}); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "reference-one", "acme/private", "not-a-reference")); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("reserve invalid reference = %v, want invalid argument", err)
 	}
 	if _, err := dataStore.GetRegistryCredentialValidationTarget(ctx, orgOneID, "00000000-0000-0000-0000-000000000999", "acme/private", "nope"); !errors.Is(err, ErrInvalidArgument) {
@@ -413,12 +463,13 @@ func TestRegistryCredentialValidationReferenceConstraintsIntegration(t *testing.
 func TestRegistryCredentialAwaitingSourceRescueIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedRegistryCredentialActor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000172"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
-	operation, err := dataStore.ReserveRegistryCredentialOperation(ctx, ReserveRegistryCredentialOperationParams{OrgID: orgOneID, RegistryID: registryID, Kind: "create", IdempotencyKey: "rescue-one", TargetRepository: "acme/private", TargetReference: commitSHA('c')})
+	operation, err := dataStore.ReserveRegistryCredentialOperation(ctx, credentialReserveParams(orgOneID, registryID, "create", "rescue-one", "acme/private", commitSHA('c')))
 	if err != nil {
 		t.Fatal(err)
 	}

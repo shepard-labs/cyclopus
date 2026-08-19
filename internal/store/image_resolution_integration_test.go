@@ -657,6 +657,29 @@ func seedActiveImageResolutionRegistry(t *testing.T, pool DB) string {
 	return registryID
 }
 
+func TestCompleteImageResolutionPrivateActiveCredentialReadyEnvironmentIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	jobID := seedImageResolutionJob(t, dataStore, pool, "private-ready-completion")
+	registryID := seedActiveImageResolutionRegistry(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET ready_registry_credential_generation=1,registry_credential_state='ready',registry_credential_checkpoint='activated' WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	claim := claimImageResolution(t, dataStore, "private-ready-worker")
+	completion := imageResolutionCompleteParams(jobID, claim.Lease)
+	completion.Claim, completion.Visibility, completion.Repository, completion.RegistryID, completion.RegistryGeneration = claim, "private", "acme/private", &registryID, ptrImageResolution(1)
+	completion.TagReference = "ghcr.io/" + completion.Repository + ":" + completion.CommitSHA
+	completion.ImmutableReference = "ghcr.io/" + completion.Repository + "@sha256:" + strings.Repeat("d", 64)
+	completion.DesiredGeneration = claim.Job.DesiredGeneration
+	if result, err := dataStore.CompleteImageResolution(t.Context(), completion); err != nil || result != ImageResolutionProcessed {
+		t.Fatalf("complete private ready = %q, %v", result, err)
+	}
+	var status, deployment string
+	if err := pool.QueryRow(t.Context(), `SELECT status,deployment_state FROM orchestration_jobs WHERE id=$1`, jobID).Scan(&status, &deployment); err != nil || status != "deploying" || deployment != "ready" {
+		t.Fatalf("private ready completion = %q/%q, %v", status, deployment, err)
+	}
+}
+
 func assertImageResolutionUnresolved(t *testing.T, pool DB, jobID string) {
 	t.Helper()
 	var status, resolution string

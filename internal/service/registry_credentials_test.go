@@ -292,6 +292,7 @@ func TestRotateGhcrCredentialValidationBounds(t *testing.T) {
 		"empty username": {PersonalAccessToken: []byte("pat")},
 		"empty pat":      {Username: []byte("octocat")},
 		"control":        {Username: []byte("octo\ncat"), PersonalAccessToken: []byte("pat")},
+		"username colon": {Username: []byte("octo:cat"), PersonalAccessToken: []byte("pat")},
 		"invalid utf8":   {Username: []byte{0xff}, PersonalAccessToken: []byte("pat")},
 		"oversized pat":  {Username: []byte("octocat"), PersonalAccessToken: make([]byte, 4097)},
 	} {
