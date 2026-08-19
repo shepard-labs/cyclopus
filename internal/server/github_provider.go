@@ -220,9 +220,17 @@ func (h *apiHandlers) ImportGitRepository(ctx context.Context, req *cyclopusv1.I
 	if runtime := map[cyclopusv1.RuntimeClass]string{cyclopusv1.RuntimeClass_RUNTIME_CLASS_GVISOR: "gvisor", cyclopusv1.RuntimeClass_RUNTIME_CLASS_RUNC: "runc"}[req.GetRuntimeClass()]; runtime != "" {
 		app.RuntimeClass = &runtime
 	}
-	operation, err := h.service.ImportGitRepository(ctx, actor, service.ImportGitRepositoryInput{RepositoryID: req.GetRepositoryId(), WorkflowPath: req.GetGithubWorkflowPath(), ProjectName: req.GetProjectName(), ProjectSlug: req.GetProjectSlug(), ApplicationName: req.GetApplicationName(), ApplicationSlug: req.GetApplicationSlug(), HostnameLabel: req.GetHostnameLabel(), ProductionBranch: req.GetProductionBranch(), ImageRepository: req.GetImageRepository(), IdempotencyKey: req.GetIdempotencyKey(), App: app, PrivateCredentialRequested: req.GetGhcrCredential() != nil})
+	var credential *service.GhcrCredentialInput
+	if raw := req.GetGhcrCredential(); raw != nil {
+		credential = &service.GhcrCredentialInput{Username: []byte(raw.GetUsername()), PersonalAccessToken: []byte(raw.GetPersonalAccessToken())}
+		defer func() {
+			clear(credential.Username)
+			clear(credential.PersonalAccessToken)
+		}()
+	}
+	operation, err := h.service.ImportGitRepository(ctx, actor, service.ImportGitRepositoryInput{RepositoryID: req.GetRepositoryId(), WorkflowPath: req.GetGithubWorkflowPath(), ProjectName: req.GetProjectName(), ProjectSlug: req.GetProjectSlug(), ApplicationName: req.GetApplicationName(), ApplicationSlug: req.GetApplicationSlug(), HostnameLabel: req.GetHostnameLabel(), ProductionBranch: req.GetProductionBranch(), ImageRepository: req.GetImageRepository(), IdempotencyKey: req.GetIdempotencyKey(), App: app, GhcrCredential: credential, PrivateCredentialRequested: req.GetGhcrCredential() != nil})
 	if err != nil {
-		return nil, githubDiscoveryError(err)
+		return nil, ghcrCredentialError(err)
 	}
 	return &cyclopusv1.ImportGitRepositoryResponse{Operation: importOperationProto(operation)}, nil
 }
@@ -285,7 +293,8 @@ func (h *apiHandlers) GetGhcrCredentialStatus(ctx context.Context, _ *cyclopusv1
 }
 
 func (h *apiHandlers) RotateGhcrCredential(ctx context.Context, req *cyclopusv1.RotateGhcrCredentialRequest) (*cyclopusv1.RotateGhcrCredentialResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if req.GetCredential() == nil {
@@ -294,7 +303,35 @@ func (h *apiHandlers) RotateGhcrCredential(ctx context.Context, req *cyclopusv1.
 	if err := requiredFields(map[string]string{"credential.username": req.GetCredential().GetUsername(), "credential.personal_access_token": req.GetCredential().GetPersonalAccessToken(), "idempotency_key": req.GetIdempotencyKey()}); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "GHCR credential rotation is not configured", "REGISTRY_AUTH_REQUIRED")
+	input := service.GhcrCredentialInput{Username: []byte(req.GetCredential().GetUsername()), PersonalAccessToken: []byte(req.GetCredential().GetPersonalAccessToken())}
+	defer func() {
+		clear(input.Username)
+		clear(input.PersonalAccessToken)
+	}()
+	value, err := h.service.RotateGhcrCredential(ctx, actor, input, req.GetIdempotencyKey())
+	if err != nil {
+		return nil, ghcrCredentialError(err)
+	}
+	return &cyclopusv1.RotateGhcrCredentialResponse{Credential: ghcrCredentialStatusProto(value)}, nil
+}
+
+// ghcrCredentialError maps credential flow errors without echoing usernames,
+// PATs, dockerconfig payloads, or Secret references. Cross-organization
+// resources and missing configuration share the same non-enumerating
+// failed-precondition body.
+func ghcrCredentialError(err error) error {
+	switch {
+	case errors.Is(err, service.ErrRegistryCredentialInProgress):
+		return typedError(codes.Aborted, "GHCR credential operation is already in progress", "CONFLICT")
+	case errors.Is(err, service.ErrRegistryCredentialRetry):
+		return typedError(codes.Unavailable, "GHCR credential source write failed; retry with the same idempotency key", "CREDENTIAL_SOURCE_UNAVAILABLE")
+	case errors.Is(err, service.ErrRegistryCredentialExists):
+		return typedError(codes.FailedPrecondition, "GHCR credential is already configured; use rotation to replace it", "REGISTRY_CREDENTIAL_EXISTS")
+	case errors.Is(err, service.ErrRegistryAuthRequired):
+		return typedError(codes.FailedPrecondition, "GHCR authentication is required", "REGISTRY_AUTH_REQUIRED")
+	default:
+		return githubDiscoveryError(err)
+	}
 }
 
 func administratorActor(ctx context.Context) (service.ActorContext, error) {
@@ -387,7 +424,7 @@ func importOperationState(v string) cyclopusv1.ImportOperationState {
 	return map[string]cyclopusv1.ImportOperationState{"pending": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_PENDING, "credential_pending": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_CREDENTIAL_PENDING, "committing": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_COMMITTING, "pending_dispatch": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_PENDING_DISPATCH, "completed": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_COMPLETED, "failed": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_FAILED, "cancelled": cyclopusv1.ImportOperationState_IMPORT_OPERATION_STATE_CANCELLED}[v]
 }
 func ghcrCredentialState(v string) cyclopusv1.GhcrCredentialState {
-	return map[string]cyclopusv1.GhcrCredentialState{"absent": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_NOT_CONFIGURED, "creating": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_CREATING, "ready": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_READY, "rotating": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_ROTATING, "reconciling": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_RECONCILING, "failed": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_FAILED}[v]
+	return map[string]cyclopusv1.GhcrCredentialState{"absent": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_NOT_CONFIGURED, "creating": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_CREATING, "provisioning": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_CREATING, "ready": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_READY, "rotating": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_ROTATING, "reconciling": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_CREATING, "failed": cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_FAILED}[v]
 }
 
 func integrationFailureCode(v string) cyclopusv1.IntegrationFailureCode {

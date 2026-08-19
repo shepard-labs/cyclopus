@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -277,7 +278,13 @@ type ImportGitRepositoryInput struct {
 	RepositoryID                                                                                                                               int64
 	WorkflowPath, ProjectName, ProjectSlug, ApplicationName, ApplicationSlug, HostnameLabel, ProductionBranch, ImageRepository, IdempotencyKey string
 	App                                                                                                                                        AppInput
-	PrivateCredentialRequested                                                                                                                 bool
+	// GhcrCredential carries raw per-org GHCR material for a first private
+	// import. Buffers are copied, validated, written to the immutable source
+	// Secret, and cleared; they are never persisted, logged, or replayed.
+	GhcrCredential *GhcrCredentialInput
+	// PrivateCredentialRequested records that the caller supplied credential
+	// material (deprecated alias kept for the pre-6B placeholder path).
+	PrivateCredentialRequested bool
 }
 
 func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, input ImportGitRepositoryInput) (store.ImportOperation, error) {
@@ -297,11 +304,25 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 	if err := validateProject(ProjectInput{Name: input.ProjectName, Slug: input.ProjectSlug}); err != nil {
 		return store.ImportOperation{}, err
 	}
+	credentialSupplied := input.GhcrCredential != nil || input.PrivateCredentialRequested
+	// The idempotency request hash never sees raw credential material: replay
+	// comparison ignores the supplied secret bytes, which the reservation's
+	// operation idempotency key owns instead.
 	request := struct {
-		ActorUserID string
-		Operator    bool
-		Input       ImportGitRepositoryInput
-	}{actor.UserID, actor.Operator, input}
+		ActorUserID           string
+		Operator              bool
+		Input                 ImportGitRepositoryInput
+		CredentialSupplied    bool
+		CredentialFingerprint string
+	}{ActorUserID: actor.UserID, Operator: actor.Operator, Input: sanitizedImportInput(input), CredentialSupplied: credentialSupplied}
+	if input.GhcrCredential != nil {
+		credentials := s.registryCredentials()
+		if credentials == nil || !credentials.Configured() {
+			return store.ImportOperation{}, ErrRegistryAuthRequired
+		}
+		fingerprint := credentials.credentialFingerprint(*input.GhcrCredential)
+		request.CredentialFingerprint = hex.EncodeToString(fingerprint[:])
+	}
 	digest := requestHash(request)
 	ownerLease, err := randomGeneration()
 	if err != nil {
@@ -333,16 +354,17 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 		completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		completion := store.CompleteIdempotencyParams{OrgID: actor.OrgID, Scope: claim.Scope, Key: claim.Key, RequestHash: digest, Owner: ownerLease, Status: "failed", StatusCode: http.StatusUnprocessableEntity, ErrorCode: &code}
+		failureMessage := cause.Error()
+		if sanitized := credentialFailureMessage(code); sanitized != "" {
+			failureMessage = sanitized
+		}
 		operation, err := s.store.FailImportGitRepository(completionCtx, store.FailImportRepositoryParams{OperationID: operationID, OrgID: actor.OrgID, ActorUserID: actor.UserID,
-			AuditID: newID(), IdempotencyKey: input.IdempotencyKey, RequestDigest: digest, RepositoryID: input.RepositoryID, FailureCode: code, FailureMessage: cause.Error(), Completion: completion})
+			AuditID: newID(), IdempotencyKey: input.IdempotencyKey, RequestDigest: digest, RepositoryID: input.RepositoryID, FailureCode: code, FailureMessage: failureMessage, Completion: completion})
 		if err != nil {
 			_ = s.store.AbandonIdempotency(completionCtx, claim)
 			return store.ImportOperation{}, mapError(err)
 		}
 		return operation, cause
-	}
-	if input.PrivateCredentialRequested {
-		return fail("registry_auth_required", ErrRegistryAuthRequired)
 	}
 	if s.githubClients == nil || len(s.githubCursorKey) < 32 {
 		return fail("github_app_not_configured", ErrGitHubAppNotConfigured)
@@ -352,6 +374,11 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 	repository, installation, client, err := s.authoritativeRepository(externalCtx, actor, input.RepositoryID)
 	if err != nil {
 		return s.finishImportExternalError(ctx, claim, fail, err)
+	}
+	// Import accepts credential input only for an authoritative private
+	// repository; supplying one for a public import is invalid input.
+	if credentialSupplied && repository.Visibility != "private" {
+		return fail("invalid_argument", ErrInvalidArgument)
 	}
 	owner, name := splitFullName(repository.FullName)
 	branch, headSHA, err := selectProductionBranch(externalCtx, client, owner, name, repository.DefaultBranch, input.ProductionBranch)
@@ -365,10 +392,46 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 	if analysis := AnalyzeGitHubWorkflow(content, input.ImageRepository); !analysis.Compatible {
 		return fail("workflow_incompatible", fmt.Errorf("%w: %s", ErrWorkflowIncompatible, strings.Join(analysis.Reasons, ",")))
 	}
+	// Private imports bind the org GHCR credential before any resource commit:
+	// reuse the ready active generation, or reserve/write/attach the first
+	// candidate keyed to this repository's immutable head SHA. A private
+	// import without a usable credential cannot proceed.
+	var reserved *reservedRegistryCredential
+	if repository.Visibility == "private" {
+		credentials := s.registryCredentials()
+		if credentials == nil {
+			return fail("registry_auth_required", ErrRegistryAuthRequired)
+		}
+		var credentialInput GhcrCredentialInput
+		if input.GhcrCredential != nil {
+			credentialInput = *input.GhcrCredential
+		}
+		binding, err := credentials.reserveImportCredentialWithKey(ctx, actor, imageRepository, headSHA, input.IdempotencyKey, credentialInput, credentialSupplied)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrRegistryAuthRequired):
+				return fail("registry_auth_required", ErrRegistryAuthRequired)
+			case errors.Is(err, ErrInvalidArgument):
+				return fail("invalid_argument", ErrInvalidArgument)
+			case errors.Is(err, ErrRegistryCredentialExists):
+				return fail("registry_credential_exists", ErrRegistryCredentialExists)
+			case errors.Is(err, ErrInProgress), errors.Is(err, ErrRegistryCredentialInProgress):
+				return store.ImportOperation{}, ErrInProgress
+			case errors.Is(err, ErrRegistryCredentialRetry), errors.Is(err, ErrConflict):
+				return store.ImportOperation{}, err
+			default:
+				return s.finishImportExternalError(ctx, claim, fail, err)
+			}
+		}
+		reserved = &binding
+	}
 	appInput := applyAppCreateDefaults(normalizeAppInput(input.App))
 	appInput.ProjectID = newID()
 	appInput.Name, appInput.Slug, appInput.HostnameLabel = input.ApplicationName, input.ApplicationSlug, input.HostnameLabel
 	appInput.ImageRepository, appInput.GitHubWorkflowPath, appInput.ProductionBranch = &imageRepository, &input.WorkflowPath, branch
+	if reserved != nil {
+		appInput.RegistryID = &reserved.registry.ID
+	}
 	runtimeClass := "gvisor"
 	if appInput.RuntimeClass != nil {
 		runtimeClass = *appInput.RuntimeClass
@@ -386,27 +449,53 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 	projectID, appID, environmentID := newID(), newID(), newID()
 	app := appValue(actor.OrgID, appID, appInput, runtimeClass)
 	app.ProjectID, app.GitHubWorkflowRevision, app.PreviewsEnabled = projectID, revision, input.App.PreviewsEnabled
+	if reserved != nil {
+		app.RegistryID = &reserved.registry.ID
+		app.ImageVisibility = "private"
+	}
 	project := store.Project{ID: projectID, OrgID: actor.OrgID, Name: input.ProjectName, Slug: input.ProjectSlug}
 	plannedHostname := hostname
 	environment := store.Environment{ID: environmentID, OrgID: actor.OrgID, AppID: appID, Branch: branch, Kind: "production", Namespace: input.HostnameLabel + "-production", PlannedHostname: &plannedHostname, LifecycleStatus: "reserved"}
+	if reserved != nil {
+		environment.RequiredRegistryCredentialGeneration = &reserved.generation
+		if reserved.ready {
+			environment.ReadyRegistryCredentialGeneration = &reserved.generation
+			environment.RegistryCredentialState = "ready"
+			environment.RegistryCredentialCheckpoint = "activated"
+		} else {
+			environment.RegistryCredentialState = "pending"
+		}
+	}
 	completion := store.CompleteIdempotencyParams{OrgID: actor.OrgID, Scope: claim.Scope, Key: claim.Key, RequestHash: digest, Status: "completed", StatusCode: http.StatusOK}
 	audits := []string{newID(), newID(), newID(), newID(), newID()}
-	operation, result, err := s.store.ImportGitRepository(ctx, store.ImportRepositoryParams{OperationID: operationID, OrgID: actor.OrgID, ActorUserID: actor.UserID,
-		IdempotencyKey: input.IdempotencyKey, RequestDigest: digest, RepositoryID: input.RepositoryID, Project: project, App: app, Environment: environment,
-		ExpectedInstallationID: installation.ID, ExpectedGitHubInstallationID: installation.GitHubInstallationID, ExpectedInstallationGeneration: installation.RepositoryReconciliationGeneration,
-		ExpectedRepositoryNodeID: repository.NodeID, ExpectedRepositoryGeneration: repository.ReconciliationGeneration,
-		WorkflowRevision: revision, BranchHeadSHA: headSHA, Idempotency: claim, Completion: completion, AuditIDs: audits})
-	if err != nil {
-		if isDeterministicStoreImportError(err) {
-			mapped := deterministicStoreImportError(err)
-			return fail(importFailureCode(mapped), mapped)
-		}
+	abandon := func(err error) (store.ImportOperation, error) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cleanupCancel()
 		if abandonErr := s.store.AbandonIdempotency(cleanupCtx, claim); abandonErr != nil && !errors.Is(abandonErr, store.ErrLeaseNotOwned) {
 			return store.ImportOperation{}, mapError(abandonErr)
 		}
-		return store.ImportOperation{}, mapError(err)
+		return store.ImportOperation{}, err
+	}
+	operation, result, err := s.store.ImportGitRepository(ctx, store.ImportRepositoryParams{OperationID: operationID, OrgID: actor.OrgID, ActorUserID: actor.UserID,
+		IdempotencyKey: input.IdempotencyKey, RequestDigest: digest, RepositoryID: input.RepositoryID, Project: project, App: app, Environment: environment,
+		ExpectedInstallationID: installation.ID, ExpectedGitHubInstallationID: installation.GitHubInstallationID, ExpectedInstallationGeneration: installation.RepositoryReconciliationGeneration,
+		ExpectedRepositoryNodeID: repository.NodeID, ExpectedRepositoryGeneration: repository.ReconciliationGeneration,
+		RegistryOperationID: reservedOperationID(reserved), RegistryCandidateGeneration: reservedGeneration(reserved),
+		WorkflowRevision: revision, BranchHeadSHA: headSHA, Idempotency: claim, Completion: completion, AuditIDs: audits})
+	if err != nil {
+		if isDeterministicStoreImportError(err) {
+			// An orphaned first-credential reservation must not strand the org
+			// in a state that accepts new imports with silently ignored input;
+			// abandoning the import claim lets the caller retry and re-execute
+			// the same deterministic reservation instead of recording a
+			// terminal failure.
+			if reserved != nil && reserved.operation != nil && reserved.operation.Status != "awaiting_source" {
+				return abandon(err)
+			}
+			mapped := deterministicStoreImportError(err)
+			return fail(importFailureCode(mapped), mapped)
+		}
+		return abandon(mapError(err))
 	}
 	switch result.Disposition {
 	case store.IdempotencyConflict:
@@ -415,6 +504,24 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 		return store.ImportOperation{}, ErrInProgress
 	}
 	return operation, nil
+}
+
+// sanitizedImportInput strips raw credential material from the value hashed
+// into the import idempotency claim; only the non-secret request shape is
+// compared on replay.
+func sanitizedImportInput(input ImportGitRepositoryInput) ImportGitRepositoryInput {
+	input.GhcrCredential = nil
+	return input
+}
+
+// credentialFailureMessage keeps failure payloads free of any raw credential
+// text for the credential-flow failures; every other failure uses its cause.
+func credentialFailureMessage(code string) string {
+	switch code {
+	case "registry_auth_required", "registry_credential_exists":
+		return code
+	}
+	return ""
 }
 
 func (s *Service) finishImportExternalError(ctx context.Context, claim store.IdempotencyClaimParams, fail func(string, error) (store.ImportOperation, error), err error) (store.ImportOperation, error) {
@@ -430,7 +537,8 @@ func (s *Service) finishImportExternalError(ctx context.Context, claim store.Ide
 }
 
 func isDeterministicImportError(err error) bool {
-	return errors.Is(err, ErrGitHubRepositoryRemoved) || errors.Is(err, ErrGitHubInstallationRemoved) || errors.Is(err, ErrGitHubInstallationSuspended) || errors.Is(err, ErrWorkflowIncompatible) || errors.Is(err, ErrInvalidArgument)
+	return errors.Is(err, ErrGitHubRepositoryRemoved) || errors.Is(err, ErrGitHubInstallationRemoved) || errors.Is(err, ErrGitHubInstallationSuspended) || errors.Is(err, ErrWorkflowIncompatible) || errors.Is(err, ErrInvalidArgument) ||
+		errors.Is(err, ErrRegistryAuthRequired) || errors.Is(err, ErrRegistryCredentialExists) || errors.Is(err, ErrRegistryCredentialInProgress)
 }
 
 func isDeterministicStoreImportError(err error) bool {
@@ -454,6 +562,12 @@ func importFailureCode(err error) string {
 		return "github_installation_suspended"
 	case errors.Is(err, ErrWorkflowIncompatible):
 		return "workflow_incompatible"
+	case errors.Is(err, ErrRegistryAuthRequired):
+		return "registry_auth_required"
+	case errors.Is(err, ErrRegistryCredentialExists):
+		return "registry_credential_exists"
+	case errors.Is(err, ErrRegistryCredentialInProgress):
+		return "registry_credential_in_progress"
 	case errors.Is(err, store.ErrAlreadyExists), errors.Is(err, ErrConflict):
 		return "conflict"
 	case errors.Is(err, store.ErrFailedPrecondition):
@@ -480,6 +594,10 @@ func importFailureError(code *string) error {
 		return ErrWorkflowIncompatible
 	case "registry_auth_required":
 		return ErrRegistryAuthRequired
+	case "registry_credential_exists":
+		return ErrRegistryCredentialExists
+	case "registry_credential_in_progress":
+		return ErrRegistryCredentialInProgress
 	case "conflict":
 		return ErrConflict
 	case "failed_precondition":

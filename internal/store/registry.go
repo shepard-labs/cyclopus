@@ -116,6 +116,55 @@ func (s *Store) GetGHCRRegistry(ctx context.Context, orgID string) (Registry, er
 	return values[0], nil
 }
 
+// EnsureGHCRRegistryID transactionally returns the ID of the org's canonical
+// GHCR registry row, creating the absent placeholder when none exists.
+// Creation races settle on the unique (org_id, provider, registry_host) key.
+func (s *Store) EnsureGHCRRegistryID(ctx context.Context, orgID string) (string, error) {
+	if orgID == "" {
+		return "", ErrInvalidArgument
+	}
+	var id string
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO registries(org_id,provider,registry_host)
+			VALUES($1,$2,$3) ON CONFLICT (org_id,provider,registry_host) DO NOTHING
+			RETURNING id::text`, orgID, RegistryProviderGHCR, RegistryHostGHCR).Scan(&id); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			return tx.QueryRow(ctx, `SELECT id::text FROM registries WHERE org_id=$1 AND provider=$2 AND registry_host=$3`, orgID, RegistryProviderGHCR, RegistryHostGHCR).Scan(&id)
+		}
+		return nil
+	})
+	return id, resourceQueryError("ensure ghcr registry", err)
+}
+
+// EnsureGHCRRegistry transactionally returns the org's canonical GHCR
+// registry row, creating the absent placeholder when none exists. Creation
+// races settle on the unique (org_id, provider, registry_host) key. The
+// helper is written against the store's connection pool interface so service
+// construction can keep its narrow credential store abstraction.
+func EnsureGHCRRegistry(ctx context.Context, s *Store, orgID string) (Registry, error) {
+	if orgID == "" {
+		return Registry{}, ErrInvalidArgument
+	}
+	var value Registry
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO registries(org_id,provider,registry_host)
+			VALUES($1,$2,$3) ON CONFLICT (org_id,provider,registry_host) DO NOTHING
+			RETURNING id::text`, orgID, RegistryProviderGHCR, RegistryHostGHCR).Scan(&id); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM registries WHERE org_id=$1 AND provider=$2 AND registry_host=$3`, orgID, RegistryProviderGHCR, RegistryHostGHCR).Scan(&id); err != nil {
+				return err
+			}
+		}
+		return scanRegistry(tx.QueryRow(ctx, registrySelect+` WHERE org_id=$1 AND id=$2`, orgID, id), &value)
+	})
+	return value, resourceQueryError("ensure ghcr registry", err)
+}
+
 func ValidateRegistry(registry Registry) error {
 	if !ValidRegistryIdentity(registry.Provider, registry.RegistryHost) {
 		return errors.New("store: unsupported or noncanonical registry identity")

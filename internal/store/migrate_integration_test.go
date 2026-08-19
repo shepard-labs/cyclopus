@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000017 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000019 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 17 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:17 dirty:false", version, dirty)
+		if version != 19 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:19 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -382,6 +382,105 @@ func TestPostgres18Migrations(t *testing.T) {
 			t.Fatalf("app tombstone failed: %v", err)
 		}
 	})
+}
+
+func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
+	url := integrationURL(t)
+	admin, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	schema := "cyclopus_migration18_down_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	testURL := withSearchPath(url, schema)
+	db, err := sql.Open("pgx", testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	source, err := iofs.New(Migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	if err := migrator.Migrate(18); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(t.Context(), testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	parents := seedTenantGraph(t, conn, "migration-eighteen", "main", "", "migration-eighteen-production")
+	var registryID, operationID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,pending_generation)
+		VALUES($1,'ghcr','ghcr.io','provisioning','source_secret_written',1) RETURNING id::text`, parents.org).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE apps SET image_visibility='private',registry_id=$2 WHERE id=$1`, parents.app, registryID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(t.Context(), `INSERT INTO registry_credential_operations(org_id,registry_id,kind,status,checkpoint,candidate_generation,target_repository,target_reference,idempotency_key)
+		VALUES($1,$2,'import_create','awaiting_import','source_secret_written',1,'acme/private',$3,'migration18-import') RETURNING id::text`, parents.org, registryID, strings.Repeat("a", 40)).Scan(&operationID); err != nil {
+		t.Fatal(err)
+	}
+	secretRef := "k8s-secret://cyclopus-system/migration18#dockerconfigjson"
+	if _, err := tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id) VALUES($1,$2,1,$3,'pending',$4)`, parents.org, registryID, secretRef, operationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `UPDATE registries SET operation_id=$2,pending_credential_secret_ref=$3 WHERE id=$1`, registryID, operationID, secretRef); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE environments SET registry_credential_state='pending',required_registry_credential_generation=1 WHERE id=$1`, parents.environment); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(17); err == nil || !strings.Contains(err.Error(), "000018 downgrade requires") {
+		t.Fatalf("000018 down with pending private import = %v", err)
+	}
+	if err := migrator.Force(18); err != nil {
+		t.Fatalf("restore version after guarded down: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE environments SET registry_credential_state='not_required',required_registry_credential_generation=NULL WHERE id=$1`, parents.environment); err != nil {
+		t.Fatal(err)
+	}
+	for _, cleanup := range []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE registry_credential_operations SET status='failed',checkpoint='cleanup_pending',failure_code='superseded',failure_message='test cleanup',terminal_at=clock_timestamp() WHERE id=$1`, []any{operationID}},
+		{`UPDATE registry_credential_generations SET state='failed' WHERE operation_id=$1`, []any{operationID}},
+		{`UPDATE registries SET state='failed',checkpoint='cleanup_pending',pending_generation=NULL,pending_credential_secret_ref=NULL,operation_id=NULL,failure_code='postgres_permanent',failure_message='test cleanup' WHERE id=$1`, []any{registryID}},
+	} {
+		if _, err := conn.Exec(t.Context(), cleanup.query, cleanup.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrator.Migrate(17); err != nil {
+		t.Fatalf("000018 down after terminal cleanup: %v", err)
+	}
 }
 
 func TestMigration000005ExpiresProtocolIncompatibleSetupSessions(t *testing.T) {

@@ -49,6 +49,10 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000016_private_resolution_model.up.sql",
 		"000017_registry_validation_references.down.sql",
 		"000017_registry_validation_references.up.sql",
+		"000018_import_pending_credentials.down.sql",
+		"000018_import_pending_credentials.up.sql",
+		"000019_registry_credential_fingerprint.down.sql",
+		"000019_registry_credential_fingerprint.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -150,6 +154,51 @@ func TestMigration000017SchemaContract(t *testing.T) {
 		sum := sha256.Sum256(contents)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			t.Fatalf("%s checksum = %s, want v17 migration fingerprint %s", name, got, want)
+		}
+	}
+}
+
+func TestMigration000018SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000018_import_pending_credentials.up.sql":   "07fcecc5a9f9c2bc30ad36f79d4f51ce3a4f797ea37a93f375b9ff888cf44788",
+		"000018_import_pending_credentials.down.sql": "4723f517b37eba08f8dac409499f3d2470b3ded479d2a27deb5b12d735429c25",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"awaiting_import", "activated", "registry_credential_operations_awaiting_import", "assert_phase6_registry_generation_consistency"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v18 migration fingerprint %s", name, got, want)
+		}
+	}
+}
+
+func TestMigration000019SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000019_registry_credential_fingerprint.up.sql":   "fe7e6848e66b392dd805b47898b2fbd6b5e8b7f1969d1ba478c90dea7f3b3b70",
+		"000019_registry_credential_fingerprint.down.sql": "c92de23bff590788092c9a537319d28c223844639c33c9b581a60ace98ac0144",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"credential_fingerprint", "actor_user_id", "registry_credential_operation_attribution"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		if strings.HasSuffix(name, ".up.sql") && !strings.Contains(string(contents), "FOREIGN KEY (org_id,actor_user_id) REFERENCES users(org_id,id)") {
+			t.Errorf("%s does not preserve composite tenant actor attribution", name)
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v19 migration fingerprint %s", name, got, want)
 		}
 	}
 }

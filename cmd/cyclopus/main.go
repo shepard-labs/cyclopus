@@ -121,6 +121,7 @@ func run(args, environ []string) error {
 		service.WithGitHubDiscovery(githubClients, []byte(cfg.Auth.TokenPepper)),
 		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget), service.WithHostnameSuffix(cfg.Kubernetes.PreviewHostnameSuffix),
 		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer), service.WithWebhookSecretValidator(webhookSecrets))
+	// Phase 6 runtime wiring occurs with validation/recovery workers.
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)
 	services.Authenticator = authenticator

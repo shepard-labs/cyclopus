@@ -64,21 +64,22 @@ type ActorContext struct {
 }
 
 type Service struct {
-	store                    *store.Store
-	now                      func() time.Time
-	previewSlugs             PreviewSlugGenerator
-	logger                   *slog.Logger
-	telemetry                TelemetryProvider
-	certReader               CertReader
-	dnsResolver              DNSResolver
-	ingressTarget            string
-	hostnameProvider         string
-	customDomainProvisioner  CustomDomainProvisioner
-	certManagerClusterIssuer string
-	github                   *GitHubOnboarding
-	githubClients            githubadapter.ClientFactory
-	githubCursorKey          []byte
-	webhookSecrets           WebhookSecretValidator
+	store                     *store.Store
+	now                       func() time.Time
+	previewSlugs              PreviewSlugGenerator
+	logger                    *slog.Logger
+	telemetry                 TelemetryProvider
+	certReader                CertReader
+	dnsResolver               DNSResolver
+	ingressTarget             string
+	hostnameProvider          string
+	customDomainProvisioner   CustomDomainProvisioner
+	certManagerClusterIssuer  string
+	github                    *GitHubOnboarding
+	githubClients             githubadapter.ClientFactory
+	githubCursorKey           []byte
+	webhookSecrets            WebhookSecretValidator
+	registryCredentialService *RegistryCredentialService
 }
 
 type WebhookSecretValidator interface {
@@ -172,6 +173,13 @@ func WithGitHubDiscovery(clients githubadapter.ClientFactory, cursorKey []byte) 
 		s.githubClients = clients
 		s.githubCursorKey = append([]byte(nil), cursorKey...)
 	}
+}
+
+// WithRegistryCredentials wires the per-org GHCR credential service used by
+// private imports and the rotation RPC. When unset, private imports fail with
+// ErrRegistryAuthRequired exactly as before Phase 6.
+func WithRegistryCredentials(credentials *RegistryCredentialService) Option {
+	return func(s *Service) { s.registryCredentialService = credentials }
 }
 
 func (s *Service) log() *slog.Logger {
@@ -994,7 +1002,7 @@ func validateApp(i AppInput, runtimeClass string) error {
 			return ErrInvalidArgument
 		}
 	} else {
-		if i.RegistryID != nil || i.ImageRepository == nil {
+		if i.ImageRepository == nil {
 			return ErrInvalidArgument
 		}
 		if !regexp.MustCompile(`^\.github/workflows/[^/\s]+\.(yml|yaml)$`).MatchString(*i.GitHubWorkflowPath) || len(*i.GitHubWorkflowPath) > 255 {

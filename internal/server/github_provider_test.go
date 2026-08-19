@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +150,95 @@ func TestImportGitRepositoryRequiredFieldValidation(t *testing.T) {
 				t.Fatalf("code = %v", status.Code(err))
 			}
 		})
+	}
+}
+
+func TestRotateGhcrCredentialHandlerWithoutServiceIsNonEnumerating(t *testing.T) {
+	handler := &apiHandlers{service: service.New(nil)}
+	ctx := authenticatedServerContext(true)
+	_, err := handler.RotateGhcrCredential(ctx, &cyclopusv1.RotateGhcrCredentialRequest{
+		Credential:     &cyclopusv1.GhcrCredential{Username: "octocat", PersonalAccessToken: "pat-value"},
+		IdempotencyKey: "rotate",
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+	for _, detail := range status.Convert(err).Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetReason() == "REGISTRY_AUTH_REQUIRED" {
+			return
+		}
+	}
+	t.Fatalf("error %v lacks REGISTRY_AUTH_REQUIRED reason", err)
+}
+
+func TestRotateGhcrCredentialValidationPrecedesService(t *testing.T) {
+	handler := &apiHandlers{service: service.New(nil)}
+	ctx := authenticatedServerContext(true)
+	for name, request := range map[string]*cyclopusv1.RotateGhcrCredentialRequest{
+		"missing credential": {IdempotencyKey: "rotate"},
+		"missing username":   {Credential: &cyclopusv1.GhcrCredential{PersonalAccessToken: "pat"}, IdempotencyKey: "rotate"},
+		"missing pat":        {Credential: &cyclopusv1.GhcrCredential{Username: "octocat"}, IdempotencyKey: "rotate"},
+		"missing key":        {Credential: &cyclopusv1.GhcrCredential{Username: "octocat", PersonalAccessToken: "pat"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := handler.RotateGhcrCredential(ctx, request); status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
+			}
+		})
+	}
+}
+
+func TestGhcrCredentialErrorMapping(t *testing.T) {
+	for name, test := range map[string]struct {
+		err    error
+		code   codes.Code
+		reason string
+	}{
+		"not configured":   {service.ErrRegistryAuthRequired, codes.FailedPrecondition, "REGISTRY_AUTH_REQUIRED"},
+		"already exists":   {service.ErrRegistryCredentialExists, codes.FailedPrecondition, "REGISTRY_CREDENTIAL_EXISTS"},
+		"in progress":      {service.ErrRegistryCredentialInProgress, codes.Aborted, "CONFLICT"},
+		"transient source": {service.ErrRegistryCredentialRetry, codes.Unavailable, "CREDENTIAL_SOURCE_UNAVAILABLE"},
+		"invalid":          {service.ErrInvalidArgument, codes.InvalidArgument, "INVALID_ARGUMENT"},
+		"forbidden":        {service.ErrForbidden, codes.PermissionDenied, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := ghcrCredentialError(test.err)
+			if status.Code(err) != test.code {
+				t.Fatalf("code = %v, want %v", status.Code(err), test.code)
+			}
+			if test.reason == "" {
+				return
+			}
+			for _, detail := range status.Convert(err).Details() {
+				if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetReason() == test.reason {
+					return
+				}
+			}
+			t.Fatalf("error %v lacks %s reason", err, test.reason)
+		})
+	}
+}
+
+func TestGhcrCredentialInternalPendingStatesMapToCreating(t *testing.T) {
+	for _, state := range []string{"provisioning", "reconciling"} {
+		if got := ghcrCredentialState(state); got != cyclopusv1.GhcrCredentialState_GHCR_CREDENTIAL_STATE_CREATING {
+			t.Errorf("ghcrCredentialState(%q) = %v, want creating", state, got)
+		}
+	}
+}
+
+func TestGhcrCredentialErrorsNeverCarrySecretMaterial(t *testing.T) {
+	handler := &apiHandlers{service: service.New(nil)}
+	_, err := handler.RotateGhcrCredential(authenticatedServerContext(true), &cyclopusv1.RotateGhcrCredentialRequest{
+		Credential:     &cyclopusv1.GhcrCredential{Username: "sentinel-user-9f2c", PersonalAccessToken: "sentinel-pat-71ad"},
+		IdempotencyKey: "rotate",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	message := status.Convert(err).Message()
+	if strings.Contains(message, "sentinel-user-9f2c") || strings.Contains(message, "sentinel-pat-71ad") || strings.Contains(message, "dockerconfigjson") || strings.Contains(message, "k8s-secret://") {
+		t.Fatalf("error leaked credential material: %q", message)
 	}
 }
 

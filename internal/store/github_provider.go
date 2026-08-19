@@ -808,11 +808,16 @@ type ImportRepositoryParams struct {
 	Project                                                        Project
 	App                                                            App
 	Environment                                                    Environment
-	WorkflowRevision, BranchHeadSHA                                string
-	Idempotency                                                    IdempotencyClaimParams
-	Completion                                                     CompleteIdempotencyParams
-	AuditIDs                                                       []string
-	BeforeCommit                                                   func() error
+	// RegistryOperationID/RegistryCandidateGeneration bind a first-credential
+	// import to its reserved pending candidate; empty/zero for public imports
+	// and for private imports reusing the active credential.
+	RegistryOperationID             string
+	RegistryCandidateGeneration     int64
+	WorkflowRevision, BranchHeadSHA string
+	Idempotency                     IdempotencyClaimParams
+	Completion                      CompleteIdempotencyParams
+	AuditIDs                        []string
+	BeforeCommit                    func() error
 }
 
 type FailImportRepositoryParams struct {
@@ -864,7 +869,7 @@ func (s *Store) ImportGitRepository(ctx context.Context, params ImportRepository
 			FROM github_installations WHERE org_id=$1 AND github_installation_id=$2 FOR UPDATE`, params.OrgID, params.ExpectedGitHubInstallationID).Scan(
 			&installationID, &installationOrgID, &installationNumericID, &installationState, &installationGeneration); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrFailedPrecondition
+				return fmt.Errorf("%s: %w", "installation", ErrFailedPrecondition)
 			}
 			return err
 		}
@@ -912,14 +917,61 @@ func (s *Store) ImportGitRepository(ctx context.Context, params ImportRepository
 			return mapMutationError("create imported project", err)
 		}
 		params.App.ProjectID, params.App.GitHubWorkflowRevision = params.Project.ID, params.WorkflowRevision
+		// A private import binds the org GHCR registry row: reusing an active
+		// credential fences it ready, while a first create fences the reserved
+		// pending candidate this import itself attached. The app then adopts
+		// the registry binding atomically inside the same transaction.
+		var registryID *string
+		if params.App.ImageVisibility == "private" {
+			var bound string
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM registries
+				WHERE org_id=$1 AND provider='ghcr' AND registry_host='ghcr.io'
+				  AND (($2='' AND state='ready' AND active_generation=$3 AND active_generation>0 AND active_credential_secret_ref IS NOT NULL
+				        AND pending_generation IS NULL AND operation_id IS NULL)
+					   OR ($2<>'' AND state IN ('creating','provisioning') AND pending_generation=$3 AND operation_id=NULLIF($4,'')::uuid
+					       AND EXISTS (SELECT 1 FROM registry_credential_operations operation
+					           WHERE operation.org_id=$1 AND operation.id=NULLIF($4,'')::uuid AND operation.registry_id=registries.id
+					             AND operation.kind='import_create' AND operation.status='awaiting_import'
+				             AND operation.checkpoint='source_secret_written' AND operation.candidate_generation=$3)))
+				FOR UPDATE`, params.OrgID, params.RegistryOperationID, params.RegistryCandidateGeneration, params.RegistryOperationID).Scan(&bound); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrFailedPrecondition
+				}
+				return err
+			}
+			registryID = &bound
+		}
+		params.App.RegistryID = registryID
+		// The environment's required credential generation is non-secret
+		// binding evidence from the service's reservation decision; the fence
+		// above guarantees it matches the registry state this transaction saw.
+		if registryID != nil {
+			pendingBinding := params.RegistryOperationID != "" && params.Environment.RegistryCredentialState == "pending" &&
+				params.Environment.RequiredRegistryCredentialGeneration != nil && params.Environment.ReadyRegistryCredentialGeneration == nil
+			readyBinding := params.RegistryOperationID == "" && params.Environment.RegistryCredentialState == "ready" &&
+				params.Environment.RequiredRegistryCredentialGeneration != nil && params.Environment.ReadyRegistryCredentialGeneration != nil &&
+				*params.Environment.RequiredRegistryCredentialGeneration == *params.Environment.ReadyRegistryCredentialGeneration &&
+				params.Environment.RegistryCredentialCheckpoint == "activated"
+			if !pendingBinding && !readyBinding {
+				return fmt.Errorf("import environment credential binding incomplete: %w", ErrInvalidArgument)
+			}
+		} else if params.Environment.RegistryCredentialState != "" && params.Environment.RegistryCredentialState != "not_required" {
+			return fmt.Errorf("import environment credential binding unexpected: %w", ErrInvalidArgument)
+		}
 		app := normalizeAppDefaults(params.App)
 		if err := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,github_workflow_path,github_workflow_revision,production_branch,annotation_policy,image_visibility)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) RETURNING id::text`, appArgs(app)...).Scan(&params.App.ID); err != nil {
 			return mapMutationError("create imported app", err)
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname,lifecycle_status)
-			VALUES($1,$2,$3,$4,'production',$5,$6,'reserved') RETURNING id::text`, params.Environment.ID, params.OrgID, params.App.ID,
-			params.Environment.Branch, params.Environment.Namespace, params.Environment.PlannedHostname).Scan(&params.Environment.ID); err != nil {
+		credentialState := params.Environment.RegistryCredentialState
+		if credentialState == "" {
+			credentialState = "not_required"
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname,lifecycle_status,required_registry_credential_generation,ready_registry_credential_generation,registry_credential_state,registry_credential_checkpoint)
+			VALUES($1,$2,$3,$4,'production',$5,$6,'reserved',$7,$8,$9,NULLIF($10,'')) RETURNING id::text`, params.Environment.ID, params.OrgID, params.App.ID,
+			params.Environment.Branch, params.Environment.Namespace, params.Environment.PlannedHostname,
+			params.Environment.RequiredRegistryCredentialGeneration, params.Environment.ReadyRegistryCredentialGeneration, credentialState,
+			params.Environment.RegistryCredentialCheckpoint).Scan(&params.Environment.ID); err != nil {
 			return mapMutationError("create imported environment", err)
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO environment_lifecycle_jobs(org_id,environment_id,kind,status,checkpoint,reason)
@@ -966,6 +1018,16 @@ func (s *Store) ImportGitRepository(ctx context.Context, params ImportRepository
 		if params.BeforeCommit != nil {
 			if err := params.BeforeCommit(); err != nil {
 				return err
+			}
+		}
+		if params.RegistryOperationID != "" {
+			tag, err := tx.Exec(ctx, `UPDATE registry_credential_operations SET status='pending',next_attempt_at=clock_timestamp(),updated_at=clock_timestamp()
+					WHERE org_id=$1 AND id=NULLIF($2,'')::uuid AND kind='import_create' AND status='awaiting_import' AND checkpoint='source_secret_written'`, params.OrgID, params.RegistryOperationID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return ErrFailedPrecondition
 			}
 		}
 		body, _ := json.Marshal(operation)
