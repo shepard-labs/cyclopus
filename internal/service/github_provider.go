@@ -9,13 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	gh "github.com/google/go-github/v88/github"
+	"github.com/shepard-labs/cyclopus/internal/oci"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
@@ -491,19 +491,12 @@ func importFailureError(code *string) error {
 // ParsePublicGHCRRepository validates and returns a canonical public GHCR
 // repository name. It intentionally never normalizes caller input.
 func ParsePublicGHCRRepository(value string) (string, error) {
-	if len(value) == 0 || len(value) > 255 || !strings.HasPrefix(value, "ghcr.io/") || strings.TrimSpace(value) != value {
+	if len(value) == 0 || len(value) > 255 || !strings.HasPrefix(value, "ghcr.io/") {
 		return "", ErrInvalidArgument
 	}
 	path := strings.TrimPrefix(value, "ghcr.io/")
-	components := strings.Split(path, "/")
-	if len(components) < 2 {
+	if !oci.ValidRepository(path, 2) {
 		return "", ErrInvalidArgument
-	}
-	component := regexp.MustCompile(`^[a-z0-9]+(?:(?:\.|_{1,2}|-+)[a-z0-9]+)*$`)
-	for _, part := range components {
-		if part == "" || part == "." || part == ".." || !component.MatchString(part) {
-			return "", ErrInvalidArgument
-		}
 	}
 	return value, nil
 }
