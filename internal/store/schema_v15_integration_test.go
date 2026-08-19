@@ -196,8 +196,8 @@ func TestSchemaV15OperationGenerationIdentityIntegration(t *testing.T) {
 		if _, err = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,candidate_generation,idempotency_key)
-			VALUES($1,$2,$3,'create',$4,$5)`, operationID, orgOneID, registryID, candidate, operationID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,checkpoint,candidate_generation,idempotency_key)
+			VALUES($1,$2,$3,'create','reserved',$4,$5)`, operationID, orgOneID, registryID, candidate, operationID); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id)
@@ -331,8 +331,8 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
 		candidate_generation,idempotency_key,failure_code,terminal_at) VALUES
-		('00000000-0000-0000-0000-000000000157',$1,$2,'create','failed','pending_recorded',2,'generation-2','postgres_permanent',$3),
-		('00000000-0000-0000-0000-000000000158',$1,$2,'create','failed','pending_recorded',3,'generation-3','postgres_permanent',$3)`,
+		('00000000-0000-0000-0000-000000000157',$1,$2,'create','failed','targets_validated',2,'generation-2','postgres_permanent',$3),
+		('00000000-0000-0000-0000-000000000158',$1,$2,'create','failed','targets_validated',3,'generation-3','postgres_permanent',$3)`,
 		orgOneID, registryID, now); err != nil {
 		t.Fatal(err)
 	}
@@ -362,8 +362,8 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_validation_targets(operation_id,org_id,registry_id,
-		repository,status,attempts,next_attempt_at,failure_code,validated_at)
-		VALUES($1,$2,$3,'acme/private','validated',4,$4,NULL,$5),($1,$2,$3,'acme/null','pending',0,$4,NULL,NULL)`,
+		repository,reference,status,attempts,next_attempt_at,failure_code,validated_at)
+		VALUES($1,$2,$3,'acme/private','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','validated',4,$4,NULL,$5),($1,$2,$3,'acme/null','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','failed',0,$4,'registry_auth_failed',NULL)`,
 		operationID, orgOneID, registryID, now.Add(time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
@@ -444,12 +444,12 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	if err != nil || nullGeneration.ValidatedAt != nil || nullGeneration.ActivatedAt != nil || nullGeneration.RetiredAt != nil || nullGeneration.GarbageCollectedAt != nil {
 		t.Fatalf("null generation round trip = %+v, %v", nullGeneration, err)
 	}
-	target, err := dataStore.GetRegistryCredentialValidationTarget(ctx, orgOneID, operationID, "acme/private")
+	target, err := dataStore.GetRegistryCredentialValidationTarget(ctx, orgOneID, operationID, "acme/private", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err != nil || target.ValidatedAt == nil || target.FailureCode != nil || target.Attempts != 4 {
 		t.Fatalf("validation target round trip = %+v, %v", target, err)
 	}
-	nullTarget, err := dataStore.GetRegistryCredentialValidationTarget(ctx, orgOneID, operationID, "acme/null")
-	if err != nil || nullTarget.ValidatedAt != nil || nullTarget.FailureCode != nil {
+	nullTarget, err := dataStore.GetRegistryCredentialValidationTarget(ctx, orgOneID, operationID, "acme/null", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if err != nil || nullTarget.ValidatedAt != nil || nullTarget.FailureCode == nil || *nullTarget.FailureCode != "registry_auth_failed" {
 		t.Fatalf("null validation target round trip = %+v, %v", nullTarget, err)
 	}
 	namespace, err := dataStore.GetNamespaceCredentialReconciliation(ctx, orgOneID, environmentOneID)
@@ -607,16 +607,16 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,attempts,next_attempt_at,
 		lease_owner,lease_epoch,lease_expires_at)
 		SELECT ('10000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,'ghcr','ghcr.io',
-		CASE WHEN g%2=0 THEN 'creating' ELSE 'reconciling' END,'pending_recorded',CASE WHEN g<=100 THEN 1 ELSE 12 END,
+		CASE WHEN g%2=0 THEN 'creating' ELSE 'reconciling' END,CASE WHEN g%2=0 THEN 'source_secret_written' ELSE 'reconciling_namespaces' END,CASE WHEN g<=100 THEN 1 ELSE 12 END,
 		clock_timestamp()-interval '1 second',CASE WHEN g%2=0 THEN NULL ELSE 'seed' END,
 		CASE WHEN g%2=0 THEN 0 ELSE 1 END,CASE WHEN g%2=0 THEN NULL ELSE clock_timestamp()-interval '1 second' END
 		FROM generate_series(1,12000) g`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `WITH operations AS (
-		INSERT INTO registry_credential_operations(org_id,registry_id,kind,status,candidate_generation,idempotency_key,
+		INSERT INTO registry_credential_operations(org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,
 		attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at)
-		SELECT registry.org_id,registry.id,'create',CASE WHEN row_number() OVER ()%2=0 THEN 'pending' ELSE 'leased' END,1,
+		SELECT registry.org_id,registry.id,'create',CASE WHEN row_number() OVER ()%2=0 THEN 'pending' ELSE 'leased' END,'source_secret_written',1,
 		'plan-'||registry.id,CASE WHEN row_number() OVER ()<=100 THEN 1 ELSE 12 END,clock_timestamp()-interval '1 second',
 		CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE 'seed' END,
 		CASE WHEN row_number() OVER ()%2=0 THEN 0 ELSE 1 END,
@@ -628,7 +628,7 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO registry_credential_validation_targets(operation_id,org_id,registry_id,repository,
-		status,attempts,next_attempt_at) SELECT id,org_id,registry_id,'acme/repo','pending',attempts,clock_timestamp()-interval '1 second'
+		reference,status,attempts,next_attempt_at) SELECT id,org_id,registry_id,'acme/repo','sha256:'||replace(id::text,'-','')||'00000000000000000000000000000000','pending',attempts,clock_timestamp()-interval '1 second'
 		FROM registry_credential_operations`); err != nil {
 		t.Fatal(err)
 	}

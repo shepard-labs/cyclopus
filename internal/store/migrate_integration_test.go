@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000016 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000017 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 16 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:16 dirty:false", version, dirty)
+		if version != 17 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:17 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -175,7 +175,7 @@ func TestPostgres18Migrations(t *testing.T) {
 		insertApp := func(scalingMode string, minReplicas int, schedules string, pendingRequests int) error {
 			_, err := db.Exec(context.Background(), `
 				INSERT INTO apps (org_id, project_id, name, slug, hostname_label, image_repository, github_workflow_path, production_branch, scaling_mode, min_replicas, keda_cron_schedules, keda_http_target_pending_requests)
-				VALUES ($1, $2, 'KEDA App', $3, $3, 'ghcr.io/acme/keda', '.github/workflows/deploy.yml', 'main', $4, $5, $6::jsonb, $7)`,
+				VALUES ($1, $2, 'KEDA App', $3, $3, 'acme/keda', '.github/workflows/deploy.yml', 'main', $4, $5, $6::jsonb, $7)`,
 				ids.org, ids.project, "keda-"+strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", ""), scalingMode, minReplicas, schedules, pendingRequests)
 			return err
 		}
@@ -229,7 +229,7 @@ func TestPostgres18Migrations(t *testing.T) {
 		var defaultTarget int
 		if err := db.QueryRow(context.Background(), `
 			INSERT INTO apps (org_id, project_id, name, slug, hostname_label, image_repository, github_workflow_path, production_branch, scaling_mode, min_replicas)
-			VALUES ($1, $2, 'Default KEDA Target', $3, $3, 'ghcr.io/acme/keda-default', '.github/workflows/deploy.yml', 'main', 'keda_http', 0)
+			VALUES ($1, $2, 'Default KEDA Target', $3, $3, 'acme/keda-default', '.github/workflows/deploy.yml', 'main', 'keda_http', 0)
 			RETURNING keda_http_target_pending_requests`, ids.org, ids.project, "keda-default-"+strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")).Scan(&defaultTarget); err != nil {
 			t.Fatalf("database KEDA HTTP default rejected: %v", err)
 		}
@@ -1475,7 +1475,7 @@ func seedTenantGraph(t *testing.T, db *pgx.Conn, prefix, branch, previewSlug, na
 		{"INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,$2,$3,$4,'acme',$5,$6,'private','main','active',1,1) RETURNING github_repository_id::text", []any{int64(len(prefix) + 10000), &org, int64(len(prefix) + 100), "node-" + prefix, prefix, "acme/" + prefix}, new(string)},
 		{"INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,$2) RETURNING id", []any{&org, int64(len(prefix) + 10000)}, &repository},
 		{"INSERT INTO projects(org_id, name, slug, git_connection_id) VALUES ($1, $2, $3, $4) RETURNING id", []any{&org, prefix + " Project", prefix + "-project", &repository}, &project},
-		{"INSERT INTO apps(org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$2,$3,$4,$5,$6,'.github/workflows/deploy.yml','main') RETURNING id", []any{&org, &project, prefix + " App", prefix + "-app", prefix + "-app", "ghcr.io/acme/" + prefix}, &app},
+		{"INSERT INTO apps(org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$2,$3,$4,$5,$6,'.github/workflows/deploy.yml','main') RETURNING id", []any{&org, &project, prefix + " App", prefix + "-app", prefix + "-app", "acme/" + prefix}, &app},
 		{"INSERT INTO environments(org_id, app_id, branch, kind, preview_slug, namespace, planned_hostname) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id", []any{&org, &app, branch, kind, preview, namespace, prefix + ".example.test"}, &environment},
 	}
 	for _, item := range queries {

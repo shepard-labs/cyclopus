@@ -47,6 +47,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000015_oci_ghcr_private_pulls.up.sql",
 		"000016_private_resolution_model.down.sql",
 		"000016_private_resolution_model.up.sql",
+		"000017_registry_validation_references.down.sql",
+		"000017_registry_validation_references.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -127,6 +129,27 @@ func TestMigration000016SchemaContract(t *testing.T) {
 		sum := sha256.Sum256(contents)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			t.Fatalf("%s checksum = %s, want v16 migration fingerprint %s", name, got, want)
+		}
+	}
+}
+
+func TestMigration000017SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000017_registry_validation_references.up.sql":   "0b0f881aae7f804ce13696df5e53aa8ca1c518cad846873244be5a77aa835a69",
+		"000017_registry_validation_references.down.sql": "1fdf0298ed16a6cd98da5c31555b35619a8f50375bc481d117a3cfee78dee2ef",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"awaiting_source", "reserved", "target_reference", "registry_credential_validation_targets_leased"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v17 migration fingerprint %s", name, got, want)
 		}
 	}
 }
