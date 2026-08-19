@@ -20,6 +20,7 @@ const (
 	CodeRegistryDigestInvalid          Code = "registry_digest_invalid"
 	CodeRegistryMediaTypeUnsupported   Code = "registry_media_type_unsupported"
 	CodeRegistryConfigInvalid          Code = "registry_config_invalid"
+	CodeClientClosed                   Code = "client_closed"
 	CodeOCIAnnotationConflict          Code = "oci_annotation_conflict"
 	CodeOCISourceMismatch              Code = "oci_source_mismatch"
 	CodeOCIRevisionMismatch            Code = "oci_revision_mismatch"

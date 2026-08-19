@@ -1,6 +1,7 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -57,9 +58,14 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	httpClient *http.Client
-	baseOrigin *url.URL
-	now        func() time.Time
+	httpClient     *http.Client
+	baseOrigin     *url.URL
+	tokenRealm     string
+	tokens         *tokenCache
+	now            func() time.Time
+	requestTimeout time.Duration
+	rootContext    context.Context
+	cancel         context.CancelFunc
 }
 
 func NewClient(config ClientConfig) (*Client, error) {
@@ -103,22 +109,22 @@ func newClient(config ClientConfig, baseOrigin *url.URL) (*Client, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Client{httpClient: &client, baseOrigin: baseOrigin, now: now}, nil
+	tokenRealm := *baseOrigin
+	tokenRealm.Path = "/token"
+	rootContext, cancel := context.WithCancel(context.Background())
+	return &Client{httpClient: &client, baseOrigin: baseOrigin, tokenRealm: tokenRealm.String(), tokens: newTokenCache(), now: now, requestTimeout: config.RequestTimeout, rootContext: rootContext, cancel: cancel}, nil
 }
 
 func (c *Client) Resolve(ctx context.Context, request ResolveRequest) (ResolvedImage, error) {
-	if request.Credential != nil {
-		return ResolvedImage{}, NewError(CodeRegistryAuthRequired)
-	}
 	reference, err := ParseReference(request.Host, request.Repository, request.Tag)
 	if err != nil {
 		return ResolvedImage{}, err
 	}
 	manifestURL := c.registryURL(reference.Repository, "manifests", reference.Tag)
-	if err := c.manifestHEAD(ctx, manifestURL); err != nil {
+	if err := c.manifestHEAD(ctx, manifestURL, reference.Repository, request.Credential); err != nil {
 		return ResolvedImage{}, err
 	}
-	manifest, mediaType, digest, err := c.resolveManifest(ctx, manifestURL, "")
+	manifest, mediaType, digest, err := c.resolveManifest(ctx, manifestURL, "", reference.Repository, request.Credential)
 	if err != nil {
 		return ResolvedImage{}, err
 	}
@@ -127,7 +133,7 @@ func (c *Client) Resolve(ctx context.Context, request ResolveRequest) (ResolvedI
 	resolved := ResolvedImage{Digest: digest, ManifestMediaType: mediaType}
 	if manifest.Config != nil {
 		configURL := c.registryURL(reference.Repository, "blobs", manifest.Config.Digest)
-		configBody, configMedia, configDigest, getErr := c.getVerified(ctx, configURL, manifest.Config.MediaType, MaxConfigBytes, ResponseConfigBlob, manifest.Config.Digest)
+		configBody, configMedia, configDigest, getErr := c.getVerified(ctx, configURL, manifest.Config.MediaType, MaxConfigBytes, ResponseConfigBlob, manifest.Config.Digest, reference.Repository, request.Credential)
 		if getErr != nil {
 			return ResolvedImage{}, getErr
 		}
@@ -154,9 +160,6 @@ func (c *Client) Resolve(ctx context.Context, request ResolveRequest) (ResolvedI
 }
 
 func (c *Client) ValidatePull(ctx context.Context, request PullValidationRequest) error {
-	if request.Credential != nil {
-		return NewError(CodeRegistryAuthRequired)
-	}
 	if request.Host != GHCRHost || !ValidRepository(request.Repository, 1) {
 		return NewError(CodeRegistryResponseInvalid)
 	}
@@ -168,12 +171,12 @@ func (c *Client) ValidatePull(ctx context.Context, request PullValidationRequest
 	} else {
 		return NewError(CodeRegistryResponseInvalid)
 	}
-	_, _, _, err := c.resolveManifest(ctx, c.registryURL(request.Repository, "manifests", request.Reference), expectedDigest)
+	_, _, _, err := c.resolveManifest(ctx, c.registryURL(request.Repository, "manifests", request.Reference), expectedDigest, request.Repository, request.Credential)
 	return err
 }
 
-func (c *Client) resolveManifest(ctx context.Context, target *url.URL, expectedDigest string) (ManifestEvidence, string, string, error) {
-	body, mediaType, digest, err := c.getVerified(ctx, target, manifestAccept, MaxManifestBytes, ResponseManifest, expectedDigest)
+func (c *Client) resolveManifest(ctx context.Context, target *url.URL, expectedDigest, repository string, credential *Credential) (ManifestEvidence, string, string, error) {
+	body, mediaType, digest, err := c.getVerified(ctx, target, manifestAccept, MaxManifestBytes, ResponseManifest, expectedDigest, repository, credential)
 	if err != nil {
 		return ManifestEvidence{}, "", "", err
 	}
@@ -184,8 +187,8 @@ func (c *Client) resolveManifest(ctx context.Context, target *url.URL, expectedD
 	return manifest, mediaType, digest, nil
 }
 
-func (c *Client) manifestHEAD(ctx context.Context, target *url.URL) error {
-	response, err := c.do(ctx, http.MethodHead, target, manifestAccept)
+func (c *Client) manifestHEAD(ctx context.Context, target *url.URL, repository string, credential *Credential) error {
+	response, err := c.doRegistry(ctx, http.MethodHead, target, manifestAccept, repository, credential)
 	if err != nil {
 		return err
 	}
@@ -205,19 +208,25 @@ func (c *Client) manifestHEAD(ctx context.Context, target *url.URL) error {
 	case http.StatusMethodNotAllowed:
 		return nil
 	case http.StatusUnauthorized:
+		if credential != nil {
+			return NewError(CodeRegistryAuthFailed)
+		}
 		return NewError(CodeRegistryAuthRequired)
 	default:
 		return c.statusError(response, ResponseManifest)
 	}
 }
 
-func (c *Client) getVerified(ctx context.Context, target *url.URL, accept string, limit int64, kind ResponseKind, expectedDigest string) ([]byte, string, string, error) {
-	response, err := c.do(ctx, http.MethodGet, target, accept)
+func (c *Client) getVerified(ctx context.Context, target *url.URL, accept string, limit int64, kind ResponseKind, expectedDigest, repository string, credential *Credential) ([]byte, string, string, error) {
+	response, err := c.doRegistry(ctx, http.MethodGet, target, accept, repository, credential)
 	if err != nil {
 		return nil, "", "", err
 	}
 	defer closeResponse(response)
 	if response.StatusCode == http.StatusUnauthorized {
+		if credential != nil {
+			return nil, "", "", NewError(CodeRegistryAuthFailed)
+		}
 		return nil, "", "", NewError(CodeRegistryAuthRequired)
 	}
 	if response.StatusCode != http.StatusOK {
@@ -273,7 +282,54 @@ func responseMediaType(header http.Header, allowUTF8Charset bool) (string, error
 	return mediaType, nil
 }
 
-func (c *Client) do(ctx context.Context, method string, target *url.URL, accept string) (*http.Response, error) {
+func (c *Client) doRegistry(ctx context.Context, method string, target *url.URL, accept, repository string, credential *Credential) (*http.Response, error) {
+	if c == nil || c.tokens == nil || c.tokens.isClosed() {
+		return nil, NewError(CodeClientClosed)
+	}
+	if credential == nil {
+		return c.do(ctx, method, target, accept, nil)
+	}
+	if credential.OrgID == "" || credential.RegistryID == "" || credential.Generation <= 0 {
+		return nil, NewError(CodeCredentialValidationFailed)
+	}
+	key := credentialCacheKey(c.baseOrigin.Host, repository, credential)
+	token, cached := c.tokens.get(key, c.now())
+	response, err := c.do(ctx, method, target, accept, token)
+	if err != nil || response.StatusCode != http.StatusUnauthorized {
+		clear(token)
+		return response, err
+	}
+	challenge, challengeErr := parseBearerChallenge(response.Header, c.tokenRealm, repository)
+	closeResponse(response)
+	if challengeErr != nil {
+		clear(token)
+		return nil, challengeErr
+	}
+	if cached {
+		c.tokens.evictToken(key, token)
+	}
+	clear(token)
+	credentialSnapshot := &Credential{
+		Username:   bytes.Clone(credential.Username),
+		PAT:        bytes.Clone(credential.PAT),
+		OrgID:      credential.OrgID,
+		RegistryID: credential.RegistryID,
+		Generation: credential.Generation,
+	}
+	token, err = c.tokens.loadOwned(ctx, key, c.now(), func() ([]byte, time.Time, error) {
+		fetchContext, cancel := context.WithTimeout(c.rootContext, c.requestTimeout)
+		defer cancel()
+		return c.fetchBearerToken(fetchContext, challenge, credentialSnapshot)
+	}, credentialSnapshot.Cleanup)
+	if err != nil {
+		return nil, err
+	}
+	response, err = c.do(ctx, method, target, accept, token)
+	clear(token)
+	return response, err
+}
+
+func (c *Client) do(ctx context.Context, method string, target *url.URL, accept string, bearer []byte) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
 	if err != nil {
 		return nil, NewError(CodeRegistryResponseInvalid)
@@ -281,7 +337,13 @@ func (c *Client) do(ctx context.Context, method string, target *url.URL, accept 
 	request.Header.Set("Accept", accept)
 	request.Header.Set("Accept-Encoding", "identity")
 	request.Header.Set("User-Agent", clientUserAgent)
+	if len(bearer) != 0 {
+		authorization := append([]byte("Bearer "), bearer...)
+		request.Header.Set("Authorization", string(authorization))
+		clear(authorization)
+	}
 	response, err := c.httpClient.Do(request)
+	request.Header.Del("Authorization")
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +355,16 @@ func (c *Client) do(ctx context.Context, method string, target *url.URL, accept 
 		return nil, NewError(CodeRegistryResponseInvalid)
 	}
 	return response, nil
+}
+
+func (c *Client) Close() error {
+	if c != nil && c.tokens != nil {
+		if c.cancel != nil {
+			c.cancel()
+		}
+		c.tokens.close()
+	}
+	return nil
 }
 
 func (c *Client) statusError(response *http.Response, kind ResponseKind) error {

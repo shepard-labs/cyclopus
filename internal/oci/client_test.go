@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -466,15 +467,235 @@ func TestResolveOversizedHeadersFailAtTransport(t *testing.T) {
 	}
 }
 
-func TestResolveRejectsCredentialUntilBearerSupport(t *testing.T) {
-	client, err := NewClient(ClientConfig{HTTPClient: http.DefaultClient, RequestTimeout: time.Second})
+func TestResolvePrivateBearerAuthentication(t *testing.T) {
+	username, pat, token := "private-user", "private-pat", "private-token"
+	configBody := []byte(`{"architecture":"amd64","os":"linux","config":{},"rootfs":{"type":"layers","diff_ids":[]}}`)
+	configDigest := clientTestDigest(configBody)
+	manifestBody := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"config":{"mediaType":%q,"digest":%q,"size":%d},"layers":[]}`,
+		MediaTypeOCIImageManifest, MediaTypeOCIConfig, configDigest, len(configBody)))
+	var mu sync.Mutex
+	var registryAuth []string
+	tokenCalls := 0
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			mu.Lock()
+			tokenCalls++
+			mu.Unlock()
+			if got, want := r.Header.Get("Authorization"), "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+pat)); got != want {
+				t.Errorf("token Authorization = %q, want %q", got, want)
+			}
+			if r.URL.Query().Get("service") != GHCRHost || r.URL.Query().Get("scope") != "repository:owner/repo:pull" {
+				t.Errorf("token query = %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+			_, _ = w.Write([]byte(`{"token":"` + token + `","expires_in":300}`))
+			return
+		}
+		mu.Lock()
+		registryAuth = append(registryAuth, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+server.URL+`/token",service="ghcr.io",scope="repository:owner/repo:pull"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", MediaTypeOCIImageManifest)
+			w.Header().Set("Docker-Content-Digest", clientTestDigest(manifestBody))
+			w.Header().Set("Content-Length", fmt.Sprint(len(manifestBody)))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/manifests/") {
+			writeVerified(w, MediaTypeOCIImageManifest, manifestBody)
+			return
+		}
+		writeVerified(w, MediaTypeOCIConfig, configBody)
+	}))
+	defer server.Close()
+
+	credential := &Credential{Username: []byte(username), PAT: []byte(pat), OrgID: "org", RegistryID: "registry", Generation: 3}
+	request := testResolveRequest()
+	request.Credential = credential
+	resolved, err := newTestClient(t, server).Resolve(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if resolved.Digest != clientTestDigest(manifestBody) || resolved.ConfigDigest != configDigest {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if tokenCalls != 1 || fmt.Sprint(registryAuth) != fmt.Sprint([]string{
+		"HEAD /v2/owner/repo/manifests/" + testSHA + " ",
+		"HEAD /v2/owner/repo/manifests/" + testSHA + " Bearer " + token,
+		"GET /v2/owner/repo/manifests/" + testSHA + " Bearer " + token,
+		"GET /v2/owner/repo/blobs/" + configDigest + " Bearer " + token,
+	}) {
+		t.Fatalf("token calls=%d registry requests=%v", tokenCalls, registryAuth)
+	}
+	if string(credential.Username) != username || string(credential.PAT) != pat {
+		t.Fatalf("Resolve mutated caller credential: %#v", credential)
+	}
+}
+
+func TestPrivateTokenTransportRejectsUnsafeResponses(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		serve func(http.ResponseWriter, *http.Request)
+	}{
+		{"unknown_charset", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json; charset=iso-8859-1")
+			_, _ = w.Write([]byte(`{"token":"secret"}`))
+		}},
+		{"gzip", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "gzip")
+			_, _ = w.Write([]byte(`{"token":"secret"}`))
+		}},
+		{"duplicate_type", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Add("Content-Type", "application/json")
+			w.Header().Add("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"token":"secret"}`))
+		}},
+		{"oversized_length", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", fmt.Sprint(maxTokenResponseBytes+1))
+		}},
+		{"oversized_body", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(strings.Repeat("x", maxTokenResponseBytes+1)))
+		}},
+		{"redirect", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/stolen", http.StatusFound) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var server *httptest.Server
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" {
+					test.serve(w, r)
+					return
+				}
+				w.Header().Set("WWW-Authenticate", `Bearer realm="`+server.URL+`/token",service="ghcr.io",scope="repository:owner/repo:pull"`)
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+			defer server.Close()
+			request := testResolveRequest()
+			request.Credential = &Credential{Username: []byte("user"), PAT: []byte("pat"), OrgID: "org", RegistryID: "registry", Generation: 1}
+			_, err := newTestClient(t, server).Resolve(t.Context(), request)
+			if !IsCode(err, CodeRegistryResponseInvalid) {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPrivateCredentialMetadataRequired(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid credential made a request") }))
+	defer server.Close()
+	for _, credential := range []*Credential{
+		{Username: []byte("user"), PAT: []byte("pat"), RegistryID: "registry", Generation: 1},
+		{Username: []byte("user"), PAT: []byte("pat"), OrgID: "org", Generation: 1},
+		{Username: []byte("user"), PAT: []byte("pat"), OrgID: "org", RegistryID: "registry"},
+	} {
+		client := newTestClient(t, server)
+		request := testResolveRequest()
+		request.Credential = credential
+		if _, err := client.Resolve(t.Context(), request); !IsCode(err, CodeCredentialValidationFailed) {
+			t.Fatalf("credential %#v error = %v", credential, err)
+		}
+	}
+}
+
+func TestPrivateAuthenticationRefreshAndNoLeaks(t *testing.T) {
+	username, pat, oldToken, freshToken, sentinel := "user-secret", "pat-secret", "old-secret", "fresh-secret", "upstream-secret"
+	var tokenCalls, registryCalls int
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			tokenCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"token":"` + freshToken + `"}`))
+			return
+		}
+		registryCalls++
+		if r.Header.Get("Authorization") != "Bearer "+freshToken {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+server.URL+`/token",service="ghcr.io",scope="repository:owner/repo:pull"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(sentinel))
+	}))
+	defer server.Close()
+	client := newTestClient(t, server)
+	credential := &Credential{Username: []byte(username), PAT: []byte(pat), OrgID: "org", RegistryID: "registry", Generation: 1}
+	key := credentialCacheKey(client.baseOrigin.Host, "owner/repo", credential)
+	if _, err := client.tokens.load(t.Context(), key, client.now(), func() ([]byte, time.Time, error) { return []byte(oldToken), time.Now().Add(time.Minute), nil }); err != nil {
+		t.Fatal(err)
+	}
 	request := testResolveRequest()
-	request.Credential = &Credential{Username: []byte("user"), PAT: []byte("secret")}
-	if _, err := client.Resolve(context.Background(), request); !IsCode(err, CodeRegistryAuthRequired) {
-		t.Fatalf("error = %v", err)
+	request.Credential = credential
+	_, err := client.Resolve(t.Context(), request)
+	if !IsCode(err, CodeRegistryAuthFailed) || tokenCalls != 1 || registryCalls != 2 {
+		t.Fatalf("Resolve() err=%v token/registry calls=%d/%d", err, tokenCalls, registryCalls)
+	}
+	for _, secret := range []string{username, pat, oldToken, freshToken, base64.StdEncoding.EncodeToString([]byte(username + ":" + pat)), sentinel} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("error leaked %q: %v", secret, err)
+		}
+	}
+}
+
+func TestClientClosePreventsFutureOperations(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("closed client made a request") }))
+	defer server.Close()
+	client := newTestClient(t, server)
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resolve(t.Context(), testResolveRequest()); !IsCode(err, CodeClientClosed) {
+		t.Fatalf("Resolve() after Close error = %v", err)
+	}
+	if err := client.ValidatePull(t.Context(), PullValidationRequest{Host: GHCRHost, Repository: "owner/repo", Reference: testSHA}); !IsCode(err, CodeClientClosed) {
+		t.Fatalf("ValidatePull() after Close error = %v", err)
+	}
+}
+
+func TestValidatePullPrivateTagAndDigest(t *testing.T) {
+	body := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[{"mediaType":%q,"digest":"sha256:%s","size":1}]}`,
+		MediaTypeOCIImageIndex, MediaTypeOCIImageManifest, strings.Repeat("1", 64)))
+	for _, reference := range []string{testSHA, clientTestDigest(body)} {
+		t.Run(reference[:6], func(t *testing.T) {
+			var tokenCalls, registryCalls int
+			var server *httptest.Server
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" {
+					tokenCalls++
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"access_token":"token"}`))
+					return
+				}
+				registryCalls++
+				if r.Header.Get("Authorization") != "Bearer token" {
+					w.Header().Set("WWW-Authenticate", `Bearer realm="`+server.URL+`/token",service="ghcr.io",scope="repository:owner/repo:pull"`)
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				if strings.HasPrefix(reference, "sha256:") {
+					writeVerified(w, MediaTypeOCIImageIndex, body)
+					return
+				}
+				writeVerified(w, MediaTypeOCIImageIndex, body)
+			}))
+			defer server.Close()
+			err := newTestClient(t, server).ValidatePull(t.Context(), PullValidationRequest{Host: GHCRHost, Repository: "owner/repo", Reference: reference, Credential: &Credential{Username: []byte("u"), PAT: []byte("p"), OrgID: "org", RegistryID: "registry", Generation: 1}})
+			if err != nil || tokenCalls != 1 || registryCalls != 2 {
+				t.Fatalf("ValidatePull() err=%v token/registry calls=%d/%d", err, tokenCalls, registryCalls)
+			}
+		})
 	}
 }
 
