@@ -665,7 +665,7 @@ func systemdServicesCard(node observability.NodeSystemDetail) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = components.Badge(serviceStateTone(svc.State), svc.State).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.StatusBadge(serviceStateTone(svc.State), svc.State).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -673,7 +673,7 @@ func systemdServicesCard(node observability.NodeSystemDetail) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = components.Badge(serviceSubStateTone(svc.SubState), svc.SubState).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.StatusBadge(serviceSubStateTone(svc.SubState), svc.SubState).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

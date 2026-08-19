@@ -13,6 +13,32 @@ templ OperationalStatus(kind, label string) {
 
 func statusDotTone(kind string) string { switch kind { case "success": return "bg-success"; case "warning": return "bg-warning"; case "error", "danger": return "bg-error"; default: return "bg-base-content/40" } }
 
+// StatusBadge renders a colored dot + label in an accent-tinted pill, more
+// vivid than the neutral Badge. Used for status columns (e.g. systemd service
+// state/sub-state) where the status color should read at a glance. The dot and
+// text take the accent color; the pill keeps a soft accent border/background.
+templ StatusBadge(kind, text string) {
+	<span class={ "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium " + statusBadgeTone(kind) }>
+		<span aria-hidden="true" class={ "size-1.5 shrink-0 rounded-full " + statusDotTone(kind) }></span>
+		<span>{ text }</span>
+	</span>
+}
+
+func statusBadgeTone(kind string) string {
+	switch kind {
+	case "success":
+		return "border-success/30 bg-success/15 text-success"
+	case "warning":
+		return "border-warning/30 bg-warning/15 text-warning"
+	case "error", "danger":
+		return "border-error/30 bg-error/15 text-error"
+	case "primary", "brand", "info":
+		return "border-primary/30 bg-primary/15 text-primary"
+	default:
+		return "border-line bg-base-300 text-base-content/70"
+	}
+}
+
 // ReleaseStatusBadge renders a colored badge for a release status string
 // (store value: pending/deploying/live/failed/superseded).
 templ ReleaseStatusBadge(status string) {

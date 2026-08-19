@@ -555,8 +555,8 @@ templ systemdServicesCard(node observability.NodeSystemDetail) {
 						for _, svc := range node.Services {
 							<tr class="systemd-service-row" data-service-name={ strings.ToLower(svc.Name) }>
 								<td class="py-3.5 pr-3 pl-4 font-mono text-sm font-medium text-base-content">{ svc.Name }</td>
-								<td class="px-3 py-3.5">@components.Badge(serviceStateTone(svc.State), svc.State)</td>
-								<td class="px-3 py-3.5">@components.Badge(serviceSubStateTone(svc.SubState), svc.SubState)</td>
+								<td class="px-3 py-3.5">@components.StatusBadge(serviceStateTone(svc.State), svc.State)</td>
+								<td class="px-3 py-3.5">@components.StatusBadge(serviceSubStateTone(svc.SubState), svc.SubState)</td>
 								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceCPU(svc, false) }</td>
 								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceCPU(svc, true) }</td>
 								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceMemory(svc.MemoryBytes) }</td>
