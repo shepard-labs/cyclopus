@@ -23,7 +23,15 @@ func StaticHandler() http.Handler {
 	}
 	files := http.FileServer(http.FS(sub))
 	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		// CSS/JS rebuild during development and are served from an embed.FS
+		// baked at build time; a long-lived cache would pin a stale stylesheet
+		// after a rebuild. Revalidate those every load; keep the day-long cache
+		// for genuinely static assets (images, fonts).
+		if strings.HasSuffix(r.URL.Path, ".css") || strings.HasSuffix(r.URL.Path, ".js") {
+			w.Header().Set("Cache-Control", "no-cache")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
 		files.ServeHTTP(w, r)
 	}))
 }
