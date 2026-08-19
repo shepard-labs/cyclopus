@@ -133,6 +133,94 @@ func titleCase(value string) string {
 	return strings.ToUpper(value[:1]) + value[1:]
 }
 
+// failedServiceCount counts services whose state or sub-state is Failed.
+func failedServiceCount(services []observability.SystemdService) int {
+	n := 0
+	for _, s := range services {
+		if s.State == "Failed" || s.SubState == "Failed" {
+			n++
+		}
+	}
+	return n
+}
+
+// serviceStateTone maps a systemd service state to a badge tone, mirroring
+// Beszel's getStatusColor (Active green, Failed red, everything else muted).
+func serviceStateTone(state string) string {
+	switch state {
+	case "Active":
+		return "success"
+	case "Failed":
+		return "error"
+	default:
+		return "neutral"
+	}
+}
+
+// serviceSubStateTone maps a systemd sub-state to a badge tone, mirroring
+// Beszel's getSubStateColor (Running green, Failed red, Dead yellow, muted
+// otherwise).
+func serviceSubStateTone(subState string) string {
+	switch subState {
+	case "Running":
+		return "success"
+	case "Failed":
+		return "error"
+	case "Dead":
+		return "warning"
+	default:
+		return "neutral"
+	}
+}
+
+// formatServiceCPU renders a service CPU percentage the way Beszel's systemd
+// table does: N/A unless the unit is currently running (no cgroup is sampled
+// for exited/dead units), otherwise two decimals (one above 10%).
+func formatServiceCPU(s observability.SystemdService, peak bool) string {
+	if s.SubState != "Running" {
+		return "N/A"
+	}
+	v := s.CPU
+	if peak {
+		v = s.CPUPeak
+	}
+	digits := 2
+	if v >= 10 {
+		digits = 1
+	}
+	return decimalString(v, digits) + "%"
+}
+
+// formatServiceMemory renders a service memory byte count using the same
+// thresholds and decimal rules as Beszel's formatBytes+decimalString pairing
+// (binary units; N/A when the agent reported nothing).
+func formatServiceMemory(bytes uint64) string {
+	if bytes == 0 {
+		return "N/A"
+	}
+	const unit = 1024.0
+	v := float64(bytes)
+	switch {
+	case v >= unit*unit*unit:
+		v /= unit * unit * unit
+		return decimalString(v, 1) + " GB"
+	case v >= unit*unit:
+		v /= unit * unit
+		if v >= 10 {
+			return decimalString(v, 1) + " MB"
+		}
+		return decimalString(v, 2) + " MB"
+	case v >= unit:
+		v /= unit
+		if v >= 10 {
+			return decimalString(v, 1) + " KB"
+		}
+		return decimalString(v, 2) + " KB"
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
 func avgCPUNodes(nodes []observability.NodeSystemDetail) float64 {
 	if len(nodes) == 0 {
 		return 0

@@ -374,7 +374,7 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 		if strings.Contains(strings.ToLower(fragmentBody), "<!doctype html") {
 			t.Fatalf("fragment contains full-page HTML:\n%s", fragmentBody)
 		}
-		if strings.Contains(fragmentBody, "Updated ") {
+		if strings.Contains(fragmentBody, "Updated ago") || strings.Contains(fragmentBody, "Updated 2") {
 			t.Fatalf("fragment still shows relative updated text:\n%s", fragmentBody)
 		}
 		if strings.Contains(fragmentBody, "bg-base-300/60") {
@@ -390,6 +390,63 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 			if strings.Contains(body, gone) {
 				t.Fatalf("metrics page still contains %q", gone)
 			}
+		}
+	})
+
+	t.Run("admin metrics renders systemd services card for the selected node", func(t *testing.T) {
+		updated := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+		nodes := []observability.NodeSystemDetail{
+			{
+				ID: "sys-1", Name: "node-1", Host: "192.168.1.10", Port: "45876", Status: "up", Updated: time.Now(),
+				CPUPercent: 12.5, MemoryUsed: 45.2, DiskPercent: 20.1,
+				History: []observability.SystemStatPoint{
+					{Timestamp: time.Now(), CPU: 12.5, Memory: 45.2, Disk: 20.1},
+				},
+				Services: []observability.SystemdService{
+					{Name: "apparmor", State: "Active", SubState: "Exited", MemoryPeakBytes: 23592960, Updated: updated},
+					{Name: "beszel-agent", State: "Active", SubState: "Running", CPU: 0.03, CPUPeak: 0.31, MemoryBytes: 12582912, MemoryPeakBytes: 14784921, Updated: updated},
+					{Name: "cloud-init-main", State: "Inactive", SubState: "Dead", MemoryPeakBytes: 60922266, Updated: updated},
+					{Name: "broken-svc", State: "Failed", SubState: "Failed", Updated: updated},
+				},
+			},
+			{
+				ID: "sys-2", Name: "node-2", Host: "192.168.1.11", Port: "45876", Status: "up", Updated: time.Now(),
+				CPUPercent: 5.0, MemoryUsed: 30.0, DiskPercent: 10.0,
+				History: []observability.SystemStatPoint{
+					{Timestamp: time.Now(), CPU: 5.0, Memory: 30.0, Disk: 10.0},
+				},
+			},
+		}
+
+		body := renderComponent(t, context.Background(), adminpages.MetricsChartsFragment(nodes, "sys-1", "24h"))
+		assertContainsAll(t, body,
+			`Systemd Services`,
+			`Total: 4`,
+			`Failed: 1`,
+			`Updated every minute.`,
+			`id="systemd-services-filter"`,
+			`beszel-agent`,
+			`data-service-name="apparmor"`,
+			`>Active<`,
+			`>Running<`,
+			`>Exited<`,
+			`>Inactive<`,
+			`>Dead<`,
+			`>Failed<`,
+			// CPU is N/A unless the unit is running; memory N/A when zero.
+			`0.03%`,
+			`0.31%`,
+			`N/A`,
+			`12.0 MB`,
+			`14.1 MB`,
+			// Updated timestamps carry ISO data attributes for client localization.
+			`data-iso-time="2026-01-02T03:04:05Z"`,
+		)
+
+		// A node whose agent reports no services renders no card.
+		emptyBody := renderComponent(t, context.Background(), adminpages.MetricsChartsFragment(nodes, "sys-2", "24h"))
+		if strings.Contains(emptyBody, "Systemd Services") {
+			t.Fatalf("services card rendered for a node with no services:\n%s", emptyBody)
 		}
 	})
 

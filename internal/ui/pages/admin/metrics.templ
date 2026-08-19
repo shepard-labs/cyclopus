@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	"github.com/shepard-labs/cyclopus/internal/store"
@@ -307,16 +308,55 @@ templ metricsContent(nodes []observability.NodeSystemDetail, selectedNodeID stri
 			}
 		}
 
+		// Systemd services card: wire the filter input (client-side row hiding)
+		// and localize the per-row Updated timestamps. Runs on every htmx:load
+		// because the card lives in the polled #metrics-charts fragment. The
+		// query survives the 10s poll swap: it is kept in a page-scope variable
+		// and re-applied to the freshly rendered rows each cycle.
+		let systemdServiceFilterQuery = '';
+		function applySystemdServiceFilter(scope) {
+			const q = systemdServiceFilterQuery;
+			(scope.querySelectorAll ? scope.querySelectorAll('.systemd-service-row') : []).forEach(row => {
+				const name = row.getAttribute('data-service-name') || '';
+				row.style.display = (!q || name.indexOf(q) !== -1) ? '' : 'none';
+			});
+		}
+		function initSystemdServices(root) {
+			const scope = root || document;
+			const filter = scope.querySelector ? scope.querySelector('#systemd-services-filter') : null;
+			if (filter && !filter.dataset.systemdWired) {
+				filter.dataset.systemdWired = '1';
+				// Restore the query into the freshly swapped-in input.
+				if (systemdServiceFilterQuery && !filter.value) {
+					filter.value = systemdServiceFilterQuery;
+				}
+				filter.addEventListener('input', function() {
+					systemdServiceFilterQuery = filter.value.trim().toLowerCase();
+					applySystemdServiceFilter(scope);
+				});
+			}
+			if (filter && systemdServiceFilterQuery) {
+				applySystemdServiceFilter(scope);
+			}
+			const stampScope = scope.querySelectorAll ? scope.querySelectorAll('.systemd-service-updated') : [];
+			stampScope.forEach(el => {
+				const iso = el.getAttribute('data-iso-time');
+				if (iso) el.textContent = formatUserLocalTimeOnly(iso);
+			});
+		}
+
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', () => { initChartInteractions(document); wireMetricsSelects(document); });
+			document.addEventListener('DOMContentLoaded', () => { initChartInteractions(document); wireMetricsSelects(document); initSystemdServices(document); });
 		} else {
 			initChartInteractions(document);
 			wireMetricsSelects(document);
+			initSystemdServices(document);
 		}
 		document.addEventListener('htmx:load', (e) => {
 			const root = e.detail?.elt || e.target || document;
 			initChartInteractions(root);
 			wireMetricsSelects(root);
+			initSystemdServices(root);
 		});
 		document.addEventListener('htmx:afterRequest', (e) => {
 			if (!e.detail.successful) return;
@@ -466,8 +506,75 @@ templ metricsCharts(nodes []observability.NodeSystemDetail, selectedNodeID strin
 			if temp.CurrentVal != "0.0 °C" && temp.CurrentVal != "0" {
 				@RenderSVGChart(temp)
 			}
+			@systemdServicesCard(node)
 		}
 	</div>
+}
+
+// systemdServicesCard renders the selected node's systemd units, mirroring
+// Beszel's Systemd Services table. It lives inside #metrics-charts so the 10s
+// poll refreshes it alongside the charts. The card is hidden entirely when
+// the node's agent reports no services (non-Linux host or SKIP_SYSTEMD).
+templ systemdServicesCard(node observability.NodeSystemDetail) {
+	if len(node.Services) > 0 {
+		<div class="rounded-box border border-line bg-base-200 p-6">
+			<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
+				<div>
+					<h3 class="text-base font-semibold text-base-content">Systemd Services</h3>
+					<p class="mt-0.5 text-xs text-base-content/60">
+						Total: { fmt.Sprintf("%d", len(node.Services)) }
+						<span aria-hidden="true"> | </span>
+						Failed: { fmt.Sprintf("%d", failedServiceCount(node.Services)) }
+						<span aria-hidden="true"> | </span>
+						Updated every minute.
+					</p>
+				</div>
+				<input
+					id="systemd-services-filter"
+					type="search"
+					placeholder="Filter..."
+					aria-label="Filter systemd services"
+					class="w-48 rounded-field border border-line bg-base-300 px-3 py-1.5 text-sm text-base-content outline-none transition-colors placeholder:text-base-content/40 hover:border-primary/60 focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"
+				/>
+			</div>
+			<div class="overflow-x-auto rounded-box border border-line">
+				<table class="table table-sm w-full">
+					<thead>
+						<tr class="text-xs uppercase tracking-wider text-base-content/50">
+							<th>Name</th>
+							<th>State</th>
+							<th>Sub State</th>
+							<th class="text-right">CPU (10m)</th>
+							<th class="text-right">CPU Peak</th>
+							<th class="text-right">Memory</th>
+							<th class="text-right">Memory Peak</th>
+							<th class="text-right">Updated</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, svc := range node.Services {
+							<tr class="systemd-service-row border-t border-line" data-service-name={ strings.ToLower(svc.Name) }>
+								<td class="font-mono text-xs font-medium text-base-content">{ svc.Name }</td>
+								<td>@components.Badge(serviceStateTone(svc.State), svc.State)</td>
+								<td>@components.Badge(serviceSubStateTone(svc.SubState), svc.SubState)</td>
+								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceCPU(svc, false) }</td>
+								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceCPU(svc, true) }</td>
+								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceMemory(svc.MemoryBytes) }</td>
+								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceMemory(svc.MemoryPeakBytes) }</td>
+								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">
+									if svc.Updated.IsZero() {
+										N/A
+									} else {
+										<span class="systemd-service-updated" data-iso-time={ svc.Updated.UTC().Format("2006-01-02T15:04:05Z") }>{ svc.Updated.UTC().Format("3:04:05 PM") }</span>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	}
 }
 
 templ RenderSVGChart(chart SVGChartData) {

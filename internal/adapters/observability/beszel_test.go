@@ -569,6 +569,110 @@ func TestBeszelGetNodeSystemDetailsHardware(t *testing.T) {
 	}
 }
 
+func TestBeszelGetNodeSystemDetailsSystemdServices(t *testing.T) {
+	updatedMs := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).UnixMilli()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/collections/systems/records"):
+			_, _ = w.Write([]byte(`{"items":[{"id":"sys-1","name":"node-1","status":"up","updated":"2026-01-02 03:04:05.000Z"},{"id":"sys-2","name":"node-2","status":"up","updated":"2026-01-02 03:04:05.000Z"}]}`))
+		case strings.HasPrefix(r.URL.Path, "/api/collections/system_stats/records"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case strings.HasPrefix(r.URL.Path, "/api/collections/system_details/records"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case strings.HasPrefix(r.URL.Path, "/api/collections/systemd_services/records"):
+			// The filter must scope services to the system being fetched.
+			filter := r.URL.Query().Get("filter")
+			if strings.Contains(filter, `system="sys-1"`) {
+				_, _ = fmt.Fprintf(w, `{"items":[
+					{"system":"sys-1","name":"beszel-agent","state":0,"sub":1,"cpu":0.03,"cpuPeak":0.31,"memory":12582912,"memPeak":14784921,"updated":%d},
+					{"system":"sys-1","name":"apparmor","state":0,"sub":2,"cpu":0,"cpuPeak":0,"memory":0,"memPeak":23592960,"updated":"%d"},
+					{"system":"sys-1","name":"cloud-init-main","state":1,"sub":0,"cpu":0,"cpuPeak":0,"memory":0,"memPeak":60922266,"updated":%d},
+					{"system":"sys-1","name":"broken-svc","state":2,"sub":3,"cpu":0,"cpuPeak":0,"memory":0,"memPeak":0,"updated":%d},
+					{"system":"sys-1","name":"future-svc","state":9,"sub":-1,"cpu":0,"cpuPeak":0,"memory":0,"memPeak":0,"updated":0}
+				]}`, updatedMs, updatedMs, updatedMs, updatedMs)
+				return
+			}
+			// sys-2's agent reports no services (or predates the collection).
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	nodes, err := unauthedTestClient(server.URL, server.Client()).GetNodeSystemDetails(context.Background())
+	if err != nil {
+		t.Fatalf("GetNodeSystemDetails: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("got %d nodes, want 2", len(nodes))
+	}
+
+	byID := map[string]NodeSystemDetail{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+
+	services := byID["sys-1"].Services
+	if len(services) != 5 {
+		t.Fatalf("sys-1 services = %d, want 5", len(services))
+	}
+	// Sorted by name.
+	wantOrder := []string{"apparmor", "beszel-agent", "broken-svc", "cloud-init-main", "future-svc"}
+	for i, want := range wantOrder {
+		if services[i].Name != want {
+			t.Errorf("services[%d].Name = %q, want %q", i, services[i].Name, want)
+		}
+	}
+
+	running := services[1] // beszel-agent
+	if running.State != "Active" || running.SubState != "Running" {
+		t.Errorf("beszel-agent state/sub = %q/%q, want Active/Running", running.State, running.SubState)
+	}
+	if running.CPU != 0.03 || running.CPUPeak != 0.31 {
+		t.Errorf("beszel-agent cpu/peak = %v/%v, want 0.03/0.31", running.CPU, running.CPUPeak)
+	}
+	if running.MemoryBytes != 12582912 || running.MemoryPeakBytes != 14784921 {
+		t.Errorf("beszel-agent mem/peak = %d/%d", running.MemoryBytes, running.MemoryPeakBytes)
+	}
+	if got := running.Updated; got.UnixMilli() != updatedMs {
+		t.Errorf("beszel-agent Updated = %v, want UnixMilli %d", got, updatedMs)
+	}
+
+	exited := services[0] // apparmor
+	if exited.State != "Active" || exited.SubState != "Exited" {
+		t.Errorf("apparmor state/sub = %q/%q, want Active/Exited", exited.State, exited.SubState)
+	}
+	// updated may also arrive as a quoted string; it must still parse.
+	if got := exited.Updated; got.UnixMilli() != updatedMs {
+		t.Errorf("apparmor Updated = %v, want UnixMilli %d (string form)", got, updatedMs)
+	}
+
+	dead := services[3] // cloud-init-main
+	if dead.State != "Inactive" || dead.SubState != "Dead" {
+		t.Errorf("cloud-init-main state/sub = %q/%q, want Inactive/Dead", dead.State, dead.SubState)
+	}
+
+	failed := services[2] // broken-svc
+	if failed.State != "Failed" || failed.SubState != "Failed" {
+		t.Errorf("broken-svc state/sub = %q/%q, want Failed/Failed", failed.State, failed.SubState)
+	}
+
+	unknown := services[4] // future-svc: out-of-range enums, zero timestamp
+	if unknown.State != "Unknown" || unknown.SubState != "Unknown" {
+		t.Errorf("future-svc state/sub = %q/%q, want Unknown/Unknown", unknown.State, unknown.SubState)
+	}
+	if !unknown.Updated.IsZero() {
+		t.Errorf("future-svc Updated = %v, want zero", unknown.Updated)
+	}
+
+	// A node whose systemd_services request fails renders no services (and
+	// does not fail the page fetch).
+	if got := byID["sys-2"].Services; len(got) != 0 {
+		t.Errorf("sys-2 services = %d, want 0 on collection error", len(got))
+	}
+}
+
 func TestBeszelStatParsingDiskAndBandwidthSplit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

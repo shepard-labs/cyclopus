@@ -233,6 +233,24 @@ type SystemStatPoint struct {
 	Temperature float64
 }
 
+// SystemdService is one systemd unit as reported by a node's Beszel agent
+// (hub collection `systemd_services`). State and SubState are decoded to
+// Beszel's display labels at the adapter boundary so templates stay dumb.
+// CPU/CPUPeak are percentages and are only meaningful while SubState is
+// "Running" (the agent samples no cgroup for exited/dead units; the Beszel UI
+// renders N/A for the same condition). Memory values are bytes; zero means
+// the agent reported nothing (also rendered N/A).
+type SystemdService struct {
+	Name            string
+	State           string // Active, Inactive, Failed, Activating, Deactivating, Reloading
+	SubState        string // Dead, Running, Exited, Failed, Unknown
+	CPU             float64
+	CPUPeak         float64
+	MemoryBytes     uint64
+	MemoryPeakBytes uint64
+	Updated         time.Time
+}
+
 // NodeSystemDetail holds live info and recent timeseries samples for one node.
 type NodeSystemDetail struct {
 	ID          string
@@ -261,4 +279,8 @@ type NodeSystemDetail struct {
 	Load15      float64
 	Temperature float64
 	History     []SystemStatPoint
+	// Services holds the node's systemd units as last reported by the
+	// Beszel agent. Empty when the agent reports none (non-Linux host or
+	// SKIP_SYSTEMD) — the UI hides the services card in that case.
+	Services []SystemdService
 }

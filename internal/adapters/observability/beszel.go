@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -118,6 +120,62 @@ type beszelSystemDetails struct {
 	Memory   int64  `json:"memory"`
 }
 
+type beszelSystemdListResponse struct {
+	Items []beszelSystemdRecord `json:"items"`
+}
+
+// beszelSystemdRecord mirrors Beszel hub's systemd_services collection. state
+// and sub are integer enums (see systemdStateLabels/systemdSubStateLabels);
+// cpu/cpuPeak are percentages; memory/memPeak are bytes; updated is Unix
+// milliseconds (the hub writes time.Now().UnixMilli() into a PocketBase
+// number field, so it arrives as a plain JSON number, not a datetime string).
+type beszelSystemdRecord struct {
+	System  string          `json:"system"`
+	Name    string          `json:"name"`
+	State   int             `json:"state"`
+	Sub     int             `json:"sub"`
+	CPU     float64         `json:"cpu"`
+	CPUPeak float64         `json:"cpuPeak"`
+	Memory  uint64          `json:"memory"`
+	MemPeak uint64          `json:"memPeak"`
+	Updated json.RawMessage `json:"updated"`
+}
+
+// Label tables mirror Beszel's ServiceStatus/ServiceSubState enums
+// (internal/entities/systemd) and its UI label arrays. Out-of-range values
+// fall back to "Unknown".
+var systemdStateLabels = []string{"Active", "Inactive", "Failed", "Activating", "Deactivating", "Reloading"}
+var systemdSubStateLabels = []string{"Dead", "Running", "Exited", "Failed", "Unknown"}
+
+func systemdStateLabel(state int) string {
+	if state >= 0 && state < len(systemdStateLabels) {
+		return systemdStateLabels[state]
+	}
+	return "Unknown"
+}
+
+func systemdSubStateLabel(sub int) string {
+	if sub >= 0 && sub < len(systemdSubStateLabels) {
+		return systemdSubStateLabels[sub]
+	}
+	return "Unknown"
+}
+
+// parseBeszelUnixMilli decodes the systemd_services `updated` field, which the
+// hub writes as Unix milliseconds into a PocketBase number field. It tolerates
+// the value arriving as a JSON number or as a quoted string.
+func parseBeszelUnixMilli(raw json.RawMessage) time.Time {
+	s := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if s == "" || s == "null" {
+		return time.Time{}
+	}
+	ms, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || ms <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms).UTC()
+}
+
 type beszelStatsListResponse struct {
 	Items []beszelStatRecord `json:"items"`
 }
@@ -202,6 +260,7 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string,
 	// and collapse long windows to the last ~40 minutes of data.
 	recordType := window.ID.RecordType()
 	statsBySystem := make(map[string][]beszelStatRecord, len(decoded.Items))
+	servicesBySystem := make(map[string][]SystemdService, len(decoded.Items))
 	for _, sys := range decoded.Items {
 		statsValues := url.Values{"perPage": {"500"}, "sort": {"-created"}}
 		filter := fmt.Sprintf(`(system="%s"&&type="%s")`, sys.ID, recordType)
@@ -235,6 +294,13 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string,
 		}
 		respStats.Body.Close()
 		statsBySystem[sys.ID] = decodedStats.Items
+
+		// Systemd services for this system (hub collection systemd_services;
+		// populated by the agent's ~1m stats pushes, pruned when stale >20m).
+		// Best-effort like the details fetch: a hub too old to have the
+		// collection (404) or a transient error must not blank the whole page —
+		// the node simply renders without a services card.
+		servicesBySystem[sys.ID] = c.fetchSystemdServices(ctx, token, sys.ID)
 	}
 
 	detailsURL := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/system_details/records?perPage=200"
@@ -356,10 +422,60 @@ func (c *BeszelClient) fetchNodeSystemDetails(ctx context.Context, token string,
 			hist[i], hist[j] = hist[j], hist[i]
 		}
 		detail.History = downsampleHistory(hist, MaxHistoryPoints)
+		detail.Services = servicesBySystem[sys.ID]
 		nodes = append(nodes, detail)
 	}
 
 	return nodes, false, nil
+}
+
+// fetchSystemdServices returns the given system's systemd units from the
+// hub's systemd_services collection, sorted by name. Any failure (including a
+// 401, which the caller's re-auth retry covers on the surrounding requests)
+// yields nil so a node without readable service data simply renders no card.
+func (c *BeszelClient) fetchSystemdServices(ctx context.Context, token string, systemID string) []SystemdService {
+	values := url.Values{
+		"perPage": {"2000"},
+		"sort":    {"name"},
+		"filter":  {fmt.Sprintf(`(system="%s")`, systemID)},
+	}
+	endpoint := strings.TrimRight(c.config.BaseURL, "/") + "/api/collections/systemd_services/records?" + values.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil
+	}
+	var decoded beszelSystemdListResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, MaxResponseBytes)).Decode(&decoded); err != nil {
+		return nil
+	}
+	services := make([]SystemdService, 0, len(decoded.Items))
+	for _, item := range decoded.Items {
+		if item.Name == "" {
+			continue
+		}
+		services = append(services, SystemdService{
+			Name:            item.Name,
+			State:           systemdStateLabel(item.State),
+			SubState:        systemdSubStateLabel(item.Sub),
+			CPU:             item.CPU,
+			CPUPeak:         item.CPUPeak,
+			MemoryBytes:     item.Memory,
+			MemoryPeakBytes: item.MemPeak,
+			Updated:         parseBeszelUnixMilli(item.Updated),
+		})
+	}
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
+	return services
 }
 
 // GetOperatorMetrics fetches the operator's host systems and projects only the
