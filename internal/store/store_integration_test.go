@@ -2616,7 +2616,7 @@ func seedTenant(t *testing.T, pool *pgxpool.Pool, fixture tenantFixture) {
 		{`INSERT INTO projects (id, org_id, name, slug, git_connection_id)
 			VALUES ($1, $2, $3, $4, $5)`, []any{fixture.projectID, fixture.orgID, "Project " + fixture.slug, "project-" + fixture.slug, fixture.repositoryID}},
 		{`INSERT INTO apps (id, org_id, project_id, name, slug, hostname_label, image_repository,github_workflow_path,production_branch,deploy_timeout_seconds, previews_enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, $7,'.github/workflows/deploy.yml','main',1,true)`, []any{fixture.appID, fixture.orgID, fixture.projectID, "App " + fixture.slug, "app-" + fixture.slug, "host-" + fixture.slug, "ghcr.io/acme/app-" + fixture.slug}},
+			VALUES ($1, $2, $3, $4, $5, $6, $7,'.github/workflows/deploy.yml','main',1,true)`, []any{fixture.appID, fixture.orgID, fixture.projectID, "App " + fixture.slug, "app-" + fixture.slug, "host-" + fixture.slug, "acme/app-" + fixture.slug}},
 		{`INSERT INTO environments (id, org_id, app_id, branch, kind, namespace, planned_hostname)
 			VALUES ($1, $2, $3, 'main', 'production', $4, $5)`, []any{fixture.environmentID, fixture.orgID, fixture.appID, fixture.namespace, "planned-" + fixture.slug + ".example.test"}},
 	}

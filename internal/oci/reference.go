@@ -89,6 +89,7 @@ type Credential struct {
 	Username   []byte
 	PAT        []byte
 	OrgID      string
+	RegistryID string
 	Generation int64
 }
 
