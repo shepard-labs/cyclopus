@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -23,22 +26,42 @@ type Registry struct {
 	RegistryURL                                          string
 	ActiveGeneration, ReconciliationGeneration           int64
 	HasActiveCredential, HasPendingCredential            bool
-	PendingGeneration                                    *int64
+	PendingGeneration, PreviousGeneration                *int64
+	HasPreviousCredential                                bool
+	OperationID, LeaseOwner                              *string
+	LeaseEpoch                                           int64
+	LeaseExpiresAt, ActivatedAt                          *time.Time
+	Attempts                                             int
+	NextAttemptAt                                        time.Time
 	FailureCode, FailureMessage                          *string
 	CreatedAt, UpdatedAt                                 time.Time
 }
 
 const registrySelect = `SELECT id::text,org_id::text,provider,registry_host,state,COALESCE(checkpoint,''),active_generation,
 	active_credential_secret_ref IS NOT NULL,pending_generation,pending_credential_secret_ref IS NOT NULL,
-	reconciliation_generation,failure_code,failure_message,created_at,updated_at FROM registries`
+	reconciliation_generation,failure_code,failure_message,created_at,updated_at,previous_generation,
+	previous_credential_secret_ref IS NOT NULL,operation_id::text,lease_owner,lease_epoch,lease_expires_at,attempts,
+	next_attempt_at,activated_at FROM registries`
 
 func scanRegistry(row rowScanner, value *Registry) error {
 	if err := row.Scan(&value.ID, &value.OrgID, &value.Provider, &value.RegistryHost, &value.State, &value.Checkpoint,
 		&value.ActiveGeneration, &value.HasActiveCredential, &value.PendingGeneration, &value.HasPendingCredential,
-		&value.ReconciliationGeneration, &value.FailureCode, &value.FailureMessage, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		&value.ReconciliationGeneration, &value.FailureCode, &value.FailureMessage, &value.CreatedAt, &value.UpdatedAt,
+		&value.PreviousGeneration, &value.HasPreviousCredential, &value.OperationID, &value.LeaseOwner,
+		&value.LeaseEpoch, &value.LeaseExpiresAt, &value.Attempts, &value.NextAttemptAt, &value.ActivatedAt); err != nil {
 		return err
 	}
 	value.RegistryURL = value.RegistryHost
+	return nil
+}
+
+// EnablePhase6SchemaEpoch is an explicit rollout fence. Migrations never call
+// it; operators enable the epoch only after all v14 binaries have drained.
+func (s *Store) EnablePhase6SchemaEpoch(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `SELECT `+pgx.Identifier{s.schema, "enable_phase6_schema_epoch"}.Sanitize()+`()`)
+	if err != nil {
+		return fmt.Errorf("%w: enable Phase 6 schema epoch: %v", ErrFailedPrecondition, err)
+	}
 	return nil
 }
 

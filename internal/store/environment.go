@@ -32,17 +32,19 @@ type DeployRecoveryResult struct {
 type DeployExecution = DeployLease
 
 type ImmutableReleaseSnapshot struct {
-	ID                string          `json:"id"`
-	OrgID             string          `json:"org_id"`
-	EnvironmentID     string          `json:"environment_id"`
-	ImageRef          string          `json:"image_ref"`
-	GitCommitSHA      *string         `json:"git_commit_sha"`
-	TriggeredByUserID *string         `json:"triggered_by_user_id"`
-	Kind              string          `json:"kind"`
-	EnvVarRevisionID  *string         `json:"env_var_revision_id"`
-	ConfigSnapshot    json.RawMessage `json:"config_snapshot"`
-	ConfigHash        string          `json:"config_hash"`
-	CreatedAt         time.Time       `json:"created_at"`
+	ID                           string          `json:"id"`
+	OrgID                        string          `json:"org_id"`
+	EnvironmentID                string          `json:"environment_id"`
+	ImageRef                     string          `json:"image_ref"`
+	GitCommitSHA                 *string         `json:"git_commit_sha"`
+	TriggeredByUserID            *string         `json:"triggered_by_user_id"`
+	Kind                         string          `json:"kind"`
+	EnvVarRevisionID             *string         `json:"env_var_revision_id"`
+	ConfigSnapshot               json.RawMessage `json:"config_snapshot"`
+	ConfigHash                   string          `json:"config_hash"`
+	RegistryCredentialRegistryID *string         `json:"registry_credential_registry_id"`
+	RegistryCredentialGeneration *int64          `json:"registry_credential_generation"`
+	CreatedAt                    time.Time       `json:"created_at"`
 }
 
 type ExpiredDeploy struct {
@@ -136,13 +138,18 @@ func (s *Store) claimForwardDeploy(ctx context.Context, orgID, status string, ex
 				  'git_commit_sha', current.git_commit_sha, 'triggered_by_user_id', current.triggered_by_user_id,
 				  'kind', current.kind, 'env_var_revision_id', current.env_var_revision_id,
 				  'config_snapshot', current.config_snapshot, 'config_hash', current.config_hash,
+				  'registry_credential_registry_id', current.registry_credential_registry_id,
+				  'registry_credential_generation', current.registry_credential_generation,
 				  'created_at', current.created_at),
 				CASE WHEN previous.id IS NULL THEN NULL ELSE jsonb_build_object(
 				  'id', previous.id, 'org_id', previous.org_id, 'environment_id', previous.environment_id,
 				  'image_ref', previous.image_ref, 'git_commit_sha', previous.git_commit_sha,
 				  'triggered_by_user_id', previous.triggered_by_user_id, 'kind', previous.kind,
 				  'env_var_revision_id', previous.env_var_revision_id, 'config_snapshot', previous.config_snapshot,
-				  'config_hash', previous.config_hash, 'created_at', previous.created_at) END
+				  'config_hash', previous.config_hash,
+				  'registry_credential_registry_id', previous.registry_credential_registry_id,
+				  'registry_credential_generation', previous.registry_credential_generation,
+				  'created_at', previous.created_at) END
 			FROM claimed JOIN transitioned current ON current.id = claimed.in_progress_release_id
 			LEFT JOIN LATERAL (SELECT release.* FROM releases release
 			  WHERE release.org_id = claimed.org_id AND release.environment_id = claimed.id
@@ -282,6 +289,8 @@ func (s *Store) ClaimExpiredDeployLease(ctx context.Context, orgID, environmentI
 					'triggered_by_user_id', failed.triggered_by_user_id, 'kind', failed.kind,
 					'env_var_revision_id', failed.env_var_revision_id,
 					'config_snapshot', failed.config_snapshot, 'config_hash', failed.config_hash,
+					'registry_credential_registry_id', failed.registry_credential_registry_id,
+					'registry_credential_generation', failed.registry_credential_generation,
 					'created_at', failed.created_at),
 				CASE WHEN previous.id IS NULL THEN NULL ELSE jsonb_build_object(
 					'id', previous.id, 'org_id', previous.org_id,
@@ -290,6 +299,8 @@ func (s *Store) ClaimExpiredDeployLease(ctx context.Context, orgID, environmentI
 					'triggered_by_user_id', previous.triggered_by_user_id, 'kind', previous.kind,
 					'env_var_revision_id', previous.env_var_revision_id,
 					'config_snapshot', previous.config_snapshot, 'config_hash', previous.config_hash,
+					'registry_credential_registry_id', previous.registry_credential_registry_id,
+					'registry_credential_generation', previous.registry_credential_generation,
 					'created_at', previous.created_at) END
 			FROM claimed
 			JOIN releases AS failed ON failed.org_id = claimed.org_id

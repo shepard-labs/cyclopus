@@ -56,12 +56,20 @@ type KEDACronSchedule struct {
 }
 
 type Environment struct {
-	ID, OrgID, AppID, Branch, Kind, Namespace, LifecycleStatus string
-	PreviewSlug, PlannedHostname, CurrentReleaseID             *string
-	InProgressReleaseID, CurrentEnvVarRevisionID               *string
-	PendingCommitSHA, LifecycleReason, LifecycleErrorCode      *string
-	LifecycleErrorMessage                                      *string
-	CreatedAt, TeardownRequestedAt, TornDownAt                 *time.Time
+	ID, OrgID, AppID, Branch, Kind, Namespace, LifecycleStatus              string
+	PreviewSlug, PlannedHostname, CurrentReleaseID                          *string
+	InProgressReleaseID, CurrentEnvVarRevisionID                            *string
+	PendingCommitSHA, LifecycleReason, LifecycleErrorCode                   *string
+	LifecycleErrorMessage                                                   *string
+	RequiredRegistryCredentialGeneration, ReadyRegistryCredentialGeneration *int64
+	RegistryCredentialState, RegistryCredentialCheckpoint                   string
+	RegistryCredentialErrorCode, RegistryCredentialErrorMessage             *string
+	RegistryCredentialAttempts                                              int
+	RegistryCredentialLeaseEpoch                                            int64
+	RegistryCredentialNextAttemptAt                                         time.Time
+	RegistryCredentialLeaseOwner                                            *string
+	RegistryCredentialLeaseExpiresAt                                        *time.Time
+	CreatedAt, TeardownRequestedAt, TornDownAt                              *time.Time
 }
 
 type Release struct {
@@ -350,10 +358,18 @@ func (s *Store) GetProductionEnvironment(ctx context.Context, orgID, appID strin
 
 const environmentSelect = `SELECT environment.id::text,environment.org_id::text,environment.app_id::text,environment.branch,environment.kind,environment.preview_slug,environment.namespace,environment.planned_hostname,environment.lifecycle_status,environment.lifecycle_reason,environment.lifecycle_error_code,environment.lifecycle_error_message,
 	(SELECT release.id::text FROM releases release WHERE release.org_id=environment.org_id AND release.environment_id=environment.id AND release.status='live' ORDER BY release.created_at DESC,release.id DESC LIMIT 1),
-	environment.in_progress_release_id::text,environment.current_env_var_revision_id::text,environment.pending_commit_sha,environment.created_at,environment.teardown_requested_at,environment.torn_down_at FROM environments environment`
+	environment.in_progress_release_id::text,environment.current_env_var_revision_id::text,environment.pending_commit_sha,environment.created_at,environment.teardown_requested_at,environment.torn_down_at,
+	environment.required_registry_credential_generation,environment.ready_registry_credential_generation,environment.registry_credential_state,
+	COALESCE(environment.registry_credential_checkpoint,''),environment.registry_credential_error_code,environment.registry_credential_error_message,
+	environment.registry_credential_attempts,environment.registry_credential_next_attempt_at,environment.registry_credential_lease_owner,
+	environment.registry_credential_lease_epoch,environment.registry_credential_lease_expires_at FROM environments environment`
 
 func scanEnvironment(row rowScanner, v *Environment) error {
-	return row.Scan(&v.ID, &v.OrgID, &v.AppID, &v.Branch, &v.Kind, &v.PreviewSlug, &v.Namespace, &v.PlannedHostname, &v.LifecycleStatus, &v.LifecycleReason, &v.LifecycleErrorCode, &v.LifecycleErrorMessage, &v.CurrentReleaseID, &v.InProgressReleaseID, &v.CurrentEnvVarRevisionID, &v.PendingCommitSHA, &v.CreatedAt, &v.TeardownRequestedAt, &v.TornDownAt)
+	return row.Scan(&v.ID, &v.OrgID, &v.AppID, &v.Branch, &v.Kind, &v.PreviewSlug, &v.Namespace, &v.PlannedHostname, &v.LifecycleStatus, &v.LifecycleReason, &v.LifecycleErrorCode, &v.LifecycleErrorMessage, &v.CurrentReleaseID, &v.InProgressReleaseID, &v.CurrentEnvVarRevisionID, &v.PendingCommitSHA, &v.CreatedAt, &v.TeardownRequestedAt, &v.TornDownAt,
+		&v.RequiredRegistryCredentialGeneration, &v.ReadyRegistryCredentialGeneration, &v.RegistryCredentialState,
+		&v.RegistryCredentialCheckpoint, &v.RegistryCredentialErrorCode, &v.RegistryCredentialErrorMessage,
+		&v.RegistryCredentialAttempts, &v.RegistryCredentialNextAttemptAt, &v.RegistryCredentialLeaseOwner,
+		&v.RegistryCredentialLeaseEpoch, &v.RegistryCredentialLeaseExpiresAt)
 }
 
 func (s *Store) ListReleases(ctx context.Context, orgID, environmentID string, statuses []string) ([]Release, error) {
@@ -377,11 +393,11 @@ func (s *Store) GetRelease(ctx context.Context, orgID, id string) (Release, erro
 	return v, resourceQueryError("get release", err)
 }
 
-const releaseSelect = `SELECT id::text,org_id::text,environment_id::text,image_ref,git_commit_sha,triggered_by_user_id::text,kind,env_var_revision_id::text,config_snapshot,config_hash,created_at,status,COALESCE(failure_reason,'') FROM releases`
+const releaseSelect = `SELECT id::text,org_id::text,environment_id::text,image_ref,git_commit_sha,triggered_by_user_id::text,kind,env_var_revision_id::text,config_snapshot,config_hash,created_at,status,COALESCE(failure_reason,''),registry_credential_registry_id::text,registry_credential_generation FROM releases`
 
 func scanRelease(r rowScanner) (Release, error) {
 	var v Release
-	err := r.Scan(&v.ID, &v.OrgID, &v.EnvironmentID, &v.ImageRef, &v.GitCommitSHA, &v.TriggeredByUserID, &v.Kind, &v.EnvVarRevisionID, &v.ConfigSnapshot, &v.ConfigHash, &v.CreatedAt, &v.Status, &v.FailureReason)
+	err := r.Scan(&v.ID, &v.OrgID, &v.EnvironmentID, &v.ImageRef, &v.GitCommitSHA, &v.TriggeredByUserID, &v.Kind, &v.EnvVarRevisionID, &v.ConfigSnapshot, &v.ConfigHash, &v.CreatedAt, &v.Status, &v.FailureReason, &v.RegistryCredentialRegistryID, &v.RegistryCredentialGeneration)
 	return v, err
 }
 

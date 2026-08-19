@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,11 +43,33 @@ type DB interface {
 
 type Store struct {
 	db                  DB
+	schema              string
 	webhookPayloadCodec GitHubWebhookPayloadCodec
 }
 
 func New(db DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, schema: "public"}
+}
+
+func NewWithSchema(db DB, schema string) (*Store, error) {
+	if err := validateSchema(schema); err != nil {
+		return nil, err
+	}
+	return &Store{db: db, schema: schema}, nil
+}
+
+func validateSchema(schema string) error {
+	if len(schema) == 0 || len(schema) > 63 || strings.HasPrefix(schema, "pg_") {
+		return fmt.Errorf("%w: invalid PostgreSQL schema identifier", ErrInvalidArgument)
+	}
+	for i := 0; i < len(schema); i++ {
+		character := schema[i]
+		if character >= 'a' && character <= 'z' || character == '_' || i > 0 && character >= '0' && character <= '9' {
+			continue
+		}
+		return fmt.Errorf("%w: invalid PostgreSQL schema identifier", ErrInvalidArgument)
+	}
+	return nil
 }
 
 func (s *Store) withTx(ctx context.Context, fn func(pgx.Tx) error) error {

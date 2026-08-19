@@ -2457,6 +2457,7 @@ func TestRequestPreviewTeardownFencesEveryActiveOrchestrationStateIntegration(t 
 				image_tag_ref=app.image_repository||':'||desired_checkout_sha,resolved_image_digest='sha256:'||repeat('9',64),
 				immutable_image_ref=app.image_repository||'@sha256:'||repeat('9',64),
 				oci_media_type='application/vnd.oci.image.manifest.v1+json',oci_resolution_state='resolved',
+				oci_deadline_at=now()+interval '5 minutes',oci_annotation_status='absent',
 				oci_resolved_at=now(),deployment_state='ready' FROM apps app WHERE job.id=$1 AND app.id=job.app_id`, jobID)
 		}
 		if err != nil {
@@ -2576,7 +2577,11 @@ func newIntegrationStore(t *testing.T) (*Store, *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	return New(pool), pool
+	dataStore, err := NewWithSchema(pool, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dataStore, pool
 }
 
 type tenantFixture struct {

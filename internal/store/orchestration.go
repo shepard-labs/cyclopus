@@ -33,6 +33,7 @@ type OrchestrationJob struct {
 	Attempt                                                                               int
 	AcceptedGeneration                                                                    int64
 	EnqueueResult                                                                         string
+	OCI                                                                                   ImageResolutionEvidence
 }
 
 type GitHubRecoveryJob = OrchestrationJob

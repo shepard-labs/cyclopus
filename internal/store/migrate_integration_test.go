@@ -58,14 +58,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000014 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000015 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 14 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:14 dirty:false", version, dirty)
+		if version != 15 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:15 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1043,7 +1043,7 @@ func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("repaired 000011 migration: %v", err)
 	}
-	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 14 || dirty {
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 15 || dirty {
 		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
@@ -1183,6 +1183,164 @@ func TestMigration000014FanoutGuardShapeDownAndReUp(t *testing.T) {
 	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 14 || dirty {
 		t.Fatalf("000014 re-up state = %d/%t, %v", version, dirty, err)
 	}
+}
+
+func TestMigration000015UpgradeGuardsConstraintsAndReUp(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(14); err != nil {
+		t.Fatalf("literal latest-14 migrate: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	legacy := seedTenantGraph(t, conn, "migration-fifteen", "main", "", "migration-fifteen-production")
+	var legacyResolvedJob string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,
+		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,
+		oci_resolution_state,image_tag_ref,resolved_image_digest,immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state)
+		SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('b',40),1,
+		'legacy-resolved-v14','deploying','resolved','ghcr.io/acme/migration-fifteen:'||repeat('b',40),'sha256:'||repeat('c',64),
+		'ghcr.io/acme/migration-fifteen@sha256:'||repeat('c',64),'application/vnd.oci.image.manifest.v1+json',now(),'ready'
+		FROM git_connections connection WHERE connection.id=$4 RETURNING id::text`, legacy.org, legacy.app, legacy.environment, legacy.repository).Scan(&legacyResolvedJob); err != nil {
+		t.Fatal(err)
+	}
+	var legacyRegistry string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,pending_generation,pending_credential_secret_ref)
+		VALUES($1,'ghcr','ghcr.io','rotating','secret_written',1,'k8s-secret://cyclopus-system/legacy-ghcr#dockerconfig') RETURNING id::text`, legacy.org).Scan(&legacyRegistry); err != nil {
+		t.Fatal(err)
+	}
+	v14Catalog := schemaCatalogSnapshot(t, conn)
+	var v14LegacyJob string
+	if err := conn.QueryRow(t.Context(), `SELECT to_jsonb(job)::text FROM orchestration_jobs job WHERE id=$1`, legacyResolvedJob).Scan(&v14LegacyJob); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(15); err != nil {
+		t.Fatalf("000014 to 000015: %v", err)
+	}
+	var version uint
+	var dirty, enabled bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 15 || dirty {
+		t.Fatalf("000015 state = %d/%t, %v", version, dirty, err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT phase6_enabled FROM schema_epoch WHERE singleton`).Scan(&enabled); err != nil || enabled {
+		t.Fatalf("phase6 enabled after migration = %t, %v", enabled, err)
+	}
+	var legacyAnnotation string
+	var legacyDeadline *time.Time
+	if err := conn.QueryRow(t.Context(), `SELECT oci_annotation_status,oci_deadline_at FROM orchestration_jobs WHERE id=$1`, legacyResolvedJob).Scan(&legacyAnnotation, &legacyDeadline); err != nil || legacyAnnotation != "legacy" || legacyDeadline != nil {
+		t.Fatalf("legacy resolved evidence after additive migration = %q/%v, %v", legacyAnnotation, legacyDeadline, err)
+	}
+	var previous *int64
+	var attempts int
+	if err := conn.QueryRow(t.Context(), `SELECT previous_generation,attempts FROM registries WHERE id=$1`, legacyRegistry).Scan(&previous, &attempts); err != nil || previous != nil || attempts != 0 {
+		t.Fatalf("registry mixed defaults = %v/%d, %v", previous, attempts, err)
+	}
+	var checkpoint string
+	if err := conn.QueryRow(t.Context(), `SELECT checkpoint FROM registries WHERE id=$1`, legacyRegistry).Scan(&checkpoint); err != nil || checkpoint != "secret_written" {
+		t.Fatalf("v14 registry checkpoint after migration = %q, %v, want secret_written", checkpoint, err)
+	}
+	var ociAttempts int
+	var annotation string
+	if err := conn.QueryRow(t.Context(), `SELECT 0,'pending' WHERE NOT EXISTS (SELECT 1 FROM orchestration_jobs WHERE oci_attempts<>0 OR oci_annotation_status NOT IN ('pending','legacy'))`).Scan(&ociAttempts, &annotation); err != nil || ociAttempts != 0 || annotation != "pending" {
+		t.Fatalf("OCI mixed defaults = %d/%q, %v", ociAttempts, annotation, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE schema_epoch SET phase6_enabled=true`); err == nil {
+		t.Fatal("direct Phase 6 enable succeeded")
+	}
+	if _, err := conn.Exec(t.Context(), `SELECT set_config('cyclopus.phase6_enable','on',true); UPDATE schema_epoch SET phase6_enabled=true`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(14); err == nil || !strings.Contains(err.Error(), "Phase 6 is enabled") {
+		t.Fatalf("enabled guarded down error = %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 15 || dirty {
+		t.Fatalf("blocked down state = %d/%t, %v", version, dirty, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE schema_epoch SET phase6_enabled=false`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE orchestration_jobs SET oci_attempts=1 WHERE id=$1`, legacyResolvedJob); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(14); err == nil || !strings.Contains(err.Error(), "Phase 6 credential, reconciliation, OCI, or release evidence remains") {
+		t.Fatalf("legacy job with changed v15 evidence down error = %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE orchestration_jobs SET oci_attempts=0 WHERE id=$1`, legacyResolvedJob); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(14); err != nil {
+		t.Fatalf("clean 000015 down: %v", err)
+	}
+	if got := schemaCatalogSnapshot(t, conn); got != v14Catalog {
+		t.Fatalf("000014 catalog after 000015 down differs from seeded v14 catalog\nwant:\n%s\n\ngot:\n%s", v14Catalog, got)
+	}
+	var downLegacyJob string
+	if err := conn.QueryRow(t.Context(), `SELECT to_jsonb(job)::text FROM orchestration_jobs job WHERE id=$1`, legacyResolvedJob).Scan(&downLegacyJob); err != nil || downLegacyJob != v14LegacyJob {
+		t.Fatalf("legacy resolved job after clean down differs\nwant: %s\n got: %s\nerr: %v", v14LegacyJob, downLegacyJob, err)
+	}
+	if err := migrator.Migrate(15); err != nil {
+		t.Fatalf("000015 re-up: %v", err)
+	}
+	first := seedTenantGraph(t, conn, "migration-fifteen-one", "main", "", "migration-fifteen-one-production")
+	second := seedTenantGraph(t, conn, "migration-fifteen-second", "main", "", "migration-fifteen-second-production")
+	var firstRegistry, secondRegistry string
+	for _, item := range []struct {
+		org string
+		id  *string
+	}{{first.org, &firstRegistry}, {second.org, &secondRegistry}} {
+		if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,'ghcr','ghcr.io') RETURNING id::text`, item.org).Scan(item.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,candidate_generation,idempotency_key)
+		VALUES('00000000-0000-0000-0000-000000000151',$1,$2,'create',1,'tenant-fk')`, first.org, secondRegistry); err == nil {
+		t.Fatal("cross-tenant credential operation succeeded")
+	}
+	var jobID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key)
+		SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('a',40),environment.desired_generation,'migration-fifteen-job'
+		FROM git_connections connection,environments environment WHERE connection.id=$4 AND environment.id=$3 RETURNING id::text`, first.org, first.app, first.environment, first.repository).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE orchestration_jobs SET oci_attempts=21 WHERE id=$1`, jobID); err == nil {
+		t.Fatal("OCI attempt cap accepted 21")
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE orchestration_jobs SET oci_lease_owner='worker' WHERE id=$1`, jobID); err == nil {
+		t.Fatal("partial OCI lease succeeded")
+	}
+	_ = firstRegistry
+}
+
+// schemaCatalogSnapshot covers every schema object whose shape migration 000015
+// can change.  Keeping it catalog-derived makes v14, rather than a copied SQL
+// fixture, the authority for an exact upgrade/down round trip.
+func schemaCatalogSnapshot(t *testing.T, conn *pgx.Conn) string {
+	t.Helper()
+	queries := []string{
+		`SELECT coalesce(string_agg(format('%s.%s|%s|%s|%s', table_name,column_name,udt_name,is_nullable,coalesce(column_default,'')), E'\n' ORDER BY table_name,ordinal_position),'')
+		 FROM information_schema.columns WHERE table_schema=current_schema()`,
+		`SELECT coalesce(string_agg(format('%s|%s|%s', rel.relname,con.conname,pg_get_constraintdef(con.oid,true)), E'\n' ORDER BY rel.relname,con.conname),'')
+		 FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid WHERE rel.relnamespace=current_schema()::regnamespace`,
+		`SELECT coalesce(string_agg(format('%s|%s', indexrel.relname,pg_get_indexdef(indexrel.oid)), E'\n' ORDER BY indexrel.relname),'')
+		 FROM pg_index idx JOIN pg_class table_rel ON table_rel.oid=idx.indrelid JOIN pg_class indexrel ON indexrel.oid=idx.indexrelid WHERE table_rel.relnamespace=current_schema()::regnamespace`,
+		`SELECT coalesce(string_agg(format('%s|%s|%s', rel.relname,trg.tgname,pg_get_triggerdef(trg.oid,true)), E'\n' ORDER BY rel.relname,trg.tgname),'')
+		 FROM pg_trigger trg JOIN pg_class rel ON rel.oid=trg.tgrelid WHERE rel.relnamespace=current_schema()::regnamespace AND NOT trg.tgisinternal`,
+		`SELECT coalesce(string_agg(format('%s|%s', p.oid::regprocedure,pg_get_functiondef(p.oid)), E'\n' ORDER BY p.oid::regprocedure::text),'')
+		 FROM pg_proc p WHERE p.pronamespace=current_schema()::regnamespace`,
+	}
+	parts := make([]string, len(queries))
+	for i, query := range queries {
+		if err := conn.QueryRow(t.Context(), query).Scan(&parts[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return strings.Join(parts, "\n---\n")
 }
 
 func TestMigrationAdvisoryLock(t *testing.T) {

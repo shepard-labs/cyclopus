@@ -3,12 +3,74 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func TestNewDefaultsToPublicSchema(t *testing.T) {
+	dataStore := New(nil)
+	if dataStore.schema != "public" {
+		t.Fatalf("schema = %q, want public", dataStore.schema)
+	}
+}
+
+func TestNewWithSchemaValidation(t *testing.T) {
+	valid := []string{"a", "_private", "tenant_123", strings.Repeat("a", 63)}
+	for _, schema := range valid {
+		dataStore, err := NewWithSchema(nil, schema)
+		if err != nil || dataStore.schema != schema {
+			t.Fatalf("NewWithSchema(%q) = %+v, %v", schema, dataStore, err)
+		}
+	}
+	invalid := []string{"", "1tenant", "Tenant", "tenant-name", "tenant.name", "pg_temp", "pg_", "ténant", strings.Repeat("a", 64)}
+	for _, schema := range invalid {
+		if _, err := NewWithSchema(nil, schema); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("NewWithSchema(%q) error = %v, want ErrInvalidArgument", schema, err)
+		}
+	}
+}
+
+type enableSchemaDB struct {
+	DB
+	query string
+}
+
+func (d *enableSchemaDB) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
+	d.query = query
+	return pgconn.CommandTag{}, nil
+}
+
+func TestEnablePhase6SchemaEpochUsesTrustedSchema(t *testing.T) {
+	tests := []struct {
+		name  string
+		store func(*enableSchemaDB) *Store
+		query string
+	}{
+		{name: "default", store: func(db *enableSchemaDB) *Store { return New(db) }, query: `SELECT "public"."enable_phase6_schema_epoch"()`},
+		{name: "configured", store: func(db *enableSchemaDB) *Store {
+			dataStore, err := NewWithSchema(db, "target_schema")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return dataStore
+		}, query: `SELECT "target_schema"."enable_phase6_schema_epoch"()`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := &enableSchemaDB{}
+			if err := test.store(db).EnablePhase6SchemaEpoch(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if db.query != test.query {
+				t.Fatalf("query = %q, want %q", db.query, test.query)
+			}
+		})
+	}
+}
 
 type githubEventRetryDB struct {
 	DB

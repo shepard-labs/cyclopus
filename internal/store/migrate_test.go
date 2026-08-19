@@ -43,6 +43,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000013_github_webhook_conflict_error.up.sql",
 		"000014_github_routing_fanout.down.sql",
 		"000014_github_routing_fanout.up.sql",
+		"000015_oci_ghcr_private_pulls.down.sql",
+		"000015_oci_ghcr_private_pulls.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -102,6 +104,61 @@ func TestEmbeddedMigrations(t *testing.T) {
 	for _, want := range []string{"ADD COLUMN state_generation", "status = 'expired'", "github_setup_protocol_incompatible", "status <> 'active' OR state_generation IS NOT NULL"} {
 		if !strings.Contains(string(stateGeneration), want) {
 			t.Errorf("state generation migration does not contain %q", want)
+		}
+	}
+}
+
+func TestMigration000015SchemaContract(t *testing.T) {
+	up, err := fs.ReadFile(Migrations, "migrations/000015_oci_ghcr_private_pulls.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := fs.ReadFile(Migrations, "migrations/000015_oci_ghcr_private_pulls.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"phase6_enabled boolean NOT NULL DEFAULT false",
+		"CREATE TABLE registry_credential_generations",
+		"CREATE TABLE registry_credential_operations",
+		"CREATE TABLE registry_credential_validation_targets",
+		"registry_credential_operations_active",
+		"orchestration_jobs_oci_due",
+		"orchestration_jobs_oci_leased",
+		"environments_registry_credential_due",
+		"attempts BETWEEN 0 AND 12",
+		"oci_attempts BETWEEN 0 AND 20",
+		"enable_phase6_schema_epoch",
+		"schema_epoch_phase6_enable_guard",
+		"registry_credential_generations_one_active",
+		"resolved_registry_id uuid",
+		"oci_annotation_status IN ('pending','matched','absent','mismatched','legacy')",
+		"assert_oci_ghcr_v15_down_safe",
+		"BEFORE TRUNCATE ON schema_migrations",
+	} {
+		if !strings.Contains(string(up), want) {
+			t.Errorf("000015 up does not contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{"dockerconfig", "personal_access_token", "bearer_token", "raw_body bytea"} {
+		if strings.Contains(strings.ToLower(string(up)), forbidden) {
+			t.Errorf("000015 persists forbidden secret material %q", forbidden)
+		}
+	}
+	if !strings.HasPrefix(string(down), "LOCK TABLE schema_epoch, registries") || !strings.Contains(string(down), "SELECT assert_oci_ghcr_v15_down_safe();") {
+		t.Fatal("000015 down must lock in deterministic order and assert safety before DDL")
+	}
+	for name, want := range map[string]string{
+		"000015_oci_ghcr_private_pulls.up.sql":   "69a4531df0de59f491e2a5a7420f1fc6f6332246a00a58cc812a2eeec144a16e",
+		"000015_oci_ghcr_private_pulls.down.sql": "7ee47017af04e29545d41c96c99ef87139d18cd7e87f74313768afe0ba245456",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v15 migration fingerprint %s", name, got, want)
 		}
 	}
 }
