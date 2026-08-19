@@ -538,30 +538,30 @@ templ systemdServicesCard(node observability.NodeSystemDetail) {
 				/>
 			</div>
 			<div class="overflow-x-auto rounded-box border border-line">
-				<table class="table table-sm w-full">
+				<table class="w-full table-auto whitespace-nowrap text-sm">
 					<thead>
-						<tr class="text-xs uppercase tracking-wider text-base-content/50">
-							<th>Name</th>
-							<th>State</th>
-							<th>Sub State</th>
-							<th class="text-right">CPU (10m)</th>
-							<th class="text-right">CPU Peak</th>
-							<th class="text-right">Memory</th>
-							<th class="text-right">Memory Peak</th>
-							<th class="text-right">Updated</th>
+						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
+							<th class="py-3 pr-3 pl-4 text-left font-medium">Name</th>
+							<th class="px-3 py-3 text-left font-medium">State</th>
+							<th class="px-3 py-3 text-left font-medium">Sub State</th>
+							<th class="px-3 py-3 text-right font-medium">CPU (10m)</th>
+							<th class="px-3 py-3 text-right font-medium">CPU Peak</th>
+							<th class="px-3 py-3 text-right font-medium">Memory</th>
+							<th class="px-3 py-3 text-right font-medium">Memory Peak</th>
+							<th class="py-3 pr-4 pl-3 text-right font-medium">Updated</th>
 						</tr>
 					</thead>
-					<tbody>
+					<tbody class="divide-y divide-line">
 						for _, svc := range node.Services {
-							<tr class="systemd-service-row border-t border-line" data-service-name={ strings.ToLower(svc.Name) }>
-								<td class="font-mono text-xs font-medium text-base-content">{ svc.Name }</td>
-								<td>@components.Badge(serviceStateTone(svc.State), svc.State)</td>
-								<td>@components.Badge(serviceSubStateTone(svc.SubState), svc.SubState)</td>
-								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceCPU(svc, false) }</td>
-								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceCPU(svc, true) }</td>
-								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceMemory(svc.MemoryBytes) }</td>
-								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">{ formatServiceMemory(svc.MemoryPeakBytes) }</td>
-								<td class="text-right tabular-nums font-mono text-xs text-base-content/80">
+							<tr class="systemd-service-row" data-service-name={ strings.ToLower(svc.Name) }>
+								<td class="py-3.5 pr-3 pl-4 font-mono text-sm font-medium text-base-content">{ svc.Name }</td>
+								<td class="px-3 py-3.5">@components.Badge(serviceStateTone(svc.State), svc.State)</td>
+								<td class="px-3 py-3.5">@components.Badge(serviceSubStateTone(svc.SubState), svc.SubState)</td>
+								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceCPU(svc, false) }</td>
+								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceCPU(svc, true) }</td>
+								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceMemory(svc.MemoryBytes) }</td>
+								<td class="px-3 py-3.5 text-right tabular-nums font-mono text-sm text-base-content/80">{ formatServiceMemory(svc.MemoryPeakBytes) }</td>
+								<td class="py-3.5 pr-4 pl-3 text-right tabular-nums font-mono text-sm text-base-content/80">
 									if svc.Updated.IsZero() {
 										N/A
 									} else {
