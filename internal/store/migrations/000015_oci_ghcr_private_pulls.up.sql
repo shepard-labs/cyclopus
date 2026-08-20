@@ -1,6 +1,3 @@
-ALTER TABLE schema_epoch
-    ADD COLUMN phase6_enabled boolean NOT NULL DEFAULT false;
-
 ALTER TABLE registries
     DROP CONSTRAINT registries_state_check,
     DROP CONSTRAINT registries_checkpoint_check;
@@ -36,7 +33,7 @@ CREATE INDEX registries_operation_leased
 CREATE INDEX registries_operation_exhausted
     ON registries(updated_at,id) WHERE state IN ('creating','rotating','reconciling','deleting') AND attempts>=12;
 
-CREATE FUNCTION phase6_registry_row_valid(value registries) RETURNS boolean
+CREATE FUNCTION registry_row_valid(value registries) RETURNS boolean
 LANGUAGE sql IMMUTABLE AS $$
     SELECT value.reconciliation_generation <= value.active_generation
        AND (value.previous_generation IS NULL OR value.previous_generation<=value.active_generation)
@@ -56,19 +53,18 @@ LANGUAGE sql IMMUTABLE AS $$
         ELSE false END
 $$;
 
-CREATE FUNCTION enforce_phase6_registry_checkpoint() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION enforce_registry_checkpoint() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled)
-       AND NOT phase6_registry_row_valid(NEW) THEN
+    IF NOT registry_row_valid(NEW) THEN
         RAISE EXCEPTION 'registry state/checkpoint is incompatible with enabled Phase 6'
             USING ERRCODE='check_violation';
     END IF;
     RETURN NEW;
 END
 $$;
-CREATE TRIGGER registries_phase6_checkpoint
+CREATE TRIGGER registries_checkpoint_valid
     BEFORE INSERT OR UPDATE ON registries
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_registry_checkpoint();
+    FOR EACH ROW EXECUTE FUNCTION enforce_registry_checkpoint();
 
 CREATE TABLE registry_credential_generations (
     org_id uuid NOT NULL,
@@ -179,9 +175,6 @@ CREATE INDEX registry_credential_operations_terminal_cleanup
 
 CREATE FUNCTION enforce_registry_credential_references() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled) THEN
-        RETURN NEW;
-    END IF;
     IF NEW.active_generation>0 AND NOT EXISTS (SELECT 1 FROM registry_credential_generations WHERE org_id=NEW.org_id AND registry_id=NEW.id AND generation=NEW.active_generation) THEN
         RAISE EXCEPTION 'active registry generation is not tenant-local' USING ERRCODE='foreign_key_violation';
     END IF;
@@ -205,12 +198,12 @@ CREATE INDEX registries_pending_generation_ref ON registries(org_id,id,pending_g
 CREATE INDEX registries_previous_generation_ref ON registries(org_id,id,previous_generation) WHERE previous_generation IS NOT NULL;
 CREATE INDEX registries_operation_ref ON registries(operation_id,org_id,id) WHERE operation_id IS NOT NULL;
 
-CREATE FUNCTION assert_phase6_registry_generation_consistency(target_org uuid,target_registry uuid) RETURNS void
+CREATE FUNCTION assert_registry_generation_consistency(target_org uuid,target_registry uuid) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE registry_row registries;
 BEGIN
     SELECT * INTO registry_row FROM registries WHERE org_id=target_org AND id=target_registry;
-    IF NOT FOUND OR NOT EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled) THEN RETURN; END IF;
+    IF NOT FOUND THEN RETURN; END IF;
     IF registry_row.active_generation=0 THEN
         IF registry_row.active_credential_secret_ref IS NOT NULL OR EXISTS (
             SELECT 1 FROM registry_credential_generations WHERE org_id=target_org AND registry_id=target_registry AND state='active') THEN
@@ -250,7 +243,7 @@ BEGIN
     END IF;
 END
 $$;
-CREATE FUNCTION enforce_phase6_registry_generation_consistency() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION enforce_registry_generation_consistency() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE target_org uuid; target_registry uuid;
 BEGIN
     IF TG_TABLE_NAME='registries' THEN
@@ -258,19 +251,19 @@ BEGIN
     ELSE
         target_org:=COALESCE(NEW.org_id,OLD.org_id); target_registry:=COALESCE(NEW.registry_id,OLD.registry_id);
     END IF;
-    PERFORM assert_phase6_registry_generation_consistency(target_org,target_registry);
+    PERFORM assert_registry_generation_consistency(target_org,target_registry);
     RETURN NULL;
 END
 $$;
 CREATE CONSTRAINT TRIGGER registries_generation_consistency
     AFTER INSERT OR UPDATE ON registries DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_registry_generation_consistency();
+    FOR EACH ROW EXECUTE FUNCTION enforce_registry_generation_consistency();
 CREATE CONSTRAINT TRIGGER registry_generations_registry_consistency
     AFTER INSERT OR UPDATE OR DELETE ON registry_credential_generations DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_registry_generation_consistency();
+    FOR EACH ROW EXECUTE FUNCTION enforce_registry_generation_consistency();
 CREATE CONSTRAINT TRIGGER registry_operations_generation_consistency
     AFTER INSERT OR UPDATE OR DELETE ON registry_credential_operations DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_registry_generation_consistency();
+    FOR EACH ROW EXECUTE FUNCTION enforce_registry_generation_consistency();
 
 CREATE TABLE registry_credential_validation_targets (
     operation_id uuid NOT NULL,
@@ -322,7 +315,7 @@ CREATE INDEX environments_registry_credential_leased
 CREATE INDEX environments_registry_credential_exhausted
     ON environments(created_at,id) WHERE registry_credential_state='pending' AND torn_down_at IS NULL AND registry_credential_attempts>=12;
 
-CREATE FUNCTION phase6_environment_credential_row_valid(value environments) RETURNS boolean
+CREATE FUNCTION environment_credential_row_valid(value environments) RETURNS boolean
 LANGUAGE sql STABLE AS $$
     SELECT CASE value.registry_credential_state
         WHEN 'not_required' THEN value.required_registry_credential_generation IS NULL
@@ -360,51 +353,49 @@ LANGUAGE sql STABLE AS $$
     WHERE app.org_id=value.org_id AND app.id=value.app_id
 $$;
 
-CREATE FUNCTION enforce_phase6_environment_credential() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION enforce_environment_credential() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled)
-       AND NOT phase6_environment_credential_row_valid(NEW) THEN
+    IF NOT environment_credential_row_valid(NEW) THEN
         RAISE EXCEPTION 'environment credential state is incompatible with enabled Phase 6' USING ERRCODE='check_violation';
     END IF;
     RETURN NEW;
 END
 $$;
-CREATE TRIGGER environments_phase6_credential
+CREATE TRIGGER environments_credential_valid
     BEFORE INSERT OR UPDATE ON environments
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_environment_credential();
-CREATE FUNCTION assert_phase6_dependent_environments(target_org uuid,target_app uuid) RETURNS void LANGUAGE plpgsql AS $$
+    FOR EACH ROW EXECUTE FUNCTION enforce_environment_credential();
+CREATE FUNCTION assert_dependent_environments(target_org uuid,target_app uuid) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled)
-       AND EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=target_org AND environment.app_id=target_app
-           AND environment.torn_down_at IS NULL AND NOT phase6_environment_credential_row_valid(environment)) THEN
+    IF EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=target_org AND environment.app_id=target_app
+           AND environment.torn_down_at IS NULL AND NOT environment_credential_row_valid(environment)) THEN
         RAISE EXCEPTION 'application or registry mutation invalidates a live environment credential snapshot' USING ERRCODE='check_violation';
     END IF;
 END
 $$;
-CREATE FUNCTION enforce_phase6_app_environments() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN PERFORM assert_phase6_dependent_environments(NEW.org_id,NEW.id); RETURN NEW; END $$;
-CREATE FUNCTION enforce_phase6_registry_environments() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION enforce_app_environments() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN PERFORM assert_dependent_environments(NEW.org_id,NEW.id); RETURN NEW; END $$;
+CREATE FUNCTION enforce_registry_environments() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE app_row record;
 BEGIN
     FOR app_row IN SELECT org_id,id FROM apps WHERE org_id=NEW.org_id AND registry_id=NEW.id LOOP
-        PERFORM assert_phase6_dependent_environments(app_row.org_id,app_row.id);
+        PERFORM assert_dependent_environments(app_row.org_id,app_row.id);
     END LOOP;
     RETURN NEW;
 END $$;
-CREATE FUNCTION enforce_phase6_generation_environments() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION enforce_generation_environments() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE app_row record;
 BEGIN
     FOR app_row IN SELECT org_id,id FROM apps WHERE org_id=COALESCE(NEW.org_id,OLD.org_id) AND registry_id=COALESCE(NEW.registry_id,OLD.registry_id) LOOP
-        PERFORM assert_phase6_dependent_environments(app_row.org_id,app_row.id);
+        PERFORM assert_dependent_environments(app_row.org_id,app_row.id);
     END LOOP;
     RETURN NULL;
 END $$;
-CREATE TRIGGER apps_phase6_environments AFTER UPDATE OF image_visibility,registry_id,deleted_at ON apps
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_app_environments();
-CREATE TRIGGER registries_phase6_environments AFTER UPDATE OF state,active_generation,active_credential_secret_ref,pending_generation,pending_credential_secret_ref ON registries
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_registry_environments();
-CREATE CONSTRAINT TRIGGER registry_generations_phase6_environments AFTER UPDATE OF state ON registry_credential_generations
-    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION enforce_phase6_generation_environments();
+CREATE TRIGGER apps_environments_valid AFTER UPDATE OF image_visibility,registry_id,deleted_at ON apps
+    FOR EACH ROW EXECUTE FUNCTION enforce_app_environments();
+CREATE TRIGGER registries_environments_valid AFTER UPDATE OF state,active_generation,active_credential_secret_ref,pending_generation,pending_credential_secret_ref ON registries
+    FOR EACH ROW EXECUTE FUNCTION enforce_registry_environments();
+CREATE CONSTRAINT TRIGGER registry_generations_environments_valid AFTER UPDATE OF state ON registry_credential_generations
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION enforce_generation_environments();
 
 ALTER TABLE orchestration_jobs
     ADD COLUMN oci_lease_owner text,
@@ -459,7 +450,7 @@ ALTER TABLE releases
     ADD CONSTRAINT releases_registry_credential_generation_fk FOREIGN KEY (org_id,registry_credential_registry_id,registry_credential_generation)
         REFERENCES registry_credential_generations(org_id,registry_id,generation) DEFERRABLE INITIALLY DEFERRED;
 
-CREATE FUNCTION phase6_orchestration_valid(value orchestration_jobs) RETURNS boolean
+CREATE FUNCTION orchestration_oci_valid(value orchestration_jobs) RETURNS boolean
 LANGUAGE sql STABLE SET search_path FROM CURRENT AS $$
     SELECT CASE
       WHEN value.oci_annotation_status='legacy' THEN
@@ -499,10 +490,9 @@ LANGUAGE sql STABLE SET search_path FROM CURRENT AS $$
       END
 $$;
 
-CREATE FUNCTION enforce_phase6_orchestration_registry_evidence() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
+CREATE FUNCTION enforce_orchestration_registry_evidence() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
 DECLARE
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled) THEN RETURN NEW; END IF;
     IF NEW.oci_annotation_status='legacy' OR TG_OP='UPDATE' AND OLD.oci_annotation_status='legacy' THEN
         IF TG_OP='INSERT' OR OLD.oci_annotation_status IS DISTINCT FROM 'legacy'
            OR NEW.oci_annotation_status IS DISTINCT FROM 'legacy'
@@ -524,19 +514,17 @@ BEGIN
         END IF;
         RETURN NEW;
     END IF;
-    IF NOT phase6_orchestration_valid(NEW) THEN
+    IF NOT orchestration_oci_valid(NEW) THEN
         RAISE EXCEPTION 'orchestration OCI state is incompatible with enabled Phase 6' USING ERRCODE='check_violation';
     END IF;
     RETURN NEW;
 END
 $$;
-CREATE FUNCTION enforce_phase6_release_registry_evidence() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION enforce_release_registry_evidence() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     visibility text;
     registry_id uuid;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled)
-       AND NEW.registry_credential_generation IS NULL THEN RETURN NEW; END IF;
     SELECT app.image_visibility,app.registry_id INTO visibility,registry_id
       FROM environments environment
       JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
@@ -548,12 +536,12 @@ BEGIN
     RETURN NEW;
 END
 $$;
-CREATE TRIGGER orchestration_jobs_phase6_registry_evidence
+CREATE TRIGGER orchestration_jobs_registry_evidence
     BEFORE INSERT OR UPDATE ON orchestration_jobs
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_orchestration_registry_evidence();
-CREATE TRIGGER releases_phase6_registry_evidence
+    FOR EACH ROW EXECUTE FUNCTION enforce_orchestration_registry_evidence();
+CREATE TRIGGER releases_registry_evidence
     BEFORE INSERT OR UPDATE OF org_id,environment_id,registry_credential_registry_id,registry_credential_generation ON releases
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_release_registry_evidence();
+    FOR EACH ROW EXECUTE FUNCTION enforce_release_registry_evidence();
 
 CREATE OR REPLACE FUNCTION reject_release_snapshot_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -575,42 +563,10 @@ BEGIN
 END
 $$;
 
-CREATE FUNCTION guard_phase6_schema_epoch_update() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-    IF NOT OLD.phase6_enabled AND NEW.phase6_enabled
-       AND current_setting('cyclopus.phase6_enable',true) IS DISTINCT FROM 'on' THEN
-        RAISE EXCEPTION 'direct Phase 6 enablement is forbidden; call enable_phase6_schema_epoch()' USING ERRCODE='insufficient_privilege';
-    END IF;
-    RETURN NEW;
-END $$;
-CREATE TRIGGER schema_epoch_phase6_enable_guard BEFORE UPDATE OF phase6_enabled ON schema_epoch
-    FOR EACH ROW EXECUTE FUNCTION guard_phase6_schema_epoch_update();
-
-CREATE FUNCTION enable_phase6_schema_epoch() RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path FROM CURRENT AS $$
-DECLARE invalid_rows boolean;
-BEGIN
-    LOCK TABLE schema_epoch,registries,registry_credential_operations,registry_credential_generations,apps,environments,orchestration_jobs,releases IN SHARE ROW EXCLUSIVE MODE;
-    IF (SELECT phase6_enabled FROM schema_epoch WHERE singleton FOR UPDATE) THEN RETURN; END IF;
-    UPDATE registries SET checkpoint=CASE checkpoint WHEN 'secret_write_started' THEN 'source_secret_write_started'
-        WHEN 'secret_written' THEN 'source_secret_written' WHEN 'verified' THEN 'targets_validated' ELSE checkpoint END
-        WHERE checkpoint IN ('secret_write_started','secret_written','verified');
-    SELECT EXISTS (SELECT 1 FROM registries registry WHERE NOT phase6_registry_row_valid(registry))
-        OR EXISTS (SELECT 1 FROM environments environment WHERE environment.torn_down_at IS NULL AND NOT phase6_environment_credential_row_valid(environment))
-        OR EXISTS (SELECT 1 FROM orchestration_jobs job WHERE NOT phase6_orchestration_valid(job))
-      INTO invalid_rows;
-    IF invalid_rows THEN RAISE EXCEPTION 'existing rows are incompatible with Phase 6' USING ERRCODE='check_violation'; END IF;
-    PERFORM pg_catalog.set_config('cyclopus.phase6_enable','on',true);
-    UPDATE schema_epoch SET phase6_enabled=true WHERE singleton;
-    PERFORM assert_phase6_registry_generation_consistency(registry.org_id,registry.id) FROM registries registry;
-END $$;
-
 CREATE FUNCTION assert_oci_ghcr_v15_down_safe() RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
     -- Lock order for rollback is schema_epoch, registries, operations, generations,
     -- validation targets, environments, orchestration jobs, then releases.
-    IF EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled) THEN
-        RAISE EXCEPTION '000015 rollback blocked: Phase 6 is enabled' USING ERRCODE='check_violation';
-    END IF;
     IF EXISTS (SELECT 1 FROM registry_credential_operations WHERE status IN ('pending','leased'))
        OR EXISTS (SELECT 1 FROM registries WHERE lease_owner IS NOT NULL)
        OR EXISTS (SELECT 1 FROM environments WHERE registry_credential_lease_owner IS NOT NULL)

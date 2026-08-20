@@ -34,7 +34,7 @@ CREATE INDEX environments_registry_credential_cleanup_leased
     ON environments(registry_credential_cleanup_lease_expires_at,id)
     WHERE registry_credential_cleanup_lease_owner IS NOT NULL;
 
-CREATE OR REPLACE FUNCTION phase6_environment_credential_row_valid(value environments) RETURNS boolean
+CREATE OR REPLACE FUNCTION environment_credential_row_valid(value environments) RETURNS boolean
 LANGUAGE sql STABLE SET search_path FROM CURRENT AS $$
     SELECT CASE value.registry_credential_state
         WHEN 'not_required' THEN value.required_registry_credential_generation IS NULL
@@ -65,18 +65,18 @@ LANGUAGE sql STABLE SET search_path FROM CURRENT AS $$
                 WHERE generation.org_id=registry.org_id AND generation.registry_id=registry.id
                   AND generation.generation=value.required_registry_credential_generation
                   AND ((value.registry_credential_state='pending' AND generation.state IN ('pending','active','retired'))
-                    OR (value.registry_credential_state='ready' AND generation.state='active')
-                    OR (value.registry_credential_state='failed' AND generation.state IN ('active','retired'))))
+                    OR (value.registry_credential_state='ready' AND generation.state IN ('active','pending'))
+                    OR (value.registry_credential_state='failed' AND generation.state IN ('active','retired','failed','pending'))))
         ELSE false END
     FROM apps app
     LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id
     WHERE app.org_id=value.org_id AND app.id=value.app_id
 $$;
 
-DROP TRIGGER apps_phase6_environments ON apps;
-CREATE CONSTRAINT TRIGGER apps_phase6_environments
+DROP TRIGGER apps_environments_valid ON apps;
+CREATE CONSTRAINT TRIGGER apps_environments_valid
     AFTER UPDATE OF image_visibility,registry_id,deleted_at ON apps
-    DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION enforce_phase6_app_environments();
+    DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION enforce_app_environments();
 
 CREATE FUNCTION converge_registry_credential_operation_without_namespaces(target_org uuid,target_registry uuid)
 RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path FROM CURRENT AS $$
@@ -179,7 +179,7 @@ BEGIN
         IF target_registry IS NOT NULL THEN RAISE EXCEPTION 'public application cannot bind registry' USING ERRCODE='check_violation'; END IF;
     END IF;
 
-    SET CONSTRAINTS apps_phase6_environments DEFERRED;
+    SET CONSTRAINTS apps_environments_valid DEFERRED;
     IF target_visibility='private' THEN
         UPDATE apps SET image_visibility='private',registry_id=target_registry,desired_generation=desired_generation+1,
             cleanup_state='active',cleanup_checkpoint=NULL,cleanup_error_code=NULL,cleanup_error_message=NULL
@@ -212,8 +212,8 @@ BEGIN
         WHERE org_id=target_org AND app_id=target_app AND torn_down_at IS NULL;
         PERFORM converge_registry_credential_operation_without_namespaces(target_org,app_row.registry_id);
     END IF;
-    SET CONSTRAINTS apps_phase6_environments IMMEDIATE;
-    PERFORM assert_phase6_dependent_environments(target_org,target_app);
+    SET CONSTRAINTS apps_environments_valid IMMEDIATE;
+    PERFORM assert_dependent_environments(target_org,target_app);
 END
 $$;
 

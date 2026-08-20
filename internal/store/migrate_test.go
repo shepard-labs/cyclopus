@@ -122,14 +122,14 @@ func TestEmbeddedMigrations(t *testing.T) {
 
 func TestMigration000016SchemaContract(t *testing.T) {
 	for name, want := range map[string]string{
-		"000016_private_resolution_model.up.sql":   "aa56432d9ec7b83bc4b88a9fb4df6fc9b707d95f6b51b8f842399be3dbee23e5",
-		"000016_private_resolution_model.down.sql": "1e40f6058aba51246cd712c60f6e13dad69610334b83259372c07474128d739d",
+		"000016_private_resolution_model.up.sql":   "e34752a02fde1914bace629f0f43a1eccdc4d9fcfff6abb179cb91ac9d5ceec5",
+		"000016_private_resolution_model.down.sql": "213df34309d98832ec0f04afd9e490837ef8fc8b76b8071bc50d230f5d3fa72b",
 	} {
 		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, required := range []string{"apps_registry_source_consistency", "phase6_orchestration_valid", "assert_private_resolution_v16_down_safe", "enforce_orchestration_target_and_artifact"} {
+		for _, required := range []string{"apps_registry_source_consistency", "orchestration_oci_valid", "assert_private_resolution_v16_down_safe", "enforce_orchestration_target_and_artifact"} {
 			if !strings.Contains(string(contents), required) {
 				t.Errorf("%s does not contain %q", name, required)
 			}
@@ -143,8 +143,8 @@ func TestMigration000016SchemaContract(t *testing.T) {
 
 func TestMigration000017SchemaContract(t *testing.T) {
 	for name, want := range map[string]string{
-		"000017_registry_validation_references.up.sql":   "0b0f881aae7f804ce13696df5e53aa8ca1c518cad846873244be5a77aa835a69",
-		"000017_registry_validation_references.down.sql": "1fdf0298ed16a6cd98da5c31555b35619a8f50375bc481d117a3cfee78dee2ef",
+		"000017_registry_validation_references.up.sql":   "c6f8c18bf32e47a4242d756e691edbb9f0ec7e5807d1b88a811271ec508db178",
+		"000017_registry_validation_references.down.sql": "72f4360af166b3a88be726dde4390a292381e984c166c83df45836415961d15c",
 	} {
 		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
 		if err != nil {
@@ -164,14 +164,14 @@ func TestMigration000017SchemaContract(t *testing.T) {
 
 func TestMigration000018SchemaContract(t *testing.T) {
 	for name, want := range map[string]string{
-		"000018_import_pending_credentials.up.sql":   "07fcecc5a9f9c2bc30ad36f79d4f51ce3a4f797ea37a93f375b9ff888cf44788",
-		"000018_import_pending_credentials.down.sql": "4723f517b37eba08f8dac409499f3d2470b3ded479d2a27deb5b12d735429c25",
+		"000018_import_pending_credentials.up.sql":   "3866dace051ff15aeae0b2bdf3baee11580e361fe9e82f6400bcc1f5d345eefd",
+		"000018_import_pending_credentials.down.sql": "ab34de7f99c2cac3afa8e2934e89d128e4d7494d1779d8d2a5b5baaeb4340b93",
 	} {
 		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, required := range []string{"awaiting_import", "activated", "registry_credential_operations_awaiting_import", "assert_phase6_registry_generation_consistency"} {
+		for _, required := range []string{"awaiting_import", "activated", "registry_credential_operations_awaiting_import", "assert_registry_generation_consistency"} {
 			if !strings.Contains(string(contents), required) {
 				t.Errorf("%s does not contain %q", name, required)
 			}
@@ -209,14 +209,14 @@ func TestMigration000019SchemaContract(t *testing.T) {
 
 func TestMigration000020SchemaContract(t *testing.T) {
 	for name, want := range map[string]string{
-		"000020_namespace_credential_transitions.up.sql":   "949ac5ebaa92f550293340a29583cd68f1840ae4b7abca21ebe17548eb6a6922",
-		"000020_namespace_credential_transitions.down.sql": "7ef1586af271696d2f2fdce43d5f27cf82d04447f9b86a8ac31009a05097dc96",
+		"000020_namespace_credential_transitions.up.sql":   "83cd794406ea14a1c291a999c600ab333c041691a0307727ab17c73175de0e2c",
+		"000020_namespace_credential_transitions.down.sql": "7b70ed1d11aff52f81679efece75ef4ea24273e40adaaf199bad36bc6a6e2e9d",
 	} {
 		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, required := range []string{"transition_app_image_visibility", "registry_credential_cleanup_state", "environments_registry_credential_cleanup_due", "phase6_environment_credential_row_valid"} {
+		for _, required := range []string{"transition_app_image_visibility", "registry_credential_cleanup_state", "environments_registry_credential_cleanup_due", "environment_credential_row_valid"} {
 			if !strings.Contains(string(contents), required) {
 				t.Errorf("%s does not contain %q", name, required)
 			}
@@ -266,7 +266,6 @@ func TestMigration000015SchemaContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"phase6_enabled boolean NOT NULL DEFAULT false",
 		"CREATE TABLE registry_credential_generations",
 		"CREATE TABLE registry_credential_operations",
 		"CREATE TABLE registry_credential_validation_targets",
@@ -276,8 +275,22 @@ func TestMigration000015SchemaContract(t *testing.T) {
 		"environments_registry_credential_due",
 		"attempts BETWEEN 0 AND 12",
 		"oci_attempts BETWEEN 0 AND 20",
-		"enable_phase6_schema_epoch",
-		"schema_epoch_phase6_enable_guard",
+		"CREATE FUNCTION registry_row_valid",
+		"CREATE FUNCTION enforce_registry_checkpoint",
+		"CREATE FUNCTION assert_registry_generation_consistency",
+		"CREATE FUNCTION environment_credential_row_valid",
+		"CREATE FUNCTION enforce_environment_credential",
+		"CREATE FUNCTION assert_dependent_environments",
+		"CREATE FUNCTION orchestration_oci_valid",
+		"CREATE FUNCTION enforce_orchestration_registry_evidence",
+		"CREATE FUNCTION enforce_release_registry_evidence",
+		"CREATE TRIGGER registries_checkpoint_valid",
+		"CREATE TRIGGER environments_credential_valid",
+		"CREATE TRIGGER apps_environments_valid",
+		"CREATE TRIGGER registries_environments_valid",
+		"CREATE CONSTRAINT TRIGGER registry_generations_environments_valid",
+		"CREATE TRIGGER orchestration_jobs_registry_evidence",
+		"CREATE TRIGGER releases_registry_evidence",
 		"registry_credential_generations_one_active",
 		"resolved_registry_id uuid",
 		"oci_annotation_status IN ('pending','matched','absent','mismatched','legacy')",
@@ -286,6 +299,21 @@ func TestMigration000015SchemaContract(t *testing.T) {
 	} {
 		if !strings.Contains(string(up), want) {
 			t.Errorf("000015 up does not contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"phase6_enabled",
+		"enable_phase6_schema_epoch",
+		"schema_epoch_phase6_enable_guard",
+		"phase6_registry_row_valid",
+		"phase6_environment_credential_row_valid",
+		"phase6_orchestration_valid",
+		"enforce_phase6_",
+		"assert_phase6_",
+		"_phase6_",
+	} {
+		if strings.Contains(string(up), forbidden) {
+			t.Errorf("000015 up contains phase6-prefixed object %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{"dockerconfig", "personal_access_token", "bearer_token", "raw_body bytea"} {
@@ -297,8 +325,8 @@ func TestMigration000015SchemaContract(t *testing.T) {
 		t.Fatal("000015 down must lock in deterministic order and assert safety before DDL")
 	}
 	for name, want := range map[string]string{
-		"000015_oci_ghcr_private_pulls.up.sql":   "69a4531df0de59f491e2a5a7420f1fc6f6332246a00a58cc812a2eeec144a16e",
-		"000015_oci_ghcr_private_pulls.down.sql": "7ee47017af04e29545d41c96c99ef87139d18cd7e87f74313768afe0ba245456",
+		"000015_oci_ghcr_private_pulls.up.sql":   "48846958668a922da92bc8f3b2cfeed4de36b5a9289b5019ee99a55e9ba74356",
+		"000015_oci_ghcr_private_pulls.down.sql": "839e0a980d3a84210539f03fa64c86de3e0e71e4f23782ae2bdbf19e7a3945f4",
 	} {
 		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
 		if err != nil {

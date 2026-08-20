@@ -595,7 +595,7 @@ func resolveImageResolutionCASMiss(ctx context.Context, tx pgx.Tx, claim ImageRe
 		}
 		return ImageResolutionRequeued, nil
 	}
-	_, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET oci_resolution_state='pending',oci_next_attempt_at=clock_timestamp(),oci_lease_owner=NULL,oci_lease_expires_at=NULL,updated_at=clock_timestamp()
+	_, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET oci_resolution_state='pending',oci_deadline_at=NULL,oci_next_attempt_at=clock_timestamp(),oci_lease_owner=NULL,oci_lease_expires_at=NULL,updated_at=clock_timestamp()
 		WHERE org_id=$1 AND id=$2 AND oci_lease_owner=$3 AND oci_lease_epoch=$4`, claim.Job.OrgID, claim.Job.ID, lease.Owner, lease.Epoch)
 	return ImageResolutionRefreshRequired, err
 }

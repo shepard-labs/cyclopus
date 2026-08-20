@@ -34,44 +34,6 @@ func TestNewWithSchemaValidation(t *testing.T) {
 	}
 }
 
-type enableSchemaDB struct {
-	DB
-	query string
-}
-
-func (d *enableSchemaDB) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
-	d.query = query
-	return pgconn.CommandTag{}, nil
-}
-
-func TestEnablePhase6SchemaEpochUsesTrustedSchema(t *testing.T) {
-	tests := []struct {
-		name  string
-		store func(*enableSchemaDB) *Store
-		query string
-	}{
-		{name: "default", store: func(db *enableSchemaDB) *Store { return New(db) }, query: `SELECT "public"."enable_phase6_schema_epoch"()`},
-		{name: "configured", store: func(db *enableSchemaDB) *Store {
-			dataStore, err := NewWithSchema(db, "target_schema")
-			if err != nil {
-				t.Fatal(err)
-			}
-			return dataStore
-		}, query: `SELECT "target_schema"."enable_phase6_schema_epoch"()`},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			db := &enableSchemaDB{}
-			if err := test.store(db).EnablePhase6SchemaEpoch(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if db.query != test.query {
-				t.Fatalf("query = %q, want %q", db.query, test.query)
-			}
-		})
-	}
-}
-
 type githubEventRetryDB struct {
 	DB
 	commits []error

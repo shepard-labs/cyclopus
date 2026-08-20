@@ -112,7 +112,7 @@ CREATE TRIGGER registry_credential_validation_reference
     BEFORE INSERT OR UPDATE OF reference,status ON registry_credential_validation_targets
     FOR EACH ROW EXECUTE FUNCTION enforce_registry_credential_validation_reference();
 
-CREATE OR REPLACE FUNCTION phase6_registry_row_valid(value registries) RETURNS boolean
+CREATE OR REPLACE FUNCTION registry_row_valid(value registries) RETURNS boolean
 LANGUAGE sql IMMUTABLE AS $$
     SELECT value.reconciliation_generation <= value.active_generation
        AND (value.previous_generation IS NULL OR value.previous_generation<=value.active_generation)
@@ -139,12 +139,12 @@ LANGUAGE sql IMMUTABLE AS $$
         ELSE false END
 $$;
 
-CREATE OR REPLACE FUNCTION assert_phase6_registry_generation_consistency(target_org uuid,target_registry uuid) RETURNS void
+CREATE OR REPLACE FUNCTION assert_registry_generation_consistency(target_org uuid,target_registry uuid) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE registry_row registries;
 BEGIN
     SELECT * INTO registry_row FROM registries WHERE org_id=target_org AND id=target_registry;
-    IF NOT FOUND OR NOT EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled) THEN RETURN; END IF;
+    IF NOT FOUND THEN RETURN; END IF;
     IF registry_row.active_generation=0 THEN
         IF registry_row.active_credential_secret_ref IS NOT NULL OR EXISTS (
             SELECT 1 FROM registry_credential_generations WHERE org_id=target_org AND registry_id=target_registry AND state='active') THEN

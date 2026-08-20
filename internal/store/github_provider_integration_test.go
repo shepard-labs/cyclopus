@@ -278,8 +278,34 @@ func TestGetGHCRRegistryUsesCanonicalProviderAndHostIdentityIntegration(t *testi
 	if !errors.Is(err, ErrNotFound) || value.ID != "" {
 		t.Fatalf("missing canonical registry status = %+v, %v", value, err)
 	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,active_generation,active_credential_secret_ref)
-		VALUES('00000000-0000-7000-8000-000000000203',$1,'ghcr','ghcr.io','ready',1,'k8s-secret://cyclopus-system/ghcr#token')`, orgOneID); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state)
+		VALUES('00000000-0000-7000-8000-000000000203',$1,'ghcr','ghcr.io','absent')`, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+	registryTx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registryTx.Rollback(t.Context())
+	if _, err = registryTx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registryTx.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,terminal_at,
+		credential_fingerprint,actor_user_id)
+		VALUES('00000000-0000-7000-8000-000000000205',$1,'00000000-0000-7000-8000-000000000203','create','succeeded','activated',1,'canonical-test',now(),
+		decode(repeat('ab',32),'hex'),NULL)`, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registryTx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id,validated_at,activated_at)
+		VALUES($1,'00000000-0000-7000-8000-000000000203',1,'k8s-secret://cyclopus-system/ghcr#token','active','00000000-0000-7000-8000-000000000205',now(),now())`, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registryTx.Exec(t.Context(), `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/ghcr#token',activated_at=now()
+		WHERE id='00000000-0000-7000-8000-000000000203'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = registryTx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	value, err = dataStore.GetGHCRRegistry(t.Context(), orgOneID)

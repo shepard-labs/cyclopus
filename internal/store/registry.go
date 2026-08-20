@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,25 +52,6 @@ func scanRegistry(row rowScanner, value *Registry) error {
 	}
 	value.RegistryURL = value.RegistryHost
 	return nil
-}
-
-// EnablePhase6SchemaEpoch is an explicit rollout fence. Migrations never call
-// it; operators enable the epoch only after all v14 binaries have drained.
-func (s *Store) EnablePhase6SchemaEpoch(ctx context.Context) error {
-	_, err := s.db.Exec(ctx, `SELECT `+pgx.Identifier{s.schema, "enable_phase6_schema_epoch"}.Sanitize()+`()`)
-	if err != nil {
-		return fmt.Errorf("%w: enable Phase 6 schema epoch: %v", ErrFailedPrecondition, err)
-	}
-	return nil
-}
-
-func (s *Store) Phase6SchemaEnabled(ctx context.Context) (bool, error) {
-	var enabled bool
-	err := s.db.QueryRow(ctx, `SELECT phase6_enabled FROM `+pgx.Identifier{s.schema, "schema_epoch"}.Sanitize()+` WHERE singleton=true`).Scan(&enabled)
-	if err != nil {
-		return false, fmt.Errorf("read Phase 6 schema epoch: %w", err)
-	}
-	return enabled, nil
 }
 
 func (s *Store) GetRegistry(ctx context.Context, orgID, id string) (Registry, error) {

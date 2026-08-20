@@ -102,7 +102,7 @@ ALTER TABLE orchestration_jobs
         AND (status <> 'resolving_image' OR oci_resolution_state IN ('pending','polling') OR deployment_state='waiting_credential')
     );
 
-CREATE OR REPLACE FUNCTION phase6_orchestration_valid(value orchestration_jobs) RETURNS boolean
+CREATE OR REPLACE FUNCTION orchestration_oci_valid(value orchestration_jobs) RETURNS boolean
 LANGUAGE sql STABLE SET search_path FROM CURRENT AS $$
     SELECT CASE
       WHEN value.oci_annotation_status='legacy' THEN

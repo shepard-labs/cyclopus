@@ -215,6 +215,15 @@ func (s *Store) RequestPreviewTeardown(ctx context.Context, params PreviewTeardo
 			deployment_claim_owner=NULL,deployment_claim_expires_at=NULL,cancellation_state='requested',
 			cancellation_requested_at=COALESCE(cancellation_requested_at,now()),
 			deployment_state=CASE WHEN deployment_state IN ('ready','claimed','applying') THEN 'cancelled' ELSE deployment_state END,
+			oci_resolution_state=CASE WHEN oci_resolution_state='resolved' THEN 'not_required' ELSE oci_resolution_state END,
+			oci_annotation_status=CASE WHEN oci_annotation_status IN ('matched','absent') AND oci_resolution_state='resolved' THEN 'absent' ELSE oci_annotation_status END,
+			oci_config_digest=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE oci_config_digest END,
+			oci_config_media_type=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE oci_config_media_type END,
+			oci_source=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE oci_source END,
+			oci_revision=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE oci_revision END,
+			oci_deadline_at=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE oci_deadline_at END,
+			resolved_registry_id=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE resolved_registry_id END,
+			resolved_registry_generation=CASE WHEN oci_resolution_state='resolved' THEN NULL ELSE resolved_registry_generation END,
 			terminal_error_code='environment_teardown_requested',terminal_error_message='preview teardown was requested',
 			terminal_at=now(),updated_at=now()
 			WHERE org_id=$1 AND environment_id=$2 AND status IN ('queued','leased','dispatch_reconciling','dispatched','resolving_image','deploying')`, params.OrgID, environmentID); err != nil {

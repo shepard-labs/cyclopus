@@ -787,7 +787,9 @@ func (s *Store) FinishRegistryCredentialValidation(ctx context.Context, operatio
 		if _, err = tx.Exec(ctx, `UPDATE registry_credential_operations SET checkpoint='namespaces_reconciling',updated_at=clock_timestamp() WHERE org_id=$1 AND id=$2 AND status='pending' AND checkpoint='validation_complete'`, operation.OrgID, operation.ID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE registries SET checkpoint='namespaces_reconciling',state='reconciling',updated_at=clock_timestamp() WHERE org_id=$1 AND operation_id=$2`, operation.OrgID, operation.ID); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE registries SET checkpoint='namespaces_reconciling',
+			state=CASE WHEN active_generation>0 THEN 'reconciling' ELSE state END,
+			updated_at=clock_timestamp() WHERE org_id=$1 AND operation_id=$2`, operation.OrgID, operation.ID); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE environments environment SET required_registry_credential_generation=$3,

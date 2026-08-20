@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -21,172 +20,34 @@ func seedSchemaV15Actor(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-func TestEnablePhase6SchemaEpochIntegration(t *testing.T) {
-	dataStore, pool := newIntegrationStore(t)
-	seedTenant(t, pool, tenantOne())
-	seedSchemaV15Actor(t, pool)
-	ctx := t.Context()
-	registryID := "00000000-0000-0000-0000-000000000141"
-	operationID := "00000000-0000-0000-0000-000000000142"
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,pending_generation,
-		pending_credential_secret_ref,operation_id) VALUES($1,$2,'ghcr','ghcr.io','creating','secret_written',1,
-		'k8s-secret://cyclopus-system/enable-ghcr#dockerconfigjson',$3)`, registryID, orgOneID, operationID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,checkpoint,candidate_generation,idempotency_key,
-		credential_fingerprint,actor_user_id) VALUES($1,$2,$3,'create','source_secret_written',1,'enable-phase6',decode(repeat('a',64),'hex'),$4)`, operationID, orgOneID, registryID, schemaV15ActorID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id)
-		VALUES($1,$2,1,'k8s-secret://cyclopus-system/enable-ghcr#dockerconfigjson','pending',$3)`, orgOneID, registryID, operationID); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := dataStore.EnablePhase6SchemaEpoch(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var enabled bool
-	var checkpoint string
-	if err := pool.QueryRow(ctx, `SELECT epoch.phase6_enabled,registry.checkpoint FROM schema_epoch epoch,registries registry
-		WHERE epoch.singleton AND registry.id=$1`, registryID).Scan(&enabled, &checkpoint); err != nil || !enabled || checkpoint != "source_secret_written" {
-		t.Fatalf("enabled/checkpoint = %t/%q, %v", enabled, checkpoint, err)
-	}
-}
-
-func TestEnablePhase6SchemaEpochGuardAndHostileSearchPathIntegration(t *testing.T) {
-	_, pool := newIntegrationStore(t)
-	ctx := t.Context()
-	if _, err := pool.Exec(ctx, `UPDATE schema_epoch SET phase6_enabled=true WHERE singleton`); err == nil {
-		t.Fatal("direct Phase 6 enable succeeded")
-	}
-	var targetSchema string
-	if err := pool.QueryRow(ctx, `SELECT current_schema()`).Scan(&targetSchema); err != nil {
-		t.Fatal(err)
-	}
-	maliciousSchema := "malicious_phase6_" + strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
-	if _, err := pool.Exec(ctx, `CREATE SCHEMA `+pgx.Identifier{maliciousSchema}.Sanitize()+`;
-		CREATE TABLE `+pgx.Identifier{maliciousSchema, "schema_epoch"}.Sanitize()+`(singleton boolean PRIMARY KEY,phase6_enabled boolean NOT NULL);
-		INSERT INTO `+pgx.Identifier{maliciousSchema, "schema_epoch"}.Sanitize()+` VALUES(true,false);
-		CREATE TABLE `+pgx.Identifier{maliciousSchema, "phase6_hijack"}.Sanitize()+`(called boolean NOT NULL DEFAULT false);
-		INSERT INTO `+pgx.Identifier{maliciousSchema, "phase6_hijack"}.Sanitize()+` DEFAULT VALUES;
-		CREATE FUNCTION `+pgx.Identifier{maliciousSchema, "enable_phase6_schema_epoch"}.Sanitize()+`() RETURNS void LANGUAGE sql AS
-		'UPDATE `+pgx.Identifier{maliciousSchema, "phase6_hijack"}.Sanitize()+` SET called=true'`); err != nil {
-		t.Fatal(err)
-	}
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Release()
-	if _, err := conn.Exec(ctx, `SET search_path=`+pgx.Identifier{maliciousSchema}.Sanitize()+`,`+pgx.Identifier{targetSchema}.Sanitize()); err != nil {
-		t.Fatal(err)
-	}
-	if err := New(conn).EnablePhase6SchemaEpoch(ctx); !errors.Is(err, ErrFailedPrecondition) {
-		t.Fatalf("default public schema error = %v, want ErrFailedPrecondition", err)
-	}
-	var hijacked, maliciousEnabled bool
-	if err := conn.QueryRow(ctx, `SELECT hijack.called,epoch.phase6_enabled FROM `+pgx.Identifier{maliciousSchema, "phase6_hijack"}.Sanitize()+` hijack,`+pgx.Identifier{maliciousSchema, "schema_epoch"}.Sanitize()+` epoch WHERE epoch.singleton`).Scan(&hijacked, &maliciousEnabled); err != nil || hijacked || maliciousEnabled {
-		t.Fatalf("malicious schema changed by default store = called:%t enabled:%t, %v", hijacked, maliciousEnabled, err)
-	}
-	wrongStore, err := NewWithSchema(conn, "wrong_phase6_schema")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wrongStore.EnablePhase6SchemaEpoch(ctx); !errors.Is(err, ErrFailedPrecondition) {
-		t.Fatalf("wrong configured schema error = %v, want ErrFailedPrecondition", err)
-	}
-	var enabled bool
-	if err := conn.QueryRow(ctx, `SELECT phase6_enabled FROM `+pgx.Identifier{targetSchema, "schema_epoch"}.Sanitize()+` WHERE singleton`).Scan(&enabled); err != nil || enabled {
-		t.Fatalf("target schema changed after wrong-schema call = %t, %v", enabled, err)
-	}
-	configuredStore, err := NewWithSchema(conn, targetSchema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := configuredStore.EnablePhase6SchemaEpoch(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := conn.QueryRow(ctx, `SELECT phase6_enabled FROM `+pgx.Identifier{targetSchema, "schema_epoch"}.Sanitize()+` WHERE singleton`).Scan(&enabled); err != nil || !enabled {
-		t.Fatalf("real schema epoch enabled = %t, %v", enabled, err)
-	}
-	if err := conn.QueryRow(ctx, `SELECT hijack.called,epoch.phase6_enabled FROM `+pgx.Identifier{maliciousSchema, "phase6_hijack"}.Sanitize()+` hijack,`+pgx.Identifier{maliciousSchema, "schema_epoch"}.Sanitize()+` epoch WHERE epoch.singleton`).Scan(&hijacked, &maliciousEnabled); err != nil || hijacked || maliciousEnabled {
-		t.Fatalf("malicious schema changed = called:%t enabled:%t, %v", hijacked, maliciousEnabled, err)
-	}
-}
-
 func TestMigration000015LegacyResolvedJobIntegration(t *testing.T) {
 	_, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
 	ctx := t.Context()
 	jobID := "00000000-0000-0000-0000-000000000148"
+	// Legacy OCI annotation status is rejected on INSERT — always-on Phase 6
+	// means no new legacy rows can be created.
 	if _, err := pool.Exec(ctx, `INSERT INTO orchestration_jobs(id,org_id,app_id,environment_id,github_repository_id,
 		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,
-		oci_resolution_state,image_tag_ref,resolved_image_digest,immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state)
+		oci_resolution_state,image_tag_ref,resolved_image_digest,immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state,oci_annotation_status)
 		SELECT $1,$2,$3,$4,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('b',40),1,
 		'legacy-resolved','deploying','resolved','ghcr.io/acme/app-one:'||repeat('b',40),'sha256:'||repeat('c',64),
-		'ghcr.io/acme/app-one@sha256:'||repeat('c',64),'application/vnd.oci.image.manifest.v1+json',now(),'ready'
+		'ghcr.io/acme/app-one@sha256:'||repeat('c',64),'application/vnd.oci.image.manifest.v1+json',now(),'ready','legacy'
+		FROM git_connections connection WHERE connection.id=$5`, jobID, orgOneID, appOneID, environmentOneID, repositoryOneID); err == nil {
+		t.Fatal("legacy OCI evidence insert succeeded — must be rejected with always-on Phase 6")
+	}
+	// Inserting a non-legacy row with resolved state should work when the OCI
+	// evidence is fully consistent.
+	if _, err := pool.Exec(ctx, `INSERT INTO orchestration_jobs(id,org_id,app_id,environment_id,github_repository_id,
+		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,
+		oci_resolution_state,image_tag_ref,resolved_image_digest,immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state,
+		oci_annotation_status,oci_config_digest,oci_config_media_type,oci_deadline_at,oci_source,oci_revision)
+		SELECT $1,$2,$3,$4,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('b',40),1,
+		'resolved-job','deploying','resolved','ghcr.io/acme/app-one:'||repeat('b',40),'sha256:'||repeat('c',64),
+		'ghcr.io/acme/app-one@sha256:'||repeat('c',64),'application/vnd.oci.image.manifest.v1+json',now(),'ready',
+		'matched','sha256:'||repeat('d',64),'application/vnd.oci.image.config.v1+json',now(),'https://github.com/acme/app-one',repeat('b',40)
 		FROM git_connections connection WHERE connection.id=$5`, jobID, orgOneID, appOneID, environmentOneID, repositoryOneID); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_annotation_status='legacy' WHERE id=$1`, jobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `SELECT enable_phase6_schema_epoch()`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET updated_at=now() WHERE id=$1`, jobID); err != nil {
-		t.Fatalf("untouched legacy evidence update: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_attempts=1 WHERE id=$1`, jobID); err == nil {
-		t.Fatal("legacy OCI attempts mutation succeeded after enable")
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,github_workflow_path,
-		workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,oci_annotation_status)
-		SELECT $1,$2,$3,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('b',40),1,
-		'new-legacy','legacy' FROM git_connections connection WHERE connection.id=$4`, orgOneID, appOneID, environmentOneID, repositoryOneID); err == nil {
-		t.Fatal("new legacy annotation status succeeded after enable")
-	}
-}
-
-func TestEnablePhase6SchemaEpochRejectsWithoutPartialConversion(t *testing.T) {
-	dataStore, pool := newIntegrationStore(t)
-	seedTenant(t, pool, tenantOne())
-	seedTenant(t, pool, tenantTwo())
-	ctx := t.Context()
-	compatibleID := "00000000-0000-0000-0000-000000000143"
-	invalidID := "00000000-0000-0000-0000-000000000144"
-	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint)
-		VALUES($1,$3,'ghcr','ghcr.io','failed','secret_written'),($2,$3,'ghcr','ghcr.io','failed','verified')`,
-		compatibleID, invalidID, orgOneID); err == nil {
-		t.Fatal("failed registries without failure codes unexpectedly inserted")
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,failure_code)
-		VALUES($1,$3,'ghcr','ghcr.io','failed','secret_written','postgres_permanent'),
-		($2,$4,'ghcr','ghcr.io','failed','verified','legacy_failure')`, compatibleID, invalidID, orgOneID, orgTwoID); err != nil {
-		t.Fatal(err)
-	}
-	if err := dataStore.EnablePhase6SchemaEpoch(ctx); !errors.Is(err, ErrFailedPrecondition) {
-		t.Fatalf("enable error = %v, want ErrFailedPrecondition", err)
-	}
-	var enabled bool
-	var first, second string
-	if err := pool.QueryRow(ctx, `SELECT epoch.phase6_enabled,
-		(SELECT checkpoint FROM registries WHERE id=$1),(SELECT checkpoint FROM registries WHERE id=$2)
-		FROM schema_epoch epoch WHERE singleton`, compatibleID, invalidID).Scan(&enabled, &first, &second); err != nil {
-		t.Fatal(err)
-	}
-	if enabled || first != "secret_written" || second != "verified" {
-		t.Fatalf("failed enable partially changed state: enabled=%t checkpoints=%q/%q", enabled, first, second)
 	}
 }
 
@@ -233,7 +94,7 @@ func TestSchemaV15OperationGenerationIdentityIntegration(t *testing.T) {
 }
 
 func TestSchemaV15DeferredGenerationRotationAndEnvironmentDependenciesIntegration(t *testing.T) {
-	dataStore, pool := newIntegrationStore(t)
+	_, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000149"
@@ -247,8 +108,8 @@ func TestSchemaV15DeferredGenerationRotationAndEnvironmentDependenciesIntegratio
 	if _, err = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,active_credential_secret_ref,activated_at)
-		VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,'k8s-secret://cyclopus-system/g1#dockerconfigjson',now())`, registryID, orgOneID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state)
+		VALUES($1,$2,'ghcr','ghcr.io','absent')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,terminal_at)
@@ -259,17 +120,35 @@ func TestSchemaV15DeferredGenerationRotationAndEnvironmentDependenciesIntegratio
 		VALUES($1,$2,1,'k8s-secret://cyclopus-system/g1#dockerconfigjson','active',$3,now(),now())`, orgOneID, registryID, operationOne); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/g1#dockerconfigjson',activated_at=now() WHERE id=$1`, registryID); err != nil {
+		t.Fatal(err)
+	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private',github_workflow_path=NULL,production_branch=NULL WHERE id=$1`, appOneID, registryID); err != nil {
+	// Update app to private AND environment to ready atomically. The
+	// apps_environments_valid constraint trigger fires on the app update and
+	// validates environments; the environments_credential_valid BEFORE
+	// trigger fires on the environment update and validates against the app.
+	// Both must see each other's new state, so defer the cross-dependency
+	// constraint while doing both updates in one transaction.
+	tx, err = pool.Begin(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=1,ready_registry_credential_generation=1,
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SET CONSTRAINTS apps_environments_valid DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private',github_workflow_path=NULL,production_branch=NULL WHERE id=$1`, appOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=1,ready_registry_credential_generation=1,
 		registry_credential_state='ready',registry_credential_checkpoint='namespace_secret_verified' WHERE id=$1`, environmentOneID); err != nil {
 		t.Fatal(err)
 	}
-	if err := dataStore.EnablePhase6SchemaEpoch(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	tx, err = pool.Begin(ctx)
@@ -318,7 +197,6 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 34, 56, 123456000, time.UTC)
 	registryID := "00000000-0000-0000-0000-000000000151"
 	operationID := "00000000-0000-0000-0000-000000000152"
-	secretRef := "k8s-secret://cyclopus-system/ghcr-1#dockerconfigjson"
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -327,23 +205,16 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	if _, err = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,
-		active_generation,active_credential_secret_ref,pending_generation,pending_credential_secret_ref,
-		previous_generation,previous_credential_secret_ref,reconciliation_generation,operation_id,
-		lease_owner,lease_epoch,lease_expires_at,attempts,next_attempt_at,activated_at,failure_code,failure_message,
-		created_at,updated_at) VALUES($1,$2,'ghcr','ghcr.io','failed','cleanup_pending',3,$3,4,$4,2,$5,9,$6,
-		'registry-worker',7,$7,5,$8,$9,'postgres_permanent','registry failure',$10,$11)`, registryID, orgOneID,
-		secretRef, "k8s-secret://cyclopus-system/ghcr-2#dockerconfigjson",
-		"k8s-secret://cyclopus-system/ghcr-0#dockerconfigjson", operationID, now.Add(time.Hour), now.Add(-time.Hour),
-		now.Add(-2*time.Hour), now.Add(-3*time.Hour), now.Add(-time.Minute)); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
 			candidate_generation,previous_generation,target_repository,idempotency_key,lease_owner,lease_epoch,
-			lease_expires_at,attempts,next_attempt_at,failure_code,failure_message,created_at,updated_at,terminal_at)
-			VALUES($1,$2,$3,'rotate','failed','cleanup_pending',4,3,'acme/private','operation-key',NULL,11,NULL,6,$4,
-			'postgres_permanent','operation failure',$5,$6,$7)`, operationID, orgOneID, registryID, now.Add(-time.Minute),
-		now.Add(-4*time.Hour), now.Add(-2*time.Hour), now.Add(-time.Hour)); err != nil {
+			lease_expires_at,attempts,next_attempt_at,failure_code,failure_message,created_at,updated_at,
+			credential_fingerprint,actor_user_id)
+			VALUES($1,$2,$3,'rotate','pending','namespaces_reconciling',4,3,'acme/private','operation-key',NULL,11,NULL,6,$4,
+			NULL,NULL,$5,$6,decode(repeat('cc',32),'hex'),$7)`, operationID, orgOneID, registryID, now.Add(-time.Minute),
+		now.Add(-4*time.Hour), now.Add(-2*time.Hour), schemaV15ActorID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
@@ -353,7 +224,7 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 		orgOneID, registryID, now); err != nil {
 		t.Fatal(err)
 	}
-	for generation, state := range map[int]string{2: "garbage_collected", 3: "active", 4: "failed"} {
+	for generation, state := range map[int]string{2: "garbage_collected", 3: "active", 4: "pending"} {
 		validated, activated, retired, collected := any(now.Add(-6*time.Hour)), any(now.Add(-5*time.Hour)), any(nil), any(nil)
 		if generation >= 3 && state == "retired" {
 			retired = now.Add(-3 * time.Hour)
@@ -384,19 +255,41 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 		operationID, orgOneID, registryID, now.Add(time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec(ctx, `UPDATE registries SET state='rotating',checkpoint='namespaces_reconciling',
+		active_generation=3,active_credential_secret_ref='k8s-secret://cyclopus-system/ghcr-3#dockerconfigjson',
+		pending_generation=4,pending_credential_secret_ref='k8s-secret://cyclopus-system/ghcr-4#dockerconfigjson',
+		previous_generation=2,previous_credential_secret_ref='k8s-secret://cyclopus-system/ghcr-2#dockerconfigjson',
+		reconciliation_generation=3,operation_id=$2,
+		lease_owner='registry-worker',lease_epoch=7,lease_expires_at=$3,attempts=5,next_attempt_at=$4,
+		activated_at=$5,failure_code='postgres_permanent',failure_message='registry failure'
+		WHERE org_id=$6 AND id=$1`, registryID, operationID, now.Add(time.Hour), now.Add(-time.Hour),
+		now.Add(-3*time.Hour), orgOneID); err != nil {
+		t.Fatal(err)
+	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private',
+	appEnvTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appEnvTx.Rollback(ctx)
+	if _, err = appEnvTx.Exec(ctx, `SET CONSTRAINTS apps_environments_valid DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appEnvTx.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private',
 		github_workflow_path=NULL,production_branch=NULL,desired_generation=17 WHERE id=$1`,
 		appOneID, registryID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=3,ready_registry_credential_generation=3,
+	if _, err = appEnvTx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=3,ready_registry_credential_generation=3,
 		registry_credential_state='ready',registry_credential_checkpoint='namespace_secret_verified',
 		registry_credential_attempts=3,registry_credential_next_attempt_at=$2,registry_credential_lease_epoch=8,
 		desired_generation=17 WHERE id=$1`,
 		environmentOneID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err = appEnvTx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	jobID := "00000000-0000-0000-0000-000000000153"
@@ -406,11 +299,11 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 		oci_deadline_at,oci_error_code,resolved_registry_id,resolved_registry_generation,oci_config_digest,oci_config_media_type,oci_source,
 		oci_revision,oci_annotation_status,created_at,updated_at)
 		SELECT $1,$2,$3,$4,connection.github_repository_id,'.github/workflows/deploy.yml',$5,'refs/heads/main',$6,17,
-		'oci-roundtrip','resolving_image','polling','oci-worker',13,$7,9,$8,$9,'registry_unavailable',$14,3,
-		'sha256:'||repeat('a',64),'application/vnd.oci.image.config.v1+json','https://github.com/acme/private',$10,
-		'mismatched',$11,$12 FROM git_connections connection WHERE connection.id=$13`, jobID, orgOneID, appOneID,
+		'oci-roundtrip','resolving_image','polling','oci-worker',13,$7,9,$8,$9,'registry_unavailable',NULL,NULL,
+		'sha256:'||repeat('a',64),'application/vnd.oci.image.config.v1+json',NULL,NULL,
+		'pending',$10,$11 FROM git_connections connection WHERE connection.id=$12`, jobID, orgOneID, appOneID,
 		environmentOneID, commitSHA('b'), commitSHA('c'), now.Add(time.Minute), now.Add(-time.Minute), now.Add(time.Hour),
-		commitSHA('d'), now.Add(-2*time.Hour), now.Add(-time.Hour), repositoryOneID, registryID); err != nil {
+		now.Add(-2*time.Hour), now.Add(-time.Hour), repositoryOneID); err != nil {
 		t.Fatal(err)
 	}
 	releaseID := "00000000-0000-0000-0000-000000000154"
@@ -442,7 +335,7 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	}
 	operation, err := dataStore.GetRegistryCredentialOperation(ctx, orgOneID, operationID)
 	if err != nil || operation.PreviousGeneration == nil || operation.TargetRepository == nil || operation.Lease != nil ||
-		operation.FailureCode == nil || operation.FailureMessage == nil || operation.TerminalAt == nil || operation.Attempts != 6 {
+		operation.FailureCode != nil || operation.FailureMessage != nil || operation.TerminalAt != nil || operation.Attempts != 6 {
 		t.Fatalf("operation round trip = %+v, %v", operation, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE registry_credential_operations SET status='leased',lease_owner='operation-worker',
@@ -491,16 +384,16 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	}
 	job, err := dataStore.GetOrchestrationJob(ctx, orgOneID, jobID)
 	if err != nil || job.OCI.Lease == nil || job.OCI.Lease.Owner != "oci-worker" || job.OCI.Lease.Epoch != 13 ||
-		job.OCI.ConfigDigest == nil || job.OCI.ConfigMediaType == nil || job.OCI.Source == nil || job.OCI.Revision == nil ||
-		job.OCI.ResolvedRegistryGeneration == nil || job.OCI.Deadline == nil || job.OCI.ErrorCode == nil ||
-		job.OCI.Attempts != 9 || job.OCI.AnnotationStatus != "mismatched" {
+		job.OCI.ConfigDigest == nil || job.OCI.ConfigMediaType == nil || job.OCI.Source != nil || job.OCI.Revision != nil ||
+		job.OCI.ResolvedRegistryGeneration != nil || job.OCI.Deadline == nil || job.OCI.ErrorCode == nil ||
+		job.OCI.Attempts != 9 || job.OCI.AnnotationStatus != "pending" {
 		t.Fatalf("orchestration OCI round trip = %+v, %v", job, err)
 	}
 	claim, err := dataStore.GetImageResolutionClaim(ctx, orgOneID, jobID)
-	if err != nil || claim.Registry == nil || claim.Registry.ID != registryID || claim.Lease.Owner != "oci-worker" || !claim.Deadline.Equal(now.Add(time.Hour)) {
+	if err != nil || claim.Lease.Owner != "oci-worker" || !claim.Deadline.Equal(now.Add(time.Hour)) {
 		t.Fatalf("image resolution claim round trip = %+v, %v", claim, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_lease_owner=NULL,oci_lease_expires_at=NULL,
+	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_resolution_state='pending',oci_lease_owner=NULL,oci_lease_expires_at=NULL,
 		oci_config_digest=NULL,oci_config_media_type=NULL,oci_source=NULL,oci_revision=NULL,oci_annotation_status='pending',
 		resolved_registry_id=NULL,resolved_registry_generation=NULL,oci_deadline_at=NULL,oci_error_code=NULL WHERE id=$1`, jobID); err != nil {
 		t.Fatal(err)
@@ -598,6 +491,40 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
+	// Point the app at the registry so 'pending' credential state is valid.
+	appTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appTx.Rollback(ctx)
+	if _, err = appTx.Exec(ctx, `SET CONSTRAINTS apps_environments_valid DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appTx.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private',github_workflow_path=NULL,production_branch=NULL WHERE id=$1`, appOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appTx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
+		candidate_generation,idempotency_key,terminal_at,credential_fingerprint,actor_user_id)
+		VALUES('00000000-0000-0000-0000-000000000162',$1,$2,'create','succeeded','activated',1,'plan-seed',now(),decode(repeat('dd',32),'hex'),$3)`,
+		orgOneID, registryID, schemaV15ActorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appTx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
+		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/plan#dockerconfigjson','active',
+		'00000000-0000-0000-0000-000000000162',now(),now())`, orgOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appTx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=1,ready_registry_credential_generation=1,
+		registry_credential_state='ready',registry_credential_checkpoint='namespace_secret_verified' WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appTx.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/plan#dockerconfigjson',activated_at=now() WHERE id=$1`, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if err = appTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO environments(id,org_id,app_id,branch,kind,preview_slug,namespace,planned_hostname,registry_credential_state,
 		required_registry_credential_generation,registry_credential_attempts,registry_credential_next_attempt_at)
 		SELECT uuidv7(),$1,$2,'plan-'||g,'preview','plan-'||g,'plan-'||g,'plan-'||g||'.example.test','pending',1,
@@ -612,10 +539,11 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,
 		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,
-		oci_resolution_state,oci_attempts,oci_next_attempt_at,oci_lease_owner,oci_lease_epoch,oci_lease_expires_at)
+		oci_resolution_state,oci_attempts,oci_next_attempt_at,oci_deadline_at,oci_lease_owner,oci_lease_epoch,oci_lease_expires_at)
 		SELECT $1,$2,environment.id,connection.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),
 		'refs/heads/main',repeat('b',40),1,'plan-'||environment.id,'resolving_image','polling',1,
-		clock_timestamp()-interval '1 second',CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE 'seed' END,
+		clock_timestamp()-interval '1 second',clock_timestamp()+interval '15 minutes',
+		CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE 'seed' END,
 		CASE WHEN row_number() OVER ()%2=0 THEN 0 ELSE 1 END,
 		CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE clock_timestamp()-interval '1 second' END
 		FROM environments environment,git_connections connection WHERE environment.org_id=$1 AND environment.branch LIKE 'plan-%'
@@ -636,10 +564,10 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 		FROM generate_series(1,12000) g`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,attempts,next_attempt_at,
+	if _, err := pool.Exec(ctx, `INSERT INTO registries(org_id,provider,registry_host,attempts,next_attempt_at,
 		lease_owner,lease_epoch,lease_expires_at)
 		SELECT ('10000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,'ghcr','ghcr.io',
-		CASE WHEN g%2=0 THEN 'creating' ELSE 'reconciling' END,CASE WHEN g%2=0 THEN 'source_secret_written' ELSE 'reconciling_namespaces' END,CASE WHEN g<=100 THEN 1 ELSE 12 END,
+		CASE WHEN g<=100 THEN 1 ELSE 12 END,
 		clock_timestamp()-interval '1 second',CASE WHEN g%2=0 THEN NULL ELSE 'seed' END,
 		CASE WHEN g%2=0 THEN 0 ELSE 1 END,CASE WHEN g%2=0 THEN NULL ELSE clock_timestamp()-interval '1 second' END
 		FROM generate_series(1,12000) g`); err != nil {

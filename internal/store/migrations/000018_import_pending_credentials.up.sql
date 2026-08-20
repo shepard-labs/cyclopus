@@ -12,7 +12,7 @@ ALTER TABLE environments DROP CONSTRAINT environments_registry_credential_checkp
 ALTER TABLE environments ADD CONSTRAINT environments_registry_credential_checkpoint_check CHECK (
     registry_credential_checkpoint IS NULL OR registry_credential_checkpoint IN ('activated','source_read','namespace_secret_written','namespace_secret_verified'));
 
-CREATE OR REPLACE FUNCTION phase6_environment_credential_row_valid(value environments) RETURNS boolean
+CREATE OR REPLACE FUNCTION environment_credential_row_valid(value environments) RETURNS boolean
 LANGUAGE sql STABLE AS $$
     SELECT CASE value.registry_credential_state
         WHEN 'not_required' THEN value.required_registry_credential_generation IS NULL
@@ -52,12 +52,12 @@ LANGUAGE sql STABLE AS $$
     WHERE app.org_id=value.org_id AND app.id=value.app_id
 $$;
 
-CREATE OR REPLACE FUNCTION assert_phase6_registry_generation_consistency(target_org uuid,target_registry uuid) RETURNS void
+CREATE OR REPLACE FUNCTION assert_registry_generation_consistency(target_org uuid,target_registry uuid) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE registry_row registries;
 BEGIN
     SELECT * INTO registry_row FROM registries WHERE org_id=target_org AND id=target_registry;
-    IF NOT FOUND OR NOT EXISTS (SELECT 1 FROM schema_epoch WHERE singleton AND phase6_enabled) THEN RETURN; END IF;
+    IF NOT FOUND THEN RETURN; END IF;
     IF registry_row.active_generation=0 THEN
         IF registry_row.active_credential_secret_ref IS NOT NULL OR EXISTS (
             SELECT 1 FROM registry_credential_generations WHERE org_id=target_org AND registry_id=target_registry AND state='active') THEN

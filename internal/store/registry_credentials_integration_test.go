@@ -506,12 +506,11 @@ func seedNamespaceCredentialSaga(t *testing.T, pool *pgxpool.Pool, rotation bool
 	var previous any
 	if rotation {
 		activeGeneration, previous = 1, int64(1)
-		if _, err = tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
-			active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
-			'k8s-secret://cyclopus-system/credential-active#dockerconfigjson',clock_timestamp())`, registryID, orgOneID); err != nil {
-			t.Fatal(err)
-		}
-	} else if _, err = tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
+	}
+	// The unconditional enforce_registry_credential_references BEFORE trigger
+	// rejects generation references that do not exist yet, so the registry is
+	// inserted bare and pointed at its generations once those rows exist.
+	if _, err = tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
 	if rotation {
@@ -541,9 +540,18 @@ func seedNamespaceCredentialSaga(t *testing.T, pool *pgxpool.Pool, rotation bool
 		operation_id,validated_at) VALUES($1,$2,$3,$4,'pending',$5,clock_timestamp())`, orgOneID, registryID, candidate, secretRef, operationID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='reconciling',checkpoint='namespaces_reconciling',pending_generation=$3,
-		pending_credential_secret_ref=$4,previous_generation=$5,previous_credential_secret_ref=CASE WHEN $5::bigint IS NULL THEN NULL ELSE active_credential_secret_ref END,
-		operation_id=$6 WHERE org_id=$1 AND id=$2`, orgOneID, registryID, candidate, secretRef, previous, operationID); err != nil {
+	if rotation {
+		if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='reconciling',
+			checkpoint='namespaces_reconciling',active_generation=1,
+			active_credential_secret_ref='k8s-secret://cyclopus-system/credential-active#dockerconfigjson',activated_at=clock_timestamp(),
+			pending_generation=$3,pending_credential_secret_ref=$4,previous_generation=$5,
+			previous_credential_secret_ref='k8s-secret://cyclopus-system/credential-active#dockerconfigjson',
+			operation_id=$6 WHERE org_id=$1 AND id=$2`, orgOneID, registryID, candidate, secretRef, previous, operationID); err != nil {
+			t.Fatal(err)
+		}
+	} else if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='creating',
+		checkpoint='namespaces_reconciling',pending_generation=$3,
+		pending_credential_secret_ref=$4,operation_id=$5 WHERE org_id=$1 AND id=$2`, orgOneID, registryID, candidate, secretRef, operationID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,github_workflow_path,production_branch,
@@ -728,13 +736,13 @@ func TestVisibilityPrivateDuringRollbackSelectsPreviousGenerationIntegration(t *
 	if _, err = tx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL WHERE org_id=$1 AND id=$2`, orgOneID, claims[0].AppID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = tx.Exec(t.Context(), `UPDATE environments SET required_registry_credential_generation=NULL,
 		ready_registry_credential_generation=NULL,registry_credential_state='not_required',registry_credential_checkpoint=NULL,
 		registry_credential_error_code=NULL,registry_credential_error_message=NULL,registry_credential_lease_owner=NULL,
 		registry_credential_lease_expires_at=NULL WHERE org_id=$1 AND app_id=$2`, orgOneID, claims[0].AppID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL WHERE org_id=$1 AND id=$2`, orgOneID, claims[0].AppID); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
@@ -817,20 +825,35 @@ func TestNamespaceCredentialFinalAttemptCrashRecoveryIntegration(t *testing.T) {
 func TestRegistryCredentialGCExcludesNamespaceCleanupTargetsIntegration(t *testing.T) {
 	pool := namespaceCredentialIntegrationPool(t)
 	dataStore, operation, registryID, _ := seedNamespaceCredentialSaga(t, pool, false, 1)
-	if _, err := pool.Exec(t.Context(), `UPDATE registry_credential_operations SET status='failed',failure_code='postgres_permanent',
+	gcTx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gcTx.Rollback(t.Context())
+	if _, err = gcTx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	// Transition app to public first so the environment can go to not_required.
+	if _, err = gcTx.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL WHERE org_id=$1 AND registry_id=$2`, orgOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = gcTx.Exec(t.Context(), `UPDATE environments SET required_registry_credential_generation=NULL,
+		registry_credential_state='not_required',registry_credential_cleanup_state='pending',
+		registry_credential_cleanup_registry_id=$2,registry_credential_cleanup_generation=1 WHERE org_id=$1`, orgOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = gcTx.Exec(t.Context(), `UPDATE registry_credential_operations SET status='failed',failure_code='postgres_permanent',
 		terminal_at=clock_timestamp()-interval '2 hours' WHERE id=$1`, operation.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE registry_credential_generations SET state='failed' WHERE registry_id=$1 AND generation=1`, registryID); err != nil {
+	if _, err = gcTx.Exec(t.Context(), `UPDATE registry_credential_generations SET state='failed' WHERE registry_id=$1 AND generation=1`, registryID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE registries SET state='failed',checkpoint=NULL,pending_generation=NULL,
+	if _, err = gcTx.Exec(t.Context(), `UPDATE registries SET state='failed',checkpoint=NULL,pending_generation=NULL,
 		pending_credential_secret_ref=NULL,operation_id=NULL,failure_code='postgres_permanent' WHERE id=$1`, registryID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE environments SET required_registry_credential_generation=NULL,
-		registry_credential_state='not_required',registry_credential_cleanup_state='pending',
-		registry_credential_cleanup_registry_id=$2,registry_credential_cleanup_generation=1 WHERE org_id=$1`, orgOneID, registryID); err != nil {
+	if err = gcTx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	candidates, err := dataStore.ListRegistryCredentialGarbageCollectionCandidates(t.Context(), time.Now().Add(-time.Hour), 10)
@@ -952,7 +975,7 @@ func TestNamespaceCredentialNonLastTargetTeardownDoesNotActivateCandidateIntegra
 		t.Fatalf("operation = %+v, %v", operation, err)
 	}
 	registry, err := dataStore.GetRegistry(t.Context(), orgOneID, registryID)
-	if err != nil || registry.State != "reconciling" || registry.ActiveGeneration != 0 || registry.PendingGeneration == nil {
+	if err != nil || registry.State != "creating" || registry.ActiveGeneration != 0 || registry.PendingGeneration == nil {
 		t.Fatalf("registry = %+v, %v", registry, err)
 	}
 }

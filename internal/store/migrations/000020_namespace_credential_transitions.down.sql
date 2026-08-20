@@ -7,11 +7,11 @@ DROP FUNCTION assert_namespace_credential_transitions_v20_down_safe();
 
 DROP FUNCTION transition_app_image_visibility(uuid,uuid,text,uuid);
 DROP FUNCTION converge_registry_credential_operation_without_namespaces(uuid,uuid);
-DROP TRIGGER apps_phase6_environments ON apps;
-CREATE TRIGGER apps_phase6_environments AFTER UPDATE OF image_visibility,registry_id,deleted_at ON apps
-    FOR EACH ROW EXECUTE FUNCTION enforce_phase6_app_environments();
+DROP TRIGGER apps_environments_valid ON apps;
+CREATE TRIGGER apps_environments_valid AFTER UPDATE OF image_visibility,registry_id,deleted_at ON apps
+    FOR EACH ROW EXECUTE FUNCTION enforce_app_environments();
 
-CREATE OR REPLACE FUNCTION phase6_environment_credential_row_valid(value environments) RETURNS boolean
+CREATE OR REPLACE FUNCTION environment_credential_row_valid(value environments) RETURNS boolean
 LANGUAGE sql STABLE AS $$
     SELECT CASE value.registry_credential_state
         WHEN 'not_required' THEN value.required_registry_credential_generation IS NULL

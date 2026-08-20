@@ -66,9 +66,7 @@ func TestUpdateAppVisibilityTransitionWithoutLiveEnvironmentIntegration(t *testi
 	}
 	registryID := "00000000-0000-7000-8000-000000000741"
 	operationID := "00000000-0000-7000-8000-000000000742"
-	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
-		active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
-		'k8s-secret://cyclopus-system/app-transition#dockerconfigjson',now())`, registryID, orgOneID); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state) VALUES($1,$2,'ghcr','ghcr.io','absent')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
 	tx, err := pool.Begin(t.Context())
@@ -87,6 +85,10 @@ func TestUpdateAppVisibilityTransitionWithoutLiveEnvironmentIntegration(t *testi
 	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
 		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/app-transition#dockerconfigjson',
 		'active',$3,now(),now())`, orgOneID, registryID, operationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/app-transition#dockerconfigjson',activated_at=now() WHERE id=$1`, registryID); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
@@ -115,9 +117,7 @@ func TestUpdateAppVisibilityTransitionWithLiveEnvironmentIntegration(t *testing.
 	seedTenant(t, pool, tenantOne())
 	registryID := "00000000-0000-7000-8000-000000000743"
 	operationID := "00000000-0000-7000-8000-000000000744"
-	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
-		active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
-		'k8s-secret://cyclopus-system/live-transition#dockerconfigjson',now())`, registryID, orgOneID); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state) VALUES($1,$2,'ghcr','ghcr.io','absent')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
 	tx, err := pool.Begin(t.Context())
@@ -136,6 +136,10 @@ func TestUpdateAppVisibilityTransitionWithLiveEnvironmentIntegration(t *testing.
 	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
 		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/live-transition#dockerconfigjson',
 		'active',$3,now(),now())`, orgOneID, registryID, operationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/live-transition#dockerconfigjson',activated_at=now() WHERE id=$1`, registryID); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
@@ -1396,8 +1400,18 @@ func TestClaimResolvedJobDeployAcceptsAbsentAnnotationsAndRejectsMalformedAbsenc
 				if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_annotation_status='absent',oci_source=NULL,oci_revision=NULL WHERE id=$1`, jobID); err != nil {
 					t.Fatal(err)
 				}
-			} else if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_annotation_status='absent',oci_source='acme/one',oci_revision=NULL WHERE id=$1`, jobID); err != nil {
-				t.Fatal(err)
+			} else {
+				// Malformed absent annotation: must bypass the OCI evidence trigger
+				// to seed intentionally invalid data for the claim-time rejection.
+				if _, err := pool.Exec(ctx, `ALTER TABLE orchestration_jobs DISABLE TRIGGER orchestration_jobs_registry_evidence`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_annotation_status='absent',oci_source='acme/one',oci_revision=NULL WHERE id=$1`, jobID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pool.Exec(ctx, `ALTER TABLE orchestration_jobs ENABLE TRIGGER orchestration_jobs_registry_evidence`); err != nil {
+					t.Fatal(err)
+				}
 			}
 			execution, err := dataStore.ClaimResolvedJobDeploy(ctx, orgOneID, nil)
 			if test.wantClaim && (err != nil || execution.ReleaseID != jobID) {
@@ -1425,14 +1439,36 @@ func TestAcceptReleaseRejectsPublicOrchestrationJobWithRegistryEvidenceIntegrati
 		t.Fatal(err)
 	}
 	registryID := seedActiveImageResolutionRegistry(t, pool)
-	if _, err := pool.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL,image_repository='acme/app-one' WHERE id=$1`, appOneID); err != nil {
+	// Graft private registry evidence onto the job while the app is still
+	// private. orchestration_oci_valid allows a private resolved job to
+	// carry resolved_registry_id/generation for the app's own registry, and
+	// keeps the completed job's 'matched' annotation consistent with its
+	// oci_source/oci_revision pair, so leave the annotation untouched. The
+	// image references must track the app's now-private repository.
+	if _, err := pool.Exec(t.Context(), `UPDATE orchestration_jobs SET resolved_registry_id=$2,resolved_registry_generation=1,
+		image_tag_ref='ghcr.io/acme/private:'||desired_checkout_sha,
+		immutable_image_ref='ghcr.io/acme/private@'||resolved_image_digest WHERE id=$1`, jobID, registryID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE environments SET registry_credential_state='not_required',required_registry_credential_generation=NULL,
+	// Flipping the app back to public invalidates the environment credential
+	// snapshot until it is reset, so defer the apps_environments_valid
+	// constraint trigger and apply both mutations in one transaction.
+	publicTx, beginErr := pool.BeginTx(t.Context(), pgx.TxOptions{})
+	if beginErr != nil {
+		t.Fatal(beginErr)
+	}
+	defer publicTx.Rollback(t.Context())
+	if _, err := publicTx.Exec(t.Context(), `SET CONSTRAINTS apps_environments_valid DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publicTx.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL,image_repository='acme/app-one' WHERE id=$1`, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publicTx.Exec(t.Context(), `UPDATE environments SET registry_credential_state='not_required',required_registry_credential_generation=NULL,
 		ready_registry_credential_generation=NULL WHERE id=$1`, environmentOneID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE orchestration_jobs SET resolved_registry_id=$2,resolved_registry_generation=1 WHERE id=$1`, jobID, registryID); err != nil {
+	if err := publicTx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	idem := IdempotencyClaimParams{OrgID: orgOneID, Scope: "deploy.accept", Key: "manual-public-registry-evidence", RequestHash: requestHash("manual-public-registry-evidence"), Owner: "user", LeaseDuration: time.Minute, Retention: time.Hour}
@@ -2889,11 +2925,20 @@ func TestRequestPreviewTeardownFencesEveryActiveOrchestrationStateIntegration(t 
 				image_tag_ref='ghcr.io/'||app.image_repository||':'||desired_checkout_sha,resolved_image_digest='sha256:'||repeat('9',64),
 				immutable_image_ref='ghcr.io/'||app.image_repository||'@sha256:'||repeat('9',64),
 				oci_media_type='application/vnd.oci.image.manifest.v1+json',oci_resolution_state='resolved',
-				oci_deadline_at=now()+interval '5 minutes',oci_annotation_status='absent',
+				oci_annotation_status='absent',oci_deadline_at=now()+interval '15 minutes',
+				oci_config_digest='sha256:'||repeat('8',64),
+				oci_config_media_type='application/vnd.oci.image.config.v1+json',
 				oci_resolved_at=now(),deployment_state='ready' FROM apps app WHERE job.id=$1 AND app.id=job.app_id`, jobID)
 		}
 		if err != nil {
 			t.Fatal(err)
+		}
+		if activeState == "deploying" {
+			var dump string
+			if dumpErr := pool.QueryRow(ctx, `SELECT jsonb_pretty(to_jsonb(job)) FROM orchestration_jobs job WHERE id=$1`, jobID).Scan(&dump); dumpErr != nil {
+				t.Fatal(dumpErr)
+			}
+			t.Logf("deploying job before teardown:\n%s", dump)
 		}
 		environment, err := dataStore.RequestPreviewTeardown(ctx, PreviewTeardownParams{
 			OrgID: orgOneID, AppID: appOneID, EnvironmentID: push.Environment.ID,
@@ -2979,10 +3024,14 @@ func newIntegrationStore(t *testing.T) (*Store, *pgxpool.Pool) {
 		admin.Close(ctx)
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-		admin.Close(context.Background())
-	})
+	if os.Getenv("CYCLOPUS_TEST_KEEP_SCHEMA") == "" {
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+			admin.Close(context.Background())
+		})
+	} else {
+		t.Logf("keeping schema %s", schema)
+	}
 
 	testURL := withSearchPath(databaseURL, schema)
 	if err := Migrate(ctx, MigrationConfig{

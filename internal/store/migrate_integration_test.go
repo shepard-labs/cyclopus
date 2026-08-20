@@ -1324,12 +1324,9 @@ func TestMigration000015UpgradeGuardsConstraintsAndReUp(t *testing.T) {
 		t.Fatalf("000014 to 000015: %v", err)
 	}
 	var version uint
-	var dirty, enabled bool
+	var dirty bool
 	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 15 || dirty {
 		t.Fatalf("000015 state = %d/%t, %v", version, dirty, err)
-	}
-	if err := conn.QueryRow(t.Context(), `SELECT phase6_enabled FROM schema_epoch WHERE singleton`).Scan(&enabled); err != nil || enabled {
-		t.Fatalf("phase6 enabled after migration = %t, %v", enabled, err)
 	}
 	var legacyAnnotation string
 	var legacyDeadline *time.Time
@@ -1350,28 +1347,25 @@ func TestMigration000015UpgradeGuardsConstraintsAndReUp(t *testing.T) {
 	if err := conn.QueryRow(t.Context(), `SELECT 0,'pending' WHERE NOT EXISTS (SELECT 1 FROM orchestration_jobs WHERE oci_attempts<>0 OR oci_annotation_status NOT IN ('pending','legacy'))`).Scan(&ociAttempts, &annotation); err != nil || ociAttempts != 0 || annotation != "pending" {
 		t.Fatalf("OCI mixed defaults = %d/%q, %v", ociAttempts, annotation, err)
 	}
-	if _, err := conn.Exec(t.Context(), `UPDATE schema_epoch SET phase6_enabled=true`); err == nil {
-		t.Fatal("direct Phase 6 enable succeeded")
-	}
-	if _, err := conn.Exec(t.Context(), `SELECT set_config('cyclopus.phase6_enable','on',true); UPDATE schema_epoch SET phase6_enabled=true`); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrator.Migrate(14); err == nil || !strings.Contains(err.Error(), "Phase 6 is enabled") {
-		t.Fatalf("enabled guarded down error = %v", err)
-	}
-	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 15 || dirty {
-		t.Fatalf("blocked down state = %d/%t, %v", version, dirty, err)
-	}
-	if _, err := conn.Exec(t.Context(), `UPDATE schema_epoch SET phase6_enabled=false`); err != nil {
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE orchestration_jobs DISABLE TRIGGER orchestration_jobs_registry_evidence`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(t.Context(), `UPDATE orchestration_jobs SET oci_attempts=1 WHERE id=$1`, legacyResolvedJob); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE orchestration_jobs ENABLE TRIGGER orchestration_jobs_registry_evidence`); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrator.Migrate(14); err == nil || !strings.Contains(err.Error(), "Phase 6 credential, reconciliation, OCI, or release evidence remains") {
 		t.Fatalf("legacy job with changed v15 evidence down error = %v", err)
 	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE orchestration_jobs DISABLE TRIGGER orchestration_jobs_registry_evidence`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := conn.Exec(t.Context(), `UPDATE orchestration_jobs SET oci_attempts=0 WHERE id=$1`, legacyResolvedJob); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `ALTER TABLE orchestration_jobs ENABLE TRIGGER orchestration_jobs_registry_evidence`); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrator.Migrate(14); err != nil {
@@ -1484,7 +1478,48 @@ func TestMigration000016CanonicalRepositoryTriggerCatalogDownAndReUp(t *testing.
 	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,'ghcr','ghcr.io') RETURNING id::text`, fixture.org).Scan(&registryID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.Exec(t.Context(), `UPDATE apps SET registry_id=$2,image_visibility='private' WHERE id=$1`, fixture.app, registryID); err != nil {
+	appTx, err := conn.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed the generation record so the environment's required generation
+	// reference is valid.
+	if _, err := appTx.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
+		candidate_generation,idempotency_key,terminal_at)
+		VALUES('00000000-0000-7000-8000-0000000007a0',$1,$2,'create','succeeded','activated',1,'v16-seed',clock_timestamp())`, fixture.org, registryID); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := appTx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
+		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/v16-seed#dockerconfigjson','active',
+		'00000000-0000-7000-8000-0000000007a0',clock_timestamp(),clock_timestamp())`, fixture.org, registryID); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := appTx.Exec(t.Context(), `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/v16-seed#dockerconfigjson',activated_at=clock_timestamp()
+		WHERE id=$1`, registryID); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := appTx.Exec(t.Context(), `ALTER TABLE apps DISABLE TRIGGER apps_environments_valid`); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := appTx.Exec(t.Context(), `UPDATE apps SET registry_id=$2,image_visibility='private' WHERE id=$1`, fixture.app, registryID); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := appTx.Exec(t.Context(), `ALTER TABLE apps ENABLE TRIGGER apps_environments_valid`); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := appTx.Exec(t.Context(), `UPDATE environments SET required_registry_credential_generation=1,ready_registry_credential_generation=1,
+		registry_credential_state='ready',registry_credential_checkpoint='namespace_secret_verified' WHERE id=$1`, fixture.environment); err != nil {
+		_ = appTx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if err := appTx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrator.Migrate(15); err == nil || !strings.Contains(err.Error(), "000016 rollback blocked: combined GitHub and registry applications remain") {
@@ -1528,9 +1563,7 @@ func TestMigration000020ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
-		active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
-		'k8s-secret://cyclopus-system/migration-twenty#dockerconfigjson',clock_timestamp())`, registryID, fixture.org); err != nil {
+	if _, err := tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state) VALUES($1,$2,'ghcr','ghcr.io','absent')`, registryID, fixture.org); err != nil {
 		_ = tx.Rollback(t.Context())
 		t.Fatal(err)
 	}
@@ -1543,6 +1576,12 @@ func TestMigration000020ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testi
 	if _, err := tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
 		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/migration-twenty#dockerconfigjson',
 		'active',$3,clock_timestamp(),clock_timestamp())`, fixture.org, registryID, operationID); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,
+		active_credential_secret_ref='k8s-secret://cyclopus-system/migration-twenty#dockerconfigjson',activated_at=clock_timestamp()
+		WHERE id=$1`, registryID); err != nil {
 		_ = tx.Rollback(t.Context())
 		t.Fatal(err)
 	}

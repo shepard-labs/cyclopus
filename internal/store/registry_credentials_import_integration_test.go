@@ -28,8 +28,12 @@ func seedPrivateGHCRRegistry(t *testing.T, pool *pgxpool.Pool, orgID, registryID
 	if _, err = tx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,active_credential_secret_ref,activated_at)
-		VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,$3,clock_timestamp())`, registryID, orgID, secretRef); err != nil {
+	// The unconditional enforce_registry_credential_references BEFORE trigger
+	// rejects active_generation references to generations that do not exist
+	// yet, so insert the registry first, add the operation and generation
+	// rows, then activate the registry.
+	if _, err = tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state)
+		VALUES($1,$2,'ghcr','ghcr.io','absent')`, registryID, orgID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,terminal_at)
@@ -39,6 +43,10 @@ func seedPrivateGHCRRegistry(t *testing.T, pool *pgxpool.Pool, orgID, registryID
 	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id,validated_at,activated_at)
 		SELECT $1,$2,1,$3,'active',operation.id,clock_timestamp(),clock_timestamp() FROM registry_credential_operations operation
 		WHERE operation.org_id=$1 AND operation.registry_id=$2 AND operation.candidate_generation=1`, orgID, registryID, secretRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,active_credential_secret_ref=$2,activated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$3`, orgID, secretRef, registryID); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {

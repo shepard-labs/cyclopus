@@ -6,15 +6,11 @@ DROP TRIGGER guard_oci_ghcr_v15_down ON schema_migrations;
 DROP FUNCTION guard_oci_ghcr_v15_down();
 DROP FUNCTION assert_oci_ghcr_v15_down_safe();
 
-DROP FUNCTION enable_phase6_schema_epoch();
-DROP TRIGGER schema_epoch_phase6_enable_guard ON schema_epoch;
-DROP FUNCTION guard_phase6_schema_epoch_update();
-
-DROP TRIGGER releases_phase6_registry_evidence ON releases;
-DROP TRIGGER orchestration_jobs_phase6_registry_evidence ON orchestration_jobs;
-DROP FUNCTION enforce_phase6_release_registry_evidence();
-DROP FUNCTION enforce_phase6_orchestration_registry_evidence();
-DROP FUNCTION phase6_orchestration_valid(orchestration_jobs);
+DROP TRIGGER releases_registry_evidence ON releases;
+DROP TRIGGER orchestration_jobs_registry_evidence ON orchestration_jobs;
+DROP FUNCTION enforce_release_registry_evidence();
+DROP FUNCTION enforce_orchestration_registry_evidence();
+DROP FUNCTION orchestration_oci_valid(orchestration_jobs);
 
 CREATE OR REPLACE FUNCTION reject_release_snapshot_mutation() RETURNS trigger
 LANGUAGE plpgsql
@@ -77,16 +73,16 @@ ALTER TABLE orchestration_jobs
 DROP INDEX environments_registry_credential_leased;
 DROP INDEX environments_registry_credential_exhausted;
 DROP INDEX environments_registry_credential_due;
-DROP TRIGGER registry_generations_phase6_environments ON registry_credential_generations;
-DROP TRIGGER registries_phase6_environments ON registries;
-DROP TRIGGER apps_phase6_environments ON apps;
-DROP FUNCTION enforce_phase6_generation_environments();
-DROP FUNCTION enforce_phase6_registry_environments();
-DROP FUNCTION enforce_phase6_app_environments();
-DROP FUNCTION assert_phase6_dependent_environments(uuid,uuid);
-DROP TRIGGER environments_phase6_credential ON environments;
-DROP FUNCTION enforce_phase6_environment_credential();
-DROP FUNCTION phase6_environment_credential_row_valid(environments);
+DROP TRIGGER registry_generations_environments_valid ON registry_credential_generations;
+DROP TRIGGER registries_environments_valid ON registries;
+DROP TRIGGER apps_environments_valid ON apps;
+DROP FUNCTION enforce_generation_environments();
+DROP FUNCTION enforce_registry_environments();
+DROP FUNCTION enforce_app_environments();
+DROP FUNCTION assert_dependent_environments(uuid,uuid);
+DROP TRIGGER environments_credential_valid ON environments;
+DROP FUNCTION enforce_environment_credential();
+DROP FUNCTION environment_credential_row_valid(environments);
 ALTER TABLE environments
     DROP CONSTRAINT environments_registry_generation_consistent,
     DROP CONSTRAINT environments_registry_credential_attempts_check,
@@ -111,8 +107,8 @@ DROP FUNCTION enforce_registry_credential_references();
 DROP TRIGGER registry_operations_generation_consistency ON registry_credential_operations;
 DROP TRIGGER registry_generations_registry_consistency ON registry_credential_generations;
 DROP TRIGGER registries_generation_consistency ON registries;
-DROP FUNCTION enforce_phase6_registry_generation_consistency();
-DROP FUNCTION assert_phase6_registry_generation_consistency(uuid,uuid);
+DROP FUNCTION enforce_registry_generation_consistency();
+DROP FUNCTION assert_registry_generation_consistency(uuid,uuid);
 DROP INDEX registries_operation_ref;
 DROP INDEX registries_previous_generation_ref;
 DROP INDEX registries_pending_generation_ref;
@@ -124,9 +120,9 @@ DROP FUNCTION protect_registry_credential_generation_identity();
 DROP TABLE registry_credential_operations;
 DROP TABLE registry_credential_generations;
 
-DROP TRIGGER registries_phase6_checkpoint ON registries;
-DROP FUNCTION enforce_phase6_registry_checkpoint();
-DROP FUNCTION phase6_registry_row_valid(registries);
+DROP TRIGGER registries_checkpoint_valid ON registries;
+DROP FUNCTION enforce_registry_checkpoint();
+DROP FUNCTION registry_row_valid(registries);
 DROP INDEX registries_operation_leased;
 DROP INDEX registries_operation_exhausted;
 DROP INDEX registries_operation_due;
@@ -158,5 +154,3 @@ UPDATE registries SET checkpoint=CASE checkpoint
 ALTER TABLE registries
     ADD CONSTRAINT registries_state_check CHECK (state IN ('absent','creating','ready','rotating','reconciling','failed','deleting')),
     ADD CONSTRAINT registries_checkpoint_check CHECK (checkpoint IS NULL OR checkpoint IN ('pending_recorded','secret_write_started','secret_written','verified','activated','namespaces_reconciling','cleanup_pending'));
-
-ALTER TABLE schema_epoch DROP COLUMN phase6_enabled;

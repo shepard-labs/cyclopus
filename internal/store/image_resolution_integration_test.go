@@ -235,7 +235,7 @@ func TestImageResolutionClaimDeadlineAttemptsAndRecoveryIntegration(t *testing.T
 	}
 
 	expiredID := seedImageResolutionJob(t, dataStore, pool, "claim-expired")
-	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_deadline_at=clock_timestamp(),oci_next_attempt_at=clock_timestamp() WHERE id=$1`, expiredID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_deadline_at=clock_timestamp(),oci_next_attempt_at=clock_timestamp(),oci_resolution_state='polling' WHERE id=$1`, expiredID); err != nil {
 		t.Fatal(err)
 	}
 	if recovered, err := dataStore.RecoverExpiredImageResolutionLeases(ctx, 1); err != nil || recovered != 1 {
@@ -452,8 +452,28 @@ func TestCompleteImageResolutionRejectsMutationWithoutEvidenceIntegration(t *tes
 			return false
 		}},
 		{"app visibility registry", true, func(t *testing.T, pool DB, _ string) bool {
-			_, err := pool.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL,image_repository='acme/one',github_workflow_path='.github/workflows/deploy.yml',production_branch='main' WHERE id=$1`, appOneID)
+			// The registry update that the transition requires invalidates the
+			// live environment credential snapshot until the environment is
+			// reset, so both apps_environments_valid and
+			// registries_environments_valid must see the end state.
+			tx, err := pool.BeginTx(t.Context(), pgx.TxOptions{})
 			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(t.Context())
+			if _, err = tx.Exec(t.Context(), `SET CONSTRAINTS apps_environments_valid DEFERRED`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.Exec(t.Context(), `UPDATE registries SET state='reconciling',checkpoint='rollback_reconciling' WHERE id=(SELECT registry_id FROM apps WHERE id=$1)`, appOneID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL,image_repository='acme/one',github_workflow_path='.github/workflows/deploy.yml',production_branch='main' WHERE id=$1`, appOneID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.Exec(t.Context(), `UPDATE environments SET required_registry_credential_generation=NULL,ready_registry_credential_generation=NULL,registry_credential_state='not_required',registry_credential_checkpoint=NULL,registry_credential_error_code=NULL,registry_credential_error_message=NULL WHERE id=$1`, environmentOneID); err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.Commit(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			return false
@@ -466,8 +486,21 @@ func TestCompleteImageResolutionRejectsMutationWithoutEvidenceIntegration(t *tes
 			return false
 		}},
 		{"registry active generation", true, func(t *testing.T, pool DB, _ string) bool {
-			_, err := pool.Exec(t.Context(), `UPDATE registries SET active_generation=0,active_credential_secret_ref=NULL,activated_at=NULL,state='absent',checkpoint=NULL WHERE id=(SELECT registry_id FROM apps WHERE id=$1)`, appOneID)
+			// Retire the active generation before clearing the registry pointer:
+			// the unconditional generation consistency triggers require the
+			// generation row state and the registry pointer to move together.
+			tx, err := pool.BeginTx(t.Context(), pgx.TxOptions{})
 			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(t.Context())
+			if _, err = tx.Exec(t.Context(), `UPDATE registry_credential_generations SET state='retired',retired_at=clock_timestamp() WHERE registry_id=(SELECT registry_id FROM apps WHERE id=$1) AND state='active'`, appOneID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.Exec(t.Context(), `UPDATE registries SET active_generation=0,active_credential_secret_ref=NULL,activated_at=NULL,state='absent',checkpoint=NULL WHERE id=(SELECT registry_id FROM apps WHERE id=$1)`, appOneID); err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.Commit(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			return false
@@ -636,7 +669,11 @@ func seedActiveImageResolutionRegistry(t *testing.T, pool DB) string {
 	if _, err = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,'k8s-secret://cyclopus/credential-sentinel#dockerconfigjson',clock_timestamp())`, registryID, orgOneID); err != nil {
+	// Insert the registry before its credential generation exists, then activate
+	// it once the operation and generation rows are in place: the unconditional
+	// enforce_registry_credential_references trigger requires the generation row
+	// to exist before active_generation references it.
+	if _, err = tx.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host,state) VALUES($1,$2,'ghcr','ghcr.io','absent')`, registryID, orgOneID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,terminal_at) VALUES($1,$2,$3,'create','succeeded','activated',1,'image-resolution-registry',clock_timestamp())`, operationID, orgOneID, registryID); err != nil {
@@ -645,13 +682,31 @@ func seedActiveImageResolutionRegistry(t *testing.T, pool DB) string {
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus/credential-sentinel#dockerconfigjson','active',$3,clock_timestamp(),clock_timestamp())`, orgOneID, registryID, operationID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',active_generation=1,active_credential_secret_ref='k8s-secret://cyclopus/credential-sentinel#dockerconfigjson',activated_at=clock_timestamp() WHERE id=$1`, registryID); err != nil {
+		t.Fatal(err)
+	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private' WHERE id=$1`, appOneID, registryID); err != nil {
+	// Binding the app to the registry flips its environments to private, which
+	// the apps_environments_valid constraint trigger (INITIALLY IMMEDIATE)
+	// asserts against a consistent credential snapshot, so defer it while the
+	// environment is moved to the matching pending state in one transaction.
+	tx, err = pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=1,ready_registry_credential_generation=NULL,registry_credential_state='pending' WHERE id=$1`, environmentOneID); err != nil {
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SET CONSTRAINTS apps_environments_valid DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE apps SET registry_id=$2,image_repository='acme/private',image_visibility='private' WHERE id=$1`, appOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=1,ready_registry_credential_generation=NULL,registry_credential_state='pending' WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	return registryID

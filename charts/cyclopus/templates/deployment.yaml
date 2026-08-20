@@ -79,13 +79,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "cyclopus.secretName" . }}
                   key: AUTH_BOOTSTRAP_SECRET
-            {{- if .Values.config.phase6.enabled }}
-            - name: CYCLOPUS_PHASE6_CREDENTIAL_FINGERPRINT_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "cyclopus.secretName" . }}
-                  key: PHASE6_CREDENTIAL_FINGERPRINT_KEY
-            {{- end }}
             - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_CREDENTIAL_SECRET
               valueFrom:
                 configMapKeyRef:
@@ -122,32 +115,6 @@ spec:
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: WORKER_LEASE_DURATION } }
             - name: CYCLOPUS_WORKER_MAX_CONCURRENT_DEPLOYS
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: WORKER_MAX_CONCURRENT_DEPLOYS } }
-            - name: CYCLOPUS_PHASE6_ENABLED
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_ENABLED } }
-            - name: CYCLOPUS_PHASE6_SCAN_INTERVAL
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_SCAN_INTERVAL } }
-            - name: CYCLOPUS_PHASE6_OCI_CONCURRENCY
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_OCI_CONCURRENCY } }
-            - name: CYCLOPUS_PHASE6_CREDENTIAL_CONCURRENCY
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_CREDENTIAL_CONCURRENCY } }
-            - name: CYCLOPUS_PHASE6_NAMESPACE_CONCURRENCY
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_NAMESPACE_CONCURRENCY } }
-            - name: CYCLOPUS_PHASE6_OCI_LEASE_DURATION
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_OCI_LEASE_DURATION } }
-            - name: CYCLOPUS_PHASE6_CREDENTIAL_LEASE_DURATION
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_CREDENTIAL_LEASE_DURATION } }
-            - name: CYCLOPUS_PHASE6_NAMESPACE_LEASE_DURATION
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_NAMESPACE_LEASE_DURATION } }
-            - name: CYCLOPUS_PHASE6_OCI_REQUEST_TIMEOUT
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_OCI_REQUEST_TIMEOUT } }
-            - name: CYCLOPUS_PHASE6_PUBLICATION_DEADLINE
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_PUBLICATION_DEADLINE } }
-            - name: CYCLOPUS_PHASE6_SHUTDOWN_GRACE
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_SHUTDOWN_GRACE } }
-            - name: CYCLOPUS_PHASE6_RETIRED_RETENTION
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_RETIRED_RETENTION } }
-            - name: CYCLOPUS_PHASE6_SOURCE_RESCUE_TIMEOUT
-              valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: PHASE6_SOURCE_RESCUE_TIMEOUT } }
             - name: CYCLOPUS_KUBERNETES_PREVIEW_HOSTNAME_SUFFIX
               valueFrom: { configMapKeyRef: { name: {{ include "cyclopus.fullname" . }}-config, key: KUBERNETES_PREVIEW_HOSTNAME_SUFFIX } }
             - name: CYCLOPUS_OBSERVABILITY_OPENOBSERVE_BASE_URL

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -121,48 +123,53 @@ func run(args, environ []string) error {
 	if err != nil {
 		return fmt.Errorf("construct GitHub discovery clients: %w", err)
 	}
-	var phase6Workers []lifecycleWorker
-	var phase6Client *oci.Client
+	var ociWorkers []lifecycleWorker
+	var ociClient *oci.Client
 	ociMetrics := ocimetrics.New()
 	var registryCredentials *service.RegistryCredentialService
-	if cfg.Phase6.Enabled {
+	{
 		credentialAdapter, err := kubernetesadapter.NewRegistryCredentialSecretAdapter(kubernetesClient, cfg.Kubernetes.InstanceNamespace)
 		if err != nil {
 			return fmt.Errorf("construct registry credential Secret adapter: %w", err)
 		}
-		ociHTTPClient, err := oci.NewHTTPClient(cfg.Phase6.OCIRequestTimeout)
+		ociRequestTimeout := 20 * time.Second
+		ociHTTPClient, err := oci.NewHTTPClient(ociRequestTimeout)
 		if err != nil {
 			return fmt.Errorf("construct OCI HTTP client: %w", err)
 		}
-		phase6Client, err = oci.NewClient(oci.ClientConfig{HTTPClient: ociHTTPClient, RequestTimeout: cfg.Phase6.OCIRequestTimeout})
+		ociClient, err = oci.NewClient(oci.ClientConfig{HTTPClient: ociHTTPClient, RequestTimeout: ociRequestTimeout})
 		if err != nil {
 			return fmt.Errorf("construct OCI client: %w", err)
 		}
-		defer phase6Client.Close()
-		registryCredentials, err = service.NewRegistryCredentialServiceFromStore(dataStore, credentialAdapter, []byte(cfg.Phase6.CredentialFingerprintKey))
+		defer ociClient.Close()
+		// Derive the credential fingerprint key from the token pepper via HMAC
+		// with a domain separator. The pepper is already required, stable, and
+		// secret-sourced; the derived key inherits the same guarantees.
+		fingerprintKey := registryCredentialFingerprintKey([]byte(cfg.Auth.TokenPepper))
+		registryCredentials, err = service.NewRegistryCredentialServiceFromStore(dataStore, credentialAdapter, fingerprintKey)
 		if err != nil {
 			return fmt.Errorf("construct registry credential service: %w", err)
 		}
 		imageRunner := worker.NewImageResolutionRunner(worker.ImageResolutionConfig{
-			ScanInterval: cfg.Phase6.ScanInterval, LeaseDuration: cfg.Phase6.OCILeaseDuration, PublicationDeadline: cfg.Phase6.PublicationDeadline,
-			RequestTimeout: cfg.Phase6.OCIRequestTimeout, ShutdownGrace: cfg.Phase6.ShutdownGrace, Concurrency: cfg.Phase6.OCIConcurrency, Owner: owner,
-		}, logger, dataStore, phase6Client, credentialAdapter, ociMetrics)
-		processor, err := worker.NewRegistryCredentialProcessor(dataStore, credentialAdapter, phase6Client, owner, cfg.Phase6.CredentialLeaseDuration)
+			ScanInterval: time.Second, LeaseDuration: 45 * time.Second, PublicationDeadline: 15 * time.Minute,
+			RequestTimeout: ociRequestTimeout, ShutdownGrace: 30 * time.Second, Concurrency: 4, Owner: owner,
+		}, logger, dataStore, ociClient, credentialAdapter, ociMetrics)
+		processor, err := worker.NewRegistryCredentialProcessor(dataStore, credentialAdapter, ociClient, owner, 60*time.Second)
 		if err != nil {
 			return fmt.Errorf("construct registry credential processor: %w", err)
 		}
 		credentialRunner := worker.NewRegistryCredentialRunner(worker.RegistryCredentialConfig{
-			ScanInterval: cfg.Phase6.ScanInterval, LeaseDuration: cfg.Phase6.CredentialLeaseDuration, RequestTimeout: cfg.Phase6.OCIRequestTimeout,
-			ShutdownGrace: cfg.Phase6.ShutdownGrace, Concurrency: cfg.Phase6.CredentialConcurrency, Owner: owner,
+			ScanInterval: time.Second, LeaseDuration: 60 * time.Second, RequestTimeout: ociRequestTimeout,
+			ShutdownGrace: 30 * time.Second, Concurrency: 2, Owner: owner,
 		}, logger, dataStore, processor, ociMetrics)
 		credentialMaintenanceRunner := worker.NewRegistryCredentialMaintenanceRunner(worker.RegistryCredentialMaintenanceConfig{
-			ScanInterval: cfg.Phase6.ScanInterval, ShutdownGrace: cfg.Phase6.ShutdownGrace, RetiredRetention: cfg.Phase6.RetiredRetention, SourceRescueTimeout: cfg.Phase6.SourceRescueTimeout,
+			ScanInterval: time.Second, ShutdownGrace: 30 * time.Second, RetiredRetention: 24 * time.Hour, SourceRescueTimeout: 5 * time.Minute,
 		}, logger, dataStore, credentialAdapter)
 		namespaceRunner := worker.NewRegistryNamespaceReconciler(worker.RegistryNamespaceReconcilerConfig{
-			ScanInterval: cfg.Phase6.ScanInterval, LeaseDuration: cfg.Phase6.NamespaceLeaseDuration, RequestTimeout: cfg.Phase6.OCIRequestTimeout,
-			ShutdownGrace: cfg.Phase6.ShutdownGrace, Concurrency: cfg.Phase6.NamespaceConcurrency, Owner: owner, InstanceNamespace: cfg.Kubernetes.InstanceNamespace,
+			ScanInterval: time.Second, LeaseDuration: 60 * time.Second, RequestTimeout: ociRequestTimeout,
+			ShutdownGrace: 30 * time.Second, Concurrency: 4, Owner: owner, InstanceNamespace: cfg.Kubernetes.InstanceNamespace,
 		}, logger, dataStore, credentialAdapter, ociMetrics)
-		phase6Workers = []lifecycleWorker{imageRunner, credentialRunner, credentialMaintenanceRunner, namespaceRunner}
+		ociWorkers = []lifecycleWorker{imageRunner, credentialRunner, credentialMaintenanceRunner, namespaceRunner}
 	}
 	domainOptions := []service.Option{service.WithLogger(logger), service.WithGitHubOnboarding(githubOnboarding),
 		service.WithGitHubDiscovery(githubClients, []byte(cfg.Auth.TokenPepper)),
@@ -231,28 +238,16 @@ func run(args, environ []string) error {
 		if err := pool.Ping(ctx); err != nil {
 			return err
 		}
-		if cfg.Phase6.Enabled {
-			enabled, err := dataStore.Phase6SchemaEnabled(ctx)
-			if err != nil || !enabled {
-				return errors.Join(errors.New("Phase 6 schema epoch is not enabled"), err)
-			}
-			if _, err := kubernetesClient.CoreV1().Namespaces().Get(ctx, cfg.Kubernetes.InstanceNamespace, metav1.GetOptions{}); err != nil {
-				return fmt.Errorf("read instance namespace: %w", err)
-			}
+		if _, err := kubernetesClient.CoreV1().Namespaces().Get(ctx, cfg.Kubernetes.InstanceNamespace, metav1.GetOptions{}); err != nil {
+			return fmt.Errorf("read instance namespace: %w", err)
 		}
 		return githubWebhookSecretChecker.Check(ctx)
 	}
 	if err := githubOnboarding.Reconcile(ctx); err != nil {
 		return fmt.Errorf("reconcile GitHub App credentials: %w", err)
 	}
-	if cfg.Phase6.Enabled {
-		enabled, err := dataStore.Phase6SchemaEnabled(ctx)
-		if err != nil || !enabled {
-			return errors.Join(errors.New("Phase 6 schema epoch is not enabled"), err)
-		}
-		if _, err := kubernetesClient.CoreV1().Namespaces().Get(ctx, cfg.Kubernetes.InstanceNamespace, metav1.GetOptions{}); err != nil {
-			return fmt.Errorf("read instance namespace: %w", err)
-		}
+	if _, err := kubernetesClient.CoreV1().Namespaces().Get(ctx, cfg.Kubernetes.InstanceNamespace, metav1.GetOptions{}); err != nil {
+		return fmt.Errorf("read instance namespace: %w", err)
 	}
 
 	logger.Info("server starting", "address", cfg.HTTP.Address, "worker_owner", owner)
@@ -260,7 +255,7 @@ func run(args, environ []string) error {
 	if err != nil {
 		return err
 	}
-	workers := append([]lifecycleWorker{eventRunner}, phase6Workers...)
+	workers := append([]lifecycleWorker{eventRunner}, ociWorkers...)
 	err = runLifecycle(ctx, apiServer, recovery, &ready, workers...)
 	logger.Info("server stopped")
 	return err
@@ -685,4 +680,15 @@ func recoveryOwner() string {
 		hostname = "cyclopus"
 	}
 	return hostname + ":" + strconv.Itoa(os.Getpid())
+}
+
+// registryCredentialFingerprintKey derives the HMAC key used to fingerprint
+// tenant registry credentials from the auth token pepper. The pepper is already
+// a required, stable, secret-sourced value; the derived key inherits the same
+// guarantees. Rotating the pepper rotates the fingerprint key — all evidence
+// becomes unlinkable (same semantics as pepper rotation invalidating sessions).
+func registryCredentialFingerprintKey(pepper []byte) []byte {
+	mac := hmac.New(sha256.New, pepper)
+	mac.Write([]byte("cyclopus/registry-credential-fingerprint/v1"))
+	return mac.Sum(nil)
 }
