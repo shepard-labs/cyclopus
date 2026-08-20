@@ -1026,6 +1026,12 @@ func (*fakeForwardStore) CheckpointEnvironmentLifecycle(context.Context, store.E
 func (*fakeForwardStore) BlockEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, string, string, string) error {
 	return nil
 }
+func (*fakeForwardStore) SeedEnvironmentCredentialForProvision(context.Context, store.EnvironmentLifecycleJob) error {
+	return nil
+}
+func (*fakeForwardStore) InvalidateNamespaceCredentialLeaseForTeardown(context.Context, string, string) error {
+	return nil
+}
 func (*fakeForwardStore) CompleteEnvironmentProvision(context.Context, store.EnvironmentLifecycleJob, *string) error {
 	return nil
 }

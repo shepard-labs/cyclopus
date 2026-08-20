@@ -22,6 +22,7 @@ import (
 )
 
 const maxRegistryCredentialMaterialBytes = 4096
+const maxImagePullSecretConflictRetries = 5
 
 const (
 	RegistryCredentialKey = corev1.DockerConfigJsonKey
@@ -35,6 +36,17 @@ const (
 	registryCredentialOrgAnnotation    = "cyclopus.dev/org-id"
 	registryCredentialOwnerAnnotation  = "cyclopus.dev/owner-namespace"
 	registryCredentialDigestAnnotation = "cyclopus.dev/data-sha256"
+
+	ImagePullSecretName                   = "cyclopus-ghcr-pull"
+	imagePullSecretPurpose                = "ghcr-pull"
+	imagePullSecretNamespaceUIDAnnotation = "cyclopus.dev/namespace-uid"
+	imagePullSecretOrgAnnotation          = "cyclopus.dev/org-id"
+	imagePullSecretRegistryAnnotation     = "cyclopus.dev/registry-id"
+	imagePullSecretEnvironmentAnnotation  = "cyclopus.dev/environment-id"
+	imagePullSecretSourceNameAnnotation   = "cyclopus.dev/source-secret-name"
+	imagePullSecretSourceUIDAnnotation    = "cyclopus.dev/source-secret-uid"
+	imagePullSecretGenerationAnnotation   = "cyclopus.dev/generation"
+	imagePullSecretContentSHAAnnotation   = "cyclopus.dev/content-sha256"
 )
 
 // Typed adapter errors let the worker classify read failures without
@@ -44,7 +56,30 @@ var (
 	ErrRegistryCredentialCollision = errors.New("registry credential Secret collision")
 	ErrRegistryCredentialInvalid   = errors.New("registry credential Secret is invalid")
 	ErrRegistryCredentialNotFound  = errors.New("registry credential Secret is missing")
+	ErrImagePullSecretOwnership    = errors.New("image pull Secret ownership mismatch")
+	ErrImagePullSecretConflict     = errors.New("image pull Secret update conflict")
 )
+
+type RegistryCredentialAdapterError struct {
+	code      oci.Code
+	retryable bool
+	cause     error
+}
+
+func (e *RegistryCredentialAdapterError) Error() string {
+	return "kubernetes registry credential: " + string(e.code)
+}
+func (e *RegistryCredentialAdapterError) Unwrap() error   { return e.cause }
+func (e *RegistryCredentialAdapterError) Code() oci.Code  { return e.code }
+func (e *RegistryCredentialAdapterError) Retryable() bool { return e.retryable }
+
+func RegistryCredentialErrorDisposition(err error) (retryable bool, code oci.Code, ok bool) {
+	var adapterError *RegistryCredentialAdapterError
+	if !errors.As(err, &adapterError) {
+		return false, "", false
+	}
+	return adapterError.retryable, adapterError.code, true
+}
 
 type RegistryCredentialSecretAdapter struct {
 	client    kubernetes.Interface
@@ -53,6 +88,18 @@ type RegistryCredentialSecretAdapter struct {
 
 type RegistryCredentialSecretIdentity struct {
 	SecretRef, UID, ResourceVersion string
+}
+
+type ImagePullSecretIdentity struct {
+	SourceSecretName, SourceUID, NamespaceUID string
+}
+
+type ImagePullSecretRequest struct {
+	OrgID, AppID, EnvironmentID string
+	Namespace, NamespaceUID     string
+	RegistryID                  string
+	SourceSecretName, SourceUID string
+	Generation                  int64
 }
 
 func NewRegistryCredentialSecretAdapter(client kubernetes.Interface, namespace string) (*RegistryCredentialSecretAdapter, error) {
@@ -68,7 +115,7 @@ func RegistryCredentialSecretName(orgID string, generation int64) (string, error
 		return "", ErrRegistryCredentialInvalid
 	}
 	sum := sha256.Sum256([]byte(orgID))
-	return "cyclopus-ghcr-" + hex.EncodeToString(sum[:16]) + "-g" + strconv.FormatInt(generation, 10), nil
+	return "cyclopus-ghcr-" + hex.EncodeToString(sum[:10]) + "-g" + strconv.FormatInt(generation, 10), nil
 }
 
 func (a *RegistryCredentialSecretAdapter) WriteCredential(ctx context.Context, orgID, registryID, operationID string, generation int64, credential *oci.Credential) (string, string, string, error) {
@@ -144,6 +191,81 @@ func (a *RegistryCredentialSecretAdapter) ReadCredential(ctx context.Context, or
 	return &oci.Credential{Username: username, PAT: password, OrgID: orgID, RegistryID: registryID, Generation: generation}, nil
 }
 
+// ReadImagePullSecretIdentity validates the persisted source reference and
+// immutable source Secret without returning credential material, then reads the
+// current namespace UID needed to fence the destination reconciliation.
+func (a *RegistryCredentialSecretAdapter) ReadImagePullSecretIdentity(ctx context.Context, orgID, registryID string, generation int64, value, namespace string) (ImagePullSecretIdentity, error) {
+	reference, err := secretref.Parse(value)
+	if err != nil || reference.Namespace != a.namespace || reference.Key != RegistryCredentialKey {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	name, err := RegistryCredentialSecretName(orgID, generation)
+	if err != nil || reference.Name != name || namespace == "" {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	secret, err := a.client.CoreV1().Secrets(a.namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialNotFound)
+	}
+	if err != nil {
+		return ImagePullSecretIdentity{}, imagePullSecretAPIError(err)
+	}
+	operationID := secret.Labels[registryCredentialOperationLabel]
+	payload, ok := secret.Data[RegistryCredentialKey]
+	digest := sha256.Sum256(payload)
+	if !ok || !validRegistryCredentialSecret(secret, orgID, registryID, operationID, generation, a.namespace, hex.EncodeToString(digest[:])) {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	namespaceObject, err := a.client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err != nil {
+		return ImagePullSecretIdentity{}, imagePullSecretAPIError(err)
+	}
+	if namespaceObject.UID == "" {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	return ImagePullSecretIdentity{SourceSecretName: name, SourceUID: string(secret.UID), NamespaceUID: string(namespaceObject.UID)}, nil
+}
+
+// ReadImagePullSecretCleanupIdentity authorizes cleanup from persisted target
+// identity and exact destination metadata. The immutable source may already
+// have been garbage-collected; in that case its UID is recovered only from the
+// owned destination annotation and remains part of the delete ownership fence.
+func (a *RegistryCredentialSecretAdapter) ReadImagePullSecretCleanupIdentity(ctx context.Context, orgID, registryID string, generation int64, value, namespace string) (ImagePullSecretIdentity, error) {
+	reference, err := secretref.Parse(value)
+	if err != nil || reference.Namespace != a.namespace || reference.Key != RegistryCredentialKey || namespace == "" {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	name, err := RegistryCredentialSecretName(orgID, generation)
+	if err != nil || reference.Name != name {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	namespaceObject, err := a.client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return ImagePullSecretIdentity{SourceSecretName: name, SourceUID: "namespace-missing", NamespaceUID: "namespace-missing"}, nil
+	}
+	if err != nil {
+		return ImagePullSecretIdentity{}, imagePullSecretAPIError(err)
+	}
+	if namespaceObject.UID == "" {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	destination, err := a.client.CoreV1().Secrets(namespace).Get(ctx, ImagePullSecretName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return ImagePullSecretIdentity{SourceSecretName: name, SourceUID: "destination-missing", NamespaceUID: string(namespaceObject.UID)}, nil
+	}
+	if err != nil {
+		return ImagePullSecretIdentity{}, imagePullSecretAPIError(err)
+	}
+	request := ImagePullSecretRequest{OrgID: orgID, AppID: namespaceObject.Labels[AppIDLabel],
+		EnvironmentID: namespaceObject.Labels[EnvironmentIDLabel], Namespace: namespace,
+		NamespaceUID: string(namespaceObject.UID), RegistryID: registryID, SourceSecretName: name,
+		SourceUID: destination.Annotations[imagePullSecretSourceUIDAnnotation], Generation: generation}
+	if request.SourceUID == "" || verifyImagePullSecretNamespace(namespaceObject, request) != nil || !ownedImagePullSecret(destination, request) {
+		return ImagePullSecretIdentity{}, imagePullSecretError(oci.CodeKubernetesOwnershipConflict, false, ErrImagePullSecretOwnership)
+	}
+	return ImagePullSecretIdentity{SourceSecretName: name, SourceUID: request.SourceUID, NamespaceUID: request.NamespaceUID}, nil
+}
+
 // validRegistryCredentialMaterial requires valid UTF-8 within a bounded size
 // and rejects ASCII control bytes (and DEL) that could corrupt logs, JSON, or
 // the Basic-auth wire format.
@@ -185,10 +307,214 @@ func (a *RegistryCredentialSecretAdapter) DeleteCredential(ctx context.Context, 
 	return a.client.CoreV1().Secrets(a.namespace).Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
 }
 
+// ReconcileImagePullSecret copies an immutable source generation into the
+// stable, mutable Secret consumed by workloads in an exactly-owned namespace.
+func (a *RegistryCredentialSecretAdapter) ReconcileImagePullSecret(ctx context.Context, request ImagePullSecretRequest) error {
+	if !validImagePullSecretRequest(request) {
+		return imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	for attempt := 0; attempt <= maxImagePullSecretConflictRetries; attempt++ {
+		namespace, source, destination, err := a.readImagePullSecretState(ctx, request)
+		if err != nil {
+			return err
+		}
+		if err = verifyImagePullSecretNamespace(namespace, request); err != nil {
+			return err
+		}
+		payload, digest, err := a.verifyImagePullSecretSource(source, request)
+		if err != nil {
+			return err
+		}
+		desired := desiredImagePullSecret(request, digest, payload)
+		if destination == nil {
+			_, err = a.client.CoreV1().Secrets(request.Namespace).Create(ctx, desired, metav1.CreateOptions{})
+		} else {
+			if !ownedImagePullSecret(destination, request) {
+				return imagePullSecretError(oci.CodeKubernetesOwnershipConflict, false, ErrImagePullSecretOwnership)
+			}
+			desired.ResourceVersion = destination.ResourceVersion
+			desired.UID = destination.UID
+			_, err = a.client.CoreV1().Secrets(request.Namespace).Update(ctx, desired, metav1.UpdateOptions{})
+		}
+		if apierrors.IsAlreadyExists(err) || apierrors.IsConflict(err) {
+			continue
+		}
+		if err != nil {
+			return imagePullSecretAPIError(err)
+		}
+		verifiedNamespace, verifiedSource, verified, err := a.readImagePullSecretState(ctx, request)
+		if err != nil {
+			return err
+		}
+		verifiedPayload, verifiedDigest, err := a.verifyImagePullSecretSource(verifiedSource, request)
+		if err != nil {
+			return err
+		}
+		if err = verifyImagePullSecretNamespace(verifiedNamespace, request); err != nil || verifiedDigest != digest ||
+			!bytes.Equal(verifiedPayload, payload) || !matchesImagePullSecret(verified, request, digest, payload) {
+			return imagePullSecretError(oci.CodeKubernetesOwnershipConflict, false, ErrImagePullSecretOwnership)
+		}
+		return nil
+	}
+	return imagePullSecretError(oci.CodeKubernetesConflict, true, ErrImagePullSecretConflict)
+}
+
+// DeleteImagePullSecret removes only the stable Secret bound to the exact
+// namespace UID in the request. A missing or recreated namespace is already
+// converged and is never touched.
+func (a *RegistryCredentialSecretAdapter) DeleteImagePullSecret(ctx context.Context, request ImagePullSecretRequest) error {
+	if !validImagePullSecretRequest(request) {
+		return imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	for attempt := 0; attempt <= maxImagePullSecretConflictRetries; attempt++ {
+		namespace, err := a.client.CoreV1().Namespaces().Get(ctx, request.Namespace, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return imagePullSecretAPIError(err)
+		}
+		if string(namespace.UID) != request.NamespaceUID {
+			return nil
+		}
+		if err = verifyImagePullSecretNamespace(namespace, request); err != nil {
+			return err
+		}
+		// Re-read the source on every attempt even though deletion is authorized
+		// solely by destination and namespace ownership.
+		if _, err = a.client.CoreV1().Secrets(a.namespace).Get(ctx, request.SourceSecretName, metav1.GetOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return imagePullSecretAPIError(err)
+		}
+		destination, err := a.client.CoreV1().Secrets(request.Namespace).Get(ctx, ImagePullSecretName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return imagePullSecretAPIError(err)
+		}
+		if !ownedImagePullSecret(destination, request) {
+			return imagePullSecretError(oci.CodeKubernetesOwnershipConflict, false, ErrImagePullSecretOwnership)
+		}
+		uid := destination.UID
+		err = a.client.CoreV1().Secrets(request.Namespace).Delete(ctx, ImagePullSecretName, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		if apierrors.IsConflict(err) {
+			continue
+		}
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return imagePullSecretAPIError(err)
+		}
+		if _, err = a.client.CoreV1().Secrets(request.Namespace).Get(ctx, ImagePullSecretName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return imagePullSecretAPIError(err)
+		}
+		return imagePullSecretError(oci.CodeKubernetesOwnershipConflict, false, ErrImagePullSecretOwnership)
+	}
+	return imagePullSecretError(oci.CodeKubernetesConflict, true, ErrImagePullSecretConflict)
+}
+
+func (a *RegistryCredentialSecretAdapter) readImagePullSecretState(ctx context.Context, request ImagePullSecretRequest) (*corev1.Namespace, *corev1.Secret, *corev1.Secret, error) {
+	namespace, err := a.client.CoreV1().Namespaces().Get(ctx, request.Namespace, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, nil, imagePullSecretAPIError(err)
+	}
+	source, err := a.client.CoreV1().Secrets(a.namespace).Get(ctx, request.SourceSecretName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil, nil, imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialNotFound)
+	}
+	if err != nil {
+		return nil, nil, nil, imagePullSecretAPIError(err)
+	}
+	destination, err := a.client.CoreV1().Secrets(request.Namespace).Get(ctx, ImagePullSecretName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		destination, err = nil, nil
+	}
+	if err != nil {
+		return nil, nil, nil, imagePullSecretAPIError(err)
+	}
+	return namespace, source, destination, nil
+}
+
+func (a *RegistryCredentialSecretAdapter) verifyImagePullSecretSource(source *corev1.Secret, request ImagePullSecretRequest) ([]byte, string, error) {
+	operationID := source.Labels[registryCredentialOperationLabel]
+	payload, ok := source.Data[RegistryCredentialKey]
+	digest := sha256.Sum256(payload)
+	digestText := hex.EncodeToString(digest[:])
+	if !ok || string(source.UID) != request.SourceUID || source.Name != request.SourceSecretName ||
+		!validRegistryCredentialSecret(source, request.OrgID, request.RegistryID, operationID, request.Generation, a.namespace, digestText) {
+		return nil, "", imagePullSecretError(oci.CodeImagePullSecretReconcileFailed, false, ErrRegistryCredentialInvalid)
+	}
+	return payload, digestText, nil
+}
+
+func validImagePullSecretRequest(request ImagePullSecretRequest) bool {
+	return request.OrgID != "" && request.AppID != "" && request.EnvironmentID != "" && request.Namespace != "" &&
+		request.NamespaceUID != "" && request.RegistryID != "" && request.SourceSecretName != "" && request.SourceUID != "" && request.Generation > 0
+}
+
+func verifyImagePullSecretNamespace(namespace *corev1.Namespace, request ImagePullSecretRequest) error {
+	if namespace == nil || namespace.Name != request.Namespace || string(namespace.UID) != request.NamespaceUID ||
+		namespace.Labels[ManagedByLabel] != ManagedByValue || namespace.Labels[OrgIDLabel] != request.OrgID ||
+		namespace.Labels[AppIDLabel] != request.AppID || namespace.Labels[EnvironmentIDLabel] != request.EnvironmentID ||
+		namespace.Annotations[NamespaceOwnerAnnotation] != request.EnvironmentID || namespace.Annotations[NamespaceUIDAnnotation] != request.NamespaceUID {
+		return imagePullSecretError(oci.CodeKubernetesOwnershipConflict, false, ErrImagePullSecretOwnership)
+	}
+	return nil
+}
+
+func desiredImagePullSecret(request ImagePullSecretRequest, digest string, payload []byte) *corev1.Secret {
+	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: ImagePullSecretName, Namespace: request.Namespace,
+		Labels: map[string]string{ManagedByLabel: ManagedByValue, OrgIDLabel: request.OrgID, AppIDLabel: request.AppID,
+			EnvironmentIDLabel: request.EnvironmentID, registryCredentialPurposeLabel: imagePullSecretPurpose},
+		Annotations: map[string]string{imagePullSecretNamespaceUIDAnnotation: request.NamespaceUID, imagePullSecretOrgAnnotation: request.OrgID,
+			imagePullSecretRegistryAnnotation: request.RegistryID, imagePullSecretEnvironmentAnnotation: request.EnvironmentID,
+			imagePullSecretSourceNameAnnotation: request.SourceSecretName, imagePullSecretSourceUIDAnnotation: request.SourceUID,
+			imagePullSecretGenerationAnnotation: strconv.FormatInt(request.Generation, 10), imagePullSecretContentSHAAnnotation: digest}},
+		Type: corev1.SecretTypeDockerConfigJson, Data: map[string][]byte{RegistryCredentialKey: append([]byte(nil), payload...)}}
+}
+
+func ownedImagePullSecret(secret *corev1.Secret, request ImagePullSecretRequest) bool {
+	return secret != nil && secret.Name == ImagePullSecretName && secret.Namespace == request.Namespace && secret.UID != "" &&
+		secret.Labels[ManagedByLabel] == ManagedByValue && secret.Labels[OrgIDLabel] == request.OrgID &&
+		secret.Labels[AppIDLabel] == request.AppID && secret.Labels[EnvironmentIDLabel] == request.EnvironmentID &&
+		secret.Labels[registryCredentialPurposeLabel] == imagePullSecretPurpose &&
+		secret.Annotations[imagePullSecretNamespaceUIDAnnotation] == request.NamespaceUID &&
+		secret.Annotations[imagePullSecretOrgAnnotation] == request.OrgID &&
+		secret.Annotations[imagePullSecretRegistryAnnotation] == request.RegistryID &&
+		secret.Annotations[imagePullSecretEnvironmentAnnotation] == request.EnvironmentID &&
+		secret.Annotations[imagePullSecretSourceNameAnnotation] == request.SourceSecretName &&
+		secret.Annotations[imagePullSecretSourceUIDAnnotation] == request.SourceUID &&
+		secret.Annotations[imagePullSecretGenerationAnnotation] == strconv.FormatInt(request.Generation, 10)
+}
+
+func matchesImagePullSecret(secret *corev1.Secret, request ImagePullSecretRequest, digest string, payload []byte) bool {
+	if !ownedImagePullSecret(secret, request) || secret.Immutable != nil && *secret.Immutable || secret.Type != corev1.SecretTypeDockerConfigJson ||
+		len(secret.Data) != 1 || !bytes.Equal(secret.Data[RegistryCredentialKey], payload) ||
+		secret.Annotations[imagePullSecretContentSHAAnnotation] != digest {
+		return false
+	}
+	return len(secret.Labels) == 5 && len(secret.Annotations) == 8
+}
+
+func imagePullSecretError(code oci.Code, retryable bool, cause error) error {
+	return &RegistryCredentialAdapterError{code: code, retryable: retryable, cause: cause}
+}
+
+func imagePullSecretAPIError(err error) error {
+	if apierrors.IsConflict(err) {
+		return imagePullSecretError(oci.CodeKubernetesConflict, true, ErrImagePullSecretConflict)
+	}
+	return imagePullSecretError(oci.CodeKubernetesUnavailable, true, nil)
+}
+
 func registryCredentialLabels(orgID, registryID, operationID string, generation int64) map[string]string {
 	sum := sha256.Sum256([]byte(orgID))
 	return map[string]string{ManagedByLabel: ManagedByValue, registryCredentialPurposeLabel: registryCredentialPurpose,
-		registryCredentialOrgHashLabel: hex.EncodeToString(sum[:16]), registryCredentialRegistryLabel: registryID,
+		registryCredentialOrgHashLabel: hex.EncodeToString(sum[:10]), registryCredentialRegistryLabel: registryID,
 		registryCredentialGenerationLabel: strconv.FormatInt(generation, 10), registryCredentialOperationLabel: operationID}
 }
 

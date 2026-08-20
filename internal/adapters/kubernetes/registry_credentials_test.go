@@ -3,14 +3,19 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -48,6 +53,193 @@ func TestRegistryCredentialSecretRoundTripAndIdempotence(t *testing.T) {
 	secret, _ := client.CoreV1().Secrets("cyclopus").Get(context.Background(), strings.Split(strings.Split(ref, "/")[3], "#")[0], metav1.GetOptions{})
 	if secret.Type != corev1.SecretTypeDockerConfigJson || secret.Immutable == nil || !*secret.Immutable || len(secret.Data) != 1 {
 		t.Fatalf("secret = %+v", secret)
+	}
+}
+
+func TestRegistryCredentialSourceOrgHashUsesFirstTwentyLowercaseHexCharacters(t *testing.T) {
+	labels := registryCredentialLabels("org-one", "registry", "operation", 1)
+	sum := sha256.Sum256([]byte("org-one"))
+	want := hex.EncodeToString(sum[:10])
+	if got := labels[registryCredentialOrgHashLabel]; got != want || len(got) != 20 || got != strings.ToLower(got) {
+		t.Fatalf("org hash = %q, want %q", got, want)
+	}
+	name, err := RegistryCredentialSecretName("org-one", 1)
+	if err != nil || name != "cyclopus-ghcr-"+want+"-g1" {
+		t.Fatalf("source name = %q, %v", name, err)
+	}
+}
+
+func TestReconcileImagePullSecretCreatesExactMutableSecret(t *testing.T) {
+	client, adapter, request, payload := imagePullSecretFixture(t)
+	client.PrependReactor("create", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
+		secret := action.(ktesting.CreateAction).GetObject().(*corev1.Secret)
+		if secret.Name == ImagePullSecretName {
+			secret.UID, secret.ResourceVersion = types.UID("destination-uid"), "1"
+		}
+		return false, nil, nil
+	})
+	if err := adapter.ReconcileImagePullSecret(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := client.CoreV1().Secrets(request.Namespace).Get(t.Context(), ImagePullSecretName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	wantLabels := map[string]string{ManagedByLabel: ManagedByValue, OrgIDLabel: request.OrgID, AppIDLabel: request.AppID,
+		EnvironmentIDLabel: request.EnvironmentID, registryCredentialPurposeLabel: imagePullSecretPurpose}
+	wantAnnotations := map[string]string{imagePullSecretNamespaceUIDAnnotation: request.NamespaceUID, imagePullSecretOrgAnnotation: request.OrgID,
+		imagePullSecretRegistryAnnotation: request.RegistryID, imagePullSecretEnvironmentAnnotation: request.EnvironmentID,
+		imagePullSecretSourceNameAnnotation: request.SourceSecretName, imagePullSecretSourceUIDAnnotation: request.SourceUID,
+		imagePullSecretGenerationAnnotation: "1", imagePullSecretContentSHAAnnotation: hex.EncodeToString(digest[:])}
+	if secret.Type != corev1.SecretTypeDockerConfigJson || secret.Immutable != nil || len(secret.Data) != 1 || !bytes.Equal(secret.Data[RegistryCredentialKey], payload) {
+		t.Fatalf("destination data contract mismatch: type=%q immutable=%v keys=%d", secret.Type, secret.Immutable, len(secret.Data))
+	}
+	if fmt.Sprint(secret.Labels) != fmt.Sprint(wantLabels) || fmt.Sprint(secret.Annotations) != fmt.Sprint(wantAnnotations) {
+		t.Fatalf("metadata = %#v %#v, want %#v %#v", secret.Labels, secret.Annotations, wantLabels, wantAnnotations)
+	}
+}
+
+func TestReconcileImagePullSecretRefusesUnownedOrMismatchedResources(t *testing.T) {
+	for name, mutate := range map[string]func(*corev1.Namespace, *corev1.Secret){
+		"namespace UID":     func(namespace *corev1.Namespace, _ *corev1.Secret) { namespace.UID = "recreated" },
+		"namespace org":     func(namespace *corev1.Namespace, _ *corev1.Secret) { namespace.Labels[OrgIDLabel] = "other" },
+		"destination owner": func(_ *corev1.Namespace, secret *corev1.Secret) { secret.Labels[ManagedByLabel] = "other" },
+		"destination namespace UID": func(_ *corev1.Namespace, secret *corev1.Secret) {
+			secret.Annotations[imagePullSecretNamespaceUIDAnnotation] = "other"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, adapter, request, payload := imagePullSecretFixture(t)
+			namespace, _ := client.CoreV1().Namespaces().Get(t.Context(), request.Namespace, metav1.GetOptions{})
+			destination := desiredImagePullSecret(request, contentSHA(payload), payload)
+			destination.UID, destination.ResourceVersion = "destination", "1"
+			mutate(namespace, destination)
+			_, _ = client.CoreV1().Namespaces().Update(t.Context(), namespace, metav1.UpdateOptions{})
+			_, _ = client.CoreV1().Secrets(request.Namespace).Create(t.Context(), destination, metav1.CreateOptions{})
+			updates := 0
+			client.PrependReactor("update", "secrets", func(ktesting.Action) (bool, runtime.Object, error) { updates++; return true, nil, nil })
+			err := adapter.ReconcileImagePullSecret(t.Context(), request)
+			if !errors.Is(err, ErrImagePullSecretOwnership) || updates != 0 {
+				t.Fatalf("reconcile error=%v updates=%d", err, updates)
+			}
+		})
+	}
+}
+
+func TestReconcileImagePullSecretRetriesFiveImmediateConflictsWithFreshReads(t *testing.T) {
+	client, adapter, request, payload := imagePullSecretFixture(t)
+	destination := desiredImagePullSecret(request, contentSHA(payload), payload)
+	destination.UID, destination.ResourceVersion = "destination", "1"
+	_, _ = client.CoreV1().Secrets(request.Namespace).Create(t.Context(), destination, metav1.CreateOptions{})
+	reads := map[string]int{}
+	client.PrependReactor("get", "namespaces", func(action ktesting.Action) (bool, runtime.Object, error) {
+		reads["namespace"]++
+		return false, nil, nil
+	})
+	client.PrependReactor("get", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
+		name := action.(ktesting.GetAction).GetName()
+		if name == request.SourceSecretName {
+			reads["source"]++
+		} else if name == ImagePullSecretName {
+			reads["destination"]++
+		}
+		return false, nil, nil
+	})
+	updates := 0
+	client.PrependReactor("update", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
+		updates++
+		if updates <= maxImagePullSecretConflictRetries {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "secrets"}, ImagePullSecretName, errors.New("conflict"))
+		}
+		return false, nil, nil
+	})
+	if err := adapter.ReconcileImagePullSecret(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 6 || reads["namespace"] != 7 || reads["source"] != 7 || reads["destination"] != 7 {
+		t.Fatalf("updates=%d reads=%v", updates, reads)
+	}
+}
+
+func TestReconcileImagePullSecretConflictExhaustionIsTypedAndRedacted(t *testing.T) {
+	client, adapter, request, payload := imagePullSecretFixture(t)
+	destination := desiredImagePullSecret(request, contentSHA(payload), payload)
+	destination.UID, destination.ResourceVersion = "destination", "1"
+	_, _ = client.CoreV1().Secrets(request.Namespace).Create(t.Context(), destination, metav1.CreateOptions{})
+	updates := 0
+	client.PrependReactor("update", "secrets", func(ktesting.Action) (bool, runtime.Object, error) {
+		updates++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "secrets"}, ImagePullSecretName, errors.New("ghp_secret"))
+	})
+	err := adapter.ReconcileImagePullSecret(t.Context(), request)
+	retryable, code, ok := RegistryCredentialErrorDisposition(err)
+	if updates != 6 || !ok || !retryable || code != oci.CodeKubernetesConflict || strings.Contains(err.Error(), "ghp_secret") {
+		t.Fatalf("error=%v updates=%d disposition=%v/%s/%v", err, updates, retryable, code, ok)
+	}
+}
+
+func TestDeleteImagePullSecretConvergesForMissingOrRecreatedNamespace(t *testing.T) {
+	client, adapter, request, payload := imagePullSecretFixture(t)
+	destination := desiredImagePullSecret(request, contentSHA(payload), payload)
+	destination.UID = "destination"
+	_, _ = client.CoreV1().Secrets(request.Namespace).Create(t.Context(), destination, metav1.CreateOptions{})
+	if err := client.CoreV1().Namespaces().Delete(t.Context(), request.Namespace, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	deletes := 0
+	client.PrependReactor("delete", "secrets", func(ktesting.Action) (bool, runtime.Object, error) { deletes++; return false, nil, nil })
+	if err := adapter.DeleteImagePullSecret(t.Context(), request); err != nil || deletes != 0 {
+		t.Fatalf("missing namespace delete=%v calls=%d", err, deletes)
+	}
+	recreated := ownedImagePullNamespace(request)
+	recreated.UID = "new-namespace-uid"
+	recreated.Annotations[NamespaceUIDAnnotation] = "new-namespace-uid"
+	_, _ = client.CoreV1().Namespaces().Create(t.Context(), recreated, metav1.CreateOptions{})
+	if err := adapter.DeleteImagePullSecret(t.Context(), request); err != nil || deletes != 0 {
+		t.Fatalf("recreated namespace delete=%v calls=%d", err, deletes)
+	}
+}
+
+func TestDeleteImagePullSecretUsesDestinationUIDPrecondition(t *testing.T) {
+	client, adapter, request, payload := imagePullSecretFixture(t)
+	destination := desiredImagePullSecret(request, contentSHA(payload), payload)
+	destination.UID = "destination-uid"
+	_, _ = client.CoreV1().Secrets(request.Namespace).Create(t.Context(), destination, metav1.CreateOptions{})
+	client.PrependReactor("delete", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
+		options := action.(ktesting.DeleteAction).GetDeleteOptions()
+		if options.Preconditions == nil || options.Preconditions.UID == nil || *options.Preconditions.UID != destination.UID {
+			t.Fatalf("delete preconditions = %#v", options.Preconditions)
+		}
+		return false, nil, nil
+	})
+	if err := adapter.DeleteImagePullSecret(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCleanupIdentityUsesOwnedDestinationWhenSourceMissing(t *testing.T) {
+	client, adapter, request, payload := imagePullSecretFixture(t)
+	destination := desiredImagePullSecret(request, contentSHA(payload), payload)
+	destination.UID = "destination-uid"
+	if _, err := client.CoreV1().Secrets(request.Namespace).Create(t.Context(), destination, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CoreV1().Secrets("cyclopus").Delete(t.Context(), request.SourceSecretName, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	ref := "k8s-secret://cyclopus/" + request.SourceSecretName + "#" + RegistryCredentialKey
+	identity, err := adapter.ReadImagePullSecretCleanupIdentity(t.Context(), request.OrgID, request.RegistryID, request.Generation, ref, request.Namespace)
+	if err != nil || identity.SourceUID != request.SourceUID || identity.NamespaceUID != request.NamespaceUID {
+		t.Fatalf("cleanup identity = %+v, %v", identity, err)
+	}
+	deleteRequest := request
+	deleteRequest.SourceUID, deleteRequest.NamespaceUID = identity.SourceUID, identity.NamespaceUID
+	if err = adapter.DeleteImagePullSecret(t.Context(), deleteRequest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.CoreV1().Secrets(request.Namespace).Get(t.Context(), ImagePullSecretName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("destination remains after source-independent cleanup: %v", err)
 	}
 }
 
@@ -281,4 +473,49 @@ func dockerConfigFixture(t *testing.T, username, password, auth string) []byte {
 	}
 	t.Cleanup(func() { clear(payload) })
 	return payload
+}
+
+func imagePullSecretFixture(t *testing.T) (*fake.Clientset, *RegistryCredentialSecretAdapter, ImagePullSecretRequest, []byte) {
+	t.Helper()
+	request := ImagePullSecretRequest{OrgID: "org-one", AppID: "app-one", EnvironmentID: "environment-one", Namespace: "app-one-production",
+		NamespaceUID: "namespace-uid", RegistryID: "registry-one", SourceUID: "source-uid", Generation: 1}
+	name, err := RegistryCredentialSecretName(request.OrgID, request.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SourceSecretName = name
+	namespace := ownedImagePullNamespace(request)
+	client := fake.NewClientset(namespace)
+	client.PrependReactor("create", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
+		secret := action.(ktesting.CreateAction).GetObject().(*corev1.Secret)
+		if secret.Name == request.SourceSecretName {
+			secret.UID, secret.ResourceVersion = types.UID(request.SourceUID), "1"
+		}
+		return false, nil, nil
+	})
+	adapter, err := NewRegistryCredentialSecretAdapter(client, "cyclopus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := &oci.Credential{Username: []byte("octocat"), PAT: []byte("ghp_secret"), OrgID: request.OrgID, RegistryID: request.RegistryID, Generation: request.Generation}
+	if _, _, _, err = adapter.WriteCredential(t.Context(), request.OrgID, request.RegistryID, "operation-one", request.Generation, credential); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := marshalDockerConfig(credential.Username, credential.PAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { clear(payload) })
+	return client, adapter, request, payload
+}
+
+func ownedImagePullNamespace(request ImagePullSecretRequest) *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: request.Namespace, UID: types.UID(request.NamespaceUID),
+		Labels:      map[string]string{ManagedByLabel: ManagedByValue, OrgIDLabel: request.OrgID, AppIDLabel: request.AppID, EnvironmentIDLabel: request.EnvironmentID},
+		Annotations: map[string]string{NamespaceOwnerAnnotation: request.EnvironmentID, NamespaceUIDAnnotation: request.NamespaceUID}}}
+}
+
+func contentSHA(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }

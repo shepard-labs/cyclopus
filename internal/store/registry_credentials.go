@@ -65,8 +65,18 @@ type RegistryCredentialGarbageCollectionCandidate struct {
 
 type NamespaceCredentialClaim struct {
 	OrgID, EnvironmentID, AppID, Namespace string
-	RegistryID                             *string
+	RegistryID, OperationID, SecretRef     string
+	Checkpoint                             string
 	Generation                             int64
+	Attempts                               int
+	Lease                                  LeaseToken
+}
+
+type NamespaceCredentialCleanupClaim struct {
+	OrgID, EnvironmentID, AppID, Namespace string
+	RegistryID, SecretRef                  string
+	Generation                             int64
+	Attempts                               int
 	Lease                                  LeaseToken
 }
 
@@ -107,7 +117,8 @@ const (
 		ORDER BY next_attempt_at,operation_id,repository LIMIT $1`
 	namespaceCredentialDueCandidateQuery = `SELECT id FROM environments
 		WHERE registry_credential_state='pending' AND registry_credential_lease_owner IS NULL
-		AND torn_down_at IS NULL AND registry_credential_attempts<12
+		AND registry_credential_checkpoint IS DISTINCT FROM 'namespace_secret_written'
+		AND lifecycle_status<>'teardown_requested' AND torn_down_at IS NULL AND registry_credential_attempts<12
 		AND registry_credential_next_attempt_at<=clock_timestamp()
 		ORDER BY registry_credential_next_attempt_at,created_at,id LIMIT $1`
 	namespaceCredentialExpiredCandidateQuery = `SELECT id FROM environments
@@ -464,6 +475,10 @@ func (s *Store) ListRegistryCredentialGarbageCollectionCandidates(ctx context.Co
 		AND NOT EXISTS (SELECT 1 FROM apps app JOIN environments environment ON environment.org_id=app.org_id AND environment.app_id=app.id
 			WHERE app.org_id=generation.org_id AND app.registry_id=generation.registry_id AND environment.torn_down_at IS NULL
 			AND (environment.required_registry_credential_generation=generation.generation OR environment.ready_registry_credential_generation=generation.generation))
+		AND NOT EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=generation.org_id
+			AND environment.registry_credential_cleanup_registry_id=generation.registry_id
+			AND environment.registry_credential_cleanup_generation=generation.generation
+			AND environment.registry_credential_cleanup_state IN ('pending','failed'))
 		AND NOT EXISTS (SELECT 1 FROM releases release WHERE release.org_id=generation.org_id AND release.registry_credential_registry_id=generation.registry_id
 			AND release.registry_credential_generation=generation.generation AND release.status='live')
 		ORDER BY operation.terminal_at,generation.registry_id,generation.generation LIMIT $2`, olderThan, limit)
@@ -708,7 +723,24 @@ func (s *Store) FinishRegistryCredentialValidation(ctx context.Context, operatio
 		if _, err = tx.Exec(ctx, `UPDATE registry_credential_generations SET validated_at=clock_timestamp() WHERE org_id=$1 AND operation_id=$2 AND state='pending'`, operation.OrgID, operation.ID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE registries SET checkpoint='reconciling_namespaces',state='reconciling',updated_at=clock_timestamp() WHERE org_id=$1 AND operation_id=$2`, operation.OrgID, operation.ID)
+		if _, err = tx.Exec(ctx, `UPDATE registry_credential_operations SET checkpoint='namespaces_reconciling',updated_at=clock_timestamp() WHERE org_id=$1 AND id=$2 AND status='pending' AND checkpoint='validation_complete'`, operation.OrgID, operation.ID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE registries SET checkpoint='namespaces_reconciling',state='reconciling',updated_at=clock_timestamp() WHERE org_id=$1 AND operation_id=$2`, operation.OrgID, operation.ID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE environments environment SET required_registry_credential_generation=$3,
+			ready_registry_credential_generation=NULL,registry_credential_state='pending',registry_credential_checkpoint=NULL,
+			registry_credential_error_code=NULL,registry_credential_error_message=NULL,registry_credential_attempts=0,
+			registry_credential_next_attempt_at=clock_timestamp(),registry_credential_lease_owner=NULL,
+			registry_credential_lease_expires_at=NULL
+			FROM apps app WHERE environment.org_id=$1 AND app.org_id=environment.org_id AND app.id=environment.app_id
+			AND app.registry_id=$2 AND app.image_visibility='private' AND app.deleted_at IS NULL
+			AND environment.torn_down_at IS NULL AND environment.lifecycle_status<>'teardown_requested'`,
+			operation.OrgID, operation.RegistryID, operation.CandidateGeneration); err != nil {
+			return err
+		}
+		_, err = activateRegistryCredentialGenerationIfReady(ctx, tx, operation.OrgID, operation.RegistryID, operation.ID, operation.CandidateGeneration, "")
 		complete = err == nil
 		return err
 	})
@@ -764,4 +796,812 @@ func (s *Store) GetNamespaceCredentialReconciliation(ctx context.Context, orgID,
 	var value NamespaceCredentialReconciliation
 	err := scanNamespaceCredentialReconciliation(s.db.QueryRow(ctx, namespaceCredentialReconciliationSelect+` WHERE environment.org_id=$1 AND environment.id=$2`, orgID, environmentID), &value)
 	return value, resourceQueryError("get namespace credential reconciliation", err)
+}
+
+func (s *Store) RecoverExpiredNamespaceCredentialLeases(ctx context.Context, limit int) (int64, error) {
+	if limit < 1 {
+		return 0, ErrInvalidArgument
+	}
+	var recovered int64
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT environment.org_id::text,environment.id::text,
+			environment.registry_credential_attempts
+			FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+			WHERE environment.registry_credential_state='pending' AND environment.registry_credential_lease_owner IS NOT NULL
+			AND environment.registry_credential_lease_expires_at<=clock_timestamp()
+			ORDER BY environment.registry_credential_lease_expires_at,environment.id LIMIT $1
+			FOR UPDATE OF environment SKIP LOCKED`, limit)
+		if err != nil {
+			return err
+		}
+		type expiredNamespaceCredential struct {
+			orgID, environmentID string
+			attempts             int
+		}
+		var values []expiredNamespaceCredential
+		for rows.Next() {
+			var value expiredNamespaceCredential
+			if err := rows.Scan(&value.orgID, &value.environmentID, &value.attempts); err != nil {
+				rows.Close()
+				return err
+			}
+			values = append(values, value)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, value := range values {
+			if value.attempts >= maxRegistryCredentialAttempts {
+				if err := failExpiredNamespaceCredential(ctx, tx, value.orgID, value.environmentID, "kubernetes_unavailable"); err != nil {
+					return err
+				}
+			} else if tag, err := tx.Exec(ctx, `UPDATE environments SET registry_credential_lease_owner=NULL,
+				registry_credential_lease_expires_at=NULL,registry_credential_next_attempt_at=clock_timestamp()
+				WHERE org_id=$1 AND id=$2 AND registry_credential_state='pending'`, value.orgID, value.environmentID); err != nil {
+				return err
+			} else if tag.RowsAffected() == 0 {
+				return ErrFailedPrecondition
+			}
+			recovered++
+		}
+		return nil
+	})
+	return recovered, err
+}
+
+func (s *Store) RecoverExpiredNamespaceCredentialCleanupLeases(ctx context.Context, limit int) (int64, error) {
+	if limit < 1 {
+		return 0, ErrInvalidArgument
+	}
+	var recovered int64
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT environment.org_id::text,environment.id::text,environment.app_id::text,
+			environment.registry_credential_cleanup_attempts
+			FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+			WHERE environment.registry_credential_cleanup_state='pending'
+			AND environment.registry_credential_cleanup_lease_owner IS NOT NULL
+			AND environment.registry_credential_cleanup_lease_expires_at<=clock_timestamp()
+			ORDER BY environment.registry_credential_cleanup_lease_expires_at,environment.id LIMIT $1
+			FOR UPDATE OF environment,app SKIP LOCKED`, limit)
+		if err != nil {
+			return err
+		}
+		type expiredCleanup struct {
+			orgID, environmentID, appID string
+			attempts                    int
+		}
+		var values []expiredCleanup
+		for rows.Next() {
+			var value expiredCleanup
+			if err := rows.Scan(&value.orgID, &value.environmentID, &value.appID, &value.attempts); err != nil {
+				rows.Close()
+				return err
+			}
+			values = append(values, value)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, value := range values {
+			if value.attempts >= maxRegistryCredentialAttempts {
+				if _, err := tx.Exec(ctx, `UPDATE environments SET registry_credential_cleanup_state='failed',
+					registry_credential_cleanup_lease_owner=NULL,registry_credential_cleanup_lease_expires_at=NULL
+					WHERE org_id=$1 AND id=$2 AND app_id=$3 AND registry_credential_cleanup_state='pending'`,
+					value.orgID, value.environmentID, value.appID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE apps SET cleanup_state='cleanup_failed',cleanup_checkpoint=NULL,
+					cleanup_error_code='kubernetes_unavailable',cleanup_error_message=NULL
+					WHERE org_id=$1 AND id=$2 AND image_visibility='public' AND cleanup_state IN ('cleanup_requested','cleaning')`,
+					value.orgID, value.appID); err != nil {
+					return err
+				}
+			} else if _, err := tx.Exec(ctx, `UPDATE environments SET registry_credential_cleanup_lease_owner=NULL,
+				registry_credential_cleanup_lease_expires_at=NULL,registry_credential_cleanup_next_attempt_at=clock_timestamp()
+				WHERE org_id=$1 AND id=$2 AND app_id=$3 AND registry_credential_cleanup_state='pending'`,
+				value.orgID, value.environmentID, value.appID); err != nil {
+				return err
+			}
+			recovered++
+		}
+		return nil
+	})
+	return recovered, err
+}
+
+func (s *Store) ListNamespaceCredentialOrgIDs(ctx context.Context, afterOrgID string, limit int) ([]string, error) {
+	if limit < 1 {
+		return nil, ErrInvalidArgument
+	}
+	rows, err := s.db.Query(ctx, `SELECT org_id FROM (SELECT DISTINCT environment.org_id::text AS org_id FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN registry_credential_generations generation ON generation.org_id=environment.org_id
+		 AND generation.registry_id=app.registry_id AND generation.generation=environment.required_registry_credential_generation
+		JOIN registries registry ON registry.org_id=generation.org_id AND registry.id=generation.registry_id
+		JOIN registry_credential_operations operation ON operation.org_id=registry.org_id AND operation.id=registry.operation_id
+		WHERE environment.registry_credential_state='pending' AND environment.registry_credential_lease_owner IS NULL
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+		AND environment.registry_credential_attempts<12 AND environment.registry_credential_next_attempt_at<=clock_timestamp()
+		AND app.image_visibility='private' AND app.deleted_at IS NULL AND operation.status='pending'
+		AND ((operation.checkpoint='namespaces_reconciling' AND operation.candidate_generation=generation.generation
+			AND generation.state='pending' AND registry.pending_generation=generation.generation)
+		 OR (operation.checkpoint='rollback_reconciling' AND operation.previous_generation=generation.generation
+			AND generation.state='active' AND registry.checkpoint='rollback_reconciling'
+			AND registry.active_generation=generation.generation))
+		UNION
+		SELECT DISTINCT environment.org_id::text FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN registry_credential_generations generation ON generation.org_id=environment.org_id
+		 AND generation.registry_id=environment.registry_credential_cleanup_registry_id
+		 AND generation.generation=environment.registry_credential_cleanup_generation
+		WHERE environment.registry_credential_cleanup_state='pending'
+		AND environment.registry_credential_cleanup_lease_owner IS NULL
+		AND environment.registry_credential_cleanup_attempts<12
+		AND environment.registry_credential_cleanup_next_attempt_at<=clock_timestamp()
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+		AND app.image_visibility='public' AND app.deleted_at IS NULL) due
+		WHERE org_id>$1 ORDER BY org_id LIMIT $2`, afterOrgID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var orgIDs []string
+	for rows.Next() {
+		var orgID string
+		if err := rows.Scan(&orgID); err != nil {
+			return nil, err
+		}
+		orgIDs = append(orgIDs, orgID)
+	}
+	return orgIDs, rows.Err()
+}
+
+func (s *Store) ClaimNamespaceCredentials(ctx context.Context, orgID, owner string, leaseDuration time.Duration, limit int) ([]NamespaceCredentialClaim, error) {
+	if orgID == "" || strings.TrimSpace(owner) == "" || leaseDuration <= 0 || limit < 1 {
+		return nil, ErrInvalidArgument
+	}
+	rows, err := s.db.Query(ctx, `WITH candidates AS (SELECT environment.id,operation.id AS operation_id,generation.secret_ref
+		FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN registry_credential_generations generation ON generation.org_id=environment.org_id
+		 AND generation.registry_id=app.registry_id AND generation.generation=environment.required_registry_credential_generation
+		JOIN registries registry ON registry.org_id=generation.org_id AND registry.id=generation.registry_id
+		JOIN registry_credential_operations operation ON operation.org_id=registry.org_id AND operation.id=registry.operation_id
+		WHERE environment.org_id=$1 AND environment.registry_credential_state='pending'
+		AND environment.registry_credential_lease_owner IS NULL
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+		AND environment.registry_credential_attempts<12 AND environment.registry_credential_next_attempt_at<=clock_timestamp()
+		AND app.image_visibility='private' AND app.deleted_at IS NULL AND app.registry_id IS NOT NULL
+		AND operation.status='pending' AND operation.registry_id=app.registry_id
+		AND ((operation.checkpoint='namespaces_reconciling' AND operation.candidate_generation=generation.generation
+			AND generation.state='pending' AND registry.operation_id=operation.id AND registry.pending_generation=generation.generation)
+		 OR (operation.checkpoint='rollback_reconciling' AND operation.previous_generation=generation.generation
+			AND generation.state='active' AND registry.operation_id=operation.id AND registry.checkpoint='rollback_reconciling'
+			AND registry.active_generation=generation.generation))
+		ORDER BY environment.registry_credential_next_attempt_at,environment.created_at,environment.id
+		LIMIT $4 FOR UPDATE OF environment SKIP LOCKED)
+		UPDATE environments environment SET registry_credential_lease_owner=$2,
+			registry_credential_lease_epoch=environment.registry_credential_lease_epoch+1,
+			registry_credential_lease_expires_at=clock_timestamp()+$3::interval,
+			registry_credential_attempts=environment.registry_credential_attempts+1
+		FROM candidates,apps app WHERE environment.org_id=$1 AND environment.id=candidates.id
+		AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.image_visibility='private'
+		AND app.registry_id IS NOT NULL
+		RETURNING environment.org_id::text,environment.id::text,environment.app_id::text,environment.namespace,
+			app.registry_id::text,candidates.operation_id::text,candidates.secret_ref,
+			COALESCE(environment.registry_credential_checkpoint,''),environment.required_registry_credential_generation,
+			environment.registry_credential_attempts,
+			environment.registry_credential_lease_owner,environment.registry_credential_lease_epoch,
+			environment.registry_credential_lease_expires_at`, orgID, owner, leaseDuration, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var claims []NamespaceCredentialClaim
+	for rows.Next() {
+		var claim NamespaceCredentialClaim
+		if err := rows.Scan(&claim.OrgID, &claim.EnvironmentID, &claim.AppID, &claim.Namespace, &claim.RegistryID,
+			&claim.OperationID, &claim.SecretRef, &claim.Checkpoint, &claim.Generation,
+			&claim.Attempts,
+			&claim.Lease.Owner, &claim.Lease.Epoch, &claim.Lease.ExpiresAt); err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, rows.Err()
+}
+
+func (s *Store) ClaimNamespaceCredentialCleanups(ctx context.Context, orgID, owner string, leaseDuration time.Duration, limit int) ([]NamespaceCredentialCleanupClaim, error) {
+	if orgID == "" || strings.TrimSpace(owner) == "" || leaseDuration <= 0 || limit < 1 {
+		return nil, ErrInvalidArgument
+	}
+	rows, err := s.db.Query(ctx, `WITH candidates AS (SELECT environment.id,generation.secret_ref
+		FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN registry_credential_generations generation ON generation.org_id=environment.org_id
+		 AND generation.registry_id=environment.registry_credential_cleanup_registry_id
+		 AND generation.generation=environment.registry_credential_cleanup_generation
+		WHERE environment.org_id=$1 AND app.image_visibility='public' AND app.deleted_at IS NULL
+		AND app.cleanup_state IN ('cleanup_requested','cleaning')
+		AND environment.registry_credential_cleanup_state='pending'
+		AND environment.registry_credential_cleanup_lease_owner IS NULL
+		AND environment.registry_credential_cleanup_attempts<12
+		AND environment.registry_credential_cleanup_next_attempt_at<=clock_timestamp()
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+		ORDER BY environment.registry_credential_cleanup_next_attempt_at,environment.created_at,environment.id
+		LIMIT $4 FOR UPDATE OF environment SKIP LOCKED)
+		UPDATE environments environment SET registry_credential_cleanup_lease_owner=$2,
+			registry_credential_cleanup_lease_epoch=environment.registry_credential_cleanup_lease_epoch+1,
+			registry_credential_cleanup_lease_expires_at=clock_timestamp()+$3::interval,
+			registry_credential_cleanup_attempts=environment.registry_credential_cleanup_attempts+1
+		FROM candidates,apps app WHERE environment.org_id=$1 AND environment.id=candidates.id
+		AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.image_visibility='public'
+		AND app.deleted_at IS NULL AND app.cleanup_state IN ('cleanup_requested','cleaning')
+		RETURNING environment.org_id::text,environment.id::text,environment.app_id::text,environment.namespace,
+			environment.registry_credential_cleanup_registry_id::text,candidates.secret_ref,
+			environment.registry_credential_cleanup_generation,environment.registry_credential_cleanup_attempts,
+			environment.registry_credential_cleanup_lease_owner,environment.registry_credential_cleanup_lease_epoch,
+			environment.registry_credential_cleanup_lease_expires_at`, orgID, owner, leaseDuration, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var claims []NamespaceCredentialCleanupClaim
+	for rows.Next() {
+		var claim NamespaceCredentialCleanupClaim
+		if err := rows.Scan(&claim.OrgID, &claim.EnvironmentID, &claim.AppID, &claim.Namespace, &claim.RegistryID,
+			&claim.SecretRef, &claim.Generation, &claim.Attempts, &claim.Lease.Owner, &claim.Lease.Epoch, &claim.Lease.ExpiresAt); err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, rows.Err()
+}
+
+func (s *Store) CompleteNamespaceCredentialCleanup(ctx context.Context, claim NamespaceCredentialCleanupClaim, lease LeaseToken) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE environments environment SET registry_credential_cleanup_state='complete',
+			registry_credential_cleanup_lease_owner=NULL,registry_credential_cleanup_lease_expires_at=NULL
+			FROM apps app WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3
+			AND environment.namespace=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id
+			AND app.image_visibility='public' AND app.deleted_at IS NULL AND app.cleanup_state IN ('cleanup_requested','cleaning')
+			AND environment.registry_credential_cleanup_registry_id=$5
+			AND environment.registry_credential_cleanup_generation=$6 AND environment.registry_credential_cleanup_state='pending'
+			AND environment.registry_credential_cleanup_lease_owner=$7 AND environment.registry_credential_cleanup_lease_epoch=$8
+			AND environment.registry_credential_cleanup_lease_expires_at>clock_timestamp()
+			AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+			AND EXISTS (SELECT 1 FROM registry_credential_generations generation WHERE generation.org_id=environment.org_id
+			 AND generation.registry_id=$5 AND generation.generation=$6 AND generation.secret_ref=$9)`,
+			claim.OrgID, claim.EnvironmentID, claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation,
+			lease.Owner, lease.Epoch, claim.SecretRef)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrLeaseNotOwned
+		}
+		_, err = tx.Exec(ctx, `UPDATE apps app SET cleanup_state='cleaned',cleanup_checkpoint='namespace_credentials_removed',
+			cleanup_error_code=NULL,cleanup_error_message=NULL
+			WHERE app.org_id=$1 AND app.id=$2 AND app.image_visibility='public' AND app.deleted_at IS NULL
+			AND app.cleanup_state IN ('cleanup_requested','cleaning')
+			AND NOT EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=app.org_id
+			 AND environment.app_id=app.id AND environment.torn_down_at IS NULL
+			 AND environment.lifecycle_status<>'teardown_requested'
+			 AND environment.registry_credential_cleanup_state<>'complete')`, claim.OrgID, claim.AppID)
+		return err
+	})
+}
+
+func (s *Store) RescheduleNamespaceCredentialCleanup(ctx context.Context, claim NamespaceCredentialCleanupClaim, lease LeaseToken, delay time.Duration) error {
+	if delay < 0 {
+		return ErrInvalidArgument
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE environments environment SET registry_credential_cleanup_lease_owner=NULL,
+		registry_credential_cleanup_lease_expires_at=NULL,registry_credential_cleanup_next_attempt_at=clock_timestamp()+$9::interval
+		FROM apps app WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3
+		AND environment.namespace=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id
+		AND app.image_visibility='public' AND app.deleted_at IS NULL AND app.cleanup_state IN ('cleanup_requested','cleaning')
+		AND environment.registry_credential_cleanup_registry_id=$5 AND environment.registry_credential_cleanup_generation=$6
+		AND environment.registry_credential_cleanup_state='pending' AND environment.registry_credential_cleanup_attempts<12
+		AND environment.registry_credential_cleanup_lease_owner=$7 AND environment.registry_credential_cleanup_lease_epoch=$8
+		AND environment.registry_credential_cleanup_lease_expires_at>clock_timestamp()
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+		AND EXISTS (SELECT 1 FROM registry_credential_generations generation WHERE generation.org_id=environment.org_id
+		 AND generation.registry_id=$5 AND generation.generation=$6 AND generation.secret_ref=$10)`,
+		claim.OrgID, claim.EnvironmentID, claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation,
+		lease.Owner, lease.Epoch, delay, claim.SecretRef)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrLeaseNotOwned
+	}
+	return err
+}
+
+func (s *Store) FailNamespaceCredentialCleanup(ctx context.Context, claim NamespaceCredentialCleanupClaim, lease LeaseToken, code string) error {
+	switch code {
+	case "image_pull_secret_reconcile_failed", "kubernetes_ownership_conflict", "kubernetes_unavailable", "postgres_permanent":
+	default:
+		return ErrInvalidArgument
+	}
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE environments environment SET registry_credential_cleanup_state='failed',
+			registry_credential_cleanup_lease_owner=NULL,registry_credential_cleanup_lease_expires_at=NULL
+			FROM apps app WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3
+			AND environment.namespace=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id
+			AND app.image_visibility='public' AND app.deleted_at IS NULL AND app.cleanup_state IN ('cleanup_requested','cleaning')
+			AND environment.registry_credential_cleanup_registry_id=$5 AND environment.registry_credential_cleanup_generation=$6
+			AND environment.registry_credential_cleanup_state='pending'
+			AND environment.registry_credential_cleanup_lease_owner=$7 AND environment.registry_credential_cleanup_lease_epoch=$8
+			AND environment.registry_credential_cleanup_lease_expires_at>clock_timestamp()
+			AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+			AND EXISTS (SELECT 1 FROM registry_credential_generations generation WHERE generation.org_id=environment.org_id
+			 AND generation.registry_id=$5 AND generation.generation=$6 AND generation.secret_ref=$9)`,
+			claim.OrgID, claim.EnvironmentID, claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation,
+			lease.Owner, lease.Epoch, claim.SecretRef)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrLeaseNotOwned
+		}
+		_, err = tx.Exec(ctx, `UPDATE apps SET cleanup_state='cleanup_failed',cleanup_checkpoint=NULL,
+			cleanup_error_code=$3,cleanup_error_message=NULL WHERE org_id=$1 AND id=$2
+			AND image_visibility='public' AND deleted_at IS NULL AND cleanup_state IN ('cleanup_requested','cleaning')`,
+			claim.OrgID, claim.AppID, code)
+		return err
+	})
+}
+
+func (s *Store) CheckpointNamespaceCredential(ctx context.Context, claim NamespaceCredentialClaim, lease LeaseToken, checkpoint string) error {
+	if checkpoint != "source_read" && checkpoint != "namespace_secret_written" {
+		return ErrInvalidArgument
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE environments environment SET registry_credential_checkpoint=$9
+		FROM apps app WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3
+		AND environment.namespace=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id
+		AND app.registry_id=$5 AND environment.required_registry_credential_generation=$6
+		AND EXISTS (SELECT 1 FROM registry_credential_generations generation
+			JOIN registry_credential_operations operation ON operation.org_id=generation.org_id AND operation.id=$10
+			WHERE generation.org_id=environment.org_id AND generation.registry_id=app.registry_id
+			AND generation.generation=environment.required_registry_credential_generation AND generation.secret_ref=$11
+			AND operation.org_id=generation.org_id AND operation.id=$10 AND operation.registry_id=generation.registry_id
+			AND operation.status='pending' AND ((operation.checkpoint='namespaces_reconciling'
+				AND operation.candidate_generation=generation.generation AND generation.state='pending')
+			 OR (operation.checkpoint='rollback_reconciling' AND operation.previous_generation=generation.generation
+				AND generation.state='active')))
+		AND environment.registry_credential_state='pending' AND environment.registry_credential_lease_owner=$7
+		AND environment.registry_credential_lease_epoch=$8 AND environment.registry_credential_lease_expires_at>clock_timestamp()
+		AND (($9='source_read' AND environment.registry_credential_checkpoint IS NULL)
+			OR ($9='source_read' AND environment.registry_credential_checkpoint='source_read')
+			OR ($9='namespace_secret_written' AND environment.registry_credential_checkpoint IN ('source_read','namespace_secret_written')))
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL`,
+		claim.OrgID, claim.EnvironmentID, claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation,
+		lease.Owner, lease.Epoch, checkpoint, claim.OperationID, claim.SecretRef)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrLeaseNotOwned
+	}
+	return err
+}
+
+func (s *Store) CompleteNamespaceCredential(ctx context.Context, claim NamespaceCredentialClaim, lease LeaseToken) (bool, error) {
+	var activated bool
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE environments environment SET registry_credential_state='ready',
+			ready_registry_credential_generation=$6,registry_credential_checkpoint='namespace_secret_verified',
+			registry_credential_error_code=NULL,registry_credential_error_message=NULL,
+			registry_credential_lease_owner=NULL,registry_credential_lease_expires_at=NULL
+			FROM apps app WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3
+			AND environment.namespace=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id
+			AND app.registry_id=$5 AND environment.required_registry_credential_generation=$6
+			AND environment.registry_credential_state='pending'
+			AND environment.registry_credential_checkpoint='namespace_secret_written'
+			AND environment.registry_credential_lease_owner=$7 AND environment.registry_credential_lease_epoch=$8
+			AND environment.registry_credential_lease_expires_at>clock_timestamp()
+			AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL
+			AND EXISTS (SELECT 1 FROM registry_credential_generations generation
+				JOIN registry_credential_operations operation ON operation.org_id=generation.org_id AND operation.id=$9
+				WHERE generation.org_id=environment.org_id AND generation.registry_id=app.registry_id
+				AND generation.generation=environment.required_registry_credential_generation AND generation.secret_ref=$10
+				AND operation.org_id=generation.org_id AND operation.id=$9 AND operation.registry_id=generation.registry_id
+				AND operation.status='pending' AND ((operation.checkpoint='namespaces_reconciling'
+					AND operation.candidate_generation=generation.generation AND generation.state='pending')
+				 OR (operation.checkpoint='rollback_reconciling' AND operation.previous_generation=generation.generation
+					AND generation.state='active')))`,
+			claim.OrgID, claim.EnvironmentID, claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation,
+			lease.Owner, lease.Epoch, claim.OperationID, claim.SecretRef)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrLeaseNotOwned
+		}
+		var checkpoint string
+		if err := tx.QueryRow(ctx, `SELECT checkpoint FROM registry_credential_operations
+			WHERE org_id=$1 AND id=$2 AND registry_id=$3 AND status='pending' FOR UPDATE`,
+			claim.OrgID, claim.OperationID, claim.RegistryID).Scan(&checkpoint); err != nil {
+			return err
+		}
+		if checkpoint == "rollback_reconciling" {
+			activated, err = finalizeRegistryCredentialRollbackIfReady(ctx, tx, claim.OrgID, claim.RegistryID, claim.OperationID, claim.Generation, "")
+			return err
+		}
+		activated, err = activateRegistryCredentialGenerationIfReady(ctx, tx, claim.OrgID, claim.RegistryID, claim.OperationID, claim.Generation, "")
+		return err
+	})
+	return activated, err
+}
+
+func (s *Store) RescheduleNamespaceCredential(ctx context.Context, claim NamespaceCredentialClaim, lease LeaseToken, delay time.Duration) error {
+	if delay < 0 {
+		return ErrInvalidArgument
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE environments environment SET registry_credential_lease_owner=NULL,
+		registry_credential_lease_expires_at=NULL,registry_credential_next_attempt_at=clock_timestamp()+$9::interval
+		FROM apps app WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3
+		AND environment.namespace=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id
+		AND app.registry_id=$5 AND environment.required_registry_credential_generation=$6
+		AND EXISTS (SELECT 1 FROM registry_credential_generations generation
+			JOIN registry_credential_operations operation ON operation.org_id=generation.org_id
+			WHERE generation.org_id=environment.org_id
+			AND generation.registry_id=app.registry_id AND generation.generation=environment.required_registry_credential_generation
+			AND generation.secret_ref=$11 AND operation.id=$10 AND operation.registry_id=generation.registry_id
+			AND operation.status='pending' AND ((operation.checkpoint='namespaces_reconciling'
+				AND operation.candidate_generation=generation.generation AND generation.state='pending')
+			 OR (operation.checkpoint='rollback_reconciling' AND operation.previous_generation=generation.generation
+				AND generation.state='active')))
+		AND environment.registry_credential_state='pending' AND environment.registry_credential_lease_owner=$7
+		AND environment.registry_credential_lease_epoch=$8 AND environment.registry_credential_lease_expires_at>clock_timestamp()
+		AND environment.lifecycle_status<>'teardown_requested' AND environment.torn_down_at IS NULL`,
+		claim.OrgID, claim.EnvironmentID, claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation,
+		lease.Owner, lease.Epoch, delay, claim.OperationID, claim.SecretRef)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrLeaseNotOwned
+	}
+	return err
+}
+
+func (s *Store) FailNamespaceCredential(ctx context.Context, claim NamespaceCredentialClaim, lease LeaseToken, code, message string) error {
+	switch code {
+	case "image_pull_secret_reconcile_failed", "kubernetes_ownership_conflict", "kubernetes_unavailable", "postgres_permanent":
+	default:
+		return ErrInvalidArgument
+	}
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var previous *int64
+		var checkpoint string
+		var owned bool
+		if err := tx.QueryRow(ctx, `SELECT operation.previous_generation,
+			EXISTS (SELECT 1 FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+			 WHERE environment.org_id=$1 AND environment.id=$2 AND environment.app_id=$3 AND environment.namespace=$4
+			 AND app.registry_id=$5 AND environment.required_registry_credential_generation=$6
+			 AND environment.registry_credential_state='pending' AND environment.registry_credential_lease_owner=$7
+			 AND environment.registry_credential_lease_epoch=$8 AND environment.registry_credential_lease_expires_at>clock_timestamp())
+			FROM registry_credential_operations operation WHERE operation.org_id=$1 AND operation.id=$9
+			AND operation.registry_id=$5 AND operation.status='pending' FOR UPDATE`, claim.OrgID, claim.EnvironmentID,
+			claim.AppID, claim.Namespace, claim.RegistryID, claim.Generation, lease.Owner, lease.Epoch, claim.OperationID).Scan(&previous, &owned); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT checkpoint FROM registry_credential_operations WHERE org_id=$1 AND id=$2`, claim.OrgID, claim.OperationID).Scan(&checkpoint); err != nil {
+			return err
+		}
+		if !owned {
+			return ErrLeaseNotOwned
+		}
+		if previous == nil {
+			if tag, err := tx.Exec(ctx, `UPDATE environments SET registry_credential_state='failed',registry_credential_error_code=$3,
+				registry_credential_error_message=NULLIF($4,''),registry_credential_lease_owner=NULL,registry_credential_lease_expires_at=NULL
+				WHERE org_id=$1 AND id=$2`, claim.OrgID, claim.EnvironmentID, code, message); err != nil {
+				return err
+			} else if tag.RowsAffected() == 0 {
+				return ErrFailedPrecondition
+			}
+			return terminalizeRegistryCredentialOperation(ctx, tx, claim.OrgID, claim.OperationID, code)
+		}
+		if checkpoint == "rollback_reconciling" {
+			return terminalizeRegistryCredentialRollbackFailure(ctx, tx, claim.OrgID, claim.RegistryID, claim.OperationID, *previous, code)
+		}
+		return beginRegistryCredentialRollback(ctx, tx, claim.OrgID, claim.RegistryID, claim.OperationID, claim.Generation, *previous, code)
+	})
+}
+
+func failExpiredNamespaceCredential(ctx context.Context, tx pgx.Tx, orgID, environmentID, code string) error {
+	var registryID, operationID, checkpoint string
+	var candidate int64
+	var previous *int64
+	if err := tx.QueryRow(ctx, `SELECT app.registry_id::text,operation.id::text,operation.checkpoint,
+		operation.candidate_generation,operation.previous_generation FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id
+		JOIN registry_credential_operations operation ON operation.org_id=registry.org_id AND operation.id=registry.operation_id
+		WHERE environment.org_id=$1 AND environment.id=$2 AND environment.registry_credential_state='pending'
+		AND environment.registry_credential_lease_expires_at<=clock_timestamp() AND operation.status='pending' FOR UPDATE OF environment,registry,operation`,
+		orgID, environmentID).Scan(&registryID, &operationID, &checkpoint, &candidate, &previous); err != nil {
+		return err
+	}
+	if previous == nil {
+		tag, err := tx.Exec(ctx, `UPDATE environments SET registry_credential_state='failed',registry_credential_error_code=$3,
+			registry_credential_error_message=NULL,registry_credential_lease_owner=NULL,registry_credential_lease_expires_at=NULL
+			WHERE org_id=$1 AND id=$2 AND registry_credential_state='pending'`, orgID, environmentID, code)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrFailedPrecondition
+		}
+		return terminalizeRegistryCredentialOperation(ctx, tx, orgID, operationID, code)
+	}
+	if checkpoint == "rollback_reconciling" {
+		return terminalizeRegistryCredentialRollbackFailure(ctx, tx, orgID, registryID, operationID, *previous, code)
+	}
+	return beginRegistryCredentialRollback(ctx, tx, orgID, registryID, operationID, candidate, *previous, code)
+}
+
+func terminalizeRegistryCredentialRollbackFailure(ctx context.Context, tx pgx.Tx, orgID, registryID, operationID string, previous int64, code string) error {
+	if tag, err := tx.Exec(ctx, `UPDATE environments environment SET registry_credential_state='failed',
+		registry_credential_error_code=$4,registry_credential_error_message=NULL,
+		registry_credential_lease_owner=NULL,registry_credential_lease_expires_at=NULL
+		FROM apps app WHERE environment.org_id=$1 AND app.org_id=environment.org_id AND app.id=environment.app_id
+		AND app.registry_id=$2 AND environment.required_registry_credential_generation=$3
+		AND environment.registry_credential_state='pending'`, orgID, registryID, previous, code); err != nil {
+		return err
+	} else if tag.RowsAffected() == 0 {
+		return ErrFailedPrecondition
+	}
+	var candidate int64
+	if err := tx.QueryRow(ctx, `UPDATE registry_credential_operations SET status='failed',failure_code=$3,failure_message=NULL,
+		terminal_at=clock_timestamp(),next_attempt_at='infinity',lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND status='pending' AND checkpoint='rollback_reconciling'
+		RETURNING candidate_generation`, orgID, operationID, code).Scan(&candidate); err != nil {
+		return err
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registry_credential_generations SET state='failed' WHERE org_id=$1 AND registry_id=$2
+		AND generation=$3 AND operation_id=$4 AND state='pending'`, orgID, registryID, candidate, operationID); err != nil {
+		return err
+	} else if tag.RowsAffected() == 0 {
+		return ErrFailedPrecondition
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',pending_generation=NULL,
+		pending_credential_secret_ref=NULL,operation_id=NULL,previous_generation=NULL,previous_credential_secret_ref=NULL,
+		failure_code=NULL,failure_message=NULL,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND operation_id=$3 AND checkpoint='rollback_reconciling'
+		AND active_generation=$4 AND pending_generation=$5`, orgID, registryID, operationID, previous, candidate); err != nil {
+		return err
+	} else if tag.RowsAffected() == 0 {
+		return ErrFailedPrecondition
+	}
+	return nil
+}
+
+func (s *Store) InvalidateNamespaceCredentialLeaseForTeardown(ctx context.Context, orgID, environmentID string) error {
+	if orgID == "" || environmentID == "" {
+		return ErrInvalidArgument
+	}
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var appID string
+		var registryID *string
+		if err := tx.QueryRow(ctx, `SELECT app.id::text,app.registry_id::text FROM environments environment
+			JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+			WHERE environment.org_id=$1 AND environment.id=$2 FOR UPDATE OF environment,app`, orgID, environmentID).Scan(&appID, &registryID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		var operationID, checkpoint *string
+		var candidate int64
+		var previous *int64
+		if registryID != nil {
+			err := tx.QueryRow(ctx, `SELECT operation.id::text,operation.checkpoint,operation.candidate_generation,operation.previous_generation
+				FROM registries registry JOIN registry_credential_operations operation
+				 ON operation.org_id=registry.org_id AND operation.id=registry.operation_id
+				WHERE registry.org_id=$1 AND registry.id=$2 AND operation.status='pending'
+				FOR UPDATE OF registry,operation`, orgID, *registryID).Scan(&operationID, &checkpoint, &candidate, &previous)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE environments SET registry_credential_lease_owner=NULL,
+			registry_credential_lease_expires_at=NULL,registry_credential_lease_epoch=registry_credential_lease_epoch+1,
+			registry_credential_cleanup_state=CASE WHEN registry_credential_cleanup_state='pending' THEN 'complete' ELSE registry_credential_cleanup_state END,
+			registry_credential_cleanup_lease_owner=NULL,registry_credential_cleanup_lease_expires_at=NULL,
+			registry_credential_cleanup_lease_epoch=registry_credential_cleanup_lease_epoch+1
+			WHERE org_id=$1 AND id=$2`, orgID, environmentID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE apps app SET cleanup_state='cleaned',cleanup_checkpoint='namespace_credentials_removed',
+			cleanup_error_code=NULL,cleanup_error_message=NULL WHERE app.org_id=$1 AND app.id=$2
+			AND app.image_visibility='public' AND app.deleted_at IS NULL AND app.cleanup_state IN ('cleanup_requested','cleaning')
+			AND NOT EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=app.org_id
+			 AND environment.app_id=app.id AND environment.torn_down_at IS NULL
+			 AND environment.lifecycle_status<>'teardown_requested'
+			 AND environment.id<>$3 AND environment.registry_credential_cleanup_state<>'complete')`, orgID, appID, environmentID); err != nil {
+			return err
+		}
+		if registryID == nil || operationID == nil || checkpoint == nil {
+			return nil
+		}
+		switch *checkpoint {
+		case "namespaces_reconciling":
+			_, err := activateRegistryCredentialGenerationIfReady(ctx, tx, orgID, *registryID, *operationID, candidate, environmentID)
+			return err
+		case "rollback_reconciling":
+			if previous == nil {
+				return ErrFailedPrecondition
+			}
+			_, err := finalizeRegistryCredentialRollbackIfReady(ctx, tx, orgID, *registryID, *operationID, *previous, environmentID)
+			return err
+		default:
+			return nil
+		}
+	})
+}
+
+func activateRegistryCredentialGenerationIfReady(ctx context.Context, tx pgx.Tx, orgID, registryID, operationID string, generation int64, excludedEnvironmentID string) (bool, error) {
+	var candidateSecretRef string
+	var previous *int64
+	var alreadySucceeded bool
+	err := tx.QueryRow(ctx, `SELECT generation.secret_ref,operation.previous_generation,operation.status='succeeded'
+		FROM registry_credential_generations generation
+		JOIN registry_credential_operations operation ON operation.org_id=generation.org_id
+		 AND operation.id=generation.operation_id AND operation.registry_id=generation.registry_id
+		JOIN registries registry ON registry.org_id=generation.org_id AND registry.id=generation.registry_id
+		WHERE generation.org_id=$1 AND generation.registry_id=$2 AND generation.generation=$3
+		AND generation.operation_id=$4 AND registry.operation_id=$4 AND registry.pending_generation=$3
+		FOR UPDATE OF registry,operation,generation`, orgID, registryID, generation, operationID).Scan(&candidateSecretRef, &previous, &alreadySucceeded)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrFailedPrecondition
+	}
+	if err != nil {
+		return false, err
+	}
+	if alreadySucceeded {
+		return false, nil
+	}
+	var blocked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		WHERE environment.org_id=$1 AND app.registry_id=$2 AND app.image_visibility='private'
+		AND app.deleted_at IS NULL AND environment.torn_down_at IS NULL
+		AND environment.lifecycle_status<>'teardown_requested'
+		AND environment.id::text<>$4
+		AND (environment.required_registry_credential_generation<>$3
+			OR environment.registry_credential_state<>'ready'
+			OR environment.ready_registry_credential_generation<>$3
+			OR environment.registry_credential_checkpoint<>'namespace_secret_verified'
+			OR environment.registry_credential_lease_owner IS NOT NULL))`, orgID, registryID, generation, excludedEnvironmentID).Scan(&blocked); err != nil {
+		return false, err
+	}
+	if blocked {
+		return false, nil
+	}
+	if previous != nil {
+		if _, err := tx.Exec(ctx, `UPDATE registry_credential_generations SET state='retired',retired_at=clock_timestamp()
+			WHERE org_id=$1 AND registry_id=$2 AND generation=$3 AND state='active'`, orgID, registryID, *previous); err != nil {
+			return false, err
+		}
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registry_credential_operations SET status='succeeded',checkpoint='activated',
+		terminal_at=clock_timestamp(),next_attempt_at='infinity',lease_owner=NULL,lease_expires_at=NULL,
+		failure_code=NULL,failure_message=NULL,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND registry_id=$3 AND candidate_generation=$4
+		AND status='pending' AND checkpoint='namespaces_reconciling'`, orgID, operationID, registryID, generation); err != nil {
+		return false, err
+	} else if tag.RowsAffected() == 0 {
+		return false, ErrFailedPrecondition
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registry_credential_generations SET state='active',activated_at=clock_timestamp()
+		WHERE org_id=$1 AND registry_id=$2 AND generation=$3 AND operation_id=$4 AND state='pending' AND validated_at IS NOT NULL`,
+		orgID, registryID, generation, operationID); err != nil {
+		return false, err
+	} else if tag.RowsAffected() == 0 {
+		return false, ErrFailedPrecondition
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',active_generation=$3,
+		active_credential_secret_ref=$4,pending_generation=NULL,pending_credential_secret_ref=NULL,
+		previous_generation=$5,previous_credential_secret_ref=CASE WHEN $5::bigint IS NULL THEN NULL ELSE active_credential_secret_ref END,
+		operation_id=NULL,activated_at=clock_timestamp(),failure_code=NULL,failure_message=NULL,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND operation_id=$6 AND pending_generation=$3`,
+		orgID, registryID, generation, candidateSecretRef, previous, operationID); err != nil {
+		return false, err
+	} else if tag.RowsAffected() == 0 {
+		return false, ErrFailedPrecondition
+	}
+	return true, nil
+}
+
+func beginRegistryCredentialRollback(ctx context.Context, tx pgx.Tx, orgID, registryID, operationID string, candidate, previous int64, code string) error {
+	var previousSecretRef string
+	if err := tx.QueryRow(ctx, `SELECT secret_ref FROM registry_credential_generations
+		WHERE org_id=$1 AND registry_id=$2 AND generation=$3 AND state='active'`, orgID, registryID, previous).Scan(&previousSecretRef); err != nil {
+		return err
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registry_credential_operations SET checkpoint='rollback_reconciling',
+		failure_code=NULL,failure_message=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND status='pending'`, orgID, operationID); err != nil {
+		return err
+	} else if tag.RowsAffected() == 0 {
+		return ErrFailedPrecondition
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registries SET state='reconciling',checkpoint='rollback_reconciling',
+		failure_code=NULL,failure_message=$6,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND operation_id=$3 AND pending_generation=$4 AND active_generation=$5`,
+		orgID, registryID, operationID, candidate, previous, code); err != nil {
+		return err
+	} else if tag.RowsAffected() == 0 {
+		return ErrFailedPrecondition
+	}
+	tag, err := tx.Exec(ctx, `UPDATE environments environment SET required_registry_credential_generation=$3,
+		ready_registry_credential_generation=NULL,registry_credential_state='pending',registry_credential_checkpoint=NULL,
+		registry_credential_error_code=NULL,registry_credential_error_message=NULL,registry_credential_attempts=0,
+		registry_credential_next_attempt_at=clock_timestamp(),registry_credential_lease_owner=NULL,
+		registry_credential_lease_expires_at=NULL,registry_credential_lease_epoch=registry_credential_lease_epoch+1
+		FROM apps app WHERE environment.org_id=$1 AND app.org_id=environment.org_id AND app.id=environment.app_id
+		AND app.registry_id=$2 AND app.image_visibility='private' AND app.deleted_at IS NULL
+		AND environment.torn_down_at IS NULL AND environment.lifecycle_status<>'teardown_requested'
+		AND EXISTS (SELECT 1 FROM registry_credential_generations generation WHERE generation.org_id=$1
+			AND generation.registry_id=$2 AND generation.generation=$3 AND generation.secret_ref=$4 AND generation.state='active')`,
+		orgID, registryID, previous, previousSecretRef)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrFailedPrecondition
+	}
+	return nil
+}
+
+func finalizeRegistryCredentialRollbackIfReady(ctx context.Context, tx pgx.Tx, orgID, registryID, operationID string, previous int64, excludedEnvironmentID string) (bool, error) {
+	var candidate int64
+	var code string
+	if err := tx.QueryRow(ctx, `SELECT operation.candidate_generation,COALESCE(registry.failure_message,'image_pull_secret_reconcile_failed')
+		FROM registry_credential_operations operation JOIN registries registry ON registry.org_id=operation.org_id
+		 AND registry.id=operation.registry_id AND registry.operation_id=operation.id
+		WHERE operation.org_id=$1 AND operation.id=$2 AND operation.registry_id=$3
+		AND operation.status='pending' AND operation.checkpoint='rollback_reconciling' AND operation.previous_generation=$4
+		FOR UPDATE OF operation,registry`,
+		orgID, operationID, registryID, previous).Scan(&candidate, &code); err != nil {
+		return false, err
+	}
+	var blocked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		WHERE environment.org_id=$1 AND app.registry_id=$2 AND app.image_visibility='private'
+		AND app.deleted_at IS NULL AND environment.torn_down_at IS NULL
+		AND environment.lifecycle_status<>'teardown_requested'
+		AND environment.id::text<>$4
+		AND (environment.required_registry_credential_generation<>$3
+			OR environment.registry_credential_state<>'ready'
+			OR environment.ready_registry_credential_generation<>$3
+			OR environment.registry_credential_checkpoint<>'namespace_secret_verified'
+			OR environment.registry_credential_lease_owner IS NOT NULL))`, orgID, registryID, previous, excludedEnvironmentID).Scan(&blocked); err != nil {
+		return false, err
+	}
+	if blocked {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE registry_credential_generations SET state='failed'
+		WHERE org_id=$1 AND registry_id=$2 AND generation=$3 AND operation_id=$4 AND state='pending'`,
+		orgID, registryID, candidate, operationID); err != nil {
+		return false, err
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registry_credential_operations SET status='failed',checkpoint='rollback_reconciling',
+		failure_code=$3,failure_message=NULL,terminal_at=clock_timestamp(),next_attempt_at='infinity',updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND status='pending' AND checkpoint='rollback_reconciling'`, orgID, operationID, code); err != nil {
+		return false, err
+	} else if tag.RowsAffected() == 0 {
+		return false, ErrFailedPrecondition
+	}
+	if tag, err := tx.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',pending_generation=NULL,
+		pending_credential_secret_ref=NULL,operation_id=NULL,previous_generation=NULL,previous_credential_secret_ref=NULL,
+		failure_code=NULL,failure_message=NULL,updated_at=clock_timestamp()
+		WHERE org_id=$1 AND id=$2 AND operation_id=$3 AND checkpoint='rollback_reconciling'
+		AND active_generation=$4 AND pending_generation=$5`, orgID, registryID, operationID, previous, candidate); err != nil {
+		return false, err
+	} else if tag.RowsAffected() == 0 {
+		return false, ErrFailedPrecondition
+	}
+	return true, nil
 }

@@ -53,6 +53,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000018_import_pending_credentials.up.sql",
 		"000019_registry_credential_fingerprint.down.sql",
 		"000019_registry_credential_fingerprint.up.sql",
+		"000020_namespace_credential_transitions.down.sql",
+		"000020_namespace_credential_transitions.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -199,6 +201,27 @@ func TestMigration000019SchemaContract(t *testing.T) {
 		sum := sha256.Sum256(contents)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			t.Fatalf("%s checksum = %s, want v19 migration fingerprint %s", name, got, want)
+		}
+	}
+}
+
+func TestMigration000020SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000020_namespace_credential_transitions.up.sql":   "949ac5ebaa92f550293340a29583cd68f1840ae4b7abca21ebe17548eb6a6922",
+		"000020_namespace_credential_transitions.down.sql": "7ef1586af271696d2f2fdce43d5f27cf82d04447f9b86a8ac31009a05097dc96",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"transition_app_image_visibility", "registry_credential_cleanup_state", "environments_registry_credential_cleanup_due", "phase6_environment_credential_row_valid"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v20 migration fingerprint %s", name, got, want)
 		}
 	}
 }

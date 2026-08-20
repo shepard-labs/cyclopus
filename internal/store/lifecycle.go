@@ -160,6 +160,78 @@ func (s *Store) UnblockEnvironmentProvision(ctx context.Context, orgID, environm
 	return rowsAffected(command, ErrNotFound)
 }
 
+func (s *Store) SeedEnvironmentCredentialForProvision(ctx context.Context, job EnvironmentLifecycleJob) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var visibility string
+		var registryID *string
+		var activeGeneration int64
+		var operationGeneration *int64
+		var operationGenerationState *string
+		if err := tx.QueryRow(ctx, `SELECT app.image_visibility,app.registry_id::text,COALESCE(registry.active_generation,0),
+			CASE operation.checkpoint
+			 WHEN 'namespaces_reconciling' THEN operation.candidate_generation
+			 WHEN 'rollback_reconciling' THEN operation.previous_generation END,
+			CASE operation.checkpoint
+			 WHEN 'namespaces_reconciling' THEN candidate.state
+			 WHEN 'rollback_reconciling' THEN previous.state END
+			FROM environment_lifecycle_jobs job
+			JOIN environments environment ON environment.org_id=job.org_id AND environment.id=job.environment_id
+			JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+			LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id
+			LEFT JOIN registry_credential_operations operation ON operation.org_id=registry.org_id
+			 AND operation.id=registry.operation_id AND operation.status='pending'
+			LEFT JOIN registry_credential_generations candidate ON candidate.org_id=operation.org_id
+			 AND candidate.registry_id=operation.registry_id AND candidate.generation=operation.candidate_generation
+			LEFT JOIN registry_credential_generations previous ON previous.org_id=operation.org_id
+			 AND previous.registry_id=operation.registry_id AND previous.generation=operation.previous_generation
+			WHERE job.org_id=$1 AND job.id=$2 AND job.environment_id=$3 AND job.status='leased'
+			 AND job.lease_owner=$4 AND job.fence=$5 AND job.lease_expires_at>now()
+			 AND environment.lifecycle_status IN ('reserved','policy_blocked') FOR UPDATE OF job,environment,app`,
+			job.OrgID, job.ID, job.EnvironmentID, stringPointerValue(job.LeaseOwner), job.Fence).
+			Scan(&visibility, &registryID, &activeGeneration, &operationGeneration, &operationGenerationState); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrLeaseNotOwned
+			}
+			return err
+		}
+		if visibility == "public" {
+			_, err := tx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=NULL,
+				ready_registry_credential_generation=NULL,registry_credential_state='not_required',
+				registry_credential_checkpoint=NULL,registry_credential_error_code=NULL,
+				registry_credential_error_message=NULL,registry_credential_attempts=0,
+				registry_credential_next_attempt_at=now(),registry_credential_lease_owner=NULL,
+				registry_credential_lease_expires_at=NULL,registry_credential_lease_epoch=registry_credential_lease_epoch+1
+				WHERE org_id=$1 AND id=$2`, job.OrgID, job.EnvironmentID)
+			return err
+		}
+		if visibility != "private" || registryID == nil {
+			return ErrFailedPrecondition
+		}
+		if operationGeneration != nil {
+			if operationGenerationState == nil || (*operationGenerationState != "pending" && *operationGenerationState != "active") {
+				return ErrFailedPrecondition
+			}
+			_, err := tx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=$3,
+				ready_registry_credential_generation=NULL,registry_credential_state='pending',registry_credential_checkpoint=NULL,
+				registry_credential_error_code=NULL,registry_credential_error_message=NULL,registry_credential_attempts=0,
+				registry_credential_next_attempt_at=now(),registry_credential_lease_owner=NULL,
+				registry_credential_lease_expires_at=NULL,registry_credential_lease_epoch=registry_credential_lease_epoch+1
+				WHERE org_id=$1 AND id=$2`, job.OrgID, job.EnvironmentID, *operationGeneration)
+			return err
+		}
+		if activeGeneration > 0 {
+			_, err := tx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=$3,
+				ready_registry_credential_generation=NULL,registry_credential_state='pending',registry_credential_checkpoint=NULL,
+				registry_credential_error_code=NULL,registry_credential_error_message=NULL,registry_credential_attempts=0,
+				registry_credential_next_attempt_at=now(),registry_credential_lease_owner=NULL,
+				registry_credential_lease_expires_at=NULL,registry_credential_lease_epoch=registry_credential_lease_epoch+1
+				WHERE org_id=$1 AND id=$2`, job.OrgID, job.EnvironmentID, activeGeneration)
+			return err
+		}
+		return ErrFailedPrecondition
+	})
+}
+
 func (s *Store) CompleteEnvironmentProvision(ctx context.Context, job EnvironmentLifecycleJob, plannedHostname *string) error {
 	return s.withTx(ctx, func(tx pgx.Tx) error {
 		command, err := tx.Exec(ctx, `UPDATE environment_lifecycle_jobs SET status='completed',checkpoint='ready',

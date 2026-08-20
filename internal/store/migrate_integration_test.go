@@ -17,6 +17,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPostgres18Migrations(t *testing.T) {
@@ -58,14 +59,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000019 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000020 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 19 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:19 dirty:false", version, dirty)
+		if version != 20 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:20 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1488,6 +1489,139 @@ func TestMigration000016CanonicalRepositoryTriggerCatalogDownAndReUp(t *testing.
 	}
 	if err := migrator.Migrate(15); err == nil || !strings.Contains(err.Error(), "000016 rollback blocked: combined GitHub and registry applications remain") {
 		t.Fatalf("combined app down error = %v", err)
+	}
+}
+
+func TestMigration000020ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(19); err != nil {
+		t.Fatalf("migrate to exact v19: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	fixture := seedTenantGraph(t, conn, "migration-twenty", "main", "", "migration-twenty-production")
+	v19Catalog := schemaCatalogSnapshot(t, conn)
+	if err := migrator.Migrate(20); err != nil {
+		t.Fatalf("exact v19 to v20 upgrade: %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 20 || dirty {
+		t.Fatalf("v20 migration state = %d/%t, %v", version, dirty, err)
+	}
+
+	actorID := "00000000-0000-7000-8000-000000000201"
+	registryID := "00000000-0000-7000-8000-000000000202"
+	operationID := "00000000-0000-7000-8000-000000000203"
+	if _, err := conn.Exec(t.Context(), `INSERT INTO users(id,org_id,email,password_hash,display_name,operator)
+		VALUES($1,$2,'migration-twenty@example.test','hash','Migration Twenty',true)`, actorID, fixture.org); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
+		active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
+		'k8s-secret://cyclopus-system/migration-twenty#dockerconfigjson',clock_timestamp())`, registryID, fixture.org); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
+		candidate_generation,idempotency_key,terminal_at,actor_user_id) VALUES($1,$2,$3,'create','succeeded','activated',1,
+		'migration-twenty',clock_timestamp(),$4)`, operationID, fixture.org, registryID, actorID); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
+		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/migration-twenty#dockerconfigjson',
+		'active',$3,clock_timestamp(),clock_timestamp())`, fixture.org, registryID, operationID); err != nil {
+		_ = tx.Rollback(t.Context())
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	hostile := schema + "_hostile"
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+pgx.Identifier{hostile}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{hostile}.Sanitize()+" CASCADE")
+	if _, err := admin.Exec(t.Context(), `CREATE FUNCTION `+pgx.Identifier{hostile, "transition_app_image_visibility"}.Sanitize()+`(uuid,uuid,text,uuid)
+		RETURNS void LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'hostile transition invoked'; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	poolConfig, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolConfig.ConnConfig.RuntimeParams["search_path"] = pgx.Identifier{hostile}.Sanitize() + "," + pgx.Identifier{schema}.Sanitize()
+	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	dataStore, err := NewWithSchema(pool, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := dataStore.GetApp(t.Context(), fixture.org, fixture.app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.ImageVisibility, app.RegistryID = "private", &registryID
+	private, err := dataStore.UpdateApp(t.Context(), appVisibilitySaveParams(t, dataStore, app, "migration-twenty-private"))
+	if err != nil || private.ImageVisibility != "private" || private.DesiredGeneration != app.DesiredGeneration+1 {
+		t.Fatalf("hostile search_path private transition = %+v, %v", private, err)
+	}
+	private.ImageVisibility, private.RegistryID = "public", nil
+	public, err := dataStore.UpdateApp(t.Context(), appVisibilitySaveParams(t, dataStore, private, "migration-twenty-public"))
+	if err != nil || public.ImageVisibility != "public" || public.CleanupState != "cleanup_requested" {
+		t.Fatalf("hostile search_path public transition = %+v, %v", public, err)
+	}
+	var credentialState, cleanupState string
+	if err := conn.QueryRow(t.Context(), `SELECT registry_credential_state,registry_credential_cleanup_state FROM environments WHERE id=$1`, fixture.environment).Scan(&credentialState, &cleanupState); err != nil || credentialState != "not_required" || cleanupState != "pending" {
+		t.Fatalf("public environment states = %q/%q, %v", credentialState, cleanupState, err)
+	}
+
+	if err := migrator.Migrate(19); err == nil || !strings.Contains(err.Error(), "000020 downgrade would discard namespace credential cleanup state or evidence") {
+		t.Fatalf("guarded v20 down error = %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 20 || dirty {
+		t.Fatalf("blocked down state = %d/%t, %v", version, dirty, err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE environments SET registry_credential_cleanup_state='not_required',
+		registry_credential_cleanup_registry_id=NULL,registry_credential_cleanup_generation=NULL,
+		registry_credential_cleanup_attempts=0,registry_credential_cleanup_lease_owner=NULL,
+		registry_credential_cleanup_lease_expires_at=NULL,registry_credential_cleanup_lease_epoch=0
+		WHERE id=$1`, fixture.environment); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(19); err != nil {
+		t.Fatalf("clean v20 down: %v", err)
+	}
+	if got := schemaCatalogSnapshot(t, conn); got != v19Catalog {
+		wantLines, gotLines := strings.Split(v19Catalog, "\n"), strings.Split(got, "\n")
+		for index := 0; index < len(wantLines) && index < len(gotLines); index++ {
+			if wantLines[index] != gotLines[index] {
+				t.Fatalf("v19 catalog after v20 down first differs at line %d\nwant: %s\n got: %s", index+1, wantLines[index], gotLines[index])
+			}
+		}
+		t.Fatalf("v19 catalog after v20 down line count differs: want %d, got %d", len(wantLines), len(gotLines))
+	}
+	if err := migrator.Migrate(20); err != nil {
+		t.Fatalf("v20 re-up: %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 20 || dirty {
+		t.Fatalf("v20 re-up state = %d/%t, %v", version, dirty, err)
 	}
 }
 

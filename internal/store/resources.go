@@ -261,6 +261,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 	var value App
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		var before json.RawMessage
+		var previousVisibility string
 		if create {
 			row := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,github_workflow_path,github_workflow_revision,production_branch,annotation_policy,image_visibility)
 			SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
@@ -269,11 +270,32 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 				return mapMutationError("create app", err)
 			}
 		} else {
-			if err := tx.QueryRow(ctx, `SELECT to_jsonb(apps) FROM apps WHERE org_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.App.OrgID, p.App.ID).Scan(&before); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT to_jsonb(apps),image_visibility FROM apps WHERE org_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.App.OrgID, p.App.ID).Scan(&before, &previousVisibility); err != nil {
 				return mapMutationError("lock app", err)
 			}
+			visibilityChanged := previousVisibility != p.App.ImageVisibility
+			if visibilityChanged {
+				var registryID *string
+				if p.App.ImageVisibility == "private" {
+					registryID = p.App.RegistryID
+				}
+				function := pgx.Identifier{s.schema, "transition_app_image_visibility"}.Sanitize()
+				if _, err := tx.Exec(ctx, `SELECT `+function+`($1,$2,$3,$4)`, p.App.OrgID, p.App.ID, p.App.ImageVisibility, registryID); err != nil {
+					return mapMutationError("transition app visibility", err)
+				}
+				if p.App.ImageVisibility == "public" {
+					p.App.RegistryID = nil
+				}
+			}
 			args := appArgs(p.App)
-			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,github_workflow_path=$27,github_workflow_revision=$28,production_branch=$29,annotation_policy=$30,image_visibility=$31 WHERE org_id=$2 AND id=$1 AND deleted_at IS NULL RETURNING id::text`, args...)
+			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,github_workflow_path=$27,github_workflow_revision=$28,production_branch=$29,annotation_policy=$30,image_visibility=$31,
+				desired_generation=desired_generation+CASE WHEN image_visibility IS DISTINCT FROM $31 THEN 1 ELSE 0 END,
+				cleanup_state=CASE WHEN image_visibility='private' AND $31='public' THEN 'cleanup_requested'
+				 WHEN image_visibility='public' AND $31='private' THEN 'active' ELSE cleanup_state END,
+				cleanup_checkpoint=CASE WHEN image_visibility IS DISTINCT FROM $31 THEN NULL ELSE cleanup_checkpoint END,
+				cleanup_error_code=CASE WHEN image_visibility IS DISTINCT FROM $31 THEN NULL ELSE cleanup_error_code END,
+				cleanup_error_message=CASE WHEN image_visibility IS DISTINCT FROM $31 THEN NULL ELSE cleanup_error_message END
+				WHERE org_id=$2 AND id=$1 AND deleted_at IS NULL RETURNING id::text`, args...)
 			var id string
 			if err := row.Scan(&id); err != nil {
 				return mapMutationError("update app", err)

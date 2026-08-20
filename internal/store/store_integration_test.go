@@ -58,6 +58,129 @@ func TestOrchestrationHardDeadlines(t *testing.T) {
 	}
 }
 
+func TestUpdateAppVisibilityTransitionWithoutLiveEnvironmentIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET lifecycle_status='torn_down',torn_down_at=now() WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	registryID := "00000000-0000-7000-8000-000000000741"
+	operationID := "00000000-0000-7000-8000-000000000742"
+	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
+		active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
+		'k8s-secret://cyclopus-system/app-transition#dockerconfigjson',now())`, registryID, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
+		candidate_generation,idempotency_key,terminal_at) VALUES($1,$2,$3,'create','succeeded','activated',1,'app-transition',now())`,
+		operationID, orgOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
+		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/app-transition#dockerconfigjson',
+		'active',$3,now(),now())`, orgOneID, registryID, operationID); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	app, err := dataStore.GetApp(t.Context(), orgOneID, appOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.ImageVisibility = "private"
+	app.RegistryID = &registryID
+	private, err := dataStore.UpdateApp(t.Context(), appVisibilitySaveParams(t, dataStore, app, "private-no-live"))
+	if err != nil || private.DesiredGeneration != app.DesiredGeneration+1 || private.CleanupState != "active" {
+		t.Fatalf("private transition = %+v, %v", private, err)
+	}
+	private.ImageVisibility = "public"
+	private.RegistryID = nil
+	public, err := dataStore.UpdateApp(t.Context(), appVisibilitySaveParams(t, dataStore, private, "public-no-live"))
+	if err != nil || public.DesiredGeneration != private.DesiredGeneration+1 || public.CleanupState != "cleanup_requested" {
+		t.Fatalf("public transition = %+v, %v", public, err)
+	}
+}
+
+func TestUpdateAppVisibilityTransitionWithLiveEnvironmentIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	registryID := "00000000-0000-7000-8000-000000000743"
+	operationID := "00000000-0000-7000-8000-000000000744"
+	if _, err := pool.Exec(t.Context(), `INSERT INTO registries(id,org_id,provider,registry_host,state,checkpoint,active_generation,
+		active_credential_secret_ref,activated_at) VALUES($1,$2,'ghcr','ghcr.io','ready','activated',1,
+		'k8s-secret://cyclopus-system/live-transition#dockerconfigjson',now())`, registryID, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,status,checkpoint,
+		candidate_generation,idempotency_key,terminal_at) VALUES($1,$2,$3,'create','succeeded','activated',1,'live-transition',now())`,
+		operationID, orgOneID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,
+		operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus-system/live-transition#dockerconfigjson',
+		'active',$3,now(),now())`, orgOneID, registryID, operationID); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	app, err := dataStore.GetApp(t.Context(), orgOneID, appOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.ImageVisibility = "private"
+	app.RegistryID = &registryID
+	private, err := dataStore.UpdateApp(t.Context(), appVisibilitySaveParams(t, dataStore, app, "private-live"))
+	if err != nil || private.ImageVisibility != "private" || private.DesiredGeneration != app.DesiredGeneration+1 {
+		t.Fatalf("private transition = %+v, %v", private, err)
+	}
+	var state string
+	var required int64
+	if err := pool.QueryRow(t.Context(), `SELECT registry_credential_state,required_registry_credential_generation FROM environments WHERE id=$1`, environmentOneID).Scan(&state, &required); err != nil || state != "pending" || required != 1 {
+		t.Fatalf("private environment = state:%q generation:%d error:%v", state, required, err)
+	}
+	private.ImageVisibility = "public"
+	private.RegistryID = nil
+	public, err := dataStore.UpdateApp(t.Context(), appVisibilitySaveParams(t, dataStore, private, "public-live"))
+	if err != nil || public.CleanupState != "cleanup_requested" || public.DesiredGeneration != private.DesiredGeneration+1 {
+		t.Fatalf("public transition = %+v, %v", public, err)
+	}
+	var cleanupState string
+	if err := pool.QueryRow(t.Context(), `SELECT registry_credential_state,registry_credential_cleanup_state FROM environments WHERE id=$1`, environmentOneID).Scan(&state, &cleanupState); err != nil || state != "not_required" || cleanupState != "pending" {
+		t.Fatalf("public environment = state:%q cleanup:%q error:%v", state, cleanupState, err)
+	}
+}
+
+func appVisibilitySaveParams(t *testing.T, dataStore *Store, app App, key string) SaveAppParams {
+	t.Helper()
+	hash := requestHash(key)
+	claim := IdempotencyClaimParams{OrgID: app.OrgID, Scope: "app.update", Key: key, RequestHash: hash,
+		Owner: "visibility-test", LeaseDuration: time.Minute, Retention: time.Hour}
+	if _, err := dataStore.ClaimIdempotency(t.Context(), claim); err != nil {
+		t.Fatal(err)
+	}
+	return SaveAppParams{App: app, Idempotency: CompleteIdempotencyParams{Scope: claim.Scope, Key: claim.Key,
+		RequestHash: claim.RequestHash, Owner: claim.Owner, Status: "completed", StatusCode: 200, Body: json.RawMessage(`{}`)},
+		Audit: testAudit("00000000-0000-7000-8000-"+requestHash(key)[:12], "", app.ID)}
+}
+
 func TestPreviewDisabledAcknowledgesWithoutEnvironmentIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())

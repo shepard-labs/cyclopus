@@ -186,6 +186,8 @@ func (p *SuffixHostnameProvider) PreviewHostname(_ context.Context, job store.En
 type LifecycleStore interface {
 	CheckpointEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, string) error
 	BlockEnvironmentLifecycle(context.Context, store.EnvironmentLifecycleJob, string, string, string) error
+	SeedEnvironmentCredentialForProvision(context.Context, store.EnvironmentLifecycleJob) error
+	InvalidateNamespaceCredentialLeaseForTeardown(context.Context, string, string) error
 	CompleteEnvironmentProvision(context.Context, store.EnvironmentLifecycleJob, *string) error
 	CompleteEnvironmentTeardown(context.Context, store.EnvironmentLifecycleJob) error
 }
@@ -295,6 +297,9 @@ func (a *LifecycleAdapter) provision(ctx context.Context, job store.EnvironmentL
 			return fmt.Errorf("provide preview hostname: %w", err)
 		}
 		hostname = &value
+	}
+	if err := a.store.SeedEnvironmentCredentialForProvision(ctx, job); err != nil {
+		return err
 	}
 	current, err = a.client.CoreV1().Namespaces().Get(ctx, job.Namespace, metav1.GetOptions{})
 	if err != nil {
@@ -418,6 +423,11 @@ func (a *LifecycleAdapter) teardown(ctx context.Context, job store.EnvironmentLi
 		if !ownedNamespace(current, job.EnvironmentID) {
 			return ErrResourceOwnership
 		}
+	}
+	if err := a.store.InvalidateNamespaceCredentialLeaseForTeardown(ctx, job.OrgID, job.EnvironmentID); err != nil {
+		return err
+	}
+	if current != nil {
 		uid := current.UID
 		policy := metav1.DeletePropagationForeground
 		err = a.client.CoreV1().Namespaces().Delete(ctx, job.Namespace, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}, PropagationPolicy: &policy})

@@ -162,6 +162,27 @@ func TestPreviewProvisionVerifiedPolicyRemovesPendingLabelAndMarksReady(t *testi
 	}
 }
 
+func TestProvisionSeedsCredentialAfterPolicyBeforeNamespaceReadyAndCompletion(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	persisted := &fakeLifecycleStore{}
+	adapter, _ := NewLifecycleAdapter(client, persisted, successfulPolicy{after: func() { persisted.events = append(persisted.events, "policy") }}, staticHostname("preview.example.test"), time.Millisecond)
+	job := previewLifecycleJob()
+	client.PrependReactor("update", "namespaces", func(action ktesting.Action) (bool, runtime.Object, error) {
+		namespace := action.(ktesting.UpdateAction).GetObject().(*corev1.Namespace)
+		if _, pending := namespace.Labels[PoliciesPendingLabel]; !pending {
+			persisted.events = append(persisted.events, "namespace_ready")
+		}
+		return false, nil, nil
+	})
+	if err := adapter.ExecuteEnvironmentLifecycle(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"policy", "seed", "namespace_ready", "complete"}
+	if !reflect.DeepEqual(persisted.events, want) {
+		t.Fatalf("events = %v, want %v", persisted.events, want)
+	}
+}
+
 func TestProvisionSecretReaderRejectsUnownedExistingRBAC(t *testing.T) {
 	job := previewLifecycleJob()
 	foreign := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: job.Namespace}}
@@ -294,16 +315,45 @@ func TestPreviewTeardownNamespaceDeletionIsIdempotentAndWaitsAbsent(t *testing.T
 	}
 }
 
+func TestPreviewTeardownVerifiesOwnershipThenInvalidatesBeforeDelete(t *testing.T) {
+	job := previewLifecycleJob()
+	namespace := ownedTestNamespace(job)
+	client := fake.NewSimpleClientset(namespace)
+	persisted := &fakeLifecycleStore{}
+	client.PrependReactor("delete", "namespaces", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if persisted.invalidatedTeardown != 1 {
+			t.Fatal("namespace delete occurred before credential lease invalidation")
+		}
+		return false, nil, nil
+	})
+	adapter, _ := NewLifecycleAdapter(client, persisted, nil, nil, time.Millisecond)
+	job.Kind = "teardown"
+	if err := adapter.ExecuteEnvironmentLifecycle(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ownedTestNamespace(job store.EnvironmentLifecycleJob) *corev1.Namespace {
+	uid := types.UID("owned-namespace")
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: job.Namespace, UID: uid,
+		Labels:      map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: job.EnvironmentID},
+		Annotations: map[string]string{NamespaceOwnerAnnotation: job.EnvironmentID, NamespaceUIDAnnotation: string(uid)}}}
+}
+
 func TestPreviewTeardownRejectsUnownedNamespace(t *testing.T) {
 	job := previewLifecycleJob()
 	client := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: job.Namespace}})
-	adapter, _ := NewLifecycleAdapter(client, &fakeLifecycleStore{}, nil, nil, time.Millisecond)
+	persisted := &fakeLifecycleStore{}
+	adapter, _ := NewLifecycleAdapter(client, persisted, nil, nil, time.Millisecond)
 	job.Kind = "teardown"
 	if err := adapter.ExecuteEnvironmentLifecycle(context.Background(), job); !errors.Is(err, ErrResourceOwnership) {
 		t.Fatalf("error = %v", err)
 	}
 	if _, err := client.CoreV1().Namespaces().Get(context.Background(), job.Namespace, metav1.GetOptions{}); err != nil {
 		t.Fatalf("unowned namespace was deleted: %v", err)
+	}
+	if persisted.invalidatedTeardown != 0 {
+		t.Fatal("unowned namespace changed credential reconciliation state")
 	}
 }
 
@@ -382,6 +432,9 @@ type fakeLifecycleStore struct {
 	hostname             string
 	checkpoints          []string
 	completeProvisionErr error
+	seedErr              error
+	invalidatedTeardown  int
+	events               []string
 }
 
 func (s *fakeLifecycleStore) CheckpointEnvironmentLifecycle(_ context.Context, _ store.EnvironmentLifecycleJob, checkpoint string) error {
@@ -392,11 +445,20 @@ func (s *fakeLifecycleStore) BlockEnvironmentLifecycle(_ context.Context, _ stor
 	s.blockCode = code
 	return nil
 }
+func (s *fakeLifecycleStore) SeedEnvironmentCredentialForProvision(context.Context, store.EnvironmentLifecycleJob) error {
+	s.events = append(s.events, "seed")
+	return s.seedErr
+}
+func (s *fakeLifecycleStore) InvalidateNamespaceCredentialLeaseForTeardown(context.Context, string, string) error {
+	s.invalidatedTeardown++
+	return nil
+}
 func (s *fakeLifecycleStore) CompleteEnvironmentProvision(_ context.Context, _ store.EnvironmentLifecycleJob, hostname *string) error {
 	if s.completeProvisionErr != nil {
 		return s.completeProvisionErr
 	}
 	s.completedProvision++
+	s.events = append(s.events, "complete")
 	if hostname != nil {
 		s.hostname = *hostname
 	}
@@ -407,9 +469,12 @@ func (s *fakeLifecycleStore) CompleteEnvironmentTeardown(context.Context, store.
 	return nil
 }
 
-type successfulPolicy struct{}
+type successfulPolicy struct{ after func() }
 
-func (successfulPolicy) ProvisionAndVerify(context.Context, store.EnvironmentLifecycleJob) error {
+func (p successfulPolicy) ProvisionAndVerify(context.Context, store.EnvironmentLifecycleJob) error {
+	if p.after != nil {
+		p.after()
+	}
 	return nil
 }
 
