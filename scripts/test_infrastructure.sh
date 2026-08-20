@@ -107,12 +107,14 @@ check_helm() {
   "$HELM" template cyclopus "$ROOT/charts/cyclopus" --kube-version "$KUBE_VERSION" \
     --set secrets.databaseUrl='postgres://u:p@h/db' \
     --set secrets.authTokenPepper='unit-gate-pepper' \
+    --set config.externalUrl='https://cyclopus.example' \
     >"$tmp_root/helm_template.log" 2>&1 \
     || { mark_failed "helm template (default) failed"; return 0; }
   "$HELM" template cyclopus "$ROOT/charts/cyclopus" --kube-version "$KUBE_VERSION" \
     -f "$ROOT/charts/cyclopus/values-constrained.yaml" \
     --set secrets.databaseUrl='postgres://u:p@h/db' \
     --set secrets.authTokenPepper='unit-gate-pepper' \
+    --set config.externalUrl='https://cyclopus.example' \
     >"$tmp_root/helm_template_constrained.log" 2>&1 \
     || { mark_failed "helm template (constrained) failed"; return 0; }
   # The rendered chart must actually carry the load-bearing invariants.

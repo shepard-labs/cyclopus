@@ -648,7 +648,7 @@ func newGitHubEventIntegrationFixture(t *testing.T, prefix string) (*store.Store
 		`INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(91001,'10000000-0000-0000-0000-000000000001',90001,'R_node','acme','hooks','acme/hooks','private','main','active',1,1)`,
 		`INSERT INTO git_connections(id,org_id,github_repository_id,state,access_state) VALUES('10000000-0000-0000-0000-000000000009','10000000-0000-0000-0000-000000000001',91001,'active','active')`,
 		`INSERT INTO projects(id,org_id,name,slug,git_connection_id) VALUES('10000000-0000-0000-0000-000000000010','10000000-0000-0000-0000-000000000001','Hooks','hooks','10000000-0000-0000-0000-000000000009')`,
-		`INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES('10000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000010','A','a','a','ghcr.io/acme/a','.github/workflows/deploy.yml','main'),('10000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000010','B','b','b','ghcr.io/acme/b','.github/workflows/deploy.yml','main')`,
+		`INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES('10000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000010','A','a','a','acme/a','.github/workflows/deploy.yml','main'),('10000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000010','B','b','b','acme/b','.github/workflows/deploy.yml','main')`,
 		`INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname) VALUES('10000000-0000-0000-0000-000000000004','10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','main','production','hooks-production','hooks.example.test')`,
 	}
 	for _, query := range queries {
@@ -717,7 +717,7 @@ func assertGitHubEventSnapshotCounts(t *testing.T, pool *pgxpool.Pool, deliveryI
 func seedGitHubEventFanoutApps(t *testing.T, pool *pgxpool.Pool, count, offset int) {
 	t.Helper()
 	if _, err := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,previews_enabled)
-		SELECT ('50000000-0000-0000-0000-'||lpad((n+$1)::text,12,'0'))::uuid,'10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000010','Fanout '||n,'fanout-'||(n+$1),'fanout-'||(n+$1),'ghcr.io/acme/fanout-'||(n+$1),'.github/workflows/deploy.yml','main',true FROM generate_series(1,$2) n`, offset, count); err != nil {
+		SELECT ('50000000-0000-0000-0000-'||lpad((n+$1)::text,12,'0'))::uuid,'10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000010','Fanout '||n,'fanout-'||(n+$1),'fanout-'||(n+$1),'acme/fanout-'||(n+$1),'.github/workflows/deploy.yml','main',true FROM generate_series(1,$2) n`, offset, count); err != nil {
 		t.Fatal(err)
 	}
 }

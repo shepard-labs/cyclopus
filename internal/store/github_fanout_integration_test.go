@@ -534,7 +534,7 @@ func TestGitHubPushDurableFanoutPostgres18(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch)
-			VALUES('5fffffff-0000-0000-0000-000000000001',$1,'10000000-0000-0000-0000-000000000010','Late','late','late','ghcr.io/acme/late','.github/workflows/deploy.yml','main')`, githubWebhookOrg); err != nil {
+			VALUES('5fffffff-0000-0000-0000-000000000001',$1,'10000000-0000-0000-0000-000000000010','Late','late','late','acme/late','.github/workflows/deploy.yml','main')`, githubWebhookOrg); err != nil {
 			t.Fatal(err)
 		}
 		for {
@@ -684,7 +684,7 @@ func TestGitHubDeleteDurableFanoutSkipsProductionWithoutStarvationPostgres18(t *
 		appID := fmt.Sprintf("56000000-0000-0000-0000-%012d", i+1)
 		environmentID := fmt.Sprintf("57000000-0000-0000-0000-%012d", i+1)
 		if _, err := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,previews_enabled)
-			VALUES($1,$2,'10000000-0000-0000-0000-000000000010',$3,$4,$4,$5,'.github/workflows/deploy.yml','deleted-many',true)`, appID, githubWebhookOrg, fmt.Sprintf("Production %d", i), fmt.Sprintf("production-%d", i), fmt.Sprintf("ghcr.io/acme/production-%d", i)); err != nil {
+			VALUES($1,$2,'10000000-0000-0000-0000-000000000010',$3,$4,$4,$5,'.github/workflows/deploy.yml','deleted-many',true)`, appID, githubWebhookOrg, fmt.Sprintf("Production %d", i), fmt.Sprintf("production-%d", i), fmt.Sprintf("acme/production-%d", i)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(t.Context(), `INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname) VALUES($1,$2,$3,'deleted-many','production',$4,$5)`, environmentID, githubWebhookOrg, appID, fmt.Sprintf("production-%d", i), fmt.Sprintf("production-%d.example.test", i)); err != nil {
@@ -708,7 +708,7 @@ func TestGitHubDeleteDurableFanoutSkipsProductionWithoutStarvationPostgres18(t *
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,previews_enabled)
-		VALUES('56000000-0000-0000-0000-000000000999',$1,'10000000-0000-0000-0000-000000000010','Late Production','late-production','late-production','ghcr.io/acme/late-production','.github/workflows/deploy.yml','deleted-many',true)`, githubWebhookOrg); err != nil {
+		VALUES('56000000-0000-0000-0000-000000000999',$1,'10000000-0000-0000-0000-000000000010','Late Production','late-production','late-production','acme/late-production','.github/workflows/deploy.yml','deleted-many',true)`, githubWebhookOrg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname)
@@ -1041,7 +1041,7 @@ func newGitHubFanoutFixture(t *testing.T) (*Store, *pgxpool.Pool) {
 func seedGitHubFanoutApps(t *testing.T, pool *pgxpool.Pool, count, offset int) {
 	t.Helper()
 	if _, err := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,previews_enabled)
-		SELECT ('50000000-0000-0000-0000-'||lpad((n+$2)::text,12,'0'))::uuid,$1,'10000000-0000-0000-0000-000000000010','Fanout '||n,'fanout-'||(n+$2),'fanout-'||(n+$2),'ghcr.io/acme/fanout-'||(n+$2),'.github/workflows/deploy.yml','main',true
+		SELECT ('50000000-0000-0000-0000-'||lpad((n+$2)::text,12,'0'))::uuid,$1,'10000000-0000-0000-0000-000000000010','Fanout '||n,'fanout-'||(n+$2),'fanout-'||(n+$2),'acme/fanout-'||(n+$2),'.github/workflows/deploy.yml','main',true
 		FROM generate_series(1,$3) n ON CONFLICT(id) DO NOTHING`, githubWebhookOrg, offset, count); err != nil {
 		t.Fatal(err)
 	}

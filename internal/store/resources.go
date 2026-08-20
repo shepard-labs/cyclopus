@@ -266,7 +266,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 		var previousVisibility string
 		if create {
 			row := tx.QueryRow(ctx, `INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,health_check_path,scaling_mode,min_replicas,max_replicas,hpa_target_cpu_percent,keda_cron_schedules,keda_http_target_pending_requests,cpu_request_millicores,cpu_limit_millicores,memory_request_mib,memory_limit_mib,previews_enabled,max_preview_environments,preview_idle_ttl_hours,deploy_timeout_seconds,release_retention_count,runtime_class,github_workflow_path,github_workflow_revision,production_branch,annotation_policy,image_visibility)
-			SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
+				SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,NULLIF($27,''),$28,NULLIF($29,''),$30,$31 WHERE EXISTS (SELECT 1 FROM projects WHERE org_id=$2 AND id=$3 AND deleted_at IS NULL) RETURNING id::text`, appArgs(p.App)...)
 			var id string
 			if err := row.Scan(&id); err != nil {
 				return mapMutationError("create app", err)
@@ -290,7 +290,7 @@ func (s *Store) saveApp(ctx context.Context, p SaveAppParams, create bool) (App,
 				}
 			}
 			args := appArgs(p.App)
-			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,github_workflow_path=$27,github_workflow_revision=$28,production_branch=$29,annotation_policy=$30,image_visibility=$31,
+			row := tx.QueryRow(ctx, `UPDATE apps SET project_id=$3,name=$4,slug=$5,hostname_label=$6,registry_id=$7,image_repository=$8,container_port=$9,health_check_path=$10,scaling_mode=$11,min_replicas=$12,max_replicas=$13,hpa_target_cpu_percent=$14,keda_cron_schedules=$15,keda_http_target_pending_requests=$16,cpu_request_millicores=$17,cpu_limit_millicores=$18,memory_request_mib=$19,memory_limit_mib=$20,previews_enabled=$21,max_preview_environments=$22,preview_idle_ttl_hours=$23,deploy_timeout_seconds=$24,release_retention_count=$25,runtime_class=$26,github_workflow_path=NULLIF($27,''),github_workflow_revision=$28,production_branch=NULLIF($29,''),annotation_policy=$30,image_visibility=$31,
 				desired_generation=desired_generation+CASE WHEN image_visibility IS DISTINCT FROM $31 THEN 1 ELSE 0 END,
 				cleanup_state=CASE WHEN image_visibility='private' AND $31='public' THEN 'cleanup_requested'
 				 WHEN image_visibility='public' AND $31='private' THEN 'active' ELSE cleanup_state END,
@@ -581,8 +581,8 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 			if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(*p.GitCommitSHA) {
 				return ErrInvalidArgument
 			}
-			if err := tx.QueryRow(ctx, `UPDATE orchestration_jobs job SET release_id=$6,updated_at=clock_timestamp()
-					WHERE job.id=(SELECT candidate.id FROM orchestration_jobs candidate
+			if err := tx.QueryRow(ctx, `SELECT candidate.id::text,candidate.resolved_registry_id::text,candidate.resolved_registry_generation
+					FROM orchestration_jobs candidate
 					 JOIN environments environment ON environment.org_id=candidate.org_id AND environment.id=candidate.environment_id
 					 JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id AND app.id=candidate.app_id
 					 LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id
@@ -604,9 +604,8 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 					   AND environment.registry_credential_state='ready'
 					   AND environment.required_registry_credential_generation=registry.active_generation
 					   AND environment.ready_registry_credential_generation=registry.active_generation))
-					 ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED)
-					AND job.release_id IS NULL RETURNING job.id::text,job.resolved_registry_id::text,job.resolved_registry_generation`, p.OrgID, p.EnvironmentID,
-				environmentGeneration, *p.GitCommitSHA, imageRef, p.ID).Scan(&orchestrationJobID, &releaseRegistryID, &releaseRegistryGeneration); err == pgx.ErrNoRows {
+					 ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED`, p.OrgID, p.EnvironmentID,
+				environmentGeneration, *p.GitCommitSHA, imageRef).Scan(&orchestrationJobID, &releaseRegistryID, &releaseRegistryGeneration); err == pgx.ErrNoRows {
 				return ErrConflict
 			} else if err != nil {
 				return fmt.Errorf("validate release image evidence: %w", err)
@@ -624,6 +623,16 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 			releaseRegistryID, releaseRegistryGeneration, environmentGeneration, orchestrationJobID, provenance)
 		if err != nil {
 			return mapMutationError("insert accepted release", err)
+		}
+		if orchestrationJobID != nil {
+			command, err := tx.Exec(ctx, `UPDATE orchestration_jobs SET release_id=$3,updated_at=clock_timestamp()
+				WHERE org_id=$1 AND id=$2 AND release_id IS NULL`, p.OrgID, *orchestrationJobID, p.ID)
+			if err != nil {
+				return fmt.Errorf("link accepted release orchestration: %w", err)
+			}
+			if err := rowsAffected(command, ErrConflict); err != nil {
+				return err
+			}
 		}
 		err = tx.QueryRow(ctx, `UPDATE environments environment SET in_progress_release_id=$3,lock_acquired_at=clock_timestamp(),deploy_recovery_checkpoint=NULL FROM apps app,projects project,orgs org,releases release WHERE environment.org_id=$1 AND environment.id=$2 AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL AND environment.lifecycle_status='ready' AND environment.planned_hostname IS NOT NULL AND environment.desired_generation=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.desired_generation=$4 AND app.deleted_at IS NULL AND project.org_id=app.org_id AND project.id=app.project_id AND project.deleted_at IS NULL AND org.id=environment.org_id AND org.deleted_at IS NULL AND release.org_id=environment.org_id AND release.id=$3 AND release.desired_generation=$4 RETURNING environment.org_id::text,environment.id::text,environment.in_progress_release_id::text,environment.lock_acquired_at,environment.lock_acquired_at+make_interval(secs=>app.deploy_timeout_seconds),release.desired_generation`, p.OrgID, p.EnvironmentID, p.ID, environmentGeneration).Scan(&lease.OrgID, &lease.EnvironmentID, &lease.ReleaseID, &lease.Fence, &lease.ExpiresAt, &lease.DesiredGeneration)
 		if err != nil {

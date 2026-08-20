@@ -256,11 +256,11 @@ func TestGitHubImportPrivateRetryAfterTransientSourceFailureIntegration(t *testi
 	}
 	source.err = nil
 	operation, err := fixture.service.ImportGitRepository(t.Context(), fixture.actor, privateImportInput())
-	if err != nil || operation.State != "completed" {
-		t.Fatalf("retry = %+v, %v", operation, err)
+	if !errors.Is(err, ErrInProgress) || operation.ID != "" {
+		t.Fatalf("retry while durable source operation is pending = %+v, %v", operation, err)
 	}
-	if source.count() != 2 {
-		t.Fatalf("source writes = %d, want 2 (initial + retry)", source.count())
+	if source.count() != 1 {
+		t.Fatalf("source writes = %d, want 1; retries must not accept new secret bytes", source.count())
 	}
 	var operations, generations int
 	if err := fixture.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM registry_credential_operations), (SELECT count(*) FROM registry_credential_generations)`).Scan(&operations, &generations); err != nil || operations != 1 || generations != 1 {

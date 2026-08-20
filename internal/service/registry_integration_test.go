@@ -82,7 +82,7 @@ func TestUpdateAppUsesPersistedGitAndRegistryStateIntegration(t *testing.T) {
 		`INSERT INTO projects(id,org_id,name,slug) VALUES('` + manualProjectID + `','` + orgID + `','Manual','manual')`,
 		`INSERT INTO registries(id,org_id,provider,registry_host,state,active_generation,active_credential_secret_ref) VALUES('` + registryID + `','` + orgID + `','ghcr','ghcr.io','ready',1,'k8s-secret://cyclopus-system/ghcr#token')`,
 		`INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,container_port,min_replicas,max_replicas,previews_enabled,github_workflow_path,github_workflow_revision,production_branch,image_visibility)
-		 VALUES('` + importedAppID + `','` + orgID + `','` + importedProjectID + `','Imported API','imported-api','imported-api','ghcr.io/acme/api',8080,1,3,true,'.github/workflows/deploy.yml','` + strings.Repeat("a", 40) + `','main','public')`,
+		VALUES('` + importedAppID + `','` + orgID + `','` + importedProjectID + `','Imported API','imported-api','imported-api','acme/api',8080,1,3,true,'.github/workflows/deploy.yml','` + strings.Repeat("a", 40) + `','main','public')`,
 		`INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,registry_id,image_repository,container_port,min_replicas,max_replicas,image_visibility)
 		 VALUES('` + manualAppID + `','` + orgID + `','` + manualProjectID + `','Manual API','manual-api','manual-api','` + registryID + `','acme/api',8080,1,3,'private')`,
 	} {
@@ -98,14 +98,14 @@ func TestUpdateAppUsesPersistedGitAndRegistryStateIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := appInputFromStoredApp(imported)
-	spoofedRegistry, spoofedImage, spoofedWorkflow := registryID, "ghcr.io/attacker/replaced", ".github/workflows/attacker.yml"
+	spoofedRegistry, spoofedImage, spoofedWorkflow := registryID, "attacker/replaced", ".github/workflows/attacker.yml"
 	input.ProjectID, input.Name, input.ContainerPort, input.MaxReplicas = manualProjectID, "Imported API Renamed", 9090, 6
 	input.RegistryID, input.ImageRepository, input.GitHubWorkflowPath, input.ProductionBranch, input.PreviewsEnabled = &spoofedRegistry, &spoofedImage, &spoofedWorkflow, "attacker", false
 	updated, err := svc.UpdateApp(t.Context(), actor, "imported-update", importedAppID, input)
 	if err != nil {
 		t.Fatalf("UpdateApp(imported): %v", err)
 	}
-	if updated.Name != "Imported API Renamed" || updated.ContainerPort != 9090 || updated.MaxReplicas != 6 || updated.ProjectID != importedProjectID || updated.RegistryID != nil || updated.ImageRepository == nil || *updated.ImageRepository != "ghcr.io/acme/api" || updated.GitHubWorkflowPath != ".github/workflows/deploy.yml" || updated.GitHubWorkflowRevision != strings.Repeat("a", 40) || updated.ProductionBranch != "main" || !updated.PreviewsEnabled {
+	if updated.Name != "Imported API Renamed" || updated.ContainerPort != 9090 || updated.MaxReplicas != 6 || updated.ProjectID != importedProjectID || updated.RegistryID != nil || updated.ImageRepository == nil || *updated.ImageRepository != "acme/api" || updated.GitHubWorkflowPath != ".github/workflows/deploy.yml" || updated.GitHubWorkflowRevision != strings.Repeat("a", 40) || updated.ProductionBranch != "main" || !updated.PreviewsEnabled {
 		t.Fatalf("updated imported app = %+v", updated)
 	}
 
@@ -166,9 +166,13 @@ func TestRegistryRepositoryGrammarMatchesDatabaseIntegration(t *testing.T) {
 	}
 	for index, test := range repositoryGrammarCases {
 		goPublicAccepted := func() bool { _, err := ParsePublicGHCRRepository(test.publicRepository); return err == nil }()
+		publicRepository := test.publicRepository
+		if parsed, err := ParsePublicGHCRRepository(test.publicRepository); err == nil {
+			publicRepository = parsed
+		}
 		_, publicInsertErr := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,image_visibility)
-			VALUES(uuidv7(),$1,$2,$3,$4,$4,$5,'.github/workflows/deploy.yml','main','public')`, orgID, projectID, fmt.Sprintf("Public Grammar %d", index), fmt.Sprintf("public-grammar-%d", index), test.publicRepository)
-		_, publicUpdateErr := pool.Exec(t.Context(), `UPDATE apps SET image_repository=$1 WHERE slug='public-grammar-0'`, test.publicRepository)
+			VALUES(uuidv7(),$1,$2,$3,$4,$4,$5,'.github/workflows/deploy.yml','main','public')`, orgID, projectID, fmt.Sprintf("Public Grammar %d", index), fmt.Sprintf("public-grammar-%d", index), publicRepository)
+		_, publicUpdateErr := pool.Exec(t.Context(), `UPDATE apps SET image_repository=$1 WHERE slug='public-grammar-0'`, publicRepository)
 		if goPublicAccepted != test.publicAccepted || publicInsertErr == nil != test.publicAccepted || publicUpdateErr == nil != test.publicAccepted {
 			t.Fatalf("public repository %q accepted go=%t insert=%t update=%t, want %t (insert err=%v update err=%v)", test.publicRepository, goPublicAccepted, publicInsertErr == nil, publicUpdateErr == nil, test.publicAccepted, publicInsertErr, publicUpdateErr)
 		}

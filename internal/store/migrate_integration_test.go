@@ -243,7 +243,7 @@ func TestPostgres18Migrations(t *testing.T) {
 	})
 
 	t.Run("cross organization links are forbidden", func(t *testing.T) {
-		other := seedTenantGraph(t, db, "other", "feature/other", "other-preview", "other-preview-ns")
+		other := seedTenantGraph(t, db, "other", "feature/other", "other-preview", "other-preview-ns", false)
 		if _, err := db.Exec(context.Background(), `
 			UPDATE projects SET git_connection_id = $1 WHERE id = $2`, other.repository, ids.project); err == nil {
 			t.Fatal("cross-org project git connection succeeded")
@@ -259,7 +259,7 @@ func TestPostgres18Migrations(t *testing.T) {
 	})
 
 	t.Run("preview branch can be recreated after teardown", func(t *testing.T) {
-		preview := seedTenantGraph(t, db, "previewx", "feature/recreate", "recreate", "recreate-ns")
+		preview := seedTenantGraph(t, db, "previewx", "feature/recreate", "recreate", "recreate-ns", false)
 		if _, err := db.Exec(context.Background(), "UPDATE environments SET torn_down_at = now() WHERE id = $1", preview.environment); err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +289,7 @@ func TestPostgres18Migrations(t *testing.T) {
 	})
 
 	t.Run("tenant uniqueness and defaults", func(t *testing.T) {
-		other := seedTenantGraph(t, db, "unique", "feature/unique", "unique-preview", "unique-preview-ns")
+		other := seedTenantGraph(t, db, "unique", "feature/unique", "unique-preview", "unique-preview-ns", false)
 		insertIdempotency := `INSERT INTO api_idempotency_records
 			(org_id, scope, idempotency_key, request_hash, lease_owner, lease_expires_at, expires_at)
 			VALUES ($1, 'deploy', 'same-key', repeat('a', 64), 'worker', now() + interval '1 minute', now() + interval '1 hour')`
@@ -424,7 +424,7 @@ func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	parents := seedTenantGraph(t, conn, "migration-eighteen", "main", "", "migration-eighteen-production")
+	parents := seedTenantGraph(t, conn, "migration-eighteen", "main", "", "migration-eighteen-production", false)
 	var registryID, operationID string
 	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,pending_generation)
 		VALUES($1,'ghcr','ghcr.io','provisioning','source_secret_written',1) RETURNING id::text`, parents.org).Scan(&registryID); err != nil {
@@ -657,7 +657,7 @@ func TestMigrations000007And000008DownAndReUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	parents := seedTenantGraph(t, conn, "migration-seven-eight", "main", "", "migration-seven-eight-production")
+	parents := seedTenantGraph(t, conn, "migration-seven-eight", "main", "", "migration-seven-eight-production", true)
 
 	if err := migrator.Migrate(7); err != nil {
 		t.Fatalf("000007 up: %v", err)
@@ -1143,7 +1143,7 @@ func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("repaired 000011 migration: %v", err)
 	}
-	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 15 || dirty {
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 21 || dirty {
 		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
@@ -1299,7 +1299,7 @@ func TestMigration000015UpgradeGuardsConstraintsAndReUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	legacy := seedTenantGraph(t, conn, "migration-fifteen", "main", "", "migration-fifteen-production")
+	legacy := seedTenantGraph(t, conn, "migration-fifteen", "main", "", "migration-fifteen-production", true)
 	var legacyResolvedJob string
 	if err := conn.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,
 		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,
@@ -1387,8 +1387,8 @@ func TestMigration000015UpgradeGuardsConstraintsAndReUp(t *testing.T) {
 	if err := migrator.Migrate(15); err != nil {
 		t.Fatalf("000015 re-up: %v", err)
 	}
-	first := seedTenantGraph(t, conn, "migration-fifteen-one", "main", "", "migration-fifteen-one-production")
-	second := seedTenantGraph(t, conn, "migration-fifteen-second", "main", "", "migration-fifteen-second-production")
+	first := seedTenantGraph(t, conn, "migration-fifteen-one", "main", "", "migration-fifteen-one-production", true)
+	second := seedTenantGraph(t, conn, "migration-fifteen-second", "main", "", "migration-fifteen-second-production", true)
 	var firstRegistry, secondRegistry string
 	for _, item := range []struct {
 		org string
@@ -1431,7 +1431,7 @@ func TestMigration000016CanonicalRepositoryTriggerCatalogDownAndReUp(t *testing.
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	fixture := seedTenantGraph(t, conn, "migration-sixteen", "main", "", "migration-sixteen-production")
+	fixture := seedTenantGraph(t, conn, "migration-sixteen", "main", "", "migration-sixteen-production", true)
 	var jobID string
 	if err := conn.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,
 		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key)
@@ -1506,7 +1506,7 @@ func TestMigration000020ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testi
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	fixture := seedTenantGraph(t, conn, "migration-twenty", "main", "", "migration-twenty-production")
+	fixture := seedTenantGraph(t, conn, "migration-twenty", "main", "", "migration-twenty-production", false)
 	v19Catalog := schemaCatalogSnapshot(t, conn)
 	if err := migrator.Migrate(20); err != nil {
 		t.Fatalf("exact v19 to v20 upgrade: %v", err)
@@ -1639,7 +1639,7 @@ func TestMigration000021ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testi
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	fixture := seedTenantGraph(t, conn, "migration-twenty-one", "main", "", "migration-twenty-one-production")
+	fixture := seedTenantGraph(t, conn, "migration-twenty-one", "main", "", "migration-twenty-one-production", false)
 	snapshot := testReleaseSnapshot("ghcr.io/acme/migration-twenty-one@sha256:" + strings.Repeat("a", 64))
 	snapshot = []byte(strings.Replace(string(snapshot), `"version":4`, `"version":3`, 1))
 	var legacyID string
@@ -1784,12 +1784,16 @@ type releaseParents struct {
 
 func seedReleaseParents(t *testing.T, db *pgx.Conn) releaseParents {
 	t.Helper()
-	return seedTenantGraph(t, db, "release", "main", "", "release-app-production")
+	return seedTenantGraph(t, db, "release", "main", "", "release-app-production", false)
 }
 
-func seedTenantGraph(t *testing.T, db *pgx.Conn, prefix, branch, previewSlug, namespace string) releaseParents {
+func seedTenantGraph(t *testing.T, db *pgx.Conn, prefix, branch, previewSlug, namespace string, hostQualifiedRepository bool) releaseParents {
 	t.Helper()
 	var org, project, app, repository, environment string
+	imageRepository := "acme/" + prefix
+	if hostQualifiedRepository {
+		imageRepository = "ghcr.io/" + imageRepository
+	}
 	kind := "production"
 	var preview any
 	if previewSlug != "" {
@@ -1806,7 +1810,7 @@ func seedTenantGraph(t *testing.T, db *pgx.Conn, prefix, branch, previewSlug, na
 		{"INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,$2,$3,$4,'acme',$5,$6,'private','main','active',1,1) RETURNING github_repository_id::text", []any{int64(len(prefix) + 10000), &org, int64(len(prefix) + 100), "node-" + prefix, prefix, "acme/" + prefix}, new(string)},
 		{"INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,$2) RETURNING id", []any{&org, int64(len(prefix) + 10000)}, &repository},
 		{"INSERT INTO projects(org_id, name, slug, git_connection_id) VALUES ($1, $2, $3, $4) RETURNING id", []any{&org, prefix + " Project", prefix + "-project", &repository}, &project},
-		{"INSERT INTO apps(org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$2,$3,$4,$5,$6,'.github/workflows/deploy.yml','main') RETURNING id", []any{&org, &project, prefix + " App", prefix + "-app", prefix + "-app", "acme/" + prefix}, &app},
+		{"INSERT INTO apps(org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$2,$3,$4,$5,$6,'.github/workflows/deploy.yml','main') RETURNING id", []any{&org, &project, prefix + " App", prefix + "-app", prefix + "-app", imageRepository}, &app},
 		{"INSERT INTO environments(org_id, app_id, branch, kind, preview_slug, namespace, planned_hostname) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id", []any{&org, &app, branch, kind, preview, namespace, prefix + ".example.test"}, &environment},
 	}
 	for _, item := range queries {

@@ -190,7 +190,7 @@ func deployTestImage(t *testing.T) (string, string, string) {
 	if match == nil {
 		t.Fatal("CYCLOPUS_DEPLOY_TEST_IMAGE must match ghcr.io/<repository>@sha256:<64 lowercase hex>")
 	}
-	return image, match[1], match[2]
+	return image, strings.TrimPrefix(match[1], "ghcr.io/"), match[2]
 }
 
 func k3sForwardEnvelope(namespace, environmentID, releaseID, revisionID, image string) store.ReleaseSnapshotEnvelope {
@@ -277,7 +277,7 @@ func seedK3sForwardScope(t *testing.T, pool *pgxpool.Pool, orgID, projectID, app
 		{`INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES(3003,$1,3001,$2,'cyclopus','forward','cyclopus/forward','public','main','active',1,1)`, []any{orgID, "forward-node-" + environmentID}},
 		{`INSERT INTO git_connections (id,org_id,github_repository_id) VALUES ($1,$2,3003)`, []any{repositoryID, orgID}},
 		{`INSERT INTO projects (id,org_id,name,slug,git_connection_id) VALUES ($1,$2,'Forward','forward',$3)`, []any{projectID, orgID, repositoryID}},
-		{`INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,deploy_timeout_seconds,runtime_class) VALUES ($1,$2,$3,'Forward','forward',$4,'ghcr.io/cyclopus/forward','.github/workflows/deploy.yml','main',180,'runc')`, []any{appID, orgID, projectID, "forward-" + environmentID[len(environmentID)-4:]}},
+		{`INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,deploy_timeout_seconds,runtime_class) VALUES ($1,$2,$3,'Forward','forward',$4,'cyclopus/forward','.github/workflows/deploy.yml','main',180,'runc')`, []any{appID, orgID, projectID, "forward-" + environmentID[len(environmentID)-4:]}},
 		{`INSERT INTO environments (id,org_id,app_id,branch,kind,namespace,planned_hostname) VALUES ($1,$2,$3,'main','production',$4,$5)`, []any{environmentID, orgID, appID, namespace, "forward-" + environmentID[len(environmentID)-4:] + ".example.test"}},
 	}
 	for _, statement := range statements {
@@ -298,7 +298,7 @@ func seedK3sCompletedForwardRoute(t *testing.T, pool *pgxpool.Pool, orgID, repos
 		immutable_image_ref,oci_media_type,oci_resolved_at,deployment_state,release_id)
 		SELECT $1,$2,app.id,$4,connection.github_repository_id,app.github_workflow_path,$5,'refs/heads/main',$5,$5,
 			environment.desired_generation,$6,'deploying',now(),'matched','cyclopus:'||$1,3004,$5,'completed','success',now(),
-			'resolved',app.image_repository||':'||$5,$7,app.image_repository||'@'||$7,
+			'resolved','ghcr.io/'||app.image_repository||':'||$5,$7,'ghcr.io/'||app.image_repository||'@'||$7,
 			'application/vnd.oci.image.manifest.v1+json',now(),'applying',release.id
 		FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
 		JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id

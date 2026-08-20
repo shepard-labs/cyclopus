@@ -810,7 +810,7 @@ func TestGitHubWebhookPersistencePostgres18(t *testing.T) {
 			environmentID := fmt.Sprintf("10000000-0000-0000-0000-%012d", 900+i)
 			if _, err := pool.Exec(t.Context(), `INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch)
 				VALUES($1,$2,'10000000-0000-0000-0000-000000000010',$3,$4,$4,$5,'.github/workflows/deploy.yml','deleted')`,
-				appID, githubWebhookOrg, fmt.Sprintf("Production %d", i), fmt.Sprintf("production-%d", i), fmt.Sprintf("ghcr.io/acme/production-%d", i),
+				appID, githubWebhookOrg, fmt.Sprintf("Production %d", i), fmt.Sprintf("production-%d", i), fmt.Sprintf("acme/production-%d", i),
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -2279,7 +2279,7 @@ func seedGitHubWebhookFixture(t *testing.T, pool *pgxpool.Pool) {
 	seedGitHubWebhookFixtureExec(t, func(query string, args ...any) error {
 		_, err := pool.Exec(t.Context(), query, args...)
 		return err
-	})
+	}, "acme/")
 }
 
 func seedGitHubWebhookFixtureConn(t *testing.T, conn *pgx.Conn) {
@@ -2287,10 +2287,10 @@ func seedGitHubWebhookFixtureConn(t *testing.T, conn *pgx.Conn) {
 	seedGitHubWebhookFixtureExec(t, func(query string, args ...any) error {
 		_, err := conn.Exec(t.Context(), query, args...)
 		return err
-	})
+	}, "ghcr.io/acme/")
 }
 
-func seedGitHubWebhookFixtureExec(t *testing.T, exec func(string, ...any) error) {
+func seedGitHubWebhookFixtureExec(t *testing.T, exec func(string, ...any) error, repositoryPrefix string) {
 	t.Helper()
 	queries := []struct {
 		query string
@@ -2301,7 +2301,7 @@ func seedGitHubWebhookFixtureExec(t *testing.T, exec func(string, ...any) error)
 		{`INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation) VALUES($1,$2,90001,'R_node','acme','hooks','acme/hooks','private','main','active',1,1)`, []any{githubWebhookRepo, githubWebhookOrg}},
 		{`INSERT INTO git_connections(id,org_id,github_repository_id,state,access_state) VALUES('10000000-0000-0000-0000-000000000009',$1,$2,'active','active')`, []any{githubWebhookOrg, githubWebhookRepo}},
 		{`INSERT INTO projects(id,org_id,name,slug,git_connection_id) VALUES('10000000-0000-0000-0000-000000000010',$1,'Hooks','hooks','10000000-0000-0000-0000-000000000009')`, []any{githubWebhookOrg}},
-		{`INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$3,'10000000-0000-0000-0000-000000000010','A','a','a','ghcr.io/acme/a','.github/workflows/deploy.yml','main'),($2,$3,'10000000-0000-0000-0000-000000000010','B','b','b','ghcr.io/acme/b','.github/workflows/deploy.yml','main')`, []any{githubWebhookAppA, githubWebhookAppB, githubWebhookOrg}},
+		{`INSERT INTO apps(id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch) VALUES($1,$3,'10000000-0000-0000-0000-000000000010','A','a','a',$4||'a','.github/workflows/deploy.yml','main'),($2,$3,'10000000-0000-0000-0000-000000000010','B','b','b',$4||'b','.github/workflows/deploy.yml','main')`, []any{githubWebhookAppA, githubWebhookAppB, githubWebhookOrg, repositoryPrefix}},
 		{`INSERT INTO environments(id,org_id,app_id,branch,kind,namespace,planned_hostname) VALUES($1,$2,$3,'main','production','hooks-production','hooks.example.test')`, []any{githubWebhookEnv, githubWebhookOrg, githubWebhookAppA}},
 	}
 	for _, item := range queries {

@@ -415,7 +415,7 @@ func seedK3sRecoveryScope(t *testing.T, pool *pgxpool.Pool, orgID, projectID, ap
 		{`INSERT INTO git_connections (id,org_id,github_repository_id) VALUES ($1,$2,4003)`, []any{repositoryID, orgID}},
 		{`INSERT INTO projects (id, org_id, name, slug, git_connection_id) VALUES ($1, $2, 'Recovery', 'recovery', $3)`, []any{projectID, orgID, repositoryID}},
 		{`INSERT INTO apps (id,org_id,project_id,name,slug,hostname_label,image_repository,github_workflow_path,production_branch,deploy_timeout_seconds)
-			VALUES ($1,$2,$3,'Recovery','recovery','recovery-host','ghcr.io/cyclopus/recovery','.github/workflows/deploy.yml','main',1)`, []any{appID, orgID, projectID}},
+			VALUES ($1,$2,$3,'Recovery','recovery','recovery-host','cyclopus/recovery','.github/workflows/deploy.yml','main',1)`, []any{appID, orgID, projectID}},
 		{`INSERT INTO environments (id, org_id, app_id, branch, kind, namespace, planned_hostname)
 			VALUES ($1, $2, $3, 'main', 'production', $4, 'recovery.example.test')`, []any{environmentID, orgID, appID, namespace}},
 	}
@@ -443,7 +443,7 @@ func seedK3sRecoveryReleases(t *testing.T, pool *pgxpool.Pool, orgID, environmen
 	if err := pool.QueryRow(ctx, `SELECT image_repository FROM apps app JOIN environments environment ON environment.app_id=app.id WHERE environment.id=$1`, environmentID).Scan(&imageRepository); err != nil {
 		t.Fatal(err)
 	}
-	image := imageRepository + "@sha256:" + strings.Repeat("a", 64)
+	image := "ghcr.io/" + imageRepository + "@sha256:" + strings.Repeat("a", 64)
 	if _, err := pool.Exec(ctx, `INSERT INTO releases
 		(id, org_id, environment_id, image_ref, git_commit_sha, kind, env_var_revision_id, config_snapshot, config_hash, status)
 		VALUES ($1, $2, $3, $4, $5, 'env_change', $6, $7, $8, 'live'),

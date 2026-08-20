@@ -151,6 +151,8 @@ func finalizeReleaseLive(t *testing.T, fixture apiFixture, dataStore *store.Stor
 	if err != nil {
 		t.Fatal(err)
 	}
+	mustExec(t, fixture.pool, `UPDATE orchestration_jobs SET status='completed',deployment_state='live',release_id=$2,
+		terminal_at=now() WHERE org_id=$1 AND environment_id=$3 AND status='deploying'`, orgID, releaseID, envID)
 }
 
 func seedGitIntegration(t *testing.T, fixture apiFixture, orgID, projectID string, appIDs ...string) {
@@ -163,7 +165,7 @@ func seedGitIntegration(t *testing.T, fixture apiFixture, orgID, projectID strin
 	}
 	mustExec(t, fixture.pool, `UPDATE projects SET git_connection_id=$2 WHERE id=$1`, projectID, gitID)
 	for _, appID := range appIDs {
-		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='ghcr.io/acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=true WHERE id=$1`, appID)
+		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=true WHERE id=$1`, appID)
 	}
 }
 
@@ -435,6 +437,7 @@ func TestE2EApiTokens(t *testing.T) {
 		}); status.Code(err) != codes.NotFound {
 			t.Fatalf("Deploy() with wrong app scope error = %v", err)
 		}
+		fixture.insertManualPrivateDeployEvidence(t, clients.orgID, appA.GetApplication().GetId(), environmentID, imageRef, strings.Repeat("b", 40), "deploy-scoped")
 		deploy, err := clients.release.Deploy(bearerContext(ctx, tokenA), &cyclopusv1.DeployRequest{
 			EnvironmentId: environmentID, ImageRef: imageRef, GitCommitSha: strings.Repeat("b", 40), IdempotencyKey: "deploy-scoped",
 		})
@@ -680,7 +683,7 @@ func TestE2EApplications(t *testing.T) {
 		mustExec(t, fixture.pool, `UPDATE apps SET github_workflow_revision=$2 WHERE id=$1`, appID, strings.Repeat("c", 40))
 		updated, err := clients.application.UpdateApplication(sessionCtx, &cyclopusv1.UpdateApplicationRequest{
 			Application: &cyclopusv1.Application{Id: appID, Name: "Imported API Renamed", ContainerPort: 9090, MaxReplicas: 7,
-				ImageRepository: "ghcr.io/attacker/replaced", PreviewsEnabled: false},
+				ImageRepository: "attacker/replaced", PreviewsEnabled: false},
 			UpdateMask:     &fieldmaskpb.FieldMask{Paths: []string{"name", "container_port", "max_replicas", "image_repository", "previews_enabled"}},
 			IdempotencyKey: "app-imported-update",
 		})
@@ -688,7 +691,7 @@ func TestE2EApplications(t *testing.T) {
 			t.Fatal(err)
 		}
 		app := updated.GetApplication()
-		if app.GetName() != "Imported API Renamed" || app.GetContainerPort() != 9090 || app.GetMaxReplicas() != 7 || app.GetRegistryId() != "" || app.GetImageRepository() != "ghcr.io/acme/api" || app.GetGithubWorkflowPath() != ".github/workflows/build.yml" || app.GetProductionBranch() != "main" || !app.GetPreviewsEnabled() {
+		if app.GetName() != "Imported API Renamed" || app.GetContainerPort() != 9090 || app.GetMaxReplicas() != 7 || app.GetRegistryId() != "" || app.GetImageRepository() != "acme/api" || app.GetGithubWorkflowPath() != ".github/workflows/build.yml" || app.GetProductionBranch() != "main" || !app.GetPreviewsEnabled() {
 			t.Fatalf("UpdateApplication(imported) = %+v", app)
 		}
 		if revision := queryString(t, fixture.pool, `SELECT github_workflow_revision FROM apps WHERE id=$1`, appID); revision != strings.Repeat("c", 40) {
@@ -791,7 +794,7 @@ func TestE2EPreviewLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='ghcr.io/acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=false WHERE id=$1`, appNoPreview.GetApplication().GetId())
+		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=false WHERE id=$1`, appNoPreview.GetApplication().GetId())
 		push, err := clients.environment.AcceptPreviewPush(sessionCtx, &cyclopusv1.PreviewPushRequest{
 			ApplicationId: appNoPreview.GetApplication().GetId(), Branch: "feature-y",
 			CommitSha: strings.Repeat("c", 40), IdempotencyKey: "push-3",
@@ -827,7 +830,7 @@ func TestE2EPreviewLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='ghcr.io/acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=true WHERE id=$1`, appCapped.GetApplication().GetId())
+		mustExec(t, fixture.pool, `UPDATE apps SET registry_id=NULL,image_repository='acme/api',image_visibility='public',github_workflow_path='.github/workflows/build.yml',production_branch='main',previews_enabled=true WHERE id=$1`, appCapped.GetApplication().GetId())
 		if _, err := clients.environment.AcceptPreviewPush(sessionCtx, &cyclopusv1.PreviewPushRequest{
 			ApplicationId: appCapped.GetApplication().GetId(), Branch: "cap-a",
 			CommitSha: strings.Repeat("e", 40), IdempotencyKey: "push-5",
@@ -900,6 +903,7 @@ func TestE2EDeployReleases(t *testing.T) {
 
 	var releaseOne, releaseTwo, releaseThree string
 	t.Run("DeployAcceptsAndPersists", func(t *testing.T) {
+		jobOne := fixture.insertManualPrivateDeployEvidence(t, clients.orgID, app.GetApplication().GetId(), environmentID, imageA, commitA, "deploy-1")
 		deploy, err := clients.release.Deploy(sessionCtx, &cyclopusv1.DeployRequest{
 			EnvironmentId: environmentID, ImageRef: imageA, GitCommitSha: commitA, IdempotencyKey: "deploy-1",
 		})
@@ -912,10 +916,10 @@ func TestE2EDeployReleases(t *testing.T) {
 			t.Fatalf("Deploy() operation = %+v", operation)
 		}
 		releaseOne = operation.GetId()
-		var statusValue, kind, storedImage, storedCommit, configHash string
+		var statusValue, kind, storedImage, storedCommit, configHash, provenance, orchestrationJobID string
 		var snapshot []byte
-		if err := fixture.pool.QueryRow(ctx, `SELECT status, kind, image_ref, git_commit_sha, config_hash, config_snapshot
-			FROM releases WHERE id=$1`, releaseOne).Scan(&statusValue, &kind, &storedImage, &storedCommit, &configHash, &snapshot); err != nil {
+		if err := fixture.pool.QueryRow(ctx, `SELECT status, kind, image_ref, git_commit_sha, config_hash, config_snapshot,
+			provenance, orchestration_job_id::text FROM releases WHERE id=$1`, releaseOne).Scan(&statusValue, &kind, &storedImage, &storedCommit, &configHash, &snapshot, &provenance, &orchestrationJobID); err != nil {
 			t.Fatal(err)
 		}
 		if statusValue != "pending" || kind != "deploy" || storedImage != imageA || storedCommit != commitA ||
@@ -929,7 +933,10 @@ func TestE2EDeployReleases(t *testing.T) {
 		desired := envelope.DesiredState
 		if desired.Deployment.Container.Port != 8080 || desired.Deployment.Container.ReadinessProbe.Path != "/healthz" ||
 			desired.Deployment.RuntimeClassName != "gvisor" || desired.Ingress.Hostname != "api.example.test" ||
-			desired.Scaling.Kind != "hpa" {
+			desired.Scaling.Kind != "hpa" || envelope.Version != store.ReleaseSnapshotVersion ||
+			desired.Deployment.PodAnnotations["cyclopus.dev/release-id"] != releaseOne ||
+			len(desired.Deployment.ImagePullSecrets) != 1 || desired.Deployment.ImagePullSecrets[0] != "cyclopus-ghcr-pull" ||
+			provenance != "orchestration" || orchestrationJobID != jobOne {
 			t.Fatalf("accepted desired state = %+v", desired)
 		}
 		if !queryBool(t, fixture.pool, `SELECT in_progress_release_id=$2 AND lock_acquired_at IS NOT NULL
@@ -990,6 +997,7 @@ func TestE2EDeployReleases(t *testing.T) {
 	})
 
 	t.Run("SecondDeploySupersedes", func(t *testing.T) {
+		jobTwo := fixture.insertManualPrivateDeployEvidence(t, clients.orgID, app.GetApplication().GetId(), environmentID, imageB, strings.Repeat("2", 40), "deploy-3")
 		deploy, err := clients.release.Deploy(sessionCtx, &cyclopusv1.DeployRequest{
 			EnvironmentId: environmentID, ImageRef: imageB, GitCommitSha: strings.Repeat("2", 40), IdempotencyKey: "deploy-3",
 		})
@@ -997,6 +1005,9 @@ func TestE2EDeployReleases(t *testing.T) {
 			t.Fatal(err)
 		}
 		releaseTwo = deploy.GetOperation().GetId()
+		if !queryBool(t, fixture.pool, `SELECT provenance='orchestration' AND orchestration_job_id=$2 FROM releases WHERE id=$1`, releaseTwo, jobTwo) {
+			t.Fatal("second release did not retain its unique orchestration evidence")
+		}
 		finalizeReleaseLive(t, fixture, dataStore, clients.orgID, environmentID, releaseTwo, clients.userID, "api.example.test")
 		if !queryBool(t, fixture.pool, `SELECT status='superseded' FROM releases WHERE id=$1`, releaseOne) {
 			t.Fatal("first release not superseded")
@@ -1025,13 +1036,20 @@ func TestE2EDeployReleases(t *testing.T) {
 			t.Fatalf("Rollback() = %+v, %v", rollback, err)
 		}
 		releaseThree = rollback.GetOperation().GetId()
-		var kind, imageRef, configHash string
-		if err := fixture.pool.QueryRow(ctx, `SELECT kind, image_ref, config_hash FROM releases WHERE id=$1`, releaseThree).Scan(&kind, &imageRef, &configHash); err != nil {
+		var kind, imageRef, configHash, provenance string
+		var snapshot []byte
+		if err := fixture.pool.QueryRow(ctx, `SELECT kind, image_ref, config_hash, provenance, config_snapshot FROM releases WHERE id=$1`, releaseThree).Scan(&kind, &imageRef, &configHash, &provenance, &snapshot); err != nil {
 			t.Fatal(err)
 		}
-		targetHash := queryString(t, fixture.pool, `SELECT config_hash FROM releases WHERE id=$1`, releaseOne)
-		if kind != "rollback" || imageRef != imageA || configHash != targetHash {
-			t.Fatalf("rollback release kind=%s image=%s hash=%s, want rollback/%s/%s", kind, imageRef, configHash, imageA, targetHash)
+		envelope, err := store.DecodeReleaseSnapshot(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != "rollback" || imageRef != imageA || provenance != "contextual" ||
+			envelope.Version != store.ReleaseSnapshotVersion || envelope.DesiredState.Deployment.Container.Image != imageA ||
+			envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"] != releaseThree ||
+			!queryBool(t, fixture.pool, `SELECT config_hash ~ '^[0-9a-f]{64}$' FROM releases WHERE id=$1`, releaseThree) {
+			t.Fatalf("rollback release kind=%s image=%s hash=%s provenance=%s snapshot=%+v", kind, imageRef, configHash, provenance, envelope)
 		}
 		finalizeReleaseLive(t, fixture, dataStore, clients.orgID, environmentID, releaseThree, clients.userID, "api.example.test")
 		if !queryBool(t, fixture.pool, `SELECT release_id=$2 FROM aliases WHERE environment_id=$1`, environmentID, releaseThree) {
@@ -1050,11 +1068,15 @@ func TestE2EDeployReleases(t *testing.T) {
 
 	t.Run("RollbackOutsideRetention", func(t *testing.T) {
 		mustExec(t, fixture.pool, `UPDATE apps SET release_retention_count=1 WHERE id=$1`, app.GetApplication().GetId())
+		jobFour := fixture.insertManualPrivateDeployEvidence(t, clients.orgID, app.GetApplication().GetId(), environmentID, imageC, strings.Repeat("3", 40), "deploy-4")
 		deploy, err := clients.release.Deploy(sessionCtx, &cyclopusv1.DeployRequest{
 			EnvironmentId: environmentID, ImageRef: imageC, GitCommitSha: strings.Repeat("3", 40), IdempotencyKey: "deploy-4",
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !queryBool(t, fixture.pool, `SELECT provenance='orchestration' AND orchestration_job_id=$2 FROM releases WHERE id=$1`, deploy.GetOperation().GetId(), jobFour) {
+			t.Fatal("retention deploy did not retain its unique orchestration evidence")
 		}
 		finalizeReleaseLive(t, fixture, dataStore, clients.orgID, environmentID, deploy.GetOperation().GetId(), clients.userID, "api.example.test")
 		releasesBefore := queryInt(t, fixture.pool, `SELECT count(*) FROM releases`)
@@ -1112,6 +1134,7 @@ func TestE2EEnvVars(t *testing.T) {
 	}
 	environmentID := fixture.insertEnvironment(t, clients.orgID, app.GetApplication().GetId())
 	imageA := "ghcr.io/acme/api@sha256:" + strings.Repeat("a", 64)
+	fixture.insertManualPrivateDeployEvidence(t, clients.orgID, app.GetApplication().GetId(), environmentID, imageA, strings.Repeat("1", 40), "deploy-1")
 	deploy, err := clients.release.Deploy(sessionCtx, &cyclopusv1.DeployRequest{
 		EnvironmentId: environmentID, ImageRef: imageA, GitCommitSha: strings.Repeat("1", 40), IdempotencyKey: "deploy-1",
 	})

@@ -443,7 +443,7 @@ func TestGitHubImportPrivateCredentialFailureIsAtomicAndReplayableIntegration(t 
 	fixture.api.mu.Unlock()
 	input := ImportGitRepositoryInput{RepositoryID: 99, WorkflowPath: ".github/workflows/deploy.yml", ProjectName: "Imported", ProjectSlug: "imported", ApplicationName: "Imported API", ApplicationSlug: "imported-api", HostnameLabel: "imported-api", ImageRepository: "ghcr.io/acme/api", IdempotencyKey: "private", PrivateCredentialRequested: true}
 	failed, err := fixture.service.ImportGitRepository(t.Context(), fixture.actor, input)
-	if !errors.Is(err, ErrRegistryAuthRequired) || failed.State != "failed" || failed.FailureCode == nil || *failed.FailureCode != "registry_auth_required" {
+	if !errors.Is(err, ErrInvalidArgument) || failed.State != "failed" || failed.FailureCode == nil || *failed.FailureCode != "invalid_argument" {
 		t.Fatalf("private failure = %+v, %v", failed, err)
 	}
 	for _, table := range []string{"git_connections", "projects", "apps", "environments", "orchestration_jobs"} {
@@ -453,13 +453,13 @@ func TestGitHubImportPrivateCredentialFailureIsAtomicAndReplayableIntegration(t 
 		}
 	}
 	replay, err := fixture.service.ImportGitRepository(t.Context(), fixture.actor, input)
-	if !errors.Is(err, ErrRegistryAuthRequired) || replay.ID != failed.ID {
+	if !errors.Is(err, ErrInvalidArgument) || replay.ID != failed.ID {
 		t.Fatalf("private replay = %+v, %v", replay, err)
 	}
 	fixture.api.mu.Lock()
 	defer fixture.api.mu.Unlock()
-	if fixture.api.callCount != calls {
-		t.Fatalf("private failure GitHub calls = %d, want %d", fixture.api.callCount, calls)
+	if fixture.api.callCount != calls+1 {
+		t.Fatalf("private failure GitHub calls = %d, want one authoritative visibility check and no replay call", fixture.api.callCount)
 	}
 }
 
@@ -480,7 +480,7 @@ func TestGitHubImportInProgressReturnsBeforeGitHubIntegration(t *testing.T) {
 	fixture.api.mu.Lock()
 	calls := fixture.api.callCount
 	fixture.api.mu.Unlock()
-	if _, err := fixture.service.ImportGitRepository(t.Context(), fixture.actor, input); !errors.Is(err, ErrInProgress) {
+	if _, err := fixture.service.ImportGitRepository(t.Context(), fixture.actor, input); !errors.Is(err, ErrConflict) {
 		t.Fatalf("concurrent import error = %v", err)
 	}
 	fixture.api.mu.Lock()

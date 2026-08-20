@@ -44,7 +44,7 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CreateApplication() error = %v details=%+v", err, status.Convert(err).Details())
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -155,7 +155,7 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 		t.Fatalf("not-found environment secret mutation error = %v", err)
 	}
 	var tornDownEnvironmentID string
-	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO environments (org_id,app_id,branch,kind,preview_slug,namespace,planned_hostname) VALUES ($1,$2,'feature/torn-down','preview','torn-down','app-torn-down','torn-down.example.test') RETURNING id::text`, createProject.OrganizationId, application.GetApplication().GetId()).Scan(&tornDownEnvironmentID); err != nil {
+	if err := fixture.pool.QueryRow(t.Context(), `INSERT INTO environments (org_id,app_id,branch,kind,preview_slug,namespace,planned_hostname,required_registry_credential_generation,ready_registry_credential_generation,registry_credential_state,registry_credential_checkpoint) VALUES ($1,$2,'feature/torn-down','preview','torn-down','app-torn-down','torn-down.example.test',1,1,'ready','namespace_secret_verified') RETURNING id::text`, createProject.OrganizationId, application.GetApplication().GetId()).Scan(&tornDownEnvironmentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.pool.Exec(t.Context(), `UPDATE environments SET torn_down_at=now() WHERE id=$1`, tornDownEnvironmentID); err != nil {
@@ -205,6 +205,7 @@ func TestPostgresNativeGRPCAPI(t *testing.T) {
 
 	releaseClient := cyclopusv1.NewReleaseServiceClient(conn)
 	digest := strings.Repeat("a", 64)
+	fixture.insertManualPrivateDeployEvidence(t, createProject.OrganizationId, application.GetApplication().GetId(), environmentID, "ghcr.io/acme/api@sha256:"+digest, strings.Repeat("b", 40), "deploy-1")
 	deploy, err := releaseClient.Deploy(apiCtx, &cyclopusv1.DeployRequest{EnvironmentId: environmentID, ImageRef: "ghcr.io/acme/api@sha256:" + digest, GitCommitSha: strings.Repeat("b", 40), IdempotencyKey: "deploy-1"})
 	if err != nil || deploy.GetOperation().GetStatus() != cyclopusv1.OperationStatus_OPERATION_STATUS_QUEUED {
 		t.Fatalf("Deploy() = %+v, %v", deploy, err)
@@ -417,9 +418,28 @@ func apiSearchPathURL(t *testing.T, databaseURL, schema string) string {
 
 func (f apiFixture) insertRegistry(t *testing.T, orgID string) string {
 	t.Helper()
-	var id string
-	err := f.pool.QueryRow(t.Context(), `INSERT INTO registries (org_id,provider,registry_host,active_generation,active_credential_secret_ref,state,reconciliation_generation) VALUES ($1,'ghcr','ghcr.io',1,'k8s-secret://cyclopus/registry#password','ready',1) RETURNING id::text`, orgID).Scan(&id)
+	var id, operationID string
+	tx, err := f.pool.Begin(t.Context())
 	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(t.Context(), `INSERT INTO registries (org_id,provider,registry_host,state) VALUES ($1,'ghcr','ghcr.io','absent') RETURNING id::text`, orgID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(t.Context(), `INSERT INTO registry_credential_operations(org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,terminal_at) VALUES($1,$2,'create','succeeded','activated',1,'server-fixture',now()) RETURNING id::text`, orgID, id).Scan(&operationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id,validated_at,activated_at) VALUES($1,$2,1,'k8s-secret://cyclopus/registry#password','active',$3,now(),now())`, orgID, id, operationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `UPDATE registries SET active_generation=1,active_credential_secret_ref='k8s-secret://cyclopus/registry#password',state='ready',checkpoint='activated',reconciliation_generation=1,activated_at=now() WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -428,11 +448,63 @@ func (f apiFixture) insertRegistry(t *testing.T, orgID string) string {
 func (f apiFixture) insertEnvironment(t *testing.T, orgID, appID string) string {
 	t.Helper()
 	var id string
-	err := f.pool.QueryRow(t.Context(), `INSERT INTO environments (org_id,app_id,branch,kind,namespace,planned_hostname) VALUES ($1,$2,'main','production','app-production','api.example.test') RETURNING id::text`, orgID, appID).Scan(&id)
+	err := f.pool.QueryRow(t.Context(), `INSERT INTO environments (org_id,app_id,branch,kind,namespace,planned_hostname,required_registry_credential_generation,ready_registry_credential_generation,registry_credential_state,registry_credential_checkpoint) VALUES ($1,$2,'main','production','app-production','api.example.test',1,1,'ready','namespace_secret_verified') RETURNING id::text`, orgID, appID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func (f apiFixture) insertManualPrivateDeployEvidence(t *testing.T, orgID, appID, environmentID, imageRef, commit, key string) string {
+	t.Helper()
+	const repositoryID = 12347
+	mustExec(t, f.pool, `INSERT INTO github_installations(github_installation_id,org_id,account_id,account_login,account_type,repository_selection,access_state,reconciliation_generation,last_api_confirmed_generation)
+		VALUES(12345,$1,12346,'acme','Organization','selected','active',1,1) ON CONFLICT(github_installation_id) DO NOTHING`, orgID)
+	mustExec(t, f.pool, `INSERT INTO github_repositories(github_repository_id,org_id,github_installation_id,node_id,owner_login,name,full_name,visibility,default_branch,access_state,reconciliation_generation,last_api_confirmed_generation)
+		VALUES(`+fmt.Sprint(repositoryID)+`,$1,12345,'api-node','acme','api','acme/api','private','main','active',1,1) ON CONFLICT(github_repository_id) DO NOTHING`, orgID)
+	var connectionID, registryID string
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO git_connections(org_id,github_repository_id) VALUES($1,12347)
+		ON CONFLICT(org_id,github_repository_id) DO UPDATE SET updated_at=now() RETURNING id::text`, orgID).Scan(&connectionID); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, f.pool, `UPDATE projects project SET git_connection_id=$2 FROM apps app
+		WHERE app.id=$1 AND project.id=app.project_id`, appID, connectionID)
+	if err := f.pool.QueryRow(t.Context(), `UPDATE apps SET github_workflow_path='.github/workflows/deploy.yml',github_workflow_revision=$2,
+		production_branch='main' WHERE id=$1 RETURNING registry_id::text`, appID, strings.Repeat("c", 40)).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `UPDATE environments environment SET desired_generation=app.desired_generation
+		FROM apps app WHERE environment.id=$1 AND app.id=environment.app_id`, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	var jobID string
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,
+		github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,
+		github_run_status,github_run_conclusion,github_run_head_sha,image_tag_ref,resolved_image_digest,immutable_image_ref,
+		oci_config_digest,oci_config_media_type,oci_annotation_status,oci_deadline_at,oci_media_type,oci_resolution_state,oci_resolved_at,resolved_registry_id,resolved_registry_generation,deployment_state)
+		SELECT $1,$2,$3,12347,'.github/workflows/deploy.yml',$4,'refs/heads/main',$5,app.desired_generation,$6,'deploying',
+		'completed','success',$5,'ghcr.io/acme/api:'||$5,'sha256:'||substring($7 from '@sha256:(.*)$'),$7,
+		'sha256:'||repeat('d',64),'application/vnd.oci.image.config.v1+json','absent',now()+interval '5 minutes','application/vnd.oci.image.manifest.v1+json','resolved',now(),$8,1,'ready' FROM apps app WHERE app.id=$2 RETURNING id::text`,
+		orgID, appID, environmentID, strings.Repeat("c", 40), commit, key, imageRef, registryID).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	if !queryBool(t, f.pool, `SELECT app.desired_generation=environment.desired_generation
+		AND environment.registry_credential_state='ready'
+		AND environment.required_registry_credential_generation=registry.active_generation
+		AND environment.ready_registry_credential_generation=registry.active_generation
+		AND registry.state='ready' AND generation.state='active'
+		AND job.status='deploying' AND job.deployment_state='ready' AND job.oci_resolution_state='resolved'
+		AND job.desired_generation=environment.desired_generation AND job.desired_checkout_sha=$4
+		AND job.immutable_image_ref=$5 AND job.resolved_registry_id=app.registry_id
+		AND job.resolved_registry_generation=registry.active_generation
+		FROM apps app JOIN environments environment ON environment.app_id=app.id
+		JOIN registries registry ON registry.id=app.registry_id
+		JOIN registry_credential_generations generation ON generation.registry_id=registry.id AND generation.generation=registry.active_generation
+		JOIN orchestration_jobs job ON job.id=$6
+		WHERE app.org_id=$1 AND app.id=$2 AND environment.id=$3`, orgID, appID, environmentID, commit, imageRef, jobID) {
+		t.Fatal("manual private deploy evidence does not satisfy release provenance fencing")
+	}
+	return jobID
 }
 
 func (f apiFixture) insertOtherTenant(t *testing.T) string {
