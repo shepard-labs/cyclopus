@@ -198,11 +198,13 @@ func TestSettingsAndAdminPagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 			store.User{Email: "operator@example.com"}, store.Organization{}, nil, "", "", "",
 		),
 		"git connections": settingspages.GitConnections(
+			store.GitHubApp{State: "ready"},
+			[]store.GitHubInstallation{{ID: "installation-1", GitHubInstallationID: 1, AccountLogin: "acme", AccessState: "active"}},
 			[]store.GitConnection{{ID: "connection-1", RepositoryFullName: "acme/api", RepositoryDefaultBranch: "main"}},
 			store.User{}, store.Organization{}, nil, "",
 		),
 		"registries": settingspages.Registries(
-			[]store.Registry{{ID: "registry-1", Provider: "ghcr", RegistryURL: "ghcr.io"}},
+			store.Registry{ID: "registry-1", Provider: "ghcr", RegistryURL: "ghcr.io"},
 			store.User{}, store.Organization{}, nil, "",
 		),
 		"webhooks": settingspages.Webhooks(
@@ -244,17 +246,59 @@ func TestSettingsAndAdminPagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 	}
 }
 
-func TestPhaseTwoIntegrationSettingsAreReadOnly(t *testing.T) {
-	gitOutput := renderPage(t, settingspages.GitConnections([]store.GitConnection{{State: "active", AccessState: "active"}}, store.User{}, store.Organization{}, nil, ""))
-	requirePageContracts(t, gitOutput, "GitHub App setup and repository import are not available in this phase", "Existing connection status is shown read-only")
-	registryOutput := renderPage(t, settingspages.Registries([]store.Registry{{Provider: "ghcr", State: "ready", HasActiveCredential: true}}, store.User{}, store.Organization{}, nil, ""))
-	requirePageContracts(t, registryOutput, "GHCR credential setup and rotation are not available in this phase", "Current credential status is shown read-only")
+func TestGitConnectionSettingsUseDiscoveredLifecycleActions(t *testing.T) {
+	gitOutput := renderPage(t, settingspages.GitConnections(store.GitHubApp{State: "ready"}, []store.GitHubInstallation{{GitHubInstallationID: 42, AccountLogin: "acme", AccessState: "suspended"}}, []store.GitConnection{{ID: "connection-1", State: "active", AccessState: "active", RepositoryFullName: "acme/api"}}, store.User{}, store.Organization{}, nil, ""))
+	requirePageContracts(t, gitOutput, "Add installation", "Refresh access", "Disconnect", "suspended")
+	registryOutput := renderPage(t, settingspages.Registries(store.Registry{Provider: "ghcr", State: "ready", HasActiveCredential: true}, store.User{}, store.Organization{}, nil, ""))
+	requirePageContracts(t, registryOutput, "Rotate GHCR credential", "never rendered back")
 	for name, output := range map[string]string{"git connections": gitOutput, "registries": registryOutput} {
-		for _, forbidden := range []string{"action=\"/settings/git-connections", "action=\"/settings/registries", "/settings/git-connections/", "/settings/registries/", "installation_id", "webhook_secret_ref", "credential_secret_ref", "k8s-secret://"} {
+		for _, forbidden := range []string{"installation_id", "repository_full_name", "webhook_secret_ref", "credential_secret_ref", "k8s-secret://", "private_key"} {
 			if strings.Contains(output, forbidden) {
 				t.Errorf("%s contains obsolete mutation or secret contract %q", name, forbidden)
 			}
 		}
+	}
+}
+
+func TestGitConnectionSetupAndDisconnectLifecycleContracts(t *testing.T) {
+	for name, test := range map[string]struct {
+		app       store.GitHubApp
+		contracts []string
+		absent    []string
+	}{
+		"unconfigured app starts setup": {
+			app:       store.GitHubApp{State: "unconfigured"},
+			contracts: []string{`action="/settings/git-connections/setup"`, `Set up GitHub`},
+			absent:    []string{`action="/settings/git-connections/install"`},
+		},
+		"ready app offers installation": {
+			app:       store.GitHubApp{State: "ready"},
+			contracts: []string{`action="/settings/git-connections/install"`, `Add installation`},
+			absent:    []string{`Set up GitHub`},
+		},
+		"in progress app prevents duplicate setup": {
+			app:       store.GitHubApp{State: "secret_pending"},
+			contracts: []string{`GitHub setup is in progress`},
+			absent:    []string{`action="/settings/git-connections/setup"`, `action="/settings/git-connections/install"`},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			output := renderPage(t, settingspages.GitConnections(test.app, nil, nil, store.User{}, store.Organization{}, nil, ""))
+			requirePageContracts(t, output, test.contracts...)
+			for _, contract := range test.absent {
+				if strings.Contains(output, contract) {
+					t.Fatalf("rendered lifecycle action %q unexpectedly:\n%s", contract, output)
+				}
+			}
+		})
+	}
+
+	disconnected := renderPage(t, settingspages.GitConnections(store.GitHubApp{State: "ready"}, nil,
+		[]store.GitConnection{{ID: "connection-1", State: "disconnected", AccessState: "active", RepositoryFullName: "acme/api"}},
+		store.User{}, store.Organization{}, nil, ""))
+	requirePageContracts(t, disconnected, "Disconnected non-destructively", "current production and preview workloads/releases remain in place")
+	if strings.Contains(disconnected, `action="/settings/git-connections/connection-1/disconnect"`) {
+		t.Fatalf("disconnected repository still exposes a disconnect mutation:\n%s", disconnected)
 	}
 }
 
@@ -263,12 +307,12 @@ func TestCorePagesUseAlignedPageLocalDesignSystem(t *testing.T) {
 	pagesUnderTest := map[string]templ.Component{
 		"projects": pages.Projects(
 			[]store.Project{{ID: "project-1", Name: "Platform", Slug: "platform"}},
-			store.Organization{}, store.User{}, nil, "",
+			store.Organization{}, store.User{}, nil,
 		),
 		"project": pages.ProjectDetail(
 			store.Project{ID: "project-1", Name: "Platform"},
 			[]store.App{{ID: "app-1", Name: "API", Slug: "api", HostnameLabel: "api", ContainerPort: 8080, RuntimeClass: "runc"}},
-			store.User{}, store.Organization{}, nil, "",
+			store.User{}, store.Organization{}, nil,
 		),
 		"app": pages.AppOverview(
 			store.App{ID: "app-1", Name: "API", MaxPreviewEnvironments: 5},

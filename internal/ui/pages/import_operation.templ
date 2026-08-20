@@ -1,0 +1,121 @@
+package pages
+
+import (
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
+)
+
+templ ImportOperationPage(progress ui.ImportProgress, user store.User, org store.Organization, flash *ui.FlashMessage) {
+	@components.Page("Import progress", user, org, flash, "/projects", importOperationContent(progress))
+}
+
+templ importOperationContent(progress ui.ImportProgress) {
+	<div class="mx-auto w-full max-w-3xl space-y-6">
+		<div><a href="/projects" class="text-xs text-base-content/55 hover:text-base-content">← Projects</a><h1 class="mt-2 text-lg/7 font-medium">Repository import and initial deployment</h1></div>
+		@ImportOperationStatus(progress)
+	</div>
+}
+
+templ ImportOperationStatus(progress ui.ImportProgress) {
+	<div id="import-status" class="rounded-box border border-line bg-base-200 p-6" role="status" aria-live="polite"
+		if !importProgressTerminal(progress) {
+			hx-get={ "/imports/" + progress.Operation.ID + "/status-fragment" }
+			hx-trigger="every 3s"
+			hx-target="#import-status"
+			hx-swap="outerHTML"
+		}
+	>
+		<div class="grid gap-4 sm:grid-cols-2">
+			<div><div class="text-sm font-medium">Import</div><div class="mt-1 text-sm text-base-content/65">{ progress.Operation.State }</div></div>
+			<div><div class="text-sm font-medium">Initial deployment</div><div class="mt-1 text-sm text-base-content/65">{ deploymentLabel(progress) }</div></div>
+		</div>
+		if progress.Operation.State == "failed" || progress.Operation.State == "cancelled" {
+			<div class="mt-5">@components.Alert("error", importFailureGuidance(progress.Operation))</div>
+			<div class="mt-4 flex flex-wrap gap-3">@importRecoveryLinks(progress.Operation)</div>
+		} else if progress.Deployment != nil && deploymentFailed(*progress.Deployment) {
+			<div class="mt-5">@components.Alert("error", deploymentFailureGuidance(*progress.Deployment))</div>
+			<div class="mt-4 flex flex-wrap gap-3">
+				<a href="/settings/registries" class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">GHCR credential status</a>
+				if progress.Environment != nil {
+					<a href={ templ.SafeURL("/environments/" + progress.Environment.ID) } class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Open environment</a>
+				}
+			</div>
+		} else if importProgressTerminal(progress) {
+			<div class="mt-5">@components.Alert("success", "Import and initial production deployment completed.")</div>
+		} else {
+			<p class="mt-5 text-sm text-base-content/65">Cyclopus is validating GitHub access, resolving the immutable OCI digest, reconciling any private pull Secret, and deploying production.</p>
+		}
+		<div class="mt-5 grid gap-3 sm:grid-cols-3">
+			if progress.Project != nil {
+				<a href={ templ.SafeURL("/projects/" + progress.Project.ID) } class="rounded-field border border-line bg-base-300 px-4 py-3 text-sm font-medium">Project</a>
+			}
+			if progress.App != nil {
+				<a href={ templ.SafeURL("/apps/" + progress.App.ID) } class="rounded-field border border-line bg-base-300 px-4 py-3 text-sm font-medium">Application</a>
+			}
+			if progress.Environment != nil {
+				<a href={ templ.SafeURL("/environments/" + progress.Environment.ID) } class="rounded-field border border-line bg-base-300 px-4 py-3 text-sm font-medium">Production environment</a>
+			}
+		</div>
+	</div>
+}
+
+templ importRecoveryLinks(operation store.ImportOperation) {
+	<a href="/projects/import" class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Retry import</a>
+	if operation.FailureCode != nil {
+		switch *operation.FailureCode {
+		case "github_app_not_configured", "github_installation_suspended", "github_installation_access_removed", "github_repository_access_removed", "failed_precondition":
+			<a href="/settings/git-connections" class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Git Connections</a>
+		case "workflow_incompatible":
+			<a href="/projects/import" class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Choose workflow</a>
+		case "registry_auth_required", "registry_auth_failed", "registry_credential_exists", "registry_credential_in_progress":
+			<a href="/settings/registries" class="rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">GHCR rotation/status</a>
+		}
+	}
+}
+
+func importProgressTerminal(progress ui.ImportProgress) bool {
+	if progress.Operation.State == "failed" || progress.Operation.State == "cancelled" { return true }
+	if progress.Operation.State != "completed" { return false }
+	if progress.Deployment == nil { return progress.Operation.OrchestrationJobID == nil }
+	return progress.Deployment.Status == "completed" || deploymentFailed(*progress.Deployment)
+}
+
+func deploymentLabel(progress ui.ImportProgress) string {
+	if progress.Deployment == nil { return "Waiting for committed orchestration job" }
+	return progress.Deployment.Status + " / " + progress.Deployment.DeploymentState
+}
+
+func deploymentFailed(value store.ImportDeploymentStatus) bool {
+	return value.Status == "failed" || value.Status == "cancelled" || value.Status == "superseded" || value.DeploymentState == "failed" || value.DeploymentState == "cancelled" || value.DeploymentState == "superseded"
+}
+
+func deploymentFailureGuidance(value store.ImportDeploymentStatus) string {
+	code := ""
+	if value.TerminalErrorCode != nil { code = *value.TerminalErrorCode }
+	switch code {
+	case "image_not_published": return "The workflow completed but the commit-tagged image was not published. Verify the workflow pushes the full commit SHA tag, then retry orchestration from the environment."
+	case "image_digest_invalid", "oci_annotation_mismatch": return "OCI verification rejected the published artifact. Correct the image digest/source/revision metadata and retry artifact resolution."
+	case "image_pull_secret_reconcile_failed": return "The private pull Secret is not ready in the production namespace. Open GHCR credential status, finish rotation/reconciliation, then retry deployment."
+	default: return "The initial deployment did not complete. Open the production environment for the typed orchestration error and retry action."
+	}
+}
+
+func importFailureGuidance(operation store.ImportOperation) string {
+	code := ""
+	if operation.FailureCode != nil { code = *operation.FailureCode }
+	switch code {
+	case "github_app_not_configured": return "Set up the singleton GitHub App in Git Connections, then retry."
+	case "github_installation_suspended": return "Restore the suspended installation in GitHub, refresh access in Git Connections, then retry."
+	case "github_installation_access_removed", "github_repository_access_removed": return "Refresh or reinstall GitHub access, then choose the discovered repository again."
+	case "workflow_incompatible": return "The workflow changed or is incompatible. Discover workflows again and choose one marked compatible."
+	case "registry_auth_required": return "Configure the first private GHCR credential during import, or verify the active credential status."
+	case "registry_auth_failed": return "Rotate the GHCR credential with a username and PAT classic that can read every referenced private package."
+	case "registry_credential_exists": return "An active GHCR credential already exists. Do not enter replacement credentials during import; use explicit rotation, then retry without secret fields."
+	case "registry_credential_in_progress": return "A GHCR credential create or rotation is already running. Open credential status and retry after it reaches ready or failed."
+	case "conflict": return "A project/application or idempotency identity conflicts with existing data. Keep the same form for a lost-response retry, or choose new names for a new import."
+	case "failed_precondition": return "GitHub access or discovered repository state changed. Refresh Git Connections and rediscover the repository and workflow."
+	case "invalid_argument": return "Review repository, workflow, names, tagless GHCR image, runtime values, and credential field pairing, then retry."
+	default: return "The import did not complete. Review Git Connections and GHCR status; no credential value is retained or shown here."
+	}
+}

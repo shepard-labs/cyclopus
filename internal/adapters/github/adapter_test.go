@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,8 +54,96 @@ func TestDispatchPersistsReconciliationBeforeRequest(t *testing.T) {
 	if storeFake.beginCalls != 1 {
 		t.Fatalf("begin calls = %d", storeFake.beginCalls)
 	}
+	if storeFake.finalizeCalls != 1 {
+		t.Fatalf("finalize calls = %d", storeFake.finalizeCalls)
+	}
 	if storeFake.beginRefSHA != strings.Repeat("b", 40) || storeFake.beginWorkflowPath != ".github/workflows/build.yml" || storeFake.beginWorkflowRevision != strings.Repeat("c", 40) {
 		t.Fatalf("observed dispatch evidence = %q/%q/%q", storeFake.beginRefSHA, storeFake.beginWorkflowPath, storeFake.beginWorkflowRevision)
+	}
+}
+
+func TestDispatchAuthorizationFenceBlocksExternalRequest(t *testing.T) {
+	storeFake := &fakeStore{authorizeErr: store.ErrLeaseNotOwned}
+	dispatches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/repos/acme/widget/git/ref/heads/main":
+			writeJSON(t, writer, `{"ref":"refs/heads/main","object":{"sha":"`+strings.Repeat("b", 40)+`"}}`)
+		case "/repos/acme/widget/contents/build.yml":
+			writeJSON(t, writer, `{"type":"file","path":".github/workflows/build.yml","sha":"`+strings.Repeat("c", 40)+`"}`)
+		default:
+			dispatches++
+		}
+	}))
+	defer server.Close()
+	job := testJob()
+	job.Status = "leased"
+	if err := newTestAdapter(t, storeFake, server.URL, time.Now).Dispatch(t.Context(), job); !errors.Is(err, store.ErrLeaseNotOwned) {
+		t.Fatalf("Dispatch() error = %v, want lease fence", err)
+	}
+	if storeFake.authorizeCalls != 1 || dispatches != 0 {
+		t.Fatalf("authorization/dispatch calls = %d/%d", storeFake.authorizeCalls, dispatches)
+	}
+}
+
+func TestCancelCorrelatesAndCancelsWorkflowRun(t *testing.T) {
+	now := time.Now().UTC()
+	storeFake := &fakeStore{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet:
+			writeJSON(t, writer, `{"total_count":1,"workflow_runs":[{"id":99,"event":"workflow_dispatch","display_title":"cyclopus:job-one","status":"in_progress","head_sha":"`+strings.Repeat("b", 40)+`","head_branch":"main","head_repository":{"full_name":"acme/widget"},"created_at":"`+now.Format(time.RFC3339)+`"}]}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widget/actions/runs/99/cancel":
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected cancellation request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	job := testJob()
+	job.Status = "cancelled"
+	job.DispatchRequestedAt = ptrTime(now.Add(-time.Minute))
+	if err := newTestAdapter(t, storeFake, server.URL, func() time.Time { return now }).Cancel(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	if storeFake.cancelOutcome != "accepted" {
+		t.Fatalf("cancellation outcome = %q", storeFake.cancelOutcome)
+	}
+}
+
+func TestCancelSettlesNoRunObservedAfterCorrelationWindow(t *testing.T) {
+	now := time.Now().UTC()
+	storeFake := &fakeStore{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writeJSON(t, writer, `{"total_count":0,"workflow_runs":[]}`)
+	}))
+	defer server.Close()
+	job := testJob()
+	job.Status = "cancelled"
+	job.DispatchRequestedAt = ptrTime(now.Add(-orchestrationCancellationCorrelationWindow - time.Second))
+	if err := newTestAdapter(t, storeFake, server.URL, func() time.Time { return now }).Cancel(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	if storeFake.cancelOutcome != "no_run_observed" {
+		t.Fatalf("cancellation outcome = %q", storeFake.cancelOutcome)
+	}
+}
+
+func TestCancelIncompletePaginationStopsAtAbsoluteDeadline(t *testing.T) {
+	now := time.Now().UTC()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		page, _ := strconv.Atoi(request.URL.Query().Get("page"))
+		writer.Header().Set("Link", `<`+serverURL(request)+`?page=`+strconv.Itoa(page+1)+`>; rel="next"`)
+		writeJSON(t, writer, `{"total_count":1001,"workflow_runs":[]}`)
+	}))
+	defer server.Close()
+	job := testJob()
+	job.Status = "cancelled"
+	job.DispatchRequestedAt = ptrTime(now.Add(-store.OrchestrationCancellationDeadline))
+	err := newTestAdapter(t, &fakeStore{}, server.URL, func() time.Time { return now }).Cancel(t.Context(), job)
+	var permanent *PermanentJobError
+	if !errors.As(err, &permanent) || permanent.Code != "github_run_cancel_failed" {
+		t.Fatalf("Cancel() error = %#v", err)
 	}
 }
 
@@ -354,6 +443,9 @@ func TestDispatchHangingServerTimesOutAfterReconciliationBegins(t *testing.T) {
 	if storeFake.beginCalls != 1 {
 		t.Fatalf("begin calls = %d, want 1", storeFake.beginCalls)
 	}
+	if storeFake.finalizeCalls != 1 {
+		t.Fatalf("finalize calls = %d, want 1 after dispatch error", storeFake.finalizeCalls)
+	}
 }
 
 func TestGetBranchRefRejectsMalformedSHA(t *testing.T) {
@@ -464,6 +556,11 @@ type fakeStore struct {
 	recordHeadSHA         string
 	resolveCalls          int
 	resolve               store.ResolveOrchestrationParams
+	authorizeErr          error
+	authorizeCalls        int
+	cancelOutcome         string
+	finalizeCalls         int
+	finalizeErr           error
 }
 
 func (f *fakeStore) BeginDispatchReconciliation(_ context.Context, _, _, _, refSHA, workflowPath, workflowRevision string, _ time.Duration) error {
@@ -471,6 +568,21 @@ func (f *fakeStore) BeginDispatchReconciliation(_ context.Context, _, _, _, refS
 	f.beginRefSHA = refSHA
 	f.beginWorkflowPath = workflowPath
 	f.beginWorkflowRevision = workflowRevision
+	return nil
+}
+
+func (f *fakeStore) AuthorizeWorkflowDispatch(context.Context, string, string, string, time.Duration) error {
+	f.authorizeCalls++
+	return f.authorizeErr
+}
+
+func (f *fakeStore) FinalizeWorkflowDispatch(context.Context, string, string, string) error {
+	f.finalizeCalls++
+	return f.finalizeErr
+}
+
+func (f *fakeStore) RecordOrchestrationCancellation(_ context.Context, _, _, _, outcome string, _ int64, _, _ string) error {
+	f.cancelOutcome = outcome
 	return nil
 }
 

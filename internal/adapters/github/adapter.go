@@ -13,10 +13,15 @@ import (
 )
 
 const maxCorrelationPages = 10
+const orchestrationCancellationCorrelationWindow = 5 * time.Minute
+const workflowDispatchPinMargin = 5 * time.Second
 
 type OrchestrationStore interface {
 	BeginDispatchReconciliation(context.Context, string, string, string, string, string, string, time.Duration) error
+	AuthorizeWorkflowDispatch(context.Context, string, string, string, time.Duration) error
+	FinalizeWorkflowDispatch(context.Context, string, string, string) error
 	RecordDispatchedRun(context.Context, string, string, string, string, int64, string, string, time.Duration) error
+	RecordOrchestrationCancellation(context.Context, string, string, string, string, int64, string, string) error
 	ContinueDispatchReconciliation(context.Context, string, string, string, time.Duration) error
 	ContinueRunReconciliation(context.Context, string, string, string, string, *string, time.Duration) error
 	ResolveOrchestration(context.Context, store.ResolveOrchestrationParams) (store.OrchestrationJob, error)
@@ -87,13 +92,82 @@ func (a *Adapter) Dispatch(ctx context.Context, job *store.GitHubRecoveryJob) er
 			"commit_sha":           job.CommitSHA,
 		},
 	}
+	if err := a.store.AuthorizeWorkflowDispatch(ctx, job.OrgID, job.ID, a.config.Owner, a.config.RequestTimeout+workflowDispatchPinMargin); err != nil {
+		return fmt.Errorf("authorize GitHub workflow dispatch: %w", err)
+	}
 	requestCtx, cancel = context.WithTimeout(ctx, a.config.RequestTimeout)
-	defer cancel()
 	_, _, err = client.Actions.CreateWorkflowDispatchEventByFileName(requestCtx, owner, repository, job.WorkflowID, request)
+	cancel()
+	finalizeCtx, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), a.config.RequestTimeout)
+	finalizeErr := a.store.FinalizeWorkflowDispatch(finalizeCtx, job.OrgID, job.ID, a.config.Owner)
+	finalizeCancel()
+	if finalizeErr != nil {
+		return &DispatchStartedError{Err: &APIError{Operation: "finalize workflow dispatch authorization", Retryable: true, Err: finalizeErr}}
+	}
 	if err != nil {
 		return &DispatchStartedError{Err: classifyError("dispatch workflow", err)}
 	}
 	return nil
+}
+
+func (a *Adapter) Cancel(ctx context.Context, job *store.GitHubRecoveryJob) error {
+	if err := validateJob(job, false); err != nil {
+		return permanentJobError("github_run_cancel_failed", err)
+	}
+	client, err := a.clients.Client(job.InstallationID)
+	if err != nil {
+		return classifyError("create installation client", err)
+	}
+	owner, repository, err := splitRepository(job.RepositoryFullName)
+	if err != nil {
+		return permanentJobError("github_run_cancel_failed", err)
+	}
+	runID, runStatus, runHeadSHA := int64(0), "", ""
+	if job.GitHubRunID != nil {
+		runID = *job.GitHubRunID
+	} else {
+		if job.DispatchRequestedAt == nil {
+			return permanentJobError("github_run_cancel_failed", fmt.Errorf("cancelled dispatch %s is missing correlation evidence", job.ID))
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, a.config.RequestTimeout)
+		matches, complete, listErr := listMatchingRuns(requestCtx, client, owner, repository, job)
+		cancel()
+		if listErr != nil {
+			return classifyError("list workflow runs for cancellation", listErr)
+		}
+		deadlineStartedAt := job.DispatchRequestedAt
+		if job.CancellationRequestedAt != nil {
+			deadlineStartedAt = job.CancellationRequestedAt
+		}
+		deadline := deadlineStartedAt.Add(store.OrchestrationCancellationDeadline)
+		if !complete && a.config.Now().Before(deadline) {
+			return &APIError{Operation: "list workflow runs for cancellation", Retryable: true, Err: errors.New("workflow run pagination exceeded correlation limit")}
+		}
+		if !complete {
+			return permanentJobError("github_run_cancel_failed", errors.New("workflow run pagination remained incomplete until the cancellation deadline"))
+		}
+		if len(matches) == 0 && a.config.Now().Before(job.DispatchRequestedAt.Add(orchestrationCancellationCorrelationWindow)) {
+			return &APIError{Operation: "correlate workflow run for cancellation", Retryable: true, RetryAfter: a.config.DispatchObservationInterval, Err: errors.New("workflow run is not observable yet")}
+		}
+		if len(matches) == 0 {
+			return a.store.RecordOrchestrationCancellation(ctx, job.OrgID, job.ID, a.config.Owner, "no_run_observed", 0, "", "")
+		}
+		if len(matches) != 1 {
+			return permanentJobError("github_run_cancel_failed", fmt.Errorf("cancellation correlation matched %d workflow runs", len(matches)))
+		}
+		runID, runStatus, runHeadSHA = matches[0].GetID(), normalizeNonterminalStatus(matches[0].GetStatus()), matches[0].GetHeadSHA()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, a.config.RequestTimeout)
+	_, err = client.Actions.CancelWorkflowRunByID(requestCtx, owner, repository, runID)
+	cancel()
+	if err != nil {
+		var response *gh.ErrorResponse
+		if errors.As(err, &response) && statusCode(response.Response) == 409 {
+			return a.store.RecordOrchestrationCancellation(ctx, job.OrgID, job.ID, a.config.Owner, "not_supported", runID, runStatus, runHeadSHA)
+		}
+		return classifyError("cancel workflow run", err)
+	}
+	return a.store.RecordOrchestrationCancellation(ctx, job.OrgID, job.ID, a.config.Owner, "accepted", runID, runStatus, runHeadSHA)
 }
 
 func (a *Adapter) ReconcileDispatch(ctx context.Context, job *store.GitHubRecoveryJob) error {

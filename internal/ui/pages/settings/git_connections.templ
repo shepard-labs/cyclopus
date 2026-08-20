@@ -1,44 +1,85 @@
 package settings
 
 import (
+	"fmt"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui"
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ GitConnections(connections []store.GitConnection, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
-	@components.Page("Git Connections", user, org, flash, "/settings/git-connections", gitConnectionsContent(connections, errMsg))
+templ GitConnections(app store.GitHubApp, installations []store.GitHubInstallation, connections []store.GitConnection, user store.User, org store.Organization, flash *ui.FlashMessage, errMsg string) {
+	@components.Page("Git Connections", user, org, flash, "/settings/git-connections", gitConnectionsContent(app, installations, connections, errMsg))
 }
 
-templ gitConnectionsContent(connections []store.GitConnection, errMsg string) {
+templ gitConnectionsContent(app store.GitHubApp, installations []store.GitHubInstallation, connections []store.GitConnection, errMsg string) {
 	<div class="w-full space-y-6">
-		@components.SectionCard("GitHub App connections") {
-			if errMsg != "" {
-				@components.Alert("error", errMsg)
-			}
-			<p class="text-sm text-base-content/65">GitHub App setup and repository import are not available in this phase. Existing connection status is shown read-only.</p>
+		if errMsg != "" {
+			@components.Alert("error", errMsg)
 		}
-		if len(connections) > 0 {
-			@components.Card("Connections") {
-				<table class="table-auto w-full text-sm">
-					<thead>
-						<tr class="border-b border-line text-xs uppercase tracking-wider text-base-content/50">
-							<th class="text-left py-2">Status</th>
-							<th class="text-left py-2">Access</th>
-							<th class="text-left py-2">Created</th>
-						</tr>
-					</thead>
-					<tbody class="divide-y divide-line">
-						for _, gc := range connections {
-							<tr class="bg-base-300/40 text-base-content/80">
-								<td class="py-2 text-xs text-base-content/65">{ gc.State }</td>
-								<td class="py-2 text-xs text-base-content/65">{ gc.AccessState }</td>
-								<td class="py-2 text-xs text-base-content/50">{ relTimeSettings(gc.CreatedAt) }</td>
-							</tr>
+		@components.SectionCard("Singleton GitHub App") {
+			<div class="flex flex-wrap items-start justify-between gap-4">
+				<div><div class="text-sm font-medium">{ app.Name }</div><div class="mt-1 text-xs text-base-content/55">State: { app.State }</div>if app.OwnerLogin != nil {
+					<div class="mt-1 text-xs text-base-content/55">Owner: { *app.OwnerLogin }</div>
+				}</div>
+				if app.State == "ready" {
+					<form method="POST" action="/settings/git-connections/install"><button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Add installation</button></form>
+				} else if !appSetupInProgress(app.State) {
+					<form method="POST" action="/settings/git-connections/setup"><button type="submit" class="rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Set up GitHub</button></form>
+				}
+			</div>
+			if app.HTMLURL != "" {
+				<a href={ templ.SafeURL(app.HTMLURL) } rel="noreferrer" class="mt-3 inline-block text-xs text-primary hover:underline">Open App in GitHub</a>
+			}
+			if app.State == "failed" || app.State == "orphaned" {
+				<div class="mt-4">@components.Alert("warning", "Setup failed after GitHub may have created an orphan App. Delete that App in GitHub, then restart setup here. Cyclopus does not accept pasted private keys or adopt orphan credentials.")</div>
+			}
+			if app.State == "exchanging" || app.State == "secret_pending" || app.State == "replacing" {
+				<div class="mt-4">@components.Alert("info", "GitHub setup is in progress. Finish the browser flow, or wait for the short-lived setup session to expire before retrying.")</div>
+			}
+		}
+		@components.Card("Installations") {
+			if len(installations) == 0 {
+				<p class="text-sm text-base-content/60">No GitHub installations are bound yet.</p>
+			} else {
+				<div class="space-y-3">
+				for _, installation := range installations {
+					<div class="rounded-box border border-line bg-base-300 p-4">
+						<div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-sm font-medium">{ installation.AccountLogin }</div><div class="mt-1 text-xs text-base-content/55">{ installation.AccountType } · { installation.RepositorySelection } repositories · { installation.AccessState }</div></div><form method="POST" action={ templ.SafeURL("/settings/git-connections/installations/" + fmt.Sprint(installation.GitHubInstallationID) + "/refresh") }><button type="submit" class="rounded-field border border-line px-3 py-1.5 text-xs font-medium">Refresh access</button></form></div>
+						if installation.AccessState == "suspended" {
+							<div class="mt-3">@components.Alert("warning", "This installation is suspended. Restore it in GitHub, then refresh access. Discovery and new dispatches remain blocked.")</div>
 						}
-					</tbody>
-				</table>
+						if installation.AccessState == "deleted" {
+							<div class="mt-3">@components.Alert("warning", "This installation was deleted. Install the App again on this owner; existing Cyclopus resources remain preserved.")</div>
+						}
+					</div>
+				}
+				</div>
+			}
+		}
+		@components.Card("Repository connections") {
+			if len(connections) == 0 {
+				<p class="text-sm text-base-content/60">No repositories have been imported.</p>
+			} else {
+				<div class="space-y-3">
+				for _, connection := range connections {
+					<div class="rounded-box border border-line bg-base-300 p-4">
+						<div class="flex flex-wrap items-start justify-between gap-4"><div><div class="text-sm font-medium">{ connection.RepositoryFullName }</div><div class="mt-1 text-xs text-base-content/55">Repository ID { fmt.Sprint(connection.GitHubRepositoryID) } · { connectionStateText(connection) }</div><div class="mt-1 text-xs text-base-content/55">{ visibilityText(connection.RepositoryPrivate) } · default branch { connection.RepositoryDefaultBranch } · archived: { fmt.Sprint(connection.RepositoryArchived) }</div></div>if connection.State == "active" {
+							<form method="POST" action={ templ.SafeURL("/settings/git-connections/" + connection.ID + "/disconnect") }><button type="submit" class="rounded-field border border-error/50 px-3 py-1.5 text-xs font-medium text-error">Disconnect</button></form>
+						}</div>
+						if connection.RepositoryAccessState != "active" || connection.AccessState != "active" {
+							<div class="mt-3">@components.Alert("warning", "Repository access is unavailable. Restore or select access in GitHub, refresh the installation, and re-import if necessary. Existing workloads and releases remain preserved.")</div>
+						}
+						if connection.State == "disconnected" {
+							<div class="mt-3">@components.Alert("info", "Disconnected non-destructively. Discovery, webhook fan-out, and new dispatches are blocked; current production and preview workloads/releases remain in place.")</div>
+						}
+					</div>
+				}
+				</div>
 			}
 		}
 	</div>
 }
+
+func visibilityText(private bool) string { if private { return "private" }; return "public" }
+func connectionStateText(connection store.GitConnection) string { return connection.State + " / " + connection.AccessState }
+func appSetupInProgress(state string) bool { return state == "exchanging" || state == "secret_pending" || state == "replacing" }

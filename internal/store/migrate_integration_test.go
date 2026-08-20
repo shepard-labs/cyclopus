@@ -59,14 +59,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000021 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000022 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 21 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:21 dirty:false", version, dirty)
+		if version != 22 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:22 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -385,6 +385,134 @@ func TestPostgres18Migrations(t *testing.T) {
 	})
 }
 
+func TestMigration000022ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(21); err != nil {
+		t.Fatalf("migrate to exact v21: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	fixture := seedTenantGraph(t, conn, "migration-twenty-two", "main", "", "migration-twenty-two-production", false)
+	v21Catalog := schemaCatalogSnapshotExceptFunction(t, conn, "fence_disconnected_git_connection")
+	if err := migrator.Migrate(22); err != nil {
+		t.Fatalf("exact v21 to v22 upgrade: %v", err)
+	}
+	var jobID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO orchestration_jobs(org_id,app_id,environment_id,github_repository_id,github_workflow_path,workflow_revision,dispatch_ref,desired_checkout_sha,desired_generation,idempotency_key,status,dispatch_requested_at,dispatch_ref_observed_sha,dispatch_ambiguity_state,reconcile_after,dispatch_deadline_at,dispatch_call_authorized_at,dispatch_call_owner,dispatch_call_expires_at,terminal_at)
+		SELECT $1,$2,$3,repository.github_repository_id,'.github/workflows/deploy.yml',repeat('a',40),'refs/heads/main',repeat('b',40),1,'migration-v22','cancelled',clock_timestamp(),repeat('b',40),'possible',clock_timestamp(),clock_timestamp()+interval '5 minutes',clock_timestamp(),'migration-worker',clock_timestamp()+interval '1 minute',clock_timestamp()
+		FROM github_repositories repository WHERE repository.org_id=$1 LIMIT 1 RETURNING id::text`, fixture.org, fixture.app, fixture.environment).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(21); err == nil || !strings.Contains(err.Error(), "000022 downgrade would discard GitHub dispatch authorization or cancellation evidence") {
+		t.Fatalf("guarded v22 down error = %v", err)
+	}
+	if err := migrator.Force(22); err != nil {
+		t.Fatalf("restore version after guarded v22 down: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE import_operations SET orchestration_job_id=NULL WHERE orchestration_job_id=$1`, jobID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `DELETE FROM orchestration_jobs WHERE id=$1`, jobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(21); err != nil {
+		t.Fatalf("clean v22 down: %v", err)
+	}
+	if got := schemaCatalogSnapshotExceptFunction(t, conn, "fence_disconnected_git_connection"); got != v21Catalog {
+		t.Fatalf("v21 catalog after v22 down differs from seeded v21 catalog\nwant:\n%s\n\ngot:\n%s", v21Catalog, got)
+	}
+	var functionSearchPath []string
+	if err := conn.QueryRow(t.Context(), `SELECT proconfig FROM pg_proc WHERE pronamespace=current_schema()::regnamespace AND proname='fence_disconnected_git_connection'`).Scan(&functionSearchPath); err != nil || len(functionSearchPath) != 1 || !strings.Contains(functionSearchPath[0], schema) || !strings.Contains(functionSearchPath[0], "pg_catalog") {
+		t.Fatalf("v21 replacement trigger search_path = %v, %v", functionSearchPath, err)
+	}
+	if err := migrator.Migrate(22); err != nil {
+		t.Fatalf("v22 re-up: %v", err)
+	}
+	hostile := schema + "_hostile"
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+pgx.Identifier{hostile}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{hostile}.Sanitize()+" CASCADE")
+	if _, err := admin.Exec(t.Context(), `CREATE TABLE `+pgx.Identifier{hostile, "orchestration_jobs"}.Sanitize()+` (dispatch_call_authorized_at timestamptz,cancellation_attempts integer,cancellation_error_code text,cancellation_error_message text,cancellation_state text)`); err != nil {
+		t.Fatal(err)
+	}
+	hostileConfig, err := pgx.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostileConfig.RuntimeParams["search_path"] = pgx.Identifier{hostile}.Sanitize() + "," + pgx.Identifier{schema}.Sanitize()
+	hostileConn, err := pgx.ConnectConfig(t.Context(), hostileConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostileConn.Close(context.Background())
+	if _, err := hostileConn.Exec(t.Context(), `UPDATE `+pgx.Identifier{schema, "git_connections"}.Sanitize()+` SET state=state WHERE false`); err != nil {
+		t.Fatalf("hostile search_path trigger resolution: %v", err)
+	}
+}
+
+func TestMigration000022TargetsCurrentSchemaWhenSameRoleOwnsTwoCyclopusSchemas(t *testing.T) {
+	baseURL := os.Getenv("CYCLOPUS_TEST_DATABASE_URL")
+	if baseURL == "" {
+		baseURL = os.Getenv("POSTGRES_TEST_URL")
+	}
+	if baseURL == "" {
+		t.Skip("CYCLOPUS_TEST_DATABASE_URL or POSTGRES_TEST_URL is not set")
+	}
+	admin, err := pgx.Connect(t.Context(), baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	suffix := strings.ReplaceAll(fmt.Sprint(time.Now().UnixNano()), "-", "")
+	firstSchema, secondSchema := "migration22_first_"+suffix, "migration22_second_"+suffix
+	for _, schema := range []string{firstSchema, secondSchema} {
+		if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+			t.Fatal(err)
+		}
+		defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	}
+	first := githubWebhookMigrator(t, withSearchPath(baseURL, firstSchema))
+	second := githubWebhookMigrator(t, withSearchPath(baseURL, secondSchema))
+	defer first.Close()
+	defer second.Close()
+	if err := first.Migrate(21); err != nil {
+		t.Fatalf("first schema migrate to v21: %v", err)
+	}
+	if err := second.Migrate(21); err != nil {
+		t.Fatalf("second schema migrate to v21: %v", err)
+	}
+	if err := first.Migrate(22); err != nil {
+		t.Fatalf("first schema migrate to v22 with second v21 schema present: %v", err)
+	}
+	if err := second.Migrate(22); err != nil {
+		t.Fatalf("second schema migrate to v22 with first v22 schema present: %v", err)
+	}
+	if err := first.Migrate(21); err != nil {
+		t.Fatalf("first schema downgrade to v21 with second v22 schema present: %v", err)
+	}
+	for _, test := range []struct {
+		schema      string
+		columnCount int
+	}{{firstSchema, 0}, {secondSchema, 1}} {
+		var count int
+		if err := admin.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns
+			WHERE table_schema=$1 AND table_name='orchestration_jobs' AND column_name='dispatch_call_authorized_at'`, test.schema).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != test.columnCount {
+			t.Fatalf("schema %s v22 column count = %d, want %d", test.schema, count, test.columnCount)
+		}
+	}
+}
+
 func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
 	url := integrationURL(t)
 	admin, err := pgx.Connect(t.Context(), url)
@@ -426,8 +554,10 @@ func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
 	defer conn.Close(context.Background())
 	parents := seedTenantGraph(t, conn, "migration-eighteen", "main", "", "migration-eighteen-production", false)
 	var registryID, operationID string
-	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,pending_generation)
-		VALUES($1,'ghcr','ghcr.io','provisioning','source_secret_written',1) RETURNING id::text`, parents.org).Scan(&registryID); err != nil {
+	if err := conn.QueryRow(t.Context(), `INSERT INTO registries(org_id,provider,registry_host) VALUES($1,'ghcr','ghcr.io') RETURNING id::text`, parents.org).Scan(&registryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(t.Context(), `UPDATE environments SET lifecycle_status='torn_down',torn_down_at=clock_timestamp() WHERE id=$1`, parents.environment); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(t.Context(), `UPDATE apps SET image_visibility='private',registry_id=$2 WHERE id=$1`, parents.app, registryID); err != nil {
@@ -449,7 +579,8 @@ func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
 	if _, err := tx.Exec(t.Context(), `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id) VALUES($1,$2,1,$3,'pending',$4)`, parents.org, registryID, secretRef, operationID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(t.Context(), `UPDATE registries SET operation_id=$2,pending_credential_secret_ref=$3 WHERE id=$1`, registryID, operationID, secretRef); err != nil {
+	if _, err := tx.Exec(t.Context(), `UPDATE registries SET state='creating',checkpoint='source_secret_written',pending_generation=1,
+		operation_id=$2,pending_credential_secret_ref=$3 WHERE id=$1`, registryID, operationID, secretRef); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(t.Context()); err != nil {
@@ -464,7 +595,18 @@ func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
 	if err := migrator.Force(18); err != nil {
 		t.Fatalf("restore version after guarded down: %v", err)
 	}
+	if _, err := conn.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL WHERE id=$1`, parents.app); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := conn.Exec(t.Context(), `UPDATE environments SET registry_credential_state='not_required',required_registry_credential_generation=NULL WHERE id=$1`, parents.environment); err != nil {
+		t.Fatal(err)
+	}
+	cleanupTx, err := conn.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupTx.Rollback(t.Context())
+	if _, err := cleanupTx.Exec(t.Context(), `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 		t.Fatal(err)
 	}
 	for _, cleanup := range []struct {
@@ -475,9 +617,12 @@ func TestMigration000018DownBlocksPendingPrivateImport(t *testing.T) {
 		{`UPDATE registry_credential_generations SET state='failed' WHERE operation_id=$1`, []any{operationID}},
 		{`UPDATE registries SET state='failed',checkpoint='cleanup_pending',pending_generation=NULL,pending_credential_secret_ref=NULL,operation_id=NULL,failure_code='postgres_permanent',failure_message='test cleanup' WHERE id=$1`, []any{registryID}},
 	} {
-		if _, err := conn.Exec(t.Context(), cleanup.query, cleanup.args...); err != nil {
+		if _, err := cleanupTx.Exec(t.Context(), cleanup.query, cleanup.args...); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := cleanupTx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 	if err := migrator.Migrate(17); err != nil {
 		t.Fatalf("000018 down after terminal cleanup: %v", err)
@@ -1143,7 +1288,7 @@ func TestMigration000011FailureRestoresV10RollbackGuard(t *testing.T) {
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
 		t.Fatalf("repaired 000011 migration: %v", err)
 	}
-	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 21 || dirty {
+	if err := db.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 22 || dirty {
 		t.Fatalf("migration state after repaired up = %d/%t, %v", version, dirty, err)
 	}
 	if err := Migrate(t.Context(), integrationConfig(testURL)); err != nil {
@@ -1782,6 +1927,30 @@ func schemaCatalogSnapshot(t *testing.T, conn *pgx.Conn) string {
 	parts := make([]string, len(queries))
 	for i, query := range queries {
 		if err := conn.QueryRow(t.Context(), query).Scan(&parts[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return strings.Join(parts, "\n---\n")
+}
+
+func schemaCatalogSnapshotExceptFunction(t *testing.T, conn *pgx.Conn, excluded string) string {
+	t.Helper()
+	queries := []string{
+		`SELECT coalesce(string_agg(format('%s.%s|%s|%s|%s', table_name,column_name,udt_name,is_nullable,coalesce(column_default,'')), E'\n' ORDER BY table_name,ordinal_position),'') FROM information_schema.columns WHERE table_schema=current_schema()`,
+		`SELECT coalesce(string_agg(format('%s|%s|%s', rel.relname,con.conname,pg_get_constraintdef(con.oid,true)), E'\n' ORDER BY rel.relname,con.conname),'') FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid WHERE rel.relnamespace=current_schema()::regnamespace`,
+		`SELECT coalesce(string_agg(format('%s|%s', indexrel.relname,pg_get_indexdef(indexrel.oid)), E'\n' ORDER BY indexrel.relname),'') FROM pg_index idx JOIN pg_class table_rel ON table_rel.oid=idx.indrelid JOIN pg_class indexrel ON indexrel.oid=idx.indexrelid WHERE table_rel.relnamespace=current_schema()::regnamespace`,
+		`SELECT coalesce(string_agg(format('%s|%s|%s', rel.relname,trg.tgname,pg_get_triggerdef(trg.oid,true)), E'\n' ORDER BY rel.relname,trg.tgname),'') FROM pg_trigger trg JOIN pg_class rel ON rel.oid=trg.tgrelid WHERE rel.relnamespace=current_schema()::regnamespace AND NOT trg.tgisinternal`,
+		`SELECT coalesce(string_agg(format('%s|%s', p.oid::regprocedure,pg_get_functiondef(p.oid)), E'\n' ORDER BY p.oid::regprocedure::text),'') FROM pg_proc p WHERE p.pronamespace=current_schema()::regnamespace AND p.proname<>$1`,
+	}
+	parts := make([]string, len(queries))
+	for i, query := range queries {
+		var row pgx.Row
+		if i == len(queries)-1 {
+			row = conn.QueryRow(t.Context(), query, excluded)
+		} else {
+			row = conn.QueryRow(t.Context(), query)
+		}
+		if err := row.Scan(&parts[i]); err != nil {
 			t.Fatal(err)
 		}
 	}

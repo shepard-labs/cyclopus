@@ -6,11 +6,11 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/ui/components"
 )
 
-templ Projects(projects []store.Project, org store.Organization, user store.User, flash *ui.FlashMessage, errMsg string) {
-	@components.Page("Projects", user, org, flash, "/projects", projectsContent(projects, errMsg))
+templ Projects(projects []store.Project, org store.Organization, user store.User, flash *ui.FlashMessage) {
+	@components.Page("Projects", user, org, flash, "/projects", projectsContent(projects))
 }
 
-templ projectsContent(projects []store.Project, errMsg string) {
+templ projectsContent(projects []store.Project) {
 	<div class="space-y-6">
 		<div data-project-browser>
 			<div class="flex items-center gap-3">
@@ -18,16 +18,7 @@ templ projectsContent(projects []store.Project, errMsg string) {
 					<input id="project-search" type="search" aria-label="Search projects" autocomplete="off" placeholder="Search projects" class="col-start-1 row-start-1 block w-full rounded-field border border-line bg-base-300 py-2 pr-3 pl-10 text-sm font-medium text-base-content outline-none placeholder:text-base-content/45 focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
 					@components.IconMagnifyingGlass("pointer-events-none col-start-1 row-start-1 ml-3 size-4 self-center text-base-content/45")
 				</div>
-				@components.Button(components.ButtonProps{
-					Type:         components.ButtonTypeButton,
-					Variant:      components.ButtonVariantPrimary,
-					Class:        "shrink-0",
-					Command:      "show-modal",
-					CommandFor:   "create-project-dialog",
-					AriaControls: "create-project-dialog",
-				}) {
-					Create project
-				}
+				<a href="/projects/import" class="shrink-0 rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content hover:brightness-110">New project</a>
 			</div>
 			if len(projects) == 0 {
 				<div class="mt-6">@components.EmptyState("No projects yet", "Create your first project to get started.")</div>
@@ -64,31 +55,5 @@ templ projectsContent(projects []store.Project, errMsg string) {
 				})()
 			</script>
 		</div>
-		@components.Dialog("create-project-dialog", "Create project") {
-			if errMsg != "" {
-				<div class="mb-4">@components.Alert("error", errMsg)</div>
-			}
-			<form method="POST" action="/projects" class="space-y-4">
-				<div>
-					@components.FormField("proj-name", "name", "Name", "text", "", "My Project", true)
-				</div>
-				<div>
-					<div class="flex flex-col gap-1.5">
-						<label for="proj-slug" class="text-xs font-medium text-base-content/80">
-							Slug
-							<span class="text-error" aria-hidden="true">*</span>
-						</label>
-						<input type="text" id="proj-slug" name="slug" required placeholder="my-project" pattern="[a-z0-9-]+" class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm font-medium outline-none focus:border-primary focus-visible:ring-1 focus-visible:ring-primary"/>
-					</div>
-				</div>
-				<div class="flex justify-end gap-3">
-					@components.Button(components.ButtonProps{Type: components.ButtonTypeButton, Variant: components.ButtonVariantSecondary, Command: "close", CommandFor: "create-project-dialog"}) { Cancel }
-					@components.Button(components.ButtonProps{Type: components.ButtonTypeSubmit, Variant: components.ButtonVariantPrimary}) { Create project }
-				</div>
-			</form>
-		}
-		if errMsg != "" {
-			<script>(function(){var dialog=document.getElementById('create-project-dialog');if(dialog){dialog.showModal()}})()</script>
-		}
 	</div>
 }

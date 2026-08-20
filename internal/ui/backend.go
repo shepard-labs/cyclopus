@@ -61,7 +61,7 @@ func (b *Backend) actor(ctx context.Context, token string) (service.ActorContext
 	if principal.Kind != auth.CredentialKindSession {
 		return service.ActorContext{}, service.ErrForbidden
 	}
-	return service.ActorContext{UserID: principal.UserID, OrgID: principal.OrgID, Operator: principal.Operator}, nil
+	return service.ActorContext{UserID: principal.UserID, OrgID: principal.OrgID, SessionID: principal.TokenID, Operator: principal.Operator}, nil
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -337,12 +337,127 @@ func (b *Backend) ListDomains(ctx context.Context, token, appID string) ([]store
 
 // ── Git connections ─────────────────────────────────────────────────────────
 
+func (b *Backend) GetGitHubApp(ctx context.Context, token string) (store.GitHubApp, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.GitHubApp{}, err
+	}
+	return b.svc.GetGitHubApp(ctx, actor)
+}
+
+func (b *Backend) BeginGitHubAppSetup(ctx context.Context, token, idemKey string) (service.GitHubFlow, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return service.GitHubFlow{}, err
+	}
+	return b.svc.BeginGitHubAppSetup(ctx, actor, idemKey)
+}
+
+func (b *Backend) BeginGitHubInstallation(ctx context.Context, token, idemKey string) (service.GitHubFlow, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return service.GitHubFlow{}, err
+	}
+	return b.svc.BeginGitHubInstallation(ctx, actor, idemKey)
+}
+
+func (b *Backend) ListGitHubInstallations(ctx context.Context, token string) ([]store.GitHubInstallation, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return b.svc.ListGitHubInstallations(ctx, actor)
+}
+
+func (b *Backend) RefreshGitHubInstallation(ctx context.Context, token, idemKey, installationID string) (store.GitHubInstallation, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.GitHubInstallation{}, err
+	}
+	return b.svc.RefreshGitHubInstallation(ctx, actor, idemKey, installationID)
+}
+
+func (b *Backend) ListGitHubRepositories(ctx context.Context, token, installationID, pageToken string) (service.GitHubRepositoryPage, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return service.GitHubRepositoryPage{}, err
+	}
+	return b.svc.ListGitHubRepositories(ctx, actor, installationID, 100, pageToken)
+}
+
+func (b *Backend) ListGitHubRepositoryWorkflows(ctx context.Context, token string, repositoryID int64, pageToken string) (service.GitHubWorkflowPage, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return service.GitHubWorkflowPage{}, err
+	}
+	return b.svc.ListGitHubRepositoryWorkflows(ctx, actor, repositoryID, 100, pageToken)
+}
+
 func (b *Backend) ListGitConnections(ctx context.Context, token, _ string) ([]store.GitConnection, error) {
 	actor, err := b.actor(ctx, token)
 	if err != nil {
 		return nil, err
 	}
 	return b.svc.ListGitConnections(ctx, actor)
+}
+
+func (b *Backend) DisconnectGitConnection(ctx context.Context, token, idemKey, id string) (store.GitConnection, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.GitConnection{}, err
+	}
+	return b.svc.DisconnectGitConnection(ctx, actor, idemKey, id)
+}
+
+func (b *Backend) ImportGitRepository(ctx context.Context, token string, input service.ImportGitRepositoryInput) (store.ImportOperation, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.ImportOperation{}, err
+	}
+	return b.svc.ImportGitRepository(ctx, actor, input)
+}
+
+func (b *Backend) GetImportOperation(ctx context.Context, token, id string) (store.ImportOperation, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.ImportOperation{}, err
+	}
+	return b.svc.GetImportOperation(ctx, actor, id)
+}
+
+func (b *Backend) GetImportProgress(ctx context.Context, token, id string) (ImportProgress, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return ImportProgress{}, err
+	}
+	operation, err := b.svc.GetImportOperation(ctx, actor, id)
+	if err != nil {
+		return ImportProgress{}, err
+	}
+	progress := ImportProgress{Operation: operation}
+	if operation.ProjectID != nil {
+		if value, getErr := b.svc.GetProject(ctx, actor, *operation.ProjectID); getErr == nil {
+			progress.Project = &value
+		}
+	}
+	if operation.AppID != nil {
+		if value, getErr := b.svc.GetApp(ctx, actor, *operation.AppID); getErr == nil {
+			progress.App = &value
+		}
+	}
+	if operation.EnvironmentID != nil {
+		if value, getErr := b.svc.GetEnvironment(ctx, actor, *operation.EnvironmentID); getErr == nil {
+			progress.Environment = &value
+		}
+	}
+	if operation.OrchestrationJobID != nil {
+		value, getErr := b.svc.GetImportDeploymentStatus(ctx, actor, *operation.OrchestrationJobID)
+		if getErr != nil {
+			return ImportProgress{}, getErr
+		}
+		progress.Deployment = &value
+	}
+	return progress, nil
 }
 
 // ── Registries ──────────────────────────────────────────────────────────────
@@ -353,6 +468,22 @@ func (b *Backend) ListRegistries(ctx context.Context, token, _ string) ([]store.
 		return nil, err
 	}
 	return b.svc.ListRegistries(ctx, actor)
+}
+
+func (b *Backend) GetGhcrCredentialStatus(ctx context.Context, token string) (store.Registry, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.Registry{}, err
+	}
+	return b.svc.GetGhcrCredentialStatus(ctx, actor)
+}
+
+func (b *Backend) RotateGhcrCredential(ctx context.Context, token, key string, input service.GhcrCredentialInput) (store.Registry, error) {
+	actor, err := b.actor(ctx, token)
+	if err != nil {
+		return store.Registry{}, err
+	}
+	return b.svc.RotateGhcrCredential(ctx, actor, input, key)
 }
 
 // ── Webhooks ────────────────────────────────────────────────────────────────

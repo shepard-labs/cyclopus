@@ -57,6 +57,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000020_namespace_credential_transitions.up.sql",
 		"000021_release_generation_fencing.down.sql",
 		"000021_release_generation_fencing.up.sql",
+		"000022_github_run_cancellation.down.sql",
+		"000022_github_run_cancellation.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -252,6 +254,30 @@ func TestMigration000021SchemaContract(t *testing.T) {
 		sum := sha256.Sum256(contents)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			t.Fatalf("%s checksum = %s, want v21 migration fingerprint %s", name, got, want)
+		}
+	}
+}
+
+func TestMigration000022SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000022_github_run_cancellation.up.sql":   "d3f59a38b8d9e9da13812c386cc4a956d2b6056f739f964815403a57c50c8b59",
+		"000022_github_run_cancellation.down.sql": "7018d505c827190270a783cda97504202e4921c77245256cd6c94899fab9039d",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"dispatch_call_authorized_at", "cancellation_attempts", "no_run_observed", "owning_schema", "pg_catalog.format", "pg_catalog.current_schema()"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		if strings.HasSuffix(name, ".down.sql") && !strings.Contains(string(contents), "ACCESS EXCLUSIVE") {
+			t.Errorf("%s does not lock orchestration_jobs ACCESS EXCLUSIVE before its evidence assertion", name)
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v22 migration fingerprint %s", name, got, want)
 		}
 	}
 }

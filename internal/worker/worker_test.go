@@ -188,6 +188,80 @@ func TestStartupDispatchesQueuedProductionWork(t *testing.T) {
 	}
 }
 
+func TestStartupConsumesDurableGitHubCancellation(t *testing.T) {
+	github := &fakeGitHubRecoveryAdapter{}
+	fake := &fakeRecoveryStore{cancellationOrgIDs: []string{"org-one"}, cancellationJobs: []*store.OrchestrationJob{{ID: "job-one", OrgID: "org-one", CancellationAttempts: 1}}}
+	runner := newTestRunner(fake, RecoveryAdapters{Capabilities: RecoveryCapabilities{GitHub: true}, GitHub: github})
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if github.cancelCalls != 1 || fake.cancellationClaims != 2 {
+		t.Fatalf("cancel calls/claims = %d/%d", github.cancelCalls, fake.cancellationClaims)
+	}
+}
+
+func TestPeriodicScanConsumesDurableGitHubCancellation(t *testing.T) {
+	github := &fakeGitHubRecoveryAdapter{}
+	now := time.Now()
+	fake := &fakeRecoveryStore{cancellationOrgIDs: []string{"org-one"}, cancellationJobs: []*store.OrchestrationJob{{
+		ID: "job-periodic", OrgID: "org-one", CancellationAttempts: 1, CancellationRequestedAt: &now,
+	}}}
+	runner := newTestRunner(fake, RecoveryAdapters{Capabilities: RecoveryCapabilities{GitHub: true}, GitHub: github})
+	if err := runner.scan(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if github.cancelCalls != 1 {
+		t.Fatalf("periodic cancellation calls = %d", github.cancelCalls)
+	}
+}
+
+func TestRetryableGitHubCancellationExhaustionTerminalizes(t *testing.T) {
+	now := time.Now()
+	github := &fakeGitHubRecoveryAdapter{err: errors.New("temporary")}
+	fake := &fakeRecoveryStore{cancellationOrgIDs: []string{"org-one"}, cancellationJobs: []*store.OrchestrationJob{{
+		ID: "job-exhausted", OrgID: "org-one", CancellationAttempts: store.OrchestrationCancellationMaxAttempts,
+		CancellationRequestedAt: &now,
+	}}}
+	runner := newTestRunner(fake, RecoveryAdapters{Capabilities: RecoveryCapabilities{GitHub: true}, GitHub: github,
+		GitHubErrorDisposition: func(error) (bool, time.Duration, string, bool) { return true, time.Second, "", true }})
+	if err := runner.scan(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if fake.cancellationFailed != 1 || fake.cancellationRescheduled != 0 {
+		t.Fatalf("failed/rescheduled = %d/%d", fake.cancellationFailed, fake.cancellationRescheduled)
+	}
+}
+
+func TestGitHubCancellationFailureOutcomesAreDurable(t *testing.T) {
+	now := time.Now()
+	for name, test := range map[string]struct {
+		attempts    int
+		retryable   bool
+		rescheduled int
+		failed      int
+	}{
+		"retryable cancellation is rescheduled before exhaustion": {attempts: 1, retryable: true, rescheduled: 1},
+		"permanent cancellation failure is terminalized":          {attempts: 1, retryable: false, failed: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			github := &fakeGitHubRecoveryAdapter{err: errors.New("cancel request rejected")}
+			fake := &fakeRecoveryStore{cancellationOrgIDs: []string{"org-one"}, cancellationJobs: []*store.OrchestrationJob{{
+				ID: "job-one", OrgID: "org-one", CancellationAttempts: test.attempts, CancellationRequestedAt: &now,
+			}}}
+			runner := newTestRunner(fake, RecoveryAdapters{Capabilities: RecoveryCapabilities{GitHub: true}, GitHub: github,
+				GitHubErrorDisposition: func(error) (bool, time.Duration, string, bool) {
+					return test.retryable, 2 * time.Second, "github_run_cancel_failed", true
+				}})
+			if err := runner.scan(t.Context(), false); err != nil {
+				t.Fatal(err)
+			}
+			if github.cancelCalls != 1 || fake.cancellationRescheduled != test.rescheduled || fake.cancellationFailed != test.failed {
+				t.Fatalf("cancel/rescheduled/failed = %d/%d/%d, want 1/%d/%d", github.cancelCalls, fake.cancellationRescheduled, fake.cancellationFailed, test.rescheduled, test.failed)
+			}
+		})
+	}
+}
+
 func TestRunReturnsBlockedRecoveryDiscoveredPeriodicallyWithoutClaiming(t *testing.T) {
 	fake := &fakeRecoveryStore{orgIDs: []string{"org-one"}}
 	runner := New(Config{ScanInterval: time.Millisecond, LeaseDuration: time.Minute, MaxConcurrentDeploys: 4, RequestTimeout: time.Second, Owner: "worker"},
@@ -278,6 +352,7 @@ type fakeGitHubRecoveryAdapter struct {
 	dispatchCalls  int
 	reconcileCalls int
 	err            error
+	cancelCalls    int
 }
 
 func (f *fakeGitHubRecoveryAdapter) ErrorDisposition(error) (bool, time.Duration, string, bool) {
@@ -293,6 +368,12 @@ func (f *fakeGitHubRecoveryAdapter) Dispatch(context.Context, *store.Orchestrati
 func (f *fakeGitHubRecoveryAdapter) ReconcileDispatch(context.Context, *store.OrchestrationJob) error {
 	f.calls++
 	f.reconcileCalls++
+	return f.err
+}
+
+func (f *fakeGitHubRecoveryAdapter) Cancel(context.Context, *store.OrchestrationJob) error {
+	f.calls++
+	f.cancelCalls++
 	return f.err
 }
 
@@ -323,40 +404,45 @@ func (f *fakeKubernetesRecoveryAdapter) RecoverExpiredDeploy(_ context.Context, 
 }
 
 type fakeRecoveryStore struct {
-	idempotencyDeleted    int64
-	idempotencyCleanupErr error
-	requeued              int64
-	requeueErr            error
-	orgIDs                []string
-	queuedOrgIDs          []string
-	queuedJobs            []*store.OrchestrationJob
-	queuedClaims          int
-	orchestrationJobs     []*store.OrchestrationJob
-	orchestrationClaims   int
-	deploys               []store.ExpiredDeploy
-	deployLease           store.DeployLease
-	deployClaims          int
-	lastOwner             string
-	lastLeaseDuration     time.Duration
-	rescheduleDeployCalls int
-	rescheduleDelay       time.Duration
-	rescheduleLease       store.DeployLease
-	quarantineDeployCalls int
-	quarantineCode        string
-	quarantineLease       store.DeployLease
-	resumeOrgIDs          []string
-	pendingDeployOrgIDs   []string
-	resumeDeploys         []store.DeployExecution
-	pendingDeploys        []store.DeployExecution
-	forwardClaims         int
-	webhookOrgIDs         []string
-	webhookDeliveries     []store.WebhookDelivery
-	webhookClaims         int
-	reconciliationOrgIDs  []string
-	reconciliationRuns    []*store.ReconciliationRun
-	reconciliationClaims  int
-	idlePreviewCandidates []store.IdlePreviewCandidate
-	idlePreviewReaped     bool
+	idempotencyDeleted      int64
+	idempotencyCleanupErr   error
+	requeued                int64
+	requeueErr              error
+	orgIDs                  []string
+	queuedOrgIDs            []string
+	queuedJobs              []*store.OrchestrationJob
+	queuedClaims            int
+	orchestrationJobs       []*store.OrchestrationJob
+	orchestrationClaims     int
+	deploys                 []store.ExpiredDeploy
+	deployLease             store.DeployLease
+	deployClaims            int
+	lastOwner               string
+	lastLeaseDuration       time.Duration
+	rescheduleDeployCalls   int
+	rescheduleDelay         time.Duration
+	rescheduleLease         store.DeployLease
+	quarantineDeployCalls   int
+	quarantineCode          string
+	quarantineLease         store.DeployLease
+	resumeOrgIDs            []string
+	pendingDeployOrgIDs     []string
+	resumeDeploys           []store.DeployExecution
+	pendingDeploys          []store.DeployExecution
+	forwardClaims           int
+	webhookOrgIDs           []string
+	webhookDeliveries       []store.WebhookDelivery
+	webhookClaims           int
+	reconciliationOrgIDs    []string
+	reconciliationRuns      []*store.ReconciliationRun
+	reconciliationClaims    int
+	idlePreviewCandidates   []store.IdlePreviewCandidate
+	idlePreviewReaped       bool
+	cancellationOrgIDs      []string
+	cancellationJobs        []*store.OrchestrationJob
+	cancellationClaims      int
+	cancellationRescheduled int
+	cancellationFailed      int
 }
 
 func (f *fakeRecoveryStore) DeleteExpiredIdempotencyRecords(context.Context, int) (int64, error) {
@@ -407,6 +493,30 @@ func (f *fakeRecoveryStore) RequestIdlePreviewTeardown(context.Context, store.Id
 
 func (f *fakeRecoveryStore) ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error) {
 	return f.orgIDs, nil
+}
+
+func (f *fakeRecoveryStore) ListOrchestrationCancellationOrgIDs(context.Context) ([]string, error) {
+	return f.cancellationOrgIDs, nil
+}
+
+func (f *fakeRecoveryStore) ClaimOrchestrationCancellation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
+	f.cancellationClaims++
+	if len(f.cancellationJobs) == 0 {
+		return nil, store.ErrNotFound
+	}
+	job := f.cancellationJobs[0]
+	f.cancellationJobs = f.cancellationJobs[1:]
+	return job, nil
+}
+
+func (f *fakeRecoveryStore) RescheduleOrchestrationCancellation(context.Context, string, string, string, time.Duration, string) error {
+	f.cancellationRescheduled++
+	return nil
+}
+
+func (f *fakeRecoveryStore) FailOrchestrationCancellation(context.Context, string, string, string, string) error {
+	f.cancellationFailed++
+	return nil
 }
 
 func (f *fakeRecoveryStore) ListWebhookOrgIDs(context.Context) ([]string, error) {
@@ -634,6 +744,10 @@ func (a *orderedGitHubAdapter) ReconcileDispatch(_ context.Context, job *store.O
 	a.record("reconcile:" + job.ID)
 	return nil
 }
+func (a *orderedGitHubAdapter) Cancel(_ context.Context, job *store.OrchestrationJob) error {
+	a.record("cancel:" + job.ID)
+	return nil
+}
 
 type blockingDeployAdapter struct {
 	started chan struct{}
@@ -711,6 +825,9 @@ func (*concurrentForwardStore) ListOrchestrationOrgIDs(context.Context) ([]strin
 func (*concurrentForwardStore) ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error) {
 	return nil, nil
 }
+func (*concurrentForwardStore) ListOrchestrationCancellationOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
 func (*concurrentForwardStore) ListWebhookOrgIDs(context.Context) ([]string, error) {
 	return nil, nil
 }
@@ -729,6 +846,9 @@ func (*concurrentForwardStore) ClaimOrchestration(context.Context, string, strin
 func (*concurrentForwardStore) ClaimDispatchReconciliation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
 	return nil, store.ErrNotFound
 }
+func (*concurrentForwardStore) ClaimOrchestrationCancellation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
+	return nil, store.ErrNotFound
+}
 func (*concurrentForwardStore) RescheduleOrchestration(context.Context, string, string, string, time.Duration) error {
 	return nil
 }
@@ -736,6 +856,12 @@ func (*concurrentForwardStore) RescheduleDispatchReconciliation(context.Context,
 	return nil
 }
 func (*concurrentForwardStore) FailOrchestration(context.Context, store.FailOrchestrationParams) error {
+	return nil
+}
+func (*concurrentForwardStore) RescheduleOrchestrationCancellation(context.Context, string, string, string, time.Duration, string) error {
+	return nil
+}
+func (*concurrentForwardStore) FailOrchestrationCancellation(context.Context, string, string, string, string) error {
 	return nil
 }
 func (*concurrentForwardStore) ListExpiredDeploys(context.Context) ([]store.ExpiredDeploy, error) {

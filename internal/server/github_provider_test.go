@@ -24,6 +24,14 @@ func TestDisconnectGitConnectionRequiresAdministratorBeforeValidation(t *testing
 	}
 }
 
+func TestDisconnectGitConnectionWithoutServiceIsNonEnumerating(t *testing.T) {
+	handler := &apiHandlers{}
+	_, err := handler.DisconnectGitConnection(authenticatedServerContext(true), &cyclopusv1.DisconnectGitConnectionRequest{GitConnectionId: "68f33e0d-dcd7-4ed1-b701-b2472ec94242", IdempotencyKey: "disconnect"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+}
+
 func TestEveryGitProviderMutationRequiresAdministratorBeforeValidation(t *testing.T) {
 	handler := &apiHandlers{}
 	ctx := authenticatedServerContext(false)
@@ -298,10 +306,6 @@ func TestGitHubAppNotConfiguredPlaceholdersUseFailedPrecondition(t *testing.T) {
 		},
 		"workflow discovery": func() error {
 			_, err := handler.ListGitHubRepositoryWorkflows(ctx, &cyclopusv1.ListGitHubRepositoryWorkflowsRequest{RepositoryId: 42})
-			return err
-		},
-		"disconnect connection": func() error {
-			_, err := handler.DisconnectGitConnection(ctx, &cyclopusv1.DisconnectGitConnectionRequest{GitConnectionId: "68f33e0d-dcd7-4ed1-b701-b2472ec94242", IdempotencyKey: "disconnect"})
 			return err
 		},
 		"import repository": func() error {

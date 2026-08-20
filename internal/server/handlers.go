@@ -1168,7 +1168,8 @@ func (h *apiHandlers) ListGitConnections(ctx context.Context, req *cyclopusv1.Li
 }
 
 func (h *apiHandlers) DisconnectGitConnection(ctx context.Context, req *cyclopusv1.DisconnectGitConnectionRequest) (*cyclopusv1.DisconnectGitConnectionResponse, error) {
-	if _, err := administratorActor(ctx); err != nil {
+	actor, err := administratorActor(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if err := validateUUID("git_connection_id", req.GetGitConnectionId()); err != nil {
@@ -1177,7 +1178,14 @@ func (h *apiHandlers) DisconnectGitConnection(ctx context.Context, req *cyclopus
 	if err := requiredFields(map[string]string{"idempotency_key": req.GetIdempotencyKey()}); err != nil {
 		return nil, err
 	}
-	return nil, typedError(codes.FailedPrecondition, "GitHub connection lifecycle integration is not configured", "GITHUB_APP_NOT_CONFIGURED")
+	if h.service == nil {
+		return nil, typedError(codes.FailedPrecondition, "GitHub connection lifecycle is unavailable", "GITHUB_APP_NOT_CONFIGURED")
+	}
+	value, err := h.service.DisconnectGitConnection(ctx, actor, req.GetIdempotencyKey(), req.GetGitConnectionId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &cyclopusv1.DisconnectGitConnectionResponse{GitConnection: gitConnectionProto(value)}, nil
 }
 
 func sessionActor(ctx context.Context) (service.ActorContext, error) {

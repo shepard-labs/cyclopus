@@ -26,3 +26,11 @@ type FlashMessage struct {
 	Kind    string // "success" | "error" | "info"
 	Message string
 }
+
+type ImportProgress struct {
+	Operation   store.ImportOperation
+	Deployment  *store.ImportDeploymentStatus
+	Project     *store.Project
+	App         *store.App
+	Environment *store.Environment
+}

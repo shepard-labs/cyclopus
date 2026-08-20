@@ -735,6 +735,48 @@ func TestCompleteImageResolutionPrivateActiveCredentialReadyEnvironmentIntegrati
 	}
 }
 
+func TestGetImportDeploymentStatusComposesAuthoritativeReleaseTerminalStateIntegration(t *testing.T) {
+	for _, test := range []struct {
+		name, releaseStatus, wantStatus, wantDeployment string
+	}{
+		{name: "live", releaseStatus: "live", wantStatus: "completed", wantDeployment: "live"},
+		{name: "superseded", releaseStatus: "superseded", wantStatus: "completed", wantDeployment: "live"},
+		{name: "failed", releaseStatus: "failed", wantStatus: "failed", wantDeployment: "failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dataStore, pool := newIntegrationStore(t)
+			seedTenant(t, pool, tenantOne())
+			jobID := seedImageResolutionJob(t, dataStore, pool, "import-status-"+test.name)
+			claim := claimImageResolution(t, dataStore, "status-worker")
+			completion := imageResolutionCompleteParams(jobID, claim.Lease)
+			completion.Claim = claim
+			if _, err := dataStore.CompleteImageResolution(t.Context(), completion); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `INSERT INTO releases(id,org_id,environment_id,image_ref,kind,config_snapshot,config_hash,status,desired_generation,orchestration_job_id,provenance,failure_reason)
+				VALUES($1,$2,$3,$4,'deploy',$5,repeat('a',64),$6,$7,$1,'orchestration',$8)`, jobID, orgOneID, environmentOneID,
+				completion.ImmutableReference, testReleaseSnapshot(completion.ImmutableReference), test.releaseStatus, claim.Job.DesiredGeneration,
+				map[bool]any{true: "rollout failed", false: nil}[test.releaseStatus == "failed"]); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `UPDATE orchestration_jobs SET release_id=$1 WHERE id=$1`, jobID); err != nil {
+				t.Fatal(err)
+			}
+			if test.releaseStatus == "superseded" {
+				if _, err := pool.Exec(t.Context(), `UPDATE environments SET lifecycle_status='failed',lifecycle_error_code='later_environment_failure',
+					lifecycle_error_message='a newer release failed' WHERE id=$1`, environmentOneID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			status, err := dataStore.GetImportDeploymentStatus(t.Context(), orgOneID, jobID)
+			if err != nil || status.Status != test.wantStatus || status.DeploymentState != test.wantDeployment ||
+				test.releaseStatus == "superseded" && (status.TerminalErrorCode != nil || status.TerminalErrorMessage != nil) {
+				t.Fatalf("status = %+v, %v", status, err)
+			}
+		})
+	}
+}
+
 func assertImageResolutionUnresolved(t *testing.T, pool DB, jobID string) {
 	t.Helper()
 	var status, resolution string

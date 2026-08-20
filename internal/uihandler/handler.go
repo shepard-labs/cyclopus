@@ -2,7 +2,9 @@ package uihandler
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +12,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -28,8 +32,9 @@ import (
 
 // Handler is the chi router serving all Cyclopus UI routes.
 type Handler struct {
-	client   *ui.Backend
-	loadLogs logsPageLoader
+	client                  *ui.Backend
+	loadLogs                logsPageLoader
+	disconnectGitConnection func(context.Context, string, string, string) (store.GitConnection, error)
 }
 
 type logsPageData struct {
@@ -53,6 +58,9 @@ func New(client *ui.Backend) http.Handler {
 
 func newHandler(client *ui.Backend, loadLogs logsPageLoader) http.Handler {
 	h := &Handler{client: client, loadLogs: loadLogs}
+	if client != nil {
+		h.disconnectGitConnection = client.DisconnectGitConnection
+	}
 	if h.loadLogs == nil {
 		h.loadLogs = h.loadLogsPage
 	}
@@ -77,9 +85,11 @@ func newHandler(client *ui.Backend, loadLogs logsPageLoader) http.Handler {
 
 		// Projects
 		r.Get("/projects", h.getProjects)
-		r.Post("/projects", h.postProject)
+		r.Get("/projects/import", h.getProjectImport)
+		r.Post("/projects/import", h.postProjectImport)
 		r.Get("/projects/{projectID}", h.getProject)
-		r.Post("/projects/{projectID}/apps", h.postApp)
+		r.Get("/imports/{importID}", h.getImportOperation)
+		r.Get("/imports/{importID}/status-fragment", h.getImportOperationFragment)
 
 		// Apps
 		r.Get("/apps/{appID}", h.getApp)
@@ -99,8 +109,13 @@ func newHandler(client *ui.Backend, loadLogs logsPageLoader) http.Handler {
 		r.Get("/settings/theme", h.getTheme)
 
 		r.Get("/settings/git-connections", h.getGitConnections)
+		r.Post("/settings/git-connections/setup", h.postGitHubAppSetup)
+		r.Post("/settings/git-connections/install", h.postGitHubInstallation)
+		r.Post("/settings/git-connections/installations/{id}/refresh", h.postGitHubInstallationRefresh)
+		r.Post("/settings/git-connections/{id}/disconnect", h.postGitConnectionDisconnect)
 
 		r.Get("/settings/registries", h.getRegistries)
+		r.Post("/settings/registries/ghcr/rotate", h.postGhcrCredentialRotation)
 
 		r.Get("/settings/webhooks", h.getWebhooks)
 		r.Post("/settings/webhooks", h.postWebhook)
@@ -291,6 +306,57 @@ func newIdemKey() string {
 	return hex.EncodeToString(b)
 }
 
+const importFormNonceTTL = time.Hour
+
+func importIdempotencyKey(r *http.Request) string {
+	token := ui.TokenFromContext(r.Context())
+	if key := r.URL.Query().Get("form_nonce"); key != "" {
+		if validateImportIdempotencyNonce(key, token, time.Now()) {
+			return key
+		}
+	}
+	return newImportIdempotencyNonce(token, time.Now())
+}
+
+func newImportIdempotencyNonce(token string, now time.Time) string {
+	timestamp := strconv.FormatInt(now.Unix(), 16)
+	nonce := newIdemKey()
+	payload := timestamp + "." + nonce
+	return payload + "." + importIdempotencyBinding(payload, token)
+}
+
+func validateImportIdempotencyNonce(value, token string, now time.Time) bool {
+	timestamp, rest, ok := strings.Cut(value, ".")
+	if !ok {
+		return false
+	}
+	nonce, signature, ok := strings.Cut(rest, ".")
+	if !ok || len(nonce) != 32 || len(signature) != 64 {
+		return false
+	}
+	issued, err := strconv.ParseInt(timestamp, 16, 64)
+	if err != nil || issued > now.Add(time.Minute).Unix() || now.Unix()-issued > int64(importFormNonceTTL/time.Second) {
+		return false
+	}
+	if _, err := hex.DecodeString(nonce); err != nil {
+		return false
+	}
+	expected, err := hex.DecodeString(importIdempotencyBinding(timestamp+"."+nonce, token))
+	if err != nil {
+		return false
+	}
+	actual, err := hex.DecodeString(signature)
+	return err == nil && hmac.Equal(actual, expected)
+}
+
+func importIdempotencyBinding(payload, token string) string {
+	key := sha256.Sum256([]byte("cyclopus-import-form-key-v2\x00" + token))
+	mac := hmac.New(sha256.New, key[:])
+	_, _ = mac.Write([]byte("cyclopus-import-v2\x00"))
+	_, _ = mac.Write([]byte(payload))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 const flashCookieName = "cyclopus_flash"
 
 // flashFromCookie consumes the one-time notification set by redirectWithFlash.
@@ -409,25 +475,200 @@ func (h *Handler) getProjects(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	render(w, r, pages.Projects(projects, org, user, flashFromCookie(w, r), ""))
+	render(w, r, pages.Projects(projects, org, user, flashFromCookie(w, r)))
 }
 
-func (h *Handler) postProject(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) getProjectImport(w http.ResponseWriter, r *http.Request) {
 	token := ui.TokenFromContext(r.Context())
 	user, org, err := h.pageCtx(r.Context(), token)
 	if err != nil {
 		h.handleErr(w, r, err)
 		return
 	}
-	name := r.FormValue("name")
-	slug := r.FormValue("slug")
-	proj, err := h.client.CreateProject(r.Context(), token, org.ID, newIdemKey(), name, slug)
+	data := pages.ImportGitRepositoryData{User: user, Org: org, Flash: flashFromCookie(w, r), IdempotencyKey: importIdempotencyKey(r)}
+	data.App, err = h.client.GetGitHubApp(r.Context(), token)
 	if err != nil {
-		projects, _, _ := h.client.ListProjects(r.Context(), token, org.ID, "")
-		render(w, r, pages.Projects(projects, org, user, nil, err.Error()))
+		data.Error = err.Error()
+		render(w, r, pages.ImportGitRepository(data))
 		return
 	}
-	redirectWithFlash(w, r, "/projects/"+proj.ID, "success", "Project created.")
+	data.Installations, err = h.client.ListGitHubInstallations(r.Context(), token)
+	if err != nil {
+		data.Error = err.Error()
+		render(w, r, pages.ImportGitRepository(data))
+		return
+	}
+	data.SelectedInstallationID = r.URL.Query().Get("installation")
+	data.CurrentRepositoryPageToken = r.URL.Query().Get("repository_page")
+	if data.SelectedInstallationID != "" {
+		if !installationSelectable(data.Installations, data.SelectedInstallationID) {
+			data.Error = "Choose an active GitHub installation."
+			render(w, r, pages.ImportGitRepository(data))
+			return
+		}
+		page, pageErr := h.client.ListGitHubRepositories(r.Context(), token, data.SelectedInstallationID, data.CurrentRepositoryPageToken)
+		data.Repositories, data.RepositoryNextPageToken, err = page.Repositories, page.NextPageToken, pageErr
+		if err != nil {
+			data.Error = err.Error()
+			render(w, r, pages.ImportGitRepository(data))
+			return
+		}
+	}
+	data.SelectedRepositoryID = r.URL.Query().Get("repository")
+	if data.SelectedRepositoryID != "" {
+		repositoryID, parseErr := strconv.ParseInt(data.SelectedRepositoryID, 10, 64)
+		if parseErr != nil || !repositorySelectable(data.Repositories, repositoryID) {
+			data.Error = "Choose a repository discovered through the selected installation."
+			render(w, r, pages.ImportGitRepository(data))
+			return
+		}
+		for _, repository := range data.Repositories {
+			if repository.GitHubRepositoryID == repositoryID {
+				data.SelectedRepository = &repository
+				break
+			}
+		}
+		page, pageErr := h.client.ListGitHubRepositoryWorkflows(r.Context(), token, repositoryID, r.URL.Query().Get("workflow_page"))
+		data.Workflows, data.WorkflowNextPageToken, err = page.Workflows, page.NextPageToken, pageErr
+		if err != nil {
+			data.Error = err.Error()
+		}
+	}
+	render(w, r, pages.ImportGitRepository(data))
+}
+
+func installationSelectable(values []store.GitHubInstallation, id string) bool {
+	for _, value := range values {
+		if value.ID == id && value.AccessState == "active" {
+			return true
+		}
+	}
+	return false
+}
+
+func repositorySelectable(values []store.GitHubRepository, id int64) bool {
+	for _, value := range values {
+		if value.GitHubRepositoryID == id && value.AccessState == "active" && !value.Archived {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) postProjectImport(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	token := ui.TokenFromContext(r.Context())
+	key := r.FormValue("idempotency_key")
+	if !validateImportIdempotencyNonce(key, token, time.Now()) {
+		http.Error(w, "Invalid or expired import form. Reload and try again.", http.StatusForbidden)
+		return
+	}
+	repositoryID, err := strconv.ParseInt(r.FormValue("repository_id"), 10, 64)
+	if err != nil || repositoryID <= 0 {
+		redirectWithFlash(w, r, "/projects/import?form_nonce="+url.QueryEscape(key), "error", "Choose a discovered repository and workflow.")
+		return
+	}
+	appInput := service.AppInput{
+		ContainerPort:          formInt(r, "container_port"),
+		HealthCheckPath:        r.FormValue("health_check_path"),
+		ScalingMode:            "hpa",
+		MinReplicas:            formInt(r, "min_replicas"),
+		MaxReplicas:            formInt(r, "max_replicas"),
+		CPURequestMillicores:   formInt(r, "cpu_request_millicores"),
+		CPULimitMillicores:     formInt(r, "cpu_limit_millicores"),
+		MemoryRequestMiB:       formInt(r, "memory_request_mib"),
+		MemoryLimitMiB:         formInt(r, "memory_limit_mib"),
+		PreviewsEnabled:        r.FormValue("previews_enabled") == "on",
+		MaxPreviewEnvironments: formInt(r, "max_preview_environments"),
+		PreviewIdleTTLHours:    formInt(r, "preview_idle_ttl_hours"),
+		DeployTimeoutSeconds:   formInt(r, "deploy_timeout_seconds"),
+		ReleaseRetentionCount:  formInt(r, "release_retention_count"),
+	}
+	runtimeClass := r.FormValue("runtime_class")
+	if runtimeClass != "" {
+		appInput.RuntimeClass = &runtimeClass
+	}
+	username := []byte(r.FormValue("ghcr_username"))
+	pat := []byte(r.FormValue("ghcr_pat"))
+	defer clear(username)
+	defer clear(pat)
+	var credential *service.GhcrCredentialInput
+	if len(username) > 0 || len(pat) > 0 {
+		credential = &service.GhcrCredentialInput{Username: username, PersonalAccessToken: pat}
+	}
+	operation, err := h.client.ImportGitRepository(r.Context(), token, service.ImportGitRepositoryInput{
+		RepositoryID: repositoryID, WorkflowPath: r.FormValue("github_workflow_path"),
+		ProjectName: r.FormValue("project_name"), ProjectSlug: r.FormValue("project_slug"),
+		ApplicationName: r.FormValue("application_name"), ApplicationSlug: r.FormValue("application_slug"), HostnameLabel: r.FormValue("hostname_label"),
+		ProductionBranch: r.FormValue("production_branch"), ImageRepository: r.FormValue("image_repository"), IdempotencyKey: key,
+		App: appInput, GhcrCredential: credential, PrivateCredentialRequested: credential != nil,
+	})
+	if err != nil {
+		if path := persistedImportRedirect(operation); path != "" {
+			http.Redirect(w, r, path, http.StatusSeeOther)
+			return
+		}
+		redirectWithFlash(w, r, "/projects/import?form_nonce="+url.QueryEscape(key), "error", importErrorMessage(err))
+		return
+	}
+	http.Redirect(w, r, "/imports/"+operation.ID, http.StatusSeeOther)
+}
+
+func persistedImportRedirect(operation store.ImportOperation) string {
+	if operation.ID == "" {
+		return ""
+	}
+	return "/imports/" + operation.ID
+}
+
+func formInt(r *http.Request, name string) int {
+	value, _ := strconv.Atoi(r.FormValue(name))
+	return value
+}
+
+func importErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, service.ErrGitHubInstallationSuspended):
+		return "The selected GitHub installation is suspended. Restore it in GitHub, then refresh access."
+	case errors.Is(err, service.ErrGitHubInstallationRemoved), errors.Is(err, service.ErrGitHubRepositoryRemoved):
+		return "GitHub repository access was removed. Refresh the installation or choose another repository."
+	case errors.Is(err, service.ErrWorkflowIncompatible):
+		return "The selected workflow is no longer compatible. Discover workflows again and choose a compatible workflow."
+	case errors.Is(err, service.ErrRegistryAuthRequired):
+		return "This private image requires the active GHCR credential or a username and PAT classic with read:packages."
+	default:
+		return "Import could not start. Review the discovered repository, workflow, image repository, and runtime settings."
+	}
+}
+
+func (h *Handler) getImportOperation(w http.ResponseWriter, r *http.Request) {
+	h.renderImportOperation(w, r, false)
+}
+
+func (h *Handler) getImportOperationFragment(w http.ResponseWriter, r *http.Request) {
+	h.renderImportOperation(w, r, true)
+}
+
+func (h *Handler) renderImportOperation(w http.ResponseWriter, r *http.Request, fragment bool) {
+	token := ui.TokenFromContext(r.Context())
+	progress, err := h.client.GetImportProgress(r.Context(), token, chi.URLParam(r, "importID"))
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	if fragment {
+		render(w, r, pages.ImportOperationStatus(progress))
+		return
+	}
+	user, org, err := h.pageCtx(r.Context(), token)
+	if err != nil {
+		h.handleErr(w, r, err)
+		return
+	}
+	render(w, r, pages.ImportOperationPage(progress, user, org, flashFromCookie(w, r)))
 }
 
 func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
@@ -448,38 +689,7 @@ func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	render(w, r, pages.ProjectDetail(*proj, apps, user, org, flashFromCookie(w, r), ""))
-}
-
-func (h *Handler) postApp(w http.ResponseWriter, r *http.Request) {
-	token := ui.TokenFromContext(r.Context())
-	user, org, err := h.pageCtx(r.Context(), token)
-	if err != nil {
-		h.handleErr(w, r, err)
-		return
-	}
-	projectID := chi.URLParam(r, "projectID")
-	name := r.FormValue("name")
-	slug := r.FormValue("slug")
-	hostnameLabel := r.FormValue("hostname_label")
-	port := 8080
-	if v := r.FormValue("container_port"); v != "" {
-		if p, e := fmt.Sscanf(v, "%d", &port); e != nil || p != 1 {
-			port = 8080
-		}
-	}
-	input := service.AppInput{Name: name, Slug: slug, HostnameLabel: hostnameLabel, ContainerPort: port, HealthCheckPath: "/", ProjectID: projectID}
-	created, err := h.client.CreateApplication(r.Context(), token, projectID, newIdemKey(), input)
-	if err != nil {
-		proj, _ := h.client.GetProject(r.Context(), token, projectID)
-		apps, _, _ := h.client.ListApplications(r.Context(), token, projectID, "")
-		if proj == nil {
-			proj = &store.Project{ID: projectID}
-		}
-		render(w, r, pages.ProjectDetail(*proj, apps, user, org, nil, err.Error()))
-		return
-	}
-	redirectWithFlash(w, r, "/apps/"+created.ID, "success", "Application created.")
+	render(w, r, pages.ProjectDetail(*proj, apps, user, org, flashFromCookie(w, r)))
 }
 
 func (h *Handler) getApp(w http.ResponseWriter, r *http.Request) {
@@ -576,7 +786,6 @@ func (h *Handler) postAppSettings(w http.ResponseWriter, r *http.Request) {
 	setField("name", r.FormValue("name"))
 	setField("hostname_label", r.FormValue("hostname_label"))
 	setField("health_check_path", r.FormValue("health_check_path"))
-	setField("github_workflow_path", r.FormValue("github_workflow_path"))
 	setField("image_repository", r.FormValue("image_repository"))
 	setField("scaling_mode", r.FormValue("scaling_mode"))
 	for _, key := range []string{"container_port", "min_replicas", "max_replicas", "hpa_target_cpu_percent",
@@ -722,8 +931,91 @@ func (h *Handler) getGitConnections(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	conns, _ := h.client.ListGitConnections(r.Context(), token, org.ID)
-	render(w, r, settingspages.GitConnections(conns, user, org, flashFromCookie(w, r), ""))
+	app, appErr := h.client.GetGitHubApp(r.Context(), token)
+	installations, installErr := h.client.ListGitHubInstallations(r.Context(), token)
+	conns, connectionErr := h.client.ListGitConnections(r.Context(), token, org.ID)
+	errMsg := ""
+	for _, candidate := range []error{appErr, installErr, connectionErr} {
+		if candidate != nil {
+			errMsg = candidate.Error()
+			break
+		}
+	}
+	render(w, r, settingspages.GitConnections(app, installations, conns, user, org, flashFromCookie(w, r), errMsg))
+}
+
+func (h *Handler) postGitHubAppSetup(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	flow, err := h.client.BeginGitHubAppSetup(r.Context(), ui.TokenFromContext(r.Context()), newIdemKey())
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/git-connections", "error", githubSettingsError(err))
+		return
+	}
+	http.Redirect(w, r, flow.StartURL, http.StatusSeeOther)
+}
+
+func (h *Handler) postGitHubInstallation(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	flow, err := h.client.BeginGitHubInstallation(r.Context(), ui.TokenFromContext(r.Context()), newIdemKey())
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/git-connections", "error", githubSettingsError(err))
+		return
+	}
+	http.Redirect(w, r, flow.StartURL, http.StatusSeeOther)
+}
+
+func (h *Handler) postGitHubInstallationRefresh(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	_, err := h.client.RefreshGitHubInstallation(r.Context(), ui.TokenFromContext(r.Context()), newIdemKey(), chi.URLParam(r, "id"))
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/git-connections", "error", githubSettingsError(err))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/git-connections", "success", "GitHub installation access refreshed.")
+}
+
+func (h *Handler) postGitConnectionDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	_, err := h.disconnectGitConnection(r.Context(), ui.TokenFromContext(r.Context()), newIdemKey(), chi.URLParam(r, "id"))
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/git-connections", "error", gitConnectionDisconnectError(err))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/git-connections", "success", "Repository disconnected. Existing workloads and releases were preserved.")
+}
+
+func gitConnectionDisconnectError(err error) string {
+	if errors.Is(err, service.ErrConflict) || errors.Is(err, service.ErrInProgress) || errors.Is(err, store.ErrConflict) {
+		return "An active GitHub request is still finalizing. Wait for it to finish or for its dispatch pin to expire, then retry disconnect."
+	}
+	return "Disconnect failed. Refresh the page and try again."
+}
+
+func githubSettingsError(err error) string {
+	switch {
+	case errors.Is(err, store.ErrAlreadyExists), errors.Is(err, service.ErrInProgress):
+		return "A GitHub setup operation is already in progress. Finish it or wait for it to expire."
+	case errors.Is(err, service.ErrGitHubAppNotConfigured):
+		return "Set up the singleton GitHub App before adding installations."
+	case errors.Is(err, service.ErrGitHubInstallationSuspended):
+		return "The GitHub installation is suspended. Restore it in GitHub, then refresh access."
+	case errors.Is(err, service.ErrGitHubInstallationRemoved):
+		return "The GitHub installation was removed. Install the App again on that owner."
+	default:
+		return "The GitHub operation could not be completed. Review the status and try again."
+	}
 }
 
 func (h *Handler) getRegistries(w http.ResponseWriter, r *http.Request) {
@@ -733,8 +1025,44 @@ func (h *Handler) getRegistries(w http.ResponseWriter, r *http.Request) {
 		h.handleErr(w, r, err)
 		return
 	}
-	regs, _ := h.client.ListRegistries(r.Context(), token, org.ID)
-	render(w, r, settingspages.Registries(regs, user, org, flashFromCookie(w, r), ""))
+	status, statusErr := h.client.GetGhcrCredentialStatus(r.Context(), token)
+	errMsg := ""
+	if statusErr != nil {
+		errMsg = "GHCR credential status is temporarily unavailable. Refresh and retry."
+	}
+	render(w, r, settingspages.Registries(status, user, org, flashFromCookie(w, r), errMsg))
+}
+
+func (h *Handler) postGhcrCredentialRotation(w http.ResponseWriter, r *http.Request) {
+	if !trustedFormOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	username := []byte(r.FormValue("ghcr_username"))
+	pat := []byte(r.FormValue("ghcr_pat"))
+	defer clear(username)
+	defer clear(pat)
+	_, err := h.client.RotateGhcrCredential(r.Context(), ui.TokenFromContext(r.Context()), newIdemKey(), service.GhcrCredentialInput{Username: username, PersonalAccessToken: pat})
+	if err != nil {
+		redirectWithFlash(w, r, "/settings/registries", "error", ghcrRotationError(err))
+		return
+	}
+	redirectWithFlash(w, r, "/settings/registries", "success", "GHCR credential rotation started. Status will update as validation and namespace reconciliation complete.")
+}
+
+func ghcrRotationError(err error) string {
+	switch {
+	case errors.Is(err, service.ErrRegistryAuthRequired):
+		return "Create the first private GHCR credential during repository import before rotating it."
+	case errors.Is(err, service.ErrRegistryCredentialInProgress), errors.Is(err, service.ErrInProgress):
+		return "A GHCR credential operation is already pending. Wait for it to finish, then retry if needed."
+	case errors.Is(err, service.ErrRegistryCredentialRetry):
+		return "The candidate credential could not be stored. Re-enter the username and PAT and retry rotation."
+	case errors.Is(err, service.ErrInvalidArgument):
+		return "Enter both a GitHub username and PAT classic with read:packages."
+	default:
+		return "GHCR credential rotation could not start. Review credential status and retry."
+	}
 }
 
 func (h *Handler) getWebhooks(w http.ResponseWriter, r *http.Request) {

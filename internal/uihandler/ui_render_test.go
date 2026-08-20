@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/observability"
 	"github.com/shepard-labs/cyclopus/internal/avatar"
+	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 	"github.com/shepard-labs/cyclopus/internal/ui"
 	"github.com/shepard-labs/cyclopus/internal/ui/pages"
@@ -75,6 +77,133 @@ func TestEnvironmentStatusHTMXFragmentStopsPollingWhenIdle(t *testing.T) {
 			t.Fatalf("idle fragment retained %s:\n%s", pollingAttribute, body)
 		}
 	}
+}
+
+func TestImportOperationHTMXPollingContract(t *testing.T) {
+	pending := renderComponent(t, context.Background(), pages.ImportOperationStatus(ui.ImportProgress{Operation: store.ImportOperation{ID: "import-1", State: "pending_dispatch"}}))
+	assertContainsAll(t, pending, `id="import-status"`, `hx-get="/imports/import-1/status-fragment"`, `hx-trigger="every 3s"`, `hx-swap="outerHTML"`)
+	completed := renderComponent(t, context.Background(), pages.ImportOperationStatus(ui.ImportProgress{Operation: store.ImportOperation{ID: "import-1", State: "completed"}, Deployment: &store.ImportDeploymentStatus{Status: "completed", DeploymentState: "live"}}))
+	if strings.Contains(completed, "hx-get=") || strings.Contains(completed, "hx-trigger=") {
+		t.Fatalf("terminal import retained polling: %s", completed)
+	}
+}
+
+func TestRefreshedImportForSupersededInitialReleaseStaysCompleted(t *testing.T) {
+	completed := renderComponent(t, context.Background(), pages.ImportOperationStatus(ui.ImportProgress{
+		Operation:  store.ImportOperation{ID: "import-1", State: "completed"},
+		Deployment: &store.ImportDeploymentStatus{Status: "completed", DeploymentState: "live"},
+	}))
+	assertContainsAll(t, completed, "Import and initial production deployment completed.", "completed / live")
+	if strings.Contains(completed, "hx-get=") || strings.Contains(completed, "later environment") {
+		t.Fatalf("refreshed completed import polled or inherited later failure: %s", completed)
+	}
+}
+
+func TestImportGitRepositoryFormUsesDiscoveredIdentitiesAndNoSecretRefs(t *testing.T) {
+	data := pages.ImportGitRepositoryData{App: store.GitHubApp{State: "ready"}, SelectedInstallationID: "installation-1", SelectedRepositoryID: "42",
+		Installations:      []store.GitHubInstallation{{ID: "installation-1", AccountLogin: "acme", AccessState: "active"}},
+		Repositories:       []store.GitHubRepository{{GitHubRepositoryID: 42, FullName: "acme/api", Name: "api", AccessState: "active", DefaultBranch: "main"}},
+		SelectedRepository: &store.GitHubRepository{GitHubRepositoryID: 42, FullName: "acme/api", Name: "api", AccessState: "active", DefaultBranch: "main"},
+		Workflows:          []service.GitHubWorkflow{{Path: ".github/workflows/deploy.yml", Name: "Deploy", Analysis: service.WorkflowAnalysis{Compatible: true}}}}
+	body := renderComponent(t, context.Background(), pages.ImportGitRepository(data))
+	assertContainsAll(t, body, `name="installation"`, `value="installation-1"`, `name="repository"`, `value="42"`, `name="github_workflow_path"`, `name="repository_id" value="42"`, `name="ghcr_pat"`, `name="previews_enabled"`)
+	for _, forbidden := range []string{`name="org_id"`, `name="installation_id"`, `name="repository_full_name"`, `name="workflow_id"`, `name="secret_ref"`, `name="webhook_secret"`, `name="private_key"`} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("import form contains removed field %q", forbidden)
+		}
+	}
+	if strings.Contains(body, `name="previews_enabled" checked`) {
+		t.Fatal("previews checkbox defaults on")
+	}
+}
+
+func TestGitHubAndImportMutationsRejectCrossSiteForms(t *testing.T) {
+	handler := New(nil)
+	for _, path := range []string{"/settings/git-connections/setup", "/settings/git-connections/install", "/settings/git-connections/installations/42/refresh", "/settings/git-connections/connection-1/disconnect", "/settings/registries/ghcr/rotate", "/projects/import"} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.Header.Set("Sec-Fetch-Site", "cross-site")
+		request.AddCookie(&http.Cookie{Name: "cyclopus_session", Value: "session-token"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Errorf("POST %s status = %d, want 403", path, response.Code)
+		}
+	}
+}
+
+func TestImportIdempotencyNonceIsSessionBoundPreservedAndIndependentAcrossTabs(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/projects/import", nil)
+	request.AddCookie(&http.Cookie{Name: "cyclopus_session", Value: "session-one"})
+	request = requestWithUIAuth(request)
+	first := importIdempotencyKey(request)
+	second := importIdempotencyKey(request)
+	if first == second {
+		t.Fatal("concurrent tabs received the same import nonce")
+	}
+	retry := httptest.NewRequest(http.MethodGet, "/projects/import?form_nonce="+url.QueryEscape(first), nil)
+	retry.AddCookie(&http.Cookie{Name: "cyclopus_session", Value: "session-one"})
+	retry = requestWithUIAuth(retry)
+	if got := importIdempotencyKey(retry); got != first {
+		t.Fatalf("retry key = %q, want %q", got, first)
+	}
+	if validateImportIdempotencyNonce(first, "session-two", time.Now()) {
+		t.Fatal("idempotency nonce accepted across sessions")
+	}
+	if validateImportIdempotencyNonce(first, "session-one", time.Now().Add(importFormNonceTTL+time.Second)) {
+		t.Fatal("expired idempotency nonce accepted")
+	}
+}
+
+func TestPersistedFailedImportRedirectsToRescueOperation(t *testing.T) {
+	if got := persistedImportRedirect(store.ImportOperation{ID: "import-failed"}); got != "/imports/import-failed" {
+		t.Fatalf("redirect = %q", got)
+	}
+	if got := persistedImportRedirect(store.ImportOperation{}); got != "" {
+		t.Fatalf("empty operation redirect = %q", got)
+	}
+}
+
+func TestImportPaginationAndIdempotencyFormContracts(t *testing.T) {
+	data := pages.ImportGitRepositoryData{App: store.GitHubApp{State: "ready"}, SelectedInstallationID: "installation-1", SelectedRepositoryID: "42",
+		CurrentRepositoryPageToken: "repository-current", RepositoryNextPageToken: "repository-next", WorkflowNextPageToken: "workflow-next", IdempotencyKey: strings.Repeat("a", 32),
+		Installations:      []store.GitHubInstallation{{ID: "installation-1", AccountLogin: "acme", AccessState: "active"}},
+		Repositories:       []store.GitHubRepository{{GitHubRepositoryID: 42, FullName: "acme/api", Name: "api", AccessState: "active"}},
+		SelectedRepository: &store.GitHubRepository{GitHubRepositoryID: 42, FullName: "acme/api", Name: "api", AccessState: "active"},
+		Workflows:          []service.GitHubWorkflow{{Path: ".github/workflows/deploy.yml", Name: "Deploy", Analysis: service.WorkflowAnalysis{Compatible: true}}}}
+	body := renderComponent(t, t.Context(), pages.ImportGitRepository(data))
+	assertContainsAll(t, body,
+		`name="idempotency_key" value="`+strings.Repeat("a", 32)+`"`,
+		`name="form_nonce" value="`+strings.Repeat("a", 32)+`"`,
+		`repository_page=repository-next`, `workflow_page=workflow-next`, `repository_page=repository-current`,
+		`installation=installation-1`, `repository=42`,
+	)
+}
+
+func TestImportFailureGuidanceCoversPersistedCodes(t *testing.T) {
+	for _, code := range []string{"github_app_not_configured", "github_repository_access_removed", "github_installation_access_removed", "github_installation_suspended", "workflow_incompatible", "registry_auth_required", "registry_credential_exists", "registry_credential_in_progress", "conflict", "failed_precondition", "invalid_argument"} {
+		code := code
+		body := renderComponent(t, t.Context(), pages.ImportOperationStatus(ui.ImportProgress{Operation: store.ImportOperation{ID: "import-1", State: "failed", FailureCode: &code}}))
+		if strings.Contains(body, "The import did not complete. Review Git Connections") {
+			t.Errorf("persisted code %q fell through generic guidance", code)
+		}
+	}
+}
+
+func TestGhcrRotationPageIsSecretSafeAndShowsPendingRecovery(t *testing.T) {
+	code := "image_pull_secret_reconcile_failed"
+	body := renderComponent(t, t.Context(), settingspages.Registries(store.Registry{State: "provisioning", HasActiveCredential: true, HasPendingCredential: true, FailureCode: &code}, store.User{}, store.Organization{}, nil, ""))
+	assertContainsAll(t, body, `action="/settings/registries/ghcr/rotate"`, `name="ghcr_username"`, `name="ghcr_pat"`, `type="password"`, `namespace copies are not ready`, `disabled`)
+	for _, secret := range []string{"sentinel-user", "sentinel-pat", "credential_secret_ref", "k8s-secret://"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("GHCR status page exposed secret material %q", secret)
+		}
+	}
+}
+
+func requestWithUIAuth(request *http.Request) *http.Request {
+	var captured *http.Request
+	ui.AuthMiddleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { captured = r })).ServeHTTP(httptest.NewRecorder(), request)
+	return captured
 }
 
 func TestPageHTMXContracts(t *testing.T) {
@@ -245,49 +374,35 @@ func TestSelectAndFormFieldContracts(t *testing.T) {
 	t.Run("project fields", func(t *testing.T) {
 		body := renderComponent(t, context.Background(), pages.Projects(
 			[]store.Project{{ID: "project-1", Name: "Platform", Slug: "platform-api"}},
-			store.Organization{}, store.User{}, nil, "",
+			store.Organization{}, store.User{}, nil,
 		))
 		assertContainsAll(t, body,
 			`id="project-search" type="search" aria-label="Search projects"`,
-			`command="show-modal" commandfor="create-project-dialog" aria-controls="create-project-dialog"`,
-			`id="create-project-dialog" role="dialog"`,
-			`name="name"`,
-			`name="slug"`,
+			`href="/projects/import"`,
+			`New project`,
 			`data-project-search="Platform platform-api"`,
 			`card.dataset.projectSearch.toLowerCase().indexOf(query) === -1`,
 			`data-project-no-results`,
 		)
 	})
 
-	t.Run("project creation error reopens dialog", func(t *testing.T) {
-		body := renderComponent(t, context.Background(), pages.Projects(nil, store.Organization{}, store.User{}, nil, "create failed"))
-		assertContainsAll(t, body, `create failed`, `document.getElementById('create-project-dialog')`, `dialog.showModal()`)
-	})
-
-	t.Run("application search and creation dialog", func(t *testing.T) {
+	t.Run("application search and GitHub import action", func(t *testing.T) {
 		body := renderComponent(t, context.Background(), pages.ProjectDetail(
 			store.Project{ID: "project-1", Name: "Platform"},
 			[]store.App{{ID: "app-1", Name: "API", Slug: "api-service", HostnameLabel: "api", ContainerPort: 8080}},
-			store.User{}, store.Organization{}, nil, "",
+			store.User{}, store.Organization{}, nil,
 		))
 		assertContainsAll(t, body,
 			`id="application-search" type="search" aria-label="Search applications"`,
-			`command="show-modal" commandfor="create-application-dialog" aria-controls="create-application-dialog"`,
-			`id="create-application-dialog" role="dialog"`,
+			`href="/projects/import"`,
+			`Import repository`,
 			`data-application-search="API api-service api"`,
 			`card.dataset.applicationSearch.toLowerCase().indexOf(query) === -1`,
 			`data-application-no-results`,
-			`name="hostname_label"`,
-			`name="container_port"`,
 		)
-	})
-
-	t.Run("application creation error reopens dialog", func(t *testing.T) {
-		body := renderComponent(t, context.Background(), pages.ProjectDetail(
-			store.Project{ID: "project-1", Name: "Platform"}, nil,
-			store.User{}, store.Organization{}, nil, "create failed",
-		))
-		assertContainsAll(t, body, `create failed`, `document.getElementById('create-application-dialog')`, `dialog.showModal()`)
+		if strings.Contains(body, `/projects/project-1/apps`) || strings.Contains(body, `Create application`) {
+			t.Fatalf("legacy manual application creation surface remains: %s", body)
+		}
 	})
 
 	t.Run("admin metrics page renders nodes and polling container", func(t *testing.T) {

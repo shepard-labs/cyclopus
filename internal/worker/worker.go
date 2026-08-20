@@ -17,11 +17,15 @@ type RecoveryStore interface {
 	RequeueExpiredOrchestrationLeases(context.Context) (int64, error)
 	ListOrchestrationOrgIDs(context.Context) ([]string, error)
 	ListOrchestrationRecoveryOrgIDs(context.Context) ([]string, error)
+	ListOrchestrationCancellationOrgIDs(context.Context) ([]string, error)
 	ClaimOrchestration(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error)
 	ClaimDispatchReconciliation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error)
+	ClaimOrchestrationCancellation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error)
 	RescheduleOrchestration(context.Context, string, string, string, time.Duration) error
 	RescheduleDispatchReconciliation(context.Context, string, string, string, time.Duration) error
 	FailOrchestration(context.Context, store.FailOrchestrationParams) error
+	RescheduleOrchestrationCancellation(context.Context, string, string, string, time.Duration, string) error
+	FailOrchestrationCancellation(context.Context, string, string, string, string) error
 	ListExpiredDeploys(context.Context) ([]store.ExpiredDeploy, error)
 	ClaimExpiredDeployLease(context.Context, string, string) (store.DeployLease, error)
 	RescheduleDeployRecovery(context.Context, store.DeployLease, time.Duration) error
@@ -44,6 +48,7 @@ type RecoveryStore interface {
 type GitHubRecoveryAdapter interface {
 	Dispatch(context.Context, *store.OrchestrationJob) error
 	ReconcileDispatch(context.Context, *store.OrchestrationJob) error
+	Cancel(context.Context, *store.OrchestrationJob) error
 }
 
 type KubernetesRecoveryAdapter interface {
@@ -211,7 +216,11 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 	if err != nil {
 		return fmt.Errorf("scan orchestration recovery: %w", err)
 	}
-	orgIDs := mergeOrgIDs(queuedOrgIDs, recoveryOrgIDs)
+	cancellationOrgIDs, err := r.store.ListOrchestrationCancellationOrgIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("scan orchestration cancellation: %w", err)
+	}
+	orgIDs := mergeOrgIDs(queuedOrgIDs, recoveryOrgIDs, cancellationOrgIDs)
 	resumeDeployOrgIDs, err := r.store.ListForwardDeployOrgIDs(ctx, true)
 	if err != nil {
 		return fmt.Errorf("scan resumable deploys: %w", err)
@@ -389,6 +398,48 @@ func (r *Runner) scan(ctx context.Context, startup bool) error {
 					return handleErr
 				}
 			}
+		}
+	}
+
+	for _, orgID := range cancellationOrgIDs {
+		for {
+			job, err := r.store.ClaimOrchestrationCancellation(ctx, orgID, r.config.Owner, r.config.LeaseDuration)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("claim orchestration cancellation for organization %s: %w", orgID, err)
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, r.config.RequestTimeout)
+			err = r.adapters.GitHub.Cancel(requestCtx, job)
+			cancel()
+			if err == nil {
+				continue
+			}
+			retryable, retryAfter, _, classified := r.adapters.GitHubErrorDisposition(err)
+			if !classified {
+				return fmt.Errorf("GitHub cancellation %s/%s returned unclassified error: %w", job.OrgID, job.ID, err)
+			}
+			if retryable {
+				deadlineExpired := job.CancellationRequestedAt == nil || !time.Now().Before(job.CancellationRequestedAt.Add(store.OrchestrationCancellationDeadline))
+				if job.CancellationAttempts >= store.OrchestrationCancellationMaxAttempts || deadlineExpired {
+					if storeErr := r.store.FailOrchestrationCancellation(ctx, job.OrgID, job.ID, r.config.Owner, err.Error()); storeErr != nil {
+						return fmt.Errorf("terminalize exhausted GitHub cancellation %s/%s: %w", job.OrgID, job.ID, storeErr)
+					}
+					r.logger.Error("GitHub run cancellation exhausted", "org_id", job.OrgID, "job_id", job.ID, "code", "github_run_cancel_failed")
+					continue
+				}
+				delay := retryDelay(job.CancellationAttempts, retryAfter, r.config.LeaseDuration)
+				if storeErr := r.store.RescheduleOrchestrationCancellation(ctx, job.OrgID, job.ID, r.config.Owner, delay, err.Error()); storeErr != nil {
+					return fmt.Errorf("reschedule GitHub cancellation %s/%s: %w", job.OrgID, job.ID, storeErr)
+				}
+				r.logger.Warn("GitHub run cancellation rescheduled", "org_id", job.OrgID, "job_id", job.ID, "delay", delay)
+				continue
+			}
+			if storeErr := r.store.FailOrchestrationCancellation(ctx, job.OrgID, job.ID, r.config.Owner, err.Error()); storeErr != nil {
+				return fmt.Errorf("terminalize GitHub cancellation %s/%s: %w", job.OrgID, job.ID, storeErr)
+			}
+			r.logger.Error("GitHub run cancellation failed", "org_id", job.OrgID, "job_id", job.ID, "code", "github_run_cancel_failed")
 		}
 	}
 

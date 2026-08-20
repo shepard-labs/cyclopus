@@ -1,0 +1,147 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/shepard-labs/cyclopus/internal/service"
+	"github.com/shepard-labs/cyclopus/internal/store"
+	"github.com/shepard-labs/cyclopus/internal/ui"
+	"github.com/shepard-labs/cyclopus/internal/ui/components"
+)
+
+type ImportGitRepositoryData struct {
+	App store.GitHubApp
+	Installations []store.GitHubInstallation
+	Repositories []store.GitHubRepository
+	Workflows []service.GitHubWorkflow
+	SelectedInstallationID string
+	SelectedRepositoryID string
+	SelectedRepository *store.GitHubRepository
+	RepositoryNextPageToken string
+	WorkflowNextPageToken string
+	CurrentRepositoryPageToken string
+	IdempotencyKey string
+	User store.User
+	Org store.Organization
+	Flash *ui.FlashMessage
+	Error string
+}
+
+templ ImportGitRepository(data ImportGitRepositoryData) {
+	@components.Page("Import Git Repository", data.User, data.Org, data.Flash, "/projects", importGitRepositoryContent(data))
+}
+
+templ importGitRepositoryContent(data ImportGitRepositoryData) {
+	<div class="mx-auto w-full max-w-4xl space-y-6">
+		<div>
+			<a href="/projects" class="text-xs text-base-content/55 hover:text-base-content">← Projects</a>
+			<h1 class="mt-2 text-lg/7 font-medium">Import Git Repository</h1>
+			<p class="mt-1 text-sm text-base-content/65">Choose only GitHub-discovered identities. Cyclopus revalidates access and workflow compatibility before creating resources.</p>
+		</div>
+		if data.Error != "" {
+			@components.Alert("error", data.Error)
+		}
+		if data.App.State != "ready" {
+			@components.SectionCard("Connect GitHub") {
+				<p class="text-sm text-base-content/65">The singleton GitHub App must be ready before repositories can be imported.</p>
+				<a href="/settings/git-connections" class="mt-4 inline-flex rounded-field bg-primary px-4 py-2 text-sm font-medium text-primary-content">Open Git Connections</a>
+			}
+		} else {
+			@components.SectionCard("1. Installation and repository") {
+				<form method="GET" action="/projects/import" class="grid gap-4 md:grid-cols-2">
+					<input type="hidden" name="form_nonce" value={ data.IdempotencyKey }/>
+					<input type="hidden" name="repository_page" value={ data.CurrentRepositoryPageToken }/>
+					<div class="flex flex-col gap-1.5">
+						<label for="import-installation" class="text-xs font-medium">GitHub installation</label>
+						<select id="import-installation" name="installation" required class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm" onchange="this.form.elements.repository_page.value='';this.form.submit()">
+							<option value="">Choose an active installation</option>
+							for _, installation := range data.Installations {
+								if installation.AccessState == "active" {
+									<option value={ installation.ID } selected?={ installation.ID == data.SelectedInstallationID }>{ installation.AccountLogin } · { installation.RepositorySelection }</option>
+								}
+							}
+						</select>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<label for="import-repository" class="text-xs font-medium">Repository</label>
+						<select id="import-repository" name="repository" required disabled?={ data.SelectedInstallationID == "" } class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm" onchange="this.form.submit()">
+							<option value="">Choose a discovered repository</option>
+							for _, repository := range data.Repositories {
+								if repository.AccessState == "active" && !repository.Archived {
+									<option value={ fmt.Sprint(repository.GitHubRepositoryID) } selected?={ fmt.Sprint(repository.GitHubRepositoryID) == data.SelectedRepositoryID }>{ repository.FullName } ({ repository.Visibility })</option>
+								}
+							}
+						</select>
+					</div>
+				</form>
+				if data.RepositoryNextPageToken != "" {
+					<a href={ templ.SafeURL("/projects/import?installation=" + data.SelectedInstallationID + "&repository_page=" + data.RepositoryNextPageToken + "&form_nonce=" + data.IdempotencyKey) } class="mt-4 inline-flex rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Next repository page</a>
+				}
+			}
+			if data.SelectedRepository != nil {
+				<form method="POST" action="/projects/import" class="space-y-6">
+					<input type="hidden" name="repository_id" value={ data.SelectedRepositoryID }/>
+					<input type="hidden" name="idempotency_key" value={ data.IdempotencyKey }/>
+					@components.SectionCard("2. Compatible workflow") {
+						<div class="space-y-3">
+							for _, workflow := range data.Workflows {
+								<label class="block rounded-box border border-line bg-base-300 p-4">
+									<div class="flex items-start gap-3">
+										<input type="radio" name="github_workflow_path" value={ workflow.Path } required disabled?={ !workflow.Analysis.Compatible } class="mt-1"/>
+										<div class="min-w-0">
+											<div class="text-sm font-medium">{ workflow.Name }</div>
+											<div class="break-all text-xs text-base-content/50">{ workflow.Path }</div>
+										if workflow.Analysis.Compatible {
+											<div class="mt-1 text-xs text-success">Compatible</div>
+										} else {
+											<div class="mt-1 text-xs text-warning">Incompatible: { strings.Join(workflow.Analysis.Reasons, ", ") }</div>
+										}
+										</div>
+									</div>
+								</label>
+							}
+						</div>
+						if data.WorkflowNextPageToken != "" {
+							<a href={ templ.SafeURL("/projects/import?installation=" + data.SelectedInstallationID + "&repository=" + data.SelectedRepositoryID + "&repository_page=" + data.CurrentRepositoryPageToken + "&workflow_page=" + data.WorkflowNextPageToken + "&form_nonce=" + data.IdempotencyKey) } class="mt-4 inline-flex rounded-field border border-line bg-base-300 px-4 py-2 text-sm font-medium">Next workflow page</a>
+						}
+					}
+					@components.SectionCard("3. Project and deployment") {
+						<div class="grid gap-4 md:grid-cols-2">
+							@components.FormField("import-project-name", "project_name", "Project name", "text", data.SelectedRepository.Name, "API", true)
+							@components.FormField("import-project-slug", "project_slug", "Project slug", "text", "", "api", true)
+							@components.FormField("import-app-name", "application_name", "Application name", "text", data.SelectedRepository.Name, "API", true)
+							@components.FormField("import-app-slug", "application_slug", "Application slug", "text", "", "api", true)
+							@components.FormField("import-hostname", "hostname_label", "Hostname label", "text", "", "api", true)
+							@components.FormField("import-branch", "production_branch", "Production branch (optional)", "text", "", data.SelectedRepository.DefaultBranch, false)
+							<div class="md:col-span-2">@components.FormField("import-image", "image_repository", "GHCR image repository", "text", "", "ghcr.io/acme/api", true)</div>
+						</div>
+						<p class="mt-3 text-xs text-base-content/55">Use a canonical, tagless <code>ghcr.io/owner/image</code> repository. Blank branch defaults to main, then master, then GitHub's default branch.</p>
+					}
+					@components.SectionCard("4. Runtime") {
+						<div class="grid gap-4 md:grid-cols-3">
+							@components.FormField("import-port", "container_port", "Container port", "number", "8080", "8080", false)
+							@components.FormField("import-health", "health_check_path", "Health check path", "text", "/", "/", false)
+							<div class="flex flex-col gap-1.5"><label for="import-runtime" class="text-xs font-medium">Runtime class</label><select id="import-runtime" name="runtime_class" class="rounded-field border border-line bg-base-300 px-3 py-2 text-sm"><option value="gvisor">gVisor</option><option value="runc">runc</option></select></div>
+							@components.FormField("import-min", "min_replicas", "Minimum replicas", "number", "1", "1", false)
+							@components.FormField("import-max", "max_replicas", "Maximum replicas", "number", "3", "3", false)
+							@components.FormField("import-cpu-request", "cpu_request_millicores", "CPU request (m)", "number", "100", "100", false)
+							@components.FormField("import-cpu-limit", "cpu_limit_millicores", "CPU limit (m)", "number", "1000", "1000", false)
+							@components.FormField("import-memory-request", "memory_request_mib", "Memory request (MiB)", "number", "128", "128", false)
+							@components.FormField("import-memory-limit", "memory_limit_mib", "Memory limit (MiB)", "number", "512", "512", false)
+						</div>
+						<label class="mt-4 flex items-center gap-2 text-sm"><input type="checkbox" name="previews_enabled"/> Enable preview environments</label>
+						<input type="hidden" name="max_preview_environments" value="10"/><input type="hidden" name="preview_idle_ttl_hours" value="168"/><input type="hidden" name="deploy_timeout_seconds" value="600"/><input type="hidden" name="release_retention_count" value="5"/>
+					}
+					@components.SectionCard("5. Private GHCR (optional)") {
+						<p class="mb-4 text-sm text-base-content/65">For private packages, enter a GitHub username and PAT classic with <code>read:packages</code>. Cyclopus supports one active credential; later replacement uses credential rotation.</p>
+						<div class="grid gap-4 md:grid-cols-2">
+							@components.FormField("import-ghcr-user", "ghcr_username", "GHCR username", "text", "", "octocat", false)
+							@components.FormField("import-ghcr-pat", "ghcr_pat", "PAT classic", "password", "", "ghp_…", false)
+						</div>
+					}
+					<div class="flex justify-end"><button type="submit" class="rounded-field bg-primary px-5 py-2 text-sm font-medium text-primary-content">Import and deploy</button></div>
+				</form>
+			}
+		}
+	</div>
+}

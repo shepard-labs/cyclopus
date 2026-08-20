@@ -221,6 +221,7 @@ func (*fakeGitHubAdapter) Dispatch(context.Context, *store.OrchestrationJob) err
 func (*fakeGitHubAdapter) ReconcileDispatch(context.Context, *store.OrchestrationJob) error {
 	return nil
 }
+func (*fakeGitHubAdapter) Cancel(context.Context, *store.OrchestrationJob) error { return nil }
 
 type fakeKubernetesAdapter struct{}
 
@@ -261,6 +262,10 @@ func (a *countingGitHubAdapter) Dispatch(context.Context, *store.OrchestrationJo
 }
 
 func (a *countingGitHubAdapter) ReconcileDispatch(context.Context, *store.OrchestrationJob) error {
+	a.calls++
+	return nil
+}
+func (a *countingGitHubAdapter) Cancel(context.Context, *store.OrchestrationJob) error {
 	a.calls++
 	return nil
 }
@@ -338,6 +343,18 @@ func (s *startupRecoveryStore) ListOrchestrationRecoveryOrgIDs(context.Context) 
 
 func (*startupRecoveryStore) ListOrchestrationOrgIDs(context.Context) ([]string, error) {
 	return nil, nil
+}
+func (*startupRecoveryStore) ListOrchestrationCancellationOrgIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (*startupRecoveryStore) ClaimOrchestrationCancellation(context.Context, string, string, time.Duration) (*store.OrchestrationJob, error) {
+	return nil, store.ErrNotFound
+}
+func (*startupRecoveryStore) RescheduleOrchestrationCancellation(context.Context, string, string, string, time.Duration, string) error {
+	return nil
+}
+func (*startupRecoveryStore) FailOrchestrationCancellation(context.Context, string, string, string, string) error {
+	return nil
 }
 func (*startupRecoveryStore) ListWebhookOrgIDs(context.Context) ([]string, error) {
 	return nil, nil

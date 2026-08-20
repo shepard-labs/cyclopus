@@ -39,6 +39,33 @@ type ImageResolutionEvidence struct {
 	Lease                                           *LeaseToken
 }
 
+type ImportDeploymentStatus struct {
+	JobID, Status, DeploymentState, OCIResolutionState string
+	ImmutableImageRef                                  *string
+	TerminalErrorCode, TerminalErrorMessage            *string
+}
+
+func (s *Store) GetImportDeploymentStatus(ctx context.Context, orgID, jobID string) (ImportDeploymentStatus, error) {
+	var value ImportDeploymentStatus
+	err := s.db.QueryRow(ctx, `SELECT job.id::text,
+		CASE WHEN release.status IN ('live','superseded') THEN 'completed'
+			WHEN release.status='failed' OR environment.lifecycle_status='failed' THEN 'failed' ELSE job.status END,
+		CASE WHEN release.status IN ('live','superseded') THEN 'live'
+			WHEN release.status='failed' OR environment.lifecycle_status='failed' THEN 'failed' ELSE job.deployment_state END,
+		job.oci_resolution_state,job.immutable_image_ref,
+		CASE WHEN release.status IN ('live','superseded') THEN NULL
+			ELSE COALESCE(job.terminal_error_code,CASE WHEN release.status='failed' THEN 'deployment_failed' ELSE environment.lifecycle_error_code END) END,
+		CASE WHEN release.status IN ('live','superseded') THEN NULL
+			ELSE COALESCE(job.terminal_error_message,release.failure_reason,environment.lifecycle_error_message) END
+		FROM orchestration_jobs job
+		JOIN environments environment ON environment.org_id=job.org_id AND environment.id=job.environment_id
+		LEFT JOIN releases release ON release.org_id=job.org_id AND release.environment_id=job.environment_id AND release.id=job.release_id
+		WHERE job.org_id=$1 AND job.id=$2`, orgID, jobID).Scan(
+		&value.JobID, &value.Status, &value.DeploymentState, &value.OCIResolutionState, &value.ImmutableImageRef,
+		&value.TerminalErrorCode, &value.TerminalErrorMessage)
+	return value, resourceQueryError("get import deployment status", err)
+}
+
 type ImageResolutionClaim struct {
 	Job                          OrchestrationJob
 	App                          App

@@ -14,6 +14,8 @@ import (
 const (
 	orchestrationDispatchObservationDeadline = 5 * time.Minute
 	orchestrationRunDeadline                 = 45 * time.Minute
+	OrchestrationCancellationDeadline        = 15 * time.Minute
+	OrchestrationCancellationMaxAttempts     = 12
 )
 
 type OrchestrationJob struct {
@@ -28,6 +30,12 @@ type OrchestrationJob struct {
 	LeaseExpiresAt, DispatchRequestedAt, DispatchDeadlineAt, RunDeadlineAt                *time.Time
 	GitHubRunID                                                                           *int64
 	ReconciliationLeaseEnd                                                                *time.Time
+	DispatchCallAuthorizedAt, DispatchCallExpiresAt                                       *time.Time
+	CancellationRequestedAt                                                               *time.Time
+	DispatchCallOwner, CancellationState                                                  string
+	CancellationAttempts                                                                  int
+	CancellationNextAttemptAt                                                             time.Time
+	CancellationErrorCode, CancellationErrorMessage                                       *string
 	InstallationID                                                                        int64
 	RepositoryFullName                                                                    string
 	Attempt                                                                               int
@@ -64,6 +72,27 @@ func (s *Store) ListOrchestrationRecoveryOrgIDs(ctx context.Context) ([]string, 
 	return s.listOrchestrationOrgIDs(ctx, `status IN ('dispatch_reconciling','dispatched') AND
 		(reconciliation_lease_expires_at IS NULL OR reconciliation_lease_expires_at<=now()) AND
 		(reconcile_after<=now() OR dispatch_deadline_at<=now() OR run_deadline_at<=now())`)
+}
+
+func (s *Store) ListOrchestrationCancellationOrgIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT org_id::text FROM orchestration_jobs
+		WHERE status='cancelled' AND cancellation_state IN ('requested','failed')
+		AND (cancellation_next_attempt_at<=now() OR cancellation_requested_at+make_interval(secs=>$1)<=now())
+		AND (github_run_id IS NOT NULL OR dispatch_call_authorized_at IS NOT NULL OR dispatch_requested_at IS NOT NULL)
+		ORDER BY org_id::text`, OrchestrationCancellationDeadline.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var values []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 func (s *Store) ListOrchestrationOrgIDs(ctx context.Context) ([]string, error) {
@@ -209,7 +238,9 @@ func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDu
 		dispatch_deadline_at=NULL,run_deadline_at=NULL,reconciliation_owner=NULL,reconciliation_lease_expires_at=NULL,
 		github_dispatch_identity=NULL,github_run_id=NULL,github_run_head_sha=NULL,github_run_status=NULL,
 		github_run_conclusion=NULL,github_status_observed_at=NULL,cancellation_state='not_requested',
-		cancellation_requested_at=NULL,superseded_by_job_id=NULL,superseded_at=NULL,oci_resolution_state='pending',
+		cancellation_requested_at=NULL,cancellation_attempts=0,cancellation_next_attempt_at=now(),cancellation_error_code=NULL,
+		cancellation_error_message=NULL,dispatch_call_authorized_at=NULL,dispatch_call_owner=NULL,dispatch_call_expires_at=NULL,
+		superseded_by_job_id=NULL,superseded_at=NULL,oci_resolution_state='pending',
 		image_tag_ref=NULL,resolved_image_digest=NULL,immutable_image_ref=NULL,oci_media_type=NULL,oci_resolved_at=NULL,
 		deployment_state='not_started',deployment_claim_owner=NULL,deployment_claim_expires_at=NULL,release_id=NULL,
 		terminal_error_code=NULL,terminal_error_message=NULL,terminal_at=NULL,attempt=attempt+1`
@@ -218,6 +249,9 @@ func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDu
 		assignment = `reconciliation_owner=$2,reconciliation_lease_expires_at=now()+make_interval(secs=>$3)`
 	}
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1380270412))`, orgID); err != nil {
+			return fmt.Errorf("lock orchestration claim boundary: %w", err)
+		}
 		row := tx.QueryRow(ctx, `WITH candidate AS (
 			SELECT job.id,repository.github_installation_id,repository.full_name
 			FROM orchestration_jobs job
@@ -225,9 +259,12 @@ func (s *Store) claimGitHubJob(ctx context.Context, orgID, owner string, leaseDu
 			JOIN github_installations installation ON installation.org_id=repository.org_id AND installation.github_installation_id=repository.github_installation_id
 			JOIN environments environment ON environment.org_id=job.org_id AND environment.id=job.environment_id
 			JOIN apps app ON app.org_id=job.org_id AND app.id=job.app_id
+			JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
+			JOIN git_connections connection ON connection.org_id=project.org_id AND connection.id=project.git_connection_id
 				WHERE job.org_id=$1 AND (`+statusPredicate+`) AND environment.torn_down_at IS NULL
 				AND environment.lifecycle_status NOT IN ('policy_blocked','teardown_requested','torn_down','failed')
-				AND app.deleted_at IS NULL AND repository.access_state='active' AND installation.access_state='active'
+				AND app.deleted_at IS NULL AND project.deleted_at IS NULL AND connection.state='active' AND connection.access_state='active'
+				AND repository.access_state='active' AND installation.access_state='active'
 				AND (job.desired_generation=environment.desired_generation OR job.pending_desired_generation=environment.desired_generation)
 			ORDER BY job.created_at,job.id FOR UPDATE OF job SKIP LOCKED LIMIT 1)
 			UPDATE orchestration_jobs job SET `+assignment+`,updated_at=now() FROM candidate WHERE job.id=candidate.id
@@ -282,6 +319,136 @@ func (s *Store) BeginDispatchReconciliation(ctx context.Context, orgID, jobID, o
 		AND $4 ~ '^[0-9a-f]{40}$' AND $5 ~ '^\.github/workflows/[^/[:space:]]+\.(yml|yaml)$'
 		AND $6 ~ '^[0-9a-f]{40}$'`, orgID, jobID, owner, observedRefSHA, workflowPath, workflowRevision,
 		reconcileDelay.Seconds(), orchestrationDispatchObservationDeadline.Seconds())
+	if err != nil {
+		return err
+	}
+	return rowsAffected(command, ErrLeaseNotOwned)
+}
+
+func (s *Store) AuthorizeWorkflowDispatch(ctx context.Context, orgID, jobID, owner string, callDuration time.Duration) error {
+	if err := requirePositiveDuration("workflow dispatch call duration", callDuration); err != nil {
+		return err
+	}
+	var command pgconn.CommandTag
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1380270412))`, orgID); err != nil {
+			return fmt.Errorf("lock workflow dispatch boundary: %w", err)
+		}
+		var err error
+		command, err = tx.Exec(ctx, `UPDATE orchestration_jobs job SET dispatch_call_authorized_at=now(),
+		dispatch_call_owner=$3,dispatch_call_expires_at=now()+make_interval(secs=>$4),updated_at=now()
+		FROM apps app,projects project,git_connections connection,github_repositories repository,github_installations installation
+		WHERE job.org_id=$1 AND job.id=$2 AND job.status='dispatch_reconciling' AND job.github_run_id IS NULL
+		AND app.org_id=job.org_id AND app.id=job.app_id AND app.deleted_at IS NULL
+		AND project.org_id=app.org_id AND project.id=app.project_id AND project.deleted_at IS NULL
+		AND connection.org_id=project.org_id AND connection.id=project.git_connection_id
+		AND connection.state='active' AND connection.access_state='active'
+		AND repository.org_id=connection.org_id AND repository.github_repository_id=connection.github_repository_id
+		AND repository.github_repository_id=job.github_repository_id AND repository.access_state='active' AND NOT repository.archived
+		AND installation.org_id=repository.org_id AND installation.github_installation_id=repository.github_installation_id
+		AND installation.access_state='active'`, orgID, jobID, owner, callDuration.Seconds())
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return rowsAffected(command, ErrLeaseNotOwned)
+}
+
+func (s *Store) FinalizeWorkflowDispatch(ctx context.Context, orgID, jobID, owner string) error {
+	command, err := s.db.Exec(ctx, `UPDATE orchestration_jobs SET dispatch_call_authorized_at=NULL,
+		dispatch_call_owner=NULL,dispatch_call_expires_at=NULL,updated_at=now() WHERE org_id=$1 AND id=$2
+		AND dispatch_call_owner=$3`, orgID, jobID, owner)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(command, ErrLeaseNotOwned)
+}
+
+func (s *Store) ClaimOrchestrationCancellation(ctx context.Context, orgID, owner string, leaseDuration time.Duration) (*OrchestrationJob, error) {
+	if err := requirePositiveDuration("orchestration cancellation lease duration", leaseDuration); err != nil {
+		return nil, err
+	}
+	var job OrchestrationJob
+	err := s.db.QueryRow(ctx, `WITH exhausted AS (
+		UPDATE orchestration_jobs SET cancellation_state='failed',cancellation_next_attempt_at='infinity',
+		cancellation_error_code='github_run_cancel_failed',
+		cancellation_error_message=CASE WHEN cancellation_attempts>=$4 THEN 'GitHub run cancellation attempts exhausted'
+			ELSE 'GitHub run cancellation deadline expired' END,reconciliation_owner=NULL,
+		reconciliation_lease_expires_at=NULL,updated_at=now()
+		WHERE org_id=$1 AND status='cancelled' AND cancellation_state IN ('requested','failed')
+		AND (cancellation_next_attempt_at<=now() OR cancellation_requested_at+make_interval(secs=>$5)<=now()) AND (cancellation_attempts>=$4
+			OR cancellation_requested_at+make_interval(secs=>$5)<=now())
+		AND (reconciliation_lease_expires_at IS NULL OR reconciliation_lease_expires_at<=now())
+	), candidate AS (
+		SELECT job.id,repository.github_installation_id,repository.full_name FROM orchestration_jobs job
+		JOIN github_repositories repository ON repository.org_id=job.org_id AND repository.github_repository_id=job.github_repository_id
+		WHERE job.org_id=$1 AND job.status='cancelled' AND job.cancellation_state IN ('requested','failed')
+		AND (job.cancellation_next_attempt_at<=now() OR job.cancellation_requested_at+make_interval(secs=>$5)<=now()) AND job.cancellation_attempts<$4
+		AND job.cancellation_requested_at+make_interval(secs=>$5)>now()
+		AND (job.github_run_id IS NOT NULL OR job.dispatch_call_authorized_at IS NOT NULL OR job.dispatch_requested_at IS NOT NULL)
+		AND (job.reconciliation_lease_expires_at IS NULL OR job.reconciliation_lease_expires_at<=now())
+		ORDER BY job.cancellation_next_attempt_at,job.created_at,job.id FOR UPDATE OF job SKIP LOCKED LIMIT 1)
+		UPDATE orchestration_jobs job SET reconciliation_owner=$2,reconciliation_lease_expires_at=now()+make_interval(secs=>$3),
+		cancellation_attempts=cancellation_attempts+1,updated_at=now() FROM candidate WHERE job.id=candidate.id
+		RETURNING job.id::text,job.org_id::text,job.idempotency_key,job.github_repository_id::text,
+		job.github_workflow_path,job.workflow_revision,job.dispatch_ref,job.app_id::text,job.environment_id::text,
+		job.desired_checkout_sha,job.desired_generation,job.status,job.dispatch_requested_at,
+		COALESCE(job.dispatch_ref_observed_sha,''),job.dispatch_deadline_at,job.github_run_id,
+		candidate.github_installation_id,candidate.full_name,job.attempt,job.dispatch_call_authorized_at,
+		COALESCE(job.dispatch_call_owner,''),job.dispatch_call_expires_at,job.cancellation_state,job.cancellation_attempts,
+		job.cancellation_requested_at,job.cancellation_next_attempt_at,job.cancellation_error_code,job.cancellation_error_message`,
+		orgID, owner, leaseDuration.Seconds(), OrchestrationCancellationMaxAttempts, OrchestrationCancellationDeadline.Seconds()).Scan(
+		&job.ID, &job.OrgID, &job.IdempotencyKey, &job.RepositoryID, &job.WorkflowID, &job.WorkflowRevision,
+		&job.GitRef, &job.AppID, &job.EnvironmentID, &job.CommitSHA, &job.DesiredGeneration, &job.Status,
+		&job.DispatchRequestedAt, &job.DispatchRefObservedSHA, &job.DispatchDeadlineAt, &job.GitHubRunID,
+		&job.InstallationID, &job.RepositoryFullName, &job.Attempt, &job.DispatchCallAuthorizedAt,
+		&job.DispatchCallOwner, &job.DispatchCallExpiresAt, &job.CancellationState, &job.CancellationAttempts,
+		&job.CancellationRequestedAt, &job.CancellationNextAttemptAt, &job.CancellationErrorCode, &job.CancellationErrorMessage)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &job, err
+}
+
+func (s *Store) RecordOrchestrationCancellation(ctx context.Context, orgID, jobID, owner, outcome string, runID int64, runStatus, runHeadSHA string) error {
+	if outcome != "accepted" && outcome != "not_supported" && outcome != "no_run_observed" {
+		return fmt.Errorf("%w: invalid cancellation outcome", ErrInvalidArgument)
+	}
+	command, err := s.db.Exec(ctx, `UPDATE orchestration_jobs SET cancellation_state=$4,
+		github_run_id=COALESCE(github_run_id,NULLIF($5,0)),github_run_status=COALESCE(NULLIF($6,''),github_run_status),
+		github_run_head_sha=COALESCE(NULLIF($7,''),github_run_head_sha),cancellation_error_code=NULL,
+		cancellation_error_message=NULL,cancellation_next_attempt_at='infinity',reconciliation_owner=NULL,
+		reconciliation_lease_expires_at=NULL,updated_at=now()
+		WHERE org_id=$1 AND id=$2 AND status='cancelled' AND reconciliation_owner=$3
+		AND reconciliation_lease_expires_at>now()`, orgID, jobID, owner, outcome, runID, runStatus, runHeadSHA)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(command, ErrLeaseNotOwned)
+}
+
+func (s *Store) RescheduleOrchestrationCancellation(ctx context.Context, orgID, jobID, owner string, delay time.Duration, message string) error {
+	if err := requirePositiveDuration("orchestration cancellation retry delay", delay); err != nil {
+		return err
+	}
+	command, err := s.db.Exec(ctx, `UPDATE orchestration_jobs SET cancellation_state='failed',
+		cancellation_next_attempt_at=now()+make_interval(secs=>$4),cancellation_error_code='github_run_cancel_failed',
+		cancellation_error_message=left($5,8192),reconciliation_owner=NULL,reconciliation_lease_expires_at=NULL,updated_at=now()
+		WHERE org_id=$1 AND id=$2 AND status='cancelled' AND reconciliation_owner=$3
+		AND reconciliation_lease_expires_at>now()`, orgID, jobID, owner, delay.Seconds(), message)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(command, ErrLeaseNotOwned)
+}
+
+func (s *Store) FailOrchestrationCancellation(ctx context.Context, orgID, jobID, owner, message string) error {
+	command, err := s.db.Exec(ctx, `UPDATE orchestration_jobs SET cancellation_state='failed',
+		cancellation_next_attempt_at='infinity',cancellation_error_code='github_run_cancel_failed',
+		cancellation_error_message=left($4,8192),reconciliation_owner=NULL,reconciliation_lease_expires_at=NULL,updated_at=now()
+		WHERE org_id=$1 AND id=$2 AND status='cancelled' AND reconciliation_owner=$3
+		AND reconciliation_lease_expires_at>now()`, orgID, jobID, owner, message)
 	if err != nil {
 		return err
 	}

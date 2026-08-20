@@ -416,7 +416,7 @@ func (s *Service) ImportGitRepository(ctx context.Context, actor ActorContext, i
 			case errors.Is(err, ErrRegistryCredentialExists):
 				return fail("registry_credential_exists", ErrRegistryCredentialExists)
 			case errors.Is(err, ErrInProgress), errors.Is(err, ErrRegistryCredentialInProgress):
-				return store.ImportOperation{}, ErrInProgress
+				return fail("registry_credential_in_progress", ErrRegistryCredentialInProgress)
 			case errors.Is(err, ErrRegistryCredentialRetry), errors.Is(err, ErrConflict):
 				return store.ImportOperation{}, err
 			default:
@@ -518,7 +518,7 @@ func sanitizedImportInput(input ImportGitRepositoryInput) ImportGitRepositoryInp
 // text for the credential-flow failures; every other failure uses its cause.
 func credentialFailureMessage(code string) string {
 	switch code {
-	case "registry_auth_required", "registry_credential_exists":
+	case "registry_auth_required", "registry_credential_exists", "registry_credential_in_progress":
 		return code
 	}
 	return ""
@@ -625,6 +625,14 @@ func (s *Service) GetImportOperation(ctx context.Context, actor ActorContext, id
 		return store.ImportOperation{}, err
 	}
 	value, err := s.store.GetImportOperation(ctx, actor.OrgID, id)
+	return value, mapError(err)
+}
+
+func (s *Service) GetImportDeploymentStatus(ctx context.Context, actor ActorContext, jobID string) (store.ImportDeploymentStatus, error) {
+	if err := requireAdministrator(actor); err != nil {
+		return store.ImportDeploymentStatus{}, err
+	}
+	value, err := s.store.GetImportDeploymentStatus(ctx, actor.OrgID, jobID)
 	return value, mapError(err)
 }
 func (s *Service) GetGhcrCredentialStatus(ctx context.Context, actor ActorContext) (store.Registry, error) {
