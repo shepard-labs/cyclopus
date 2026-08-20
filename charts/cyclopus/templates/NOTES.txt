@@ -8,6 +8,13 @@ Check readiness:
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "cyclopus.fullname" . }}
   kubectl -n {{ .Release.Namespace }} get svc {{ include "cyclopus.fullname" . }}
 
+Phase 6 OCI/credential reconciliation is {{ ternary "enabled" "disabled" .Values.config.phase6.enabled }}.
+{{- if .Values.config.phase6.enabled }}
+The Secret {{ include "cyclopus.secretName" . }} must contain
+PHASE6_CREDENTIAL_FINGERPRINT_KEY with at least 32 bytes. The key is injected
+directly from the Secret and is never rendered in the Cyclopus ConfigMap.
+{{- end }}
+
 GitHub App webhook routing:
 {{- if .Values.ingress.enabled }}
   URL: https://{{ .Values.ingress.host }}/webhooks/github

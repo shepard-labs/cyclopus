@@ -77,26 +77,6 @@ func TestRunRejectsGitHubRequestTimeoutAtConsumerLeaseBoundaryBeforeStartup(t *t
 	}
 }
 
-func TestProductionMainDefersRegistryCredentialRuntimeWiring(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test source path")
-	}
-	contents, err := os.ReadFile(filepath.Join(filepath.Dir(file), "main.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(contents)
-	for _, forbidden := range []string{"NewRegistryCredentialServiceFromStore", "WithRegistryCredentials("} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("production main prematurely wires registry credentials through %q", forbidden)
-		}
-	}
-	if !strings.Contains(source, "Phase 6 runtime wiring occurs with validation/recovery workers.") {
-		t.Fatal("production enablement boundary comment is missing")
-	}
-}
-
 func TestNewGitHubWebhookPayloadCodecUsesConfiguredKeyring(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keyring.json")
 	if err := os.WriteFile(path, []byte(`{"active_version":"k2","keys":{"k1":"MDEyMzQ1Njc4OWFiY2RlZg==","k2":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}}`), 0o600); err != nil {

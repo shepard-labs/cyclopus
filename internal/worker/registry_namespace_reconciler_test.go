@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/kubernetes"
 	"github.com/shepard-labs/cyclopus/internal/oci"
+	"github.com/shepard-labs/cyclopus/internal/ocimetrics"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
 
@@ -266,6 +270,25 @@ func TestRegistryNamespaceReconcilerSuccessCheckpointsAndVerifiesTwice(t *testin
 	if !runner.Ready() || dataStore.recovered != 1 || dataStore.completed != 1 || len(dataStore.checkpoints) != 2 ||
 		dataStore.checkpoints[0] != "source_read" || dataStore.checkpoints[1] != "namespace_secret_written" || reconciles != 2 {
 		t.Fatalf("unexpected success state: ready=%v recovered=%d checkpoints=%v completed=%d reconciles=%d", runner.Ready(), dataStore.recovered, dataStore.checkpoints, dataStore.completed, reconciles)
+	}
+}
+
+func TestRegistryNamespaceReconcilerRecordsBoundedOutcomeAndWork(t *testing.T) {
+	metrics := ocimetrics.New()
+	dataStore := &namespaceStoreFake{claims: []store.NamespaceCredentialClaim{namespaceClaim("one", 1, "")}}
+	runner := NewRegistryNamespaceReconciler(namespaceConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)), dataStore, &namespaceAdapterFake{}, metrics)
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waitNamespaceWorker(t, runner)
+	request, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
+	recorder := httptest.NewRecorder()
+	metrics.ServeHTTP(recorder, request)
+	body := recorder.Body.String()
+	for _, want := range []string{`cyclopus_oci_namespace_reconciliation_total{result="reconciled"} 1`, `cyclopus_oci_worker_leases{kind="namespace"} 0`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, body)
+		}
 	}
 }
 

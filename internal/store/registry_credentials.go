@@ -63,6 +63,8 @@ type RegistryCredentialGarbageCollectionCandidate struct {
 	Generation                                int64
 }
 
+type RegistryCredentialGarbageCollectionDelete func(context.Context, RegistryCredentialGarbageCollectionCandidate) error
+
 type NamespaceCredentialClaim struct {
 	OrgID, EnvironmentID, AppID, Namespace string
 	RegistryID, OperationID, SecretRef     string
@@ -480,7 +482,7 @@ func (s *Store) ListRegistryCredentialGarbageCollectionCandidates(ctx context.Co
 			AND environment.registry_credential_cleanup_generation=generation.generation
 			AND environment.registry_credential_cleanup_state IN ('pending','failed'))
 		AND NOT EXISTS (SELECT 1 FROM releases release WHERE release.org_id=generation.org_id AND release.registry_credential_registry_id=generation.registry_id
-			AND release.registry_credential_generation=generation.generation AND release.status='live')
+			AND release.registry_credential_generation=generation.generation)
 		ORDER BY operation.terminal_at,generation.registry_id,generation.generation LIMIT $2`, olderThan, limit)
 	if err != nil {
 		return nil, err
@@ -495,6 +497,65 @@ func (s *Store) ListRegistryCredentialGarbageCollectionCandidates(ctx context.Co
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+// GarbageCollectRegistryCredential revalidates and deletes one failed source
+// while the generation row is locked. The generation lock also conflicts with
+// the foreign-key key-share locks taken by current reference-creating paths.
+func (s *Store) GarbageCollectRegistryCredential(ctx context.Context, candidate RegistryCredentialGarbageCollectionCandidate, olderThan time.Time, deleteSource RegistryCredentialGarbageCollectionDelete) (bool, error) {
+	if candidate.OrgID == "" || candidate.RegistryID == "" || candidate.OperationID == "" || candidate.Generation < 1 || candidate.SecretRef == "" || olderThan.IsZero() || deleteSource == nil {
+		return false, ErrInvalidArgument
+	}
+	collected := false
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id FROM releases WHERE org_id=$1 AND registry_credential_registry_id=$2
+			AND registry_credential_generation=$3 FOR UPDATE`, candidate.OrgID, candidate.RegistryID, candidate.Generation)
+		if err != nil {
+			return err
+		}
+		rows.Close()
+		var current RegistryCredentialGarbageCollectionCandidate
+		var eligible bool
+		err = tx.QueryRow(ctx, `SELECT generation.org_id::text,generation.registry_id::text,generation.operation_id::text,
+			generation.generation,COALESCE(generation.secret_ref,''),
+			generation.state='failed' AND operation.terminal_at<=$6
+			AND NOT EXISTS (SELECT 1 FROM registries registry_ref WHERE registry_ref.org_id=generation.org_id AND registry_ref.id=generation.registry_id
+				AND (registry_ref.active_generation=generation.generation OR registry_ref.pending_generation=generation.generation OR registry_ref.previous_generation=generation.generation))
+			AND NOT EXISTS (SELECT 1 FROM apps app JOIN environments environment ON environment.org_id=app.org_id AND environment.app_id=app.id
+				WHERE app.org_id=generation.org_id AND app.registry_id=generation.registry_id AND environment.torn_down_at IS NULL
+				AND (environment.required_registry_credential_generation=generation.generation OR environment.ready_registry_credential_generation=generation.generation))
+			AND NOT EXISTS (SELECT 1 FROM environments environment WHERE environment.org_id=generation.org_id
+				AND environment.registry_credential_cleanup_registry_id=generation.registry_id
+				AND environment.registry_credential_cleanup_generation=generation.generation
+				AND environment.registry_credential_cleanup_state IN ('pending','failed'))
+				AND NOT EXISTS (SELECT 1 FROM releases release WHERE release.org_id=generation.org_id AND release.registry_credential_registry_id=generation.registry_id
+					AND release.registry_credential_generation=generation.generation)
+			FROM registry_credential_generations generation
+			JOIN registry_credential_operations operation ON operation.org_id=generation.org_id AND operation.registry_id=generation.registry_id AND operation.id=generation.operation_id
+			JOIN registries registry ON registry.org_id=generation.org_id AND registry.id=generation.registry_id
+			WHERE generation.org_id=$1 AND generation.registry_id=$2 AND generation.generation=$3 AND generation.operation_id=$4 AND generation.secret_ref=$5
+			FOR UPDATE OF generation,operation,registry`, candidate.OrgID, candidate.RegistryID, candidate.Generation, candidate.OperationID, candidate.SecretRef, olderThan).
+			Scan(&current.OrgID, &current.RegistryID, &current.OperationID, &current.Generation, &current.SecretRef, &eligible)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !eligible {
+			return nil
+		}
+		if err := deleteSource(ctx, current); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE registry_credential_generations SET state='garbage_collected',garbage_collected_at=clock_timestamp()
+			WHERE org_id=$1 AND registry_id=$2 AND generation=$3 AND operation_id=$4 AND state='failed'`, current.OrgID, current.RegistryID, current.Generation, current.OperationID); err != nil {
+			return err
+		}
+		collected = true
+		return nil
+	})
+	return collected, err
 }
 
 func (s *Store) ListRegistryCredentialOperationOrgIDs(ctx context.Context, limit int) ([]string, error) {

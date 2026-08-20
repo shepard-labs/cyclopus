@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shepard-labs/cyclopus/internal/oci"
+	"github.com/shepard-labs/cyclopus/internal/ocimetrics"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
@@ -40,6 +41,7 @@ type ImageResolutionRunner struct {
 	logger    *slog.Logger
 	store     ImageResolutionStore
 	processor ImageResolutionProcessor
+	metrics   ocimetrics.Recorder
 	now       func() time.Time
 	ready     atomic.Bool
 	sem       chan struct{}
@@ -51,14 +53,18 @@ type ImageResolutionRunner struct {
 	cancel    context.CancelFunc
 }
 
-func NewImageResolutionRunner(config ImageResolutionConfig, logger *slog.Logger, dataStore ImageResolutionStore, resolver oci.Resolver, credentials service.CredentialReader) *ImageResolutionRunner {
+func NewImageResolutionRunner(config ImageResolutionConfig, logger *slog.Logger, dataStore ImageResolutionStore, resolver oci.Resolver, credentials service.CredentialReader, recorders ...ocimetrics.Recorder) *ImageResolutionRunner {
 	processor, _ := service.NewImageResolver(resolver, credentials)
-	return newImageResolutionRunner(config, logger, dataStore, processor)
+	return newImageResolutionRunner(config, logger, dataStore, processor, recorders...)
 }
 
-func newImageResolutionRunner(config ImageResolutionConfig, logger *slog.Logger, dataStore ImageResolutionStore, processor ImageResolutionProcessor) *ImageResolutionRunner {
+func newImageResolutionRunner(config ImageResolutionConfig, logger *slog.Logger, dataStore ImageResolutionStore, processor ImageResolutionProcessor, recorders ...ocimetrics.Recorder) *ImageResolutionRunner {
+	recorder := ocimetrics.Noop()
+	if len(recorders) > 0 && recorders[0] != nil {
+		recorder = recorders[0]
+	}
 	return &ImageResolutionRunner{config: config, logger: logger, store: dataStore, processor: processor,
-		now: time.Now, sem: make(chan struct{}, config.Concurrency), inFlight: make(map[string]struct{})}
+		metrics: recorder, now: time.Now, sem: make(chan struct{}, config.Concurrency), inFlight: make(map[string]struct{})}
 }
 
 func (r *ImageResolutionRunner) Ready() bool { return r.ready.Load() }
@@ -116,6 +122,8 @@ func (r *ImageResolutionRunner) validate() error {
 func (r *ImageResolutionRunner) scan(ctx context.Context) error {
 	r.scanMu.Lock()
 	defer r.scanMu.Unlock()
+	backlog := int64(0)
+	defer func() { r.metrics.Work("image_resolution", int64(len(r.sem)), backlog) }()
 	if _, err := r.store.RecoverExpiredImageResolutionLeases(ctx, 1000); err != nil {
 		return err
 	}
@@ -137,6 +145,7 @@ func (r *ImageResolutionRunner) scan(ctx context.Context) error {
 			if len(claims) == 0 {
 				break
 			}
+			backlog += int64(len(claims))
 			for _, claim := range claims {
 				r.markInFlight(claim.Environment.ID)
 				r.sem <- struct{}{}
@@ -152,7 +161,13 @@ func (r *ImageResolutionRunner) scan(ctx context.Context) error {
 }
 
 func (r *ImageResolutionRunner) processClaim(root context.Context, claim store.ImageResolutionClaim) {
-	defer func() { <-r.sem; r.clearInFlight(claim.Environment.ID); r.wg.Done() }()
+	started := time.Now()
+	defer func() {
+		<-r.sem
+		r.clearInFlight(claim.Environment.ID)
+		r.metrics.Work("image_resolution", int64(len(r.sem)), 0)
+		r.wg.Done()
+	}()
 	ctx, cancel := context.WithTimeout(root, r.config.RequestTimeout)
 	lost := &atomic.Bool{}
 	done, stopped := make(chan struct{}), make(chan struct{})
@@ -162,18 +177,28 @@ func (r *ImageResolutionRunner) processClaim(root context.Context, claim store.I
 	<-stopped
 	cancel()
 	if lost.Load() || outcome.Disposition == service.ImageResolutionLeaseLost || root.Err() != nil {
+		if root.Err() == nil {
+			r.metrics.ImageResolution("lease_lost", time.Since(started))
+		}
 		return
 	}
 	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(root), r.config.RequestTimeout)
 	defer writeCancel()
 	lease, err := r.store.RotateImageResolutionLease(writeCtx, claim.Job.OrgID, claim.Job.ID, claim.Lease, r.config.LeaseDuration)
 	if err != nil {
+		if errors.Is(err, store.ErrLeaseNotOwned) {
+			r.metrics.ImageResolution("lease_lost", time.Since(started))
+		} else {
+			r.metrics.ImageResolution("failed", time.Since(started))
+		}
 		return
 	}
 	claim.Lease = lease
 	var result store.ImageResolutionWriteResult
+	metricResult := "failed"
 	switch outcome.Disposition {
 	case service.ImageResolutionComplete:
+		metricResult = "complete"
 		result, err = r.store.CompleteImageResolution(writeCtx, service.ImageResolutionCompleteParams(claim, outcome.Image))
 	case service.ImageResolutionRetry:
 		remaining := claim.Deadline.Sub(r.now())
@@ -181,9 +206,11 @@ func (r *ImageResolutionRunner) processClaim(root context.Context, claim store.I
 		if delay <= 0 || !r.now().Add(delay).Before(claim.Deadline) {
 			result, err = r.store.FailImageResolution(writeCtx, store.FailImageResolutionParams{Claim: claim, Lease: lease, Code: string(oci.CodeImageNotPublished)})
 		} else {
+			metricResult = "retry"
 			result, err = r.store.RetryImageResolution(writeCtx, store.RetryImageResolutionParams{Claim: claim, Lease: lease, Delay: delay, Code: service.SanitizeImageResolutionCode(outcome.Code)})
 		}
 	case service.ImageResolutionSuperseded:
+		metricResult = "superseded"
 		result, err = r.store.RetryImageResolution(writeCtx, store.RetryImageResolutionParams{Claim: claim, Lease: lease, Code: string(oci.CodeRegistryUnavailable)})
 	case service.ImageResolutionFail:
 		result, err = r.store.FailImageResolution(writeCtx, store.FailImageResolutionParams{Claim: claim, Lease: lease, Code: service.SanitizeImageResolutionCode(outcome.Code)})
@@ -191,6 +218,12 @@ func (r *ImageResolutionRunner) processClaim(root context.Context, claim store.I
 		result, err = r.store.FailImageResolution(writeCtx, store.FailImageResolutionParams{Claim: claim, Lease: lease, Code: string(oci.CodeRegistryResponseInvalid)})
 	}
 	_ = result
+	if errors.Is(err, store.ErrLeaseNotOwned) {
+		metricResult = "lease_lost"
+	} else if err != nil {
+		metricResult = "failed"
+	}
+	r.metrics.ImageResolution(metricResult, time.Since(started))
 	if err != nil && !errors.Is(err, store.ErrLeaseNotOwned) {
 		r.logger.Warn("image resolution final write failed", "job_id", claim.Job.ID, "error", err)
 	}

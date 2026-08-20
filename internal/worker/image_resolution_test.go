@@ -4,11 +4,15 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/shepard-labs/cyclopus/internal/oci"
+	"github.com/shepard-labs/cyclopus/internal/ocimetrics"
 	"github.com/shepard-labs/cyclopus/internal/service"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
@@ -138,6 +142,26 @@ func TestImageResolutionWorkerCompleteAndRetry(t *testing.T) {
 				t.Fatalf("store=%+v", dataStore)
 			}
 		})
+	}
+}
+
+func TestImageResolutionWorkerRecordsBoundedOutcomesAndWork(t *testing.T) {
+	metrics := ocimetrics.New()
+	dataStore := &imageResolutionWorkerStore{claim: workerClaim()}
+	runner := newImageResolutionRunner(workerConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)), dataStore,
+		imageResolutionProcessorFake{service.ImageResolutionOutcome{Disposition: service.ImageResolutionComplete, Image: oci.ResolvedImage{Digest: "sha256:" + workerRepeat("a", 64)}}}, metrics)
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runner.wg.Wait()
+	request, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
+	recorder := httptest.NewRecorder()
+	metrics.ServeHTTP(recorder, request)
+	body := recorder.Body.String()
+	for _, want := range []string{`cyclopus_oci_image_resolution_total{result="complete"} 1`, `cyclopus_oci_worker_leases{kind="image_resolution"} 0`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, body)
+		}
 	}
 }
 

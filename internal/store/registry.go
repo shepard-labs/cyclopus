@@ -65,6 +65,15 @@ func (s *Store) EnablePhase6SchemaEpoch(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) Phase6SchemaEnabled(ctx context.Context) (bool, error) {
+	var enabled bool
+	err := s.db.QueryRow(ctx, `SELECT phase6_enabled FROM `+pgx.Identifier{s.schema, "schema_epoch"}.Sanitize()+` WHERE singleton=true`).Scan(&enabled)
+	if err != nil {
+		return false, fmt.Errorf("read Phase 6 schema epoch: %w", err)
+	}
+	return enabled, nil
+}
+
 func (s *Store) GetRegistry(ctx context.Context, orgID, id string) (Registry, error) {
 	var value Registry
 	err := scanRegistry(s.db.QueryRow(ctx, registrySelect+` WHERE org_id=$1 AND id=$2`, orgID, id), &value)

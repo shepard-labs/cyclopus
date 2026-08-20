@@ -89,6 +89,23 @@ config:
     scanInterval: "30s"
     leaseDuration: "60s"
     maxConcurrentDeploys: 4
+  # Phase 6 OCI and registry-credential reconciliation. Disabled by default.
+  # The credential fingerprint key is secret and is configured separately at
+  # secrets.phase6CredentialFingerprintKey (or in secrets.existingSecret).
+  phase6:
+    enabled: false
+    scanInterval: "1s"
+    ociConcurrency: 4
+    credentialConcurrency: 2
+    namespaceConcurrency: 4
+    ociLeaseDuration: "45s"
+    credentialLeaseDuration: "60s"
+    namespaceLeaseDuration: "60s"
+    ociRequestTimeout: "20s"
+    publicationDeadline: "15m"
+    shutdownGrace: "30s"
+    retiredRetention: "24h"
+    sourceRescueTimeout: "5m"
   webhook:
     # Exact signing-key refs only. Each Secret must be immutable, start with
     # cyclopus-webhook-, and carry the release ownership labels validated by the API.
@@ -138,6 +155,9 @@ secrets:
   databaseUrl: ""
   authTokenPepper: ""
   authBootstrapSecret: ""
+  # Required when config.phase6.enabled=true. Must contain at least 32 bytes.
+  # Existing Secrets must provide the PHASE6_CREDENTIAL_FINGERPRINT_KEY key.
+  phase6CredentialFingerprintKey: ""
   openobserveCredential: ""
   # Beszel superuser "identity:password" credential (not a pre-minted session
   # token: the client authenticates with this on demand and caches/refreshes

@@ -3,13 +3,172 @@ package worker
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/kubernetes"
 	"github.com/shepard-labs/cyclopus/internal/oci"
+	"github.com/shepard-labs/cyclopus/internal/ocimetrics"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
+
+func TestRegistryCredentialRunnerStartupRecoversAndScans(t *testing.T) {
+	operation := registryCredentialOperation("source_secret_written")
+	dataStore := &registryCredentialRunnerStoreFake{orgIDs: []string{"org"}, operations: []store.RegistryCredentialOperation{operation}}
+	processor := &registryCredentialOperationProcessorFake{result: RegistryCredentialValidated, called: make(chan struct{}, 1)}
+	runner := NewRegistryCredentialRunner(RegistryCredentialConfig{ScanInterval: time.Hour, LeaseDuration: time.Minute, RequestTimeout: time.Second, ShutdownGrace: time.Second, Concurrency: 1, Owner: "worker-one"}, slog.Default(), dataStore, processor)
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-processor.called:
+	case <-time.After(time.Second):
+		t.Fatal("operation was not processed")
+	}
+	if !runner.Ready() || dataStore.operationRecoveries != 2 || dataStore.targetRecoveries != 2 || dataStore.claims != 1 {
+		t.Fatalf("ready=%v operation recoveries=%d target recoveries=%d claims=%d", runner.Ready(), dataStore.operationRecoveries, dataStore.targetRecoveries, dataStore.claims)
+	}
+}
+
+func TestRegistryCredentialRunnerExposesActiveAndZeroWorkMetrics(t *testing.T) {
+	operation := registryCredentialOperation("source_secret_written")
+	dataStore := &registryCredentialRunnerStoreFake{orgIDs: []string{"org"}, operations: []store.RegistryCredentialOperation{operation}}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	processor := registryCredentialOperationProcessorFunc(func(context.Context, store.RegistryCredentialOperation) (RegistryCredentialProcessResult, error) {
+		close(started)
+		<-release
+		return RegistryCredentialValidated, nil
+	})
+	metrics := ocimetrics.New()
+	runner := NewRegistryCredentialRunner(RegistryCredentialConfig{ScanInterval: time.Hour, LeaseDuration: time.Minute, RequestTimeout: time.Second, ShutdownGrace: time.Second, Concurrency: 1, Owner: "worker-one"}, slog.Default(), dataStore, processor, metrics)
+	if err := runner.Startup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("operation was not processed")
+	}
+	assertRegistryCredentialWorkMetrics(t, metrics, 1, 1)
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for {
+		if registryCredentialWorkMetrics(metrics, 0, 0) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("credential work metrics did not transition to zero")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func assertRegistryCredentialWorkMetrics(t *testing.T, metrics *ocimetrics.Metrics, active, backlog int) {
+	t.Helper()
+	if !registryCredentialWorkMetrics(metrics, active, backlog) {
+		w := httptest.NewRecorder()
+		metrics.ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+		t.Fatalf("metric exposition missing credential active=%d backlog=%d:\n%s", active, backlog, w.Body.String())
+	}
+}
+
+func registryCredentialWorkMetrics(metrics *ocimetrics.Metrics, active, backlog int) bool {
+	w := httptest.NewRecorder()
+	metrics.ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	text := w.Body.String()
+	return strings.Contains(text, `cyclopus_oci_worker_leases{kind="credential"} `+strconv.Itoa(active)) &&
+		strings.Contains(text, `cyclopus_oci_worker_backlog{kind="credential"} `+strconv.Itoa(backlog))
+}
+
+func TestRegistryCredentialRunnerRetriesAndFailsWithAllowlistedCodes(t *testing.T) {
+	for name, result := range map[string]RegistryCredentialProcessResult{"retry": RegistryCredentialRetry, "failed": RegistryCredentialFailed} {
+		t.Run(name, func(t *testing.T) {
+			operation := registryCredentialOperation("source_secret_written")
+			dataStore := &registryCredentialRunnerStoreFake{orgIDs: []string{"org"}, operations: []store.RegistryCredentialOperation{operation}, written: make(chan struct{}, 1)}
+			runner := NewRegistryCredentialRunner(RegistryCredentialConfig{ScanInterval: time.Hour, LeaseDuration: time.Minute, RequestTimeout: time.Second, ShutdownGrace: time.Second, Concurrency: 1, Owner: "worker-one"}, slog.Default(), dataStore, &registryCredentialOperationProcessorFake{result: result})
+			if err := runner.Startup(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-dataStore.written:
+			case <-time.After(time.Second):
+				t.Fatal("terminal write was not attempted")
+			}
+			if result == RegistryCredentialRetry && (dataStore.retried != 1 || dataStore.code != "postgres_retryable") {
+				t.Fatalf("retry=%d code=%q", dataStore.retried, dataStore.code)
+			}
+			if result == RegistryCredentialFailed && (dataStore.failed != 1 || dataStore.code != "credential_validation_failed") {
+				t.Fatalf("failed=%d code=%q", dataStore.failed, dataStore.code)
+			}
+		})
+	}
+}
+
+type registryCredentialOperationProcessorFake struct {
+	result RegistryCredentialProcessResult
+	err    error
+	called chan struct{}
+}
+
+type registryCredentialOperationProcessorFunc func(context.Context, store.RegistryCredentialOperation) (RegistryCredentialProcessResult, error)
+
+func (f registryCredentialOperationProcessorFunc) Process(ctx context.Context, operation store.RegistryCredentialOperation) (RegistryCredentialProcessResult, error) {
+	return f(ctx, operation)
+}
+
+func (f *registryCredentialOperationProcessorFake) Process(context.Context, store.RegistryCredentialOperation) (RegistryCredentialProcessResult, error) {
+	if f.called != nil {
+		f.called <- struct{}{}
+	}
+	return f.result, f.err
+}
+
+type registryCredentialRunnerStoreFake struct {
+	orgIDs                                                         []string
+	operations                                                     []store.RegistryCredentialOperation
+	operationRecoveries, targetRecoveries, claims, retried, failed int
+	code                                                           string
+	written                                                        chan struct{}
+}
+
+func (f *registryCredentialRunnerStoreFake) RecoverExpiredRegistryCredentialLeases(context.Context, int) (int64, error) {
+	f.operationRecoveries++
+	return 0, nil
+}
+func (f *registryCredentialRunnerStoreFake) RecoverExpiredRegistryCredentialValidationTargets(context.Context, int) (int64, error) {
+	f.targetRecoveries++
+	return 0, nil
+}
+func (f *registryCredentialRunnerStoreFake) ListRegistryCredentialOperationOrgIDs(context.Context, int) ([]string, error) {
+	return f.orgIDs, nil
+}
+func (f *registryCredentialRunnerStoreFake) ClaimRegistryCredentialOperations(context.Context, string, string, time.Duration, int) ([]store.RegistryCredentialOperation, error) {
+	f.claims++
+	values := f.operations
+	f.operations = nil
+	return values, nil
+}
+func (f *registryCredentialRunnerStoreFake) RetryRegistryCredentialOperation(context.Context, store.RegistryCredentialOperation, store.LeaseToken, time.Duration, string) error {
+	f.retried++
+	f.code = "postgres_retryable"
+	if f.written != nil {
+		f.written <- struct{}{}
+	}
+	return nil
+}
+func (f *registryCredentialRunnerStoreFake) FailRegistryCredentialOperation(_ context.Context, _ store.RegistryCredentialOperation, _ store.LeaseToken, code string) error {
+	f.failed++
+	f.code = code
+	if f.written != nil {
+		f.written <- struct{}{}
+	}
+	return nil
+}
 
 func TestRegistryCredentialProcessorReadsPersistedSecret(t *testing.T) {
 	credential := &oci.Credential{Username: []byte("octocat"), PAT: []byte("private-token")}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -25,6 +26,8 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/config"
 	"github.com/shepard-labs/cyclopus/internal/githubmetrics"
 	"github.com/shepard-labs/cyclopus/internal/logging"
+	"github.com/shepard-labs/cyclopus/internal/oci"
+	"github.com/shepard-labs/cyclopus/internal/ocimetrics"
 	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/server"
 	"github.com/shepard-labs/cyclopus/internal/service"
@@ -33,6 +36,7 @@ import (
 	"github.com/shepard-labs/cyclopus/internal/uihandler"
 	webhookdelivery "github.com/shepard-labs/cyclopus/internal/webhook"
 	"github.com/shepard-labs/cyclopus/internal/worker"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -117,11 +121,57 @@ func run(args, environ []string) error {
 	if err != nil {
 		return fmt.Errorf("construct GitHub discovery clients: %w", err)
 	}
-	domainService := service.New(dataStore, service.WithLogger(logger), service.WithGitHubOnboarding(githubOnboarding),
+	var phase6Workers []lifecycleWorker
+	var phase6Client *oci.Client
+	ociMetrics := ocimetrics.New()
+	var registryCredentials *service.RegistryCredentialService
+	if cfg.Phase6.Enabled {
+		credentialAdapter, err := kubernetesadapter.NewRegistryCredentialSecretAdapter(kubernetesClient, cfg.Kubernetes.InstanceNamespace)
+		if err != nil {
+			return fmt.Errorf("construct registry credential Secret adapter: %w", err)
+		}
+		ociHTTPClient, err := oci.NewHTTPClient(cfg.Phase6.OCIRequestTimeout)
+		if err != nil {
+			return fmt.Errorf("construct OCI HTTP client: %w", err)
+		}
+		phase6Client, err = oci.NewClient(oci.ClientConfig{HTTPClient: ociHTTPClient, RequestTimeout: cfg.Phase6.OCIRequestTimeout})
+		if err != nil {
+			return fmt.Errorf("construct OCI client: %w", err)
+		}
+		defer phase6Client.Close()
+		registryCredentials, err = service.NewRegistryCredentialServiceFromStore(dataStore, credentialAdapter, []byte(cfg.Phase6.CredentialFingerprintKey))
+		if err != nil {
+			return fmt.Errorf("construct registry credential service: %w", err)
+		}
+		imageRunner := worker.NewImageResolutionRunner(worker.ImageResolutionConfig{
+			ScanInterval: cfg.Phase6.ScanInterval, LeaseDuration: cfg.Phase6.OCILeaseDuration, PublicationDeadline: cfg.Phase6.PublicationDeadline,
+			RequestTimeout: cfg.Phase6.OCIRequestTimeout, ShutdownGrace: cfg.Phase6.ShutdownGrace, Concurrency: cfg.Phase6.OCIConcurrency, Owner: owner,
+		}, logger, dataStore, phase6Client, credentialAdapter, ociMetrics)
+		processor, err := worker.NewRegistryCredentialProcessor(dataStore, credentialAdapter, phase6Client, owner, cfg.Phase6.CredentialLeaseDuration)
+		if err != nil {
+			return fmt.Errorf("construct registry credential processor: %w", err)
+		}
+		credentialRunner := worker.NewRegistryCredentialRunner(worker.RegistryCredentialConfig{
+			ScanInterval: cfg.Phase6.ScanInterval, LeaseDuration: cfg.Phase6.CredentialLeaseDuration, RequestTimeout: cfg.Phase6.OCIRequestTimeout,
+			ShutdownGrace: cfg.Phase6.ShutdownGrace, Concurrency: cfg.Phase6.CredentialConcurrency, Owner: owner,
+		}, logger, dataStore, processor, ociMetrics)
+		credentialMaintenanceRunner := worker.NewRegistryCredentialMaintenanceRunner(worker.RegistryCredentialMaintenanceConfig{
+			ScanInterval: cfg.Phase6.ScanInterval, ShutdownGrace: cfg.Phase6.ShutdownGrace, RetiredRetention: cfg.Phase6.RetiredRetention, SourceRescueTimeout: cfg.Phase6.SourceRescueTimeout,
+		}, logger, dataStore, credentialAdapter)
+		namespaceRunner := worker.NewRegistryNamespaceReconciler(worker.RegistryNamespaceReconcilerConfig{
+			ScanInterval: cfg.Phase6.ScanInterval, LeaseDuration: cfg.Phase6.NamespaceLeaseDuration, RequestTimeout: cfg.Phase6.OCIRequestTimeout,
+			ShutdownGrace: cfg.Phase6.ShutdownGrace, Concurrency: cfg.Phase6.NamespaceConcurrency, Owner: owner, InstanceNamespace: cfg.Kubernetes.InstanceNamespace,
+		}, logger, dataStore, credentialAdapter, ociMetrics)
+		phase6Workers = []lifecycleWorker{imageRunner, credentialRunner, credentialMaintenanceRunner, namespaceRunner}
+	}
+	domainOptions := []service.Option{service.WithLogger(logger), service.WithGitHubOnboarding(githubOnboarding),
 		service.WithGitHubDiscovery(githubClients, []byte(cfg.Auth.TokenPepper)),
 		service.WithIngressTarget(cfg.Kubernetes.CustomDomainCNAMETarget), service.WithHostnameSuffix(cfg.Kubernetes.PreviewHostnameSuffix),
-		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer), service.WithWebhookSecretValidator(webhookSecrets))
-	// Phase 6 runtime wiring occurs with validation/recovery workers.
+		service.WithCertManagerClusterIssuer(cfg.Kubernetes.CertManagerClusterIssuer), service.WithWebhookSecretValidator(webhookSecrets)}
+	if registryCredentials != nil {
+		domainOptions = append(domainOptions, service.WithRegistryCredentials(registryCredentials))
+	}
+	domainService := service.New(dataStore, domainOptions...)
 	authenticator := server.NewAuthenticator(authService)
 	services := server.NewServices(authService, domainService, cfg.Auth.SessionTTL)
 	services.Authenticator = authenticator
@@ -130,7 +180,7 @@ func run(args, environ []string) error {
 	services.GitHubBrowser = server.NewGitHubBrowser(domainService, authenticator, cfg.ExternalURL, []byte(cfg.Auth.TokenPepper))
 	services.UIHandler = server.LoginContinuationMiddleware(uihandler.New(ui.NewBackend(domainService, authService, cfg.Auth.SessionTTL)))
 	githubMetrics := githubmetrics.New()
-	services.Metrics = githubMetrics
+	services.Metrics = combinedMetrics(githubMetrics, ociMetrics)
 	githubWebhookSecrets := secretref.NewKubernetesResolver(kubernetesClient)
 	services.GitHubWebhook = server.NewGitHubWebhookHandler(cfg.Webhook, githubWebhookSecrets, dataStore, githubMetrics)
 	githubWebhookSecretChecker := server.NewGitHubWebhookSecretChecker(githubWebhookSecrets, cfg.Webhook.GitHubActiveSecretRef, 30*time.Second, 2*time.Second)
@@ -181,10 +231,28 @@ func run(args, environ []string) error {
 		if err := pool.Ping(ctx); err != nil {
 			return err
 		}
+		if cfg.Phase6.Enabled {
+			enabled, err := dataStore.Phase6SchemaEnabled(ctx)
+			if err != nil || !enabled {
+				return errors.Join(errors.New("Phase 6 schema epoch is not enabled"), err)
+			}
+			if _, err := kubernetesClient.CoreV1().Namespaces().Get(ctx, cfg.Kubernetes.InstanceNamespace, metav1.GetOptions{}); err != nil {
+				return fmt.Errorf("read instance namespace: %w", err)
+			}
+		}
 		return githubWebhookSecretChecker.Check(ctx)
 	}
 	if err := githubOnboarding.Reconcile(ctx); err != nil {
 		return fmt.Errorf("reconcile GitHub App credentials: %w", err)
+	}
+	if cfg.Phase6.Enabled {
+		enabled, err := dataStore.Phase6SchemaEnabled(ctx)
+		if err != nil || !enabled {
+			return errors.Join(errors.New("Phase 6 schema epoch is not enabled"), err)
+		}
+		if _, err := kubernetesClient.CoreV1().Namespaces().Get(ctx, cfg.Kubernetes.InstanceNamespace, metav1.GetOptions{}); err != nil {
+			return fmt.Errorf("read instance namespace: %w", err)
+		}
 	}
 
 	logger.Info("server starting", "address", cfg.HTTP.Address, "worker_owner", owner)
@@ -192,9 +260,20 @@ func run(args, environ []string) error {
 	if err != nil {
 		return err
 	}
-	err = runLifecycle(ctx, apiServer, recovery, &ready, eventRunner)
+	workers := append([]lifecycleWorker{eventRunner}, phase6Workers...)
+	err = runLifecycle(ctx, apiServer, recovery, &ready, workers...)
 	logger.Info("server stopped")
 	return err
+}
+
+func combinedMetrics(handlers ...http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, handler := range handlers {
+			if handler != nil {
+				handler.ServeHTTP(w, r)
+			}
+		}
+	})
 }
 
 func newGitHubWebhookPayloadCodec(cfg config.Webhook) (store.GitHubWebhookPayloadCodec, error) {

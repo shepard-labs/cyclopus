@@ -63,6 +63,11 @@ func TestLoadPrecedence(t *testing.T) {
 		cfg.GitHubEventWorker.CleanupInterval != time.Minute || cfg.GitHubEventWorker.CleanupBatch != 100 || cfg.GitHubEventWorker.ShutdownGrace != 30*time.Second || cfg.GitHubEventWorker.MaxIntents != 1000 {
 		t.Fatalf("GitHub event worker config = %+v, want default values", cfg.GitHubEventWorker)
 	}
+	if cfg.Phase6.Enabled || cfg.Phase6.ScanInterval != time.Second || cfg.Phase6.OCIConcurrency != 4 || cfg.Phase6.CredentialConcurrency != 2 || cfg.Phase6.NamespaceConcurrency != 4 ||
+		cfg.Phase6.OCILeaseDuration != 45*time.Second || cfg.Phase6.CredentialLeaseDuration != time.Minute || cfg.Phase6.NamespaceLeaseDuration != time.Minute ||
+		cfg.Phase6.OCIRequestTimeout != 20*time.Second || cfg.Phase6.PublicationDeadline != 15*time.Minute || cfg.Phase6.ShutdownGrace != 30*time.Second || cfg.Phase6.RetiredRetention != 24*time.Hour || cfg.Phase6.SourceRescueTimeout != 5*time.Minute {
+		t.Fatalf("Phase 6 config = %+v, want disabled approved defaults", cfg.Phase6)
+	}
 	if cfg.Auth.MaxConcurrentHashes != 4 || cfg.Auth.RateLimitPerMinute != 10 || cfg.Auth.RequestBodyBytes != 65536 {
 		t.Fatalf("auth limits = %+v, want default values", cfg.Auth)
 	}
@@ -79,6 +84,28 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 	if cfg.Kubernetes.CertManagerClusterIssuer != "letsencrypt" {
 		t.Fatalf("cert-manager cluster issuer = %q, want default letsencrypt", cfg.Kubernetes.CertManagerClusterIssuer)
+	}
+}
+
+func TestLoadPhase6EnvironmentAndValidation(t *testing.T) {
+	cfg, err := Load(nil, append(baseValidEnv,
+		"CYCLOPUS_PHASE6_ENABLED=true", "CYCLOPUS_PHASE6_SCAN_INTERVAL=2s", "CYCLOPUS_PHASE6_OCI_CONCURRENCY=5",
+		"CYCLOPUS_PHASE6_CREDENTIAL_CONCURRENCY=3", "CYCLOPUS_PHASE6_NAMESPACE_CONCURRENCY=6", "CYCLOPUS_PHASE6_OCI_LEASE_DURATION=50s",
+		"CYCLOPUS_PHASE6_CREDENTIAL_LEASE_DURATION=70s", "CYCLOPUS_PHASE6_NAMESPACE_LEASE_DURATION=80s", "CYCLOPUS_PHASE6_OCI_REQUEST_TIMEOUT=25s",
+		"CYCLOPUS_PHASE6_PUBLICATION_DEADLINE=20m", "CYCLOPUS_PHASE6_SHUTDOWN_GRACE=40s", "CYCLOPUS_PHASE6_RETIRED_RETENTION=48h",
+		"CYCLOPUS_PHASE6_SOURCE_RESCUE_TIMEOUT=10m", "CYCLOPUS_PHASE6_CREDENTIAL_FINGERPRINT_KEY=0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Phase6.Enabled || cfg.Phase6.OCIConcurrency != 5 || cfg.Phase6.OCIRequestTimeout != 25*time.Second || cfg.Phase6.RetiredRetention != 48*time.Hour {
+		t.Fatalf("Phase 6 environment config = %+v", cfg.Phase6)
+	}
+
+	for _, value := range []string{"CYCLOPUS_PHASE6_OCI_CONCURRENCY=0", "CYCLOPUS_PHASE6_SCAN_INTERVAL=0s", "CYCLOPUS_PHASE6_OCI_REQUEST_TIMEOUT=45s"} {
+		_, err := Load(nil, append(baseValidEnv, "CYCLOPUS_PHASE6_ENABLED=true", "CYCLOPUS_PHASE6_CREDENTIAL_FINGERPRINT_KEY=0123456789abcdef0123456789abcdef", value))
+		if err == nil || !strings.Contains(err.Error(), "phase6") {
+			t.Fatalf("Load(%q) error = %v, want Phase 6 validation error", value, err)
+		}
 	}
 }
 

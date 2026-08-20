@@ -10,6 +10,7 @@ import (
 
 	"github.com/shepard-labs/cyclopus/internal/adapters/kubernetes"
 	"github.com/shepard-labs/cyclopus/internal/oci"
+	"github.com/shepard-labs/cyclopus/internal/ocimetrics"
 	"github.com/shepard-labs/cyclopus/internal/secretref"
 	"github.com/shepard-labs/cyclopus/internal/store"
 )
@@ -57,6 +58,7 @@ type RegistryNamespaceReconciler struct {
 	store        RegistryNamespaceReconcilerStore
 	adapter      RegistryNamespaceAdapter
 	classify     func(error) (bool, oci.Code, bool)
+	metrics      ocimetrics.Recorder
 	ready        atomic.Bool
 	sem          chan struct{}
 	wg           sync.WaitGroup
@@ -69,9 +71,13 @@ type RegistryNamespaceReconciler struct {
 	cancel       context.CancelFunc
 }
 
-func NewRegistryNamespaceReconciler(config RegistryNamespaceReconcilerConfig, logger *slog.Logger, dataStore RegistryNamespaceReconcilerStore, adapter RegistryNamespaceAdapter) *RegistryNamespaceReconciler {
+func NewRegistryNamespaceReconciler(config RegistryNamespaceReconcilerConfig, logger *slog.Logger, dataStore RegistryNamespaceReconcilerStore, adapter RegistryNamespaceAdapter, recorders ...ocimetrics.Recorder) *RegistryNamespaceReconciler {
+	recorder := ocimetrics.Noop()
+	if len(recorders) > 0 && recorders[0] != nil {
+		recorder = recorders[0]
+	}
 	return &RegistryNamespaceReconciler{config: config, logger: logger, store: dataStore, adapter: adapter,
-		classify: kubernetes.RegistryCredentialErrorDisposition, sem: make(chan struct{}, config.Concurrency), inFlight: make(map[namespaceCredentialInFlightKey]struct{})}
+		classify: kubernetes.RegistryCredentialErrorDisposition, metrics: recorder, sem: make(chan struct{}, config.Concurrency), inFlight: make(map[namespaceCredentialInFlightKey]struct{})}
 }
 
 func (r *RegistryNamespaceReconciler) Ready() bool { return r.ready.Load() }
@@ -134,6 +140,8 @@ func (r *RegistryNamespaceReconciler) validate() error {
 func (r *RegistryNamespaceReconciler) scan(ctx context.Context, recover bool) error {
 	r.scanMu.Lock()
 	defer r.scanMu.Unlock()
+	claimBatch := int64(0)
+	defer func() { r.metrics.Work("namespace", int64(len(r.sem)), claimBatch) }()
 	if recover {
 		if _, err := r.store.RecoverExpiredNamespaceCredentialLeases(ctx, 1000); err != nil {
 			return err
@@ -171,6 +179,7 @@ func (r *RegistryNamespaceReconciler) scan(ctx context.Context, recover bool) er
 			}
 			if claimed {
 				started++
+				claimBatch++
 			}
 		}
 		if started == 0 {
@@ -234,13 +243,21 @@ func (r *RegistryNamespaceReconciler) claimReconciliation(ctx context.Context, o
 }
 
 func (r *RegistryNamespaceReconciler) processCleanupClaim(root context.Context, claim store.NamespaceCredentialCleanupClaim) {
-	defer func() { <-r.sem; r.clearInFlight(claim.OrgID, claim.EnvironmentID); r.wg.Done() }()
+	started := time.Now()
+	result := "failed"
+	defer func() {
+		<-r.sem
+		r.clearInFlight(claim.OrgID, claim.EnvironmentID)
+		r.metrics.NamespaceReconciliation(result, time.Since(started))
+		r.metrics.Work("namespace", int64(len(r.sem)), 0)
+		r.wg.Done()
+	}()
 	ctx, cancel := context.WithTimeout(root, r.config.RequestTimeout)
 	defer cancel()
 	reference, err := secretref.Parse(claim.SecretRef)
 	expectedName, nameErr := kubernetes.RegistryCredentialSecretName(claim.OrgID, claim.Generation)
 	if err != nil || nameErr != nil || reference.Namespace != r.config.InstanceNamespace || reference.Name != expectedName || reference.Key != kubernetes.RegistryCredentialKey {
-		r.failCleanupClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
+		result = r.failCleanupClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
 		return
 	}
 	identityReader, ok := r.adapter.(registryNamespaceCleanupIdentityAdapter)
@@ -251,46 +268,57 @@ func (r *RegistryNamespaceReconciler) processCleanupClaim(root context.Context, 
 		identity, err = r.adapter.ReadImagePullSecretIdentity(ctx, claim.OrgID, claim.RegistryID, claim.Generation, claim.SecretRef, claim.Namespace)
 	}
 	if err != nil {
-		r.handleCleanupClaimError(root, claim, err)
+		result = r.handleCleanupClaimError(root, claim, err)
 		return
 	}
 	if identity.SourceSecretName != reference.Name {
-		r.failCleanupClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
+		result = r.failCleanupClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
 		return
 	}
 	request := kubernetes.ImagePullSecretRequest{OrgID: claim.OrgID, AppID: claim.AppID, EnvironmentID: claim.EnvironmentID,
 		Namespace: claim.Namespace, NamespaceUID: identity.NamespaceUID, RegistryID: claim.RegistryID,
 		SourceSecretName: identity.SourceSecretName, SourceUID: identity.SourceUID, Generation: claim.Generation}
 	if err = r.adapter.DeleteImagePullSecret(ctx, request); err != nil {
-		r.handleCleanupClaimError(root, claim, err)
+		result = r.handleCleanupClaimError(root, claim, err)
 		return
 	}
 	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(root), r.config.RequestTimeout)
 	defer writeCancel()
-	r.handleCleanupStoreConvergence(claim, r.store.CompleteNamespaceCredentialCleanup(writeCtx, claim, claim.Lease))
+	err = r.store.CompleteNamespaceCredentialCleanup(writeCtx, claim, claim.Lease)
+	result = namespaceMetricResult("reconciled", err)
+	r.handleCleanupStoreConvergence(claim, err)
 }
 
 func (r *RegistryNamespaceReconciler) processClaim(root context.Context, claim store.NamespaceCredentialClaim) {
-	defer func() { <-r.sem; r.clearInFlight(claim.OrgID, claim.EnvironmentID); r.wg.Done() }()
+	started := time.Now()
+	result := "failed"
+	defer func() {
+		<-r.sem
+		r.clearInFlight(claim.OrgID, claim.EnvironmentID)
+		r.metrics.NamespaceReconciliation(result, time.Since(started))
+		r.metrics.Work("namespace", int64(len(r.sem)), 0)
+		r.wg.Done()
+	}()
 	ctx, cancel := context.WithTimeout(root, r.config.RequestTimeout)
 	defer cancel()
 	reference, err := secretref.Parse(claim.SecretRef)
 	expectedName, nameErr := kubernetes.RegistryCredentialSecretName(claim.OrgID, claim.Generation)
 	if err != nil || nameErr != nil || reference.Namespace != r.config.InstanceNamespace || reference.Name != expectedName || reference.Key != kubernetes.RegistryCredentialKey {
-		r.failClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
+		result = r.failClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
 		return
 	}
 	identity, err := r.adapter.ReadImagePullSecretIdentity(ctx, claim.OrgID, claim.RegistryID, claim.Generation, claim.SecretRef, claim.Namespace)
 	if err != nil {
-		r.handleClaimError(root, claim, err)
+		result = r.handleClaimError(root, claim, err)
 		return
 	}
 	if identity.SourceSecretName != reference.Name {
-		r.failClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
+		result = r.failClaim(root, claim, string(oci.CodeImagePullSecretReconcileFailed))
 		return
 	}
 	if claim.Checkpoint != "namespace_secret_written" {
 		if err = r.store.CheckpointNamespaceCredential(ctx, claim, claim.Lease, "source_read"); err != nil {
+			result = namespaceMetricResult("reconciled", err)
 			r.handleStoreConvergence(claim, err)
 			return
 		}
@@ -299,38 +327,57 @@ func (r *RegistryNamespaceReconciler) processClaim(root context.Context, claim s
 		Namespace: claim.Namespace, NamespaceUID: identity.NamespaceUID, RegistryID: claim.RegistryID,
 		SourceSecretName: identity.SourceSecretName, SourceUID: identity.SourceUID, Generation: claim.Generation}
 	if err = r.adapter.ReconcileImagePullSecret(ctx, request); err != nil {
-		r.handleClaimError(root, claim, err)
+		result = r.handleClaimError(root, claim, err)
 		return
 	}
 	if err = r.store.CheckpointNamespaceCredential(ctx, claim, claim.Lease, "namespace_secret_written"); err != nil {
+		result = namespaceMetricResult("reconciled", err)
 		r.handleStoreConvergence(claim, err)
 		return
 	}
 	// Reconcile performs a read-after-write verification. Calling it again here
 	// binds fresh Kubernetes evidence immediately to the final database CAS.
 	if err = r.adapter.ReconcileImagePullSecret(ctx, request); err != nil {
-		r.handleClaimError(root, claim, err)
+		result = r.handleClaimError(root, claim, err)
 		return
 	}
 	_, err = r.store.CompleteNamespaceCredential(ctx, claim, claim.Lease)
+	result = namespaceMetricResult("reconciled", err)
 	r.handleStoreConvergence(claim, err)
 }
 
-func (r *RegistryNamespaceReconciler) failClaim(root context.Context, claim store.NamespaceCredentialClaim, code string) {
+func (r *RegistryNamespaceReconciler) failClaim(root context.Context, claim store.NamespaceCredentialClaim, code string) string {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(root), r.config.RequestTimeout)
 	defer cancel()
-	r.handleStoreConvergence(claim, r.store.FailNamespaceCredential(writeCtx, claim, claim.Lease, code, ""))
+	err := r.store.FailNamespaceCredential(writeCtx, claim, claim.Lease, code, "")
+	r.handleStoreConvergence(claim, err)
+	return namespaceMetricResult("failed", err)
 }
 
-func (r *RegistryNamespaceReconciler) failCleanupClaim(root context.Context, claim store.NamespaceCredentialCleanupClaim, code string) {
+func namespaceMetricResult(success string, err error) string {
+	if err == nil {
+		return success
+	}
+	if errors.Is(err, store.ErrLeaseNotOwned) {
+		return "lease_lost"
+	}
+	if isNamespaceConvergenceError(err) {
+		return "superseded"
+	}
+	return "failed"
+}
+
+func (r *RegistryNamespaceReconciler) failCleanupClaim(root context.Context, claim store.NamespaceCredentialCleanupClaim, code string) string {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(root), r.config.RequestTimeout)
 	defer cancel()
-	r.handleCleanupStoreConvergence(claim, r.store.FailNamespaceCredentialCleanup(writeCtx, claim, claim.Lease, code))
+	err := r.store.FailNamespaceCredentialCleanup(writeCtx, claim, claim.Lease, code)
+	r.handleCleanupStoreConvergence(claim, err)
+	return namespaceMetricResult("failed", err)
 }
 
-func (r *RegistryNamespaceReconciler) handleClaimError(root context.Context, claim store.NamespaceCredentialClaim, err error) {
+func (r *RegistryNamespaceReconciler) handleClaimError(root context.Context, claim store.NamespaceCredentialClaim, err error) string {
 	if root.Err() != nil || isNamespaceConvergenceError(err) {
-		return
+		return namespaceMetricResult("failed", err)
 	}
 	retryable, code, classified := r.classify(err)
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(root), r.config.RequestTimeout)
@@ -340,16 +387,20 @@ func (r *RegistryNamespaceReconciler) handleClaimError(root context.Context, cla
 	}
 	var writeErr error
 	if retryable && claim.Attempts < maxNamespaceCredentialAttempts {
+		result := "retry"
 		writeErr = r.store.RescheduleNamespaceCredential(writeCtx, claim, claim.Lease, namespaceCredentialRetryDelay(int(claim.Lease.Epoch), r.config.LeaseDuration))
+		r.handleStoreConvergence(claim, writeErr)
+		return namespaceMetricResult(result, writeErr)
 	} else {
 		writeErr = r.store.FailNamespaceCredential(writeCtx, claim, claim.Lease, namespaceCredentialFailureCode(code), "")
 	}
 	r.handleStoreConvergence(claim, writeErr)
+	return namespaceMetricResult("failed", writeErr)
 }
 
-func (r *RegistryNamespaceReconciler) handleCleanupClaimError(root context.Context, claim store.NamespaceCredentialCleanupClaim, err error) {
+func (r *RegistryNamespaceReconciler) handleCleanupClaimError(root context.Context, claim store.NamespaceCredentialCleanupClaim, err error) string {
 	if root.Err() != nil || isNamespaceConvergenceError(err) {
-		return
+		return namespaceMetricResult("failed", err)
 	}
 	retryable, code, classified := r.classify(err)
 	if !classified {
@@ -360,10 +411,13 @@ func (r *RegistryNamespaceReconciler) handleCleanupClaimError(root context.Conte
 	var writeErr error
 	if retryable && claim.Attempts < maxNamespaceCredentialAttempts {
 		writeErr = r.store.RescheduleNamespaceCredentialCleanup(writeCtx, claim, claim.Lease, namespaceCredentialRetryDelay(claim.Attempts, r.config.LeaseDuration))
+		r.handleCleanupStoreConvergence(claim, writeErr)
+		return namespaceMetricResult("retry", writeErr)
 	} else {
 		writeErr = r.store.FailNamespaceCredentialCleanup(writeCtx, claim, claim.Lease, namespaceCredentialFailureCode(code))
 	}
 	r.handleCleanupStoreConvergence(claim, writeErr)
+	return namespaceMetricResult("failed", writeErr)
 }
 
 func namespaceCredentialFailureCode(code oci.Code) string {

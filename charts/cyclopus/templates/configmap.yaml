@@ -17,6 +17,19 @@ data:
   WORKER_SCAN_INTERVAL: {{ .Values.config.worker.scanInterval | quote }}
   WORKER_LEASE_DURATION: {{ .Values.config.worker.leaseDuration | quote }}
   WORKER_MAX_CONCURRENT_DEPLOYS: {{ .Values.config.worker.maxConcurrentDeploys | quote }}
+  PHASE6_ENABLED: {{ .Values.config.phase6.enabled | quote }}
+  PHASE6_SCAN_INTERVAL: {{ .Values.config.phase6.scanInterval | quote }}
+  PHASE6_OCI_CONCURRENCY: {{ .Values.config.phase6.ociConcurrency | quote }}
+  PHASE6_CREDENTIAL_CONCURRENCY: {{ .Values.config.phase6.credentialConcurrency | quote }}
+  PHASE6_NAMESPACE_CONCURRENCY: {{ .Values.config.phase6.namespaceConcurrency | quote }}
+  PHASE6_OCI_LEASE_DURATION: {{ .Values.config.phase6.ociLeaseDuration | quote }}
+  PHASE6_CREDENTIAL_LEASE_DURATION: {{ .Values.config.phase6.credentialLeaseDuration | quote }}
+  PHASE6_NAMESPACE_LEASE_DURATION: {{ .Values.config.phase6.namespaceLeaseDuration | quote }}
+  PHASE6_OCI_REQUEST_TIMEOUT: {{ .Values.config.phase6.ociRequestTimeout | quote }}
+  PHASE6_PUBLICATION_DEADLINE: {{ .Values.config.phase6.publicationDeadline | quote }}
+  PHASE6_SHUTDOWN_GRACE: {{ .Values.config.phase6.shutdownGrace | quote }}
+  PHASE6_RETIRED_RETENTION: {{ .Values.config.phase6.retiredRetention | quote }}
+  PHASE6_SOURCE_RESCUE_TIMEOUT: {{ .Values.config.phase6.sourceRescueTimeout | quote }}
   WEBHOOK_ALLOWED_SECRET_REFS: {{ join "," (.Values.config.webhook.allowedSecretRefs | default (list)) | quote }}
   WEBHOOK_RELEASE_NAME: {{ .Release.Name | quote }}
   KUBERNETES_PREVIEW_HOSTNAME_SUFFIX: {{ .Values.config.kubernetes.previewHostnameSuffix | quote }}
