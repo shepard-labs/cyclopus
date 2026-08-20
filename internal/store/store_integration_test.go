@@ -307,6 +307,10 @@ func TestPreviewActiveDeployPushUsesCanonicalGenerationAndIdempotencyIntegration
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE environments SET lifecycle_status='ready',planned_hostname=$2 WHERE id=$1`,
+		first.Environment.ID, *first.Environment.PreviewSlug+".previews.example.test"); err != nil {
+		t.Fatal(err)
+	}
 	seedRelease(t, pool, orgOneID, first.Environment.ID, releaseOneID, "deploying")
 	if _, err := dataStore.AcquireDeployLease(ctx, orgOneID, first.Environment.ID, releaseOneID); err != nil {
 		t.Fatal(err)
@@ -659,8 +663,10 @@ func TestDeployLeaseRequiresDedicatedFencedRecoveryIntegration(t *testing.T) {
 	seedTenant(t, pool, tenantOne())
 	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
 		"00000000-0000-0000-0000-000000000024", commitSHA('1'), "expired-finalize-route")
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "pending")
+	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000025", commitSHA('b'), "expired-finalize-pending")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "pending")
 	ctx := context.Background()
 
 	lease, err := store.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
@@ -684,7 +690,7 @@ func TestDeployLeaseRequiresDedicatedFencedRecoveryIntegration(t *testing.T) {
 	if err := store.SetPendingCommitSHA(ctx, lease, commitSHA('a')); !errors.Is(err, ErrLeaseNotOwned) {
 		t.Fatalf("stale fence wrote pending SHA: %v", err)
 	}
-	if err := store.SetPendingCommitSHA(ctx, recovery, commitSHA('b')); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('b')); err != nil {
 		t.Fatal(err)
 	}
 	result, err := store.FinalizeReleaseFailed(ctx, FailReleaseParams{
@@ -878,7 +884,6 @@ func TestDeployClaimSnapshotValidationFailureRollsBackFenceAndStatusIntegration(
 func TestRecoveryScanClaimsWithoutFinalizingExternalCompensationIntegration(t *testing.T) {
 	store, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	job, err := store.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID,
 		repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000051",
@@ -886,6 +891,7 @@ func TestRecoveryScanClaimsWithoutFinalizingExternalCompensationIntegration(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	if _, err := store.ClaimOrchestration(ctx, orgOneID, "crashed-worker", time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -939,8 +945,10 @@ func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t 
 	seedTenant(t, pool, tenantOne())
 	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
 		"00000000-0000-0000-0000-000000000032", commitSHA('1'), "live-finalize-route")
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "live")
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "deploying")
+	seedCompletedOrchestrationRoute(t, store, pool, orgOneID, repositoryOneID, environmentOneID,
+		"00000000-0000-0000-0000-000000000033", commitSHA('c'), "live-finalize-pending")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "live")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "deploying")
 	if _, err := pool.Exec(context.Background(), `INSERT INTO aliases
 		(org_id, environment_id, hostname, release_id) VALUES ($1, $2, 'old.example.test', $3)`,
 		orgOneID, environmentOneID, releaseOneID); err != nil {
@@ -950,7 +958,7 @@ func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetPendingCommitSHA(context.Background(), lease, commitSHA('c')); err != nil {
+	if _, err := pool.Exec(context.Background(), `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('c')); err != nil {
 		t.Fatal(err)
 	}
 	result, err := store.FinalizeReleaseLive(context.Background(), FinalizeReleaseParams{
@@ -983,7 +991,6 @@ func TestFinalizeReleaseSupersedesFirstAndReturnsPendingAtomicallyIntegration(t 
 func TestFinalizeReleaseLivePromotesPendingSHAAtomicallyIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000072", commitSHA('1'), "live-route")); err != nil {
 		t.Fatal(err)
@@ -991,11 +998,15 @@ func TestFinalizeReleaseLivePromotesPendingSHAAtomicallyIntegration(t *testing.T
 	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET status='failed',terminal_error_code='fixture_terminal',terminal_at=now() WHERE environment_id=$1`, environmentOneID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000077", commitSHA('2'), "live-pending")); err != nil {
+		t.Fatal(err)
+	}
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('2')); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('2')); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test",
@@ -1011,7 +1022,6 @@ func TestFinalizeReleaseLivePromotesPendingSHAAtomicallyIntegration(t *testing.T
 func TestFinalizeReleaseLegacyPendingPreservesWorkflowRevisionAndCanonicalGenerationIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := t.Context()
 	params := orchestrationParams(orgOneID, repositoryOneID, environmentOneID,
 		"ignored", commitSHA('1'), "legacy-route")
@@ -1024,6 +1034,10 @@ func TestFinalizeReleaseLegacyPendingPreservesWorkflowRevisionAndCanonicalGenera
 		WHERE id=$1`, job.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "ignored", commitSHA('2'), "legacy-pending")); err != nil {
+		t.Fatal(err)
+	}
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
 		t.Fatal(err)
@@ -1042,8 +1056,8 @@ func TestFinalizeReleaseLegacyPendingPreservesWorkflowRevisionAndCanonicalGenera
 		&checkoutSHA, &workflowRevision, &generation, &key); err != nil {
 		t.Fatal(err)
 	}
-	if checkoutSHA != commitSHA('2') || workflowRevision != commitSHA('a') || generation != job.DesiredGeneration+1 ||
-		key != "recovery:"+releaseOneID+":"+commitSHA('2') {
+	if checkoutSHA != commitSHA('2') || workflowRevision != commitSHA('2') || generation != job.DesiredGeneration+1 ||
+		key != "legacy-pending" {
 		t.Fatalf("legacy promotion = checkout:%s workflow:%s generation:%d key:%s", checkoutSHA, workflowRevision, generation, key)
 	}
 }
@@ -1051,7 +1065,6 @@ func TestFinalizeReleaseLegacyPendingPreservesWorkflowRevisionAndCanonicalGenera
 func TestFinalizeReleaseFailedPromotesPendingSHAAndRejectsStaleFenceIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000073", commitSHA('1'), "failed-route")); err != nil {
 		t.Fatal(err)
@@ -1059,6 +1072,10 @@ func TestFinalizeReleaseFailedPromotesPendingSHAAndRejectsStaleFenceIntegration(
 	if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET status='failed',terminal_error_code='fixture_terminal',terminal_at=now() WHERE environment_id=$1`, environmentOneID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := dataStore.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000078", commitSHA('3'), "failed-pending")); err != nil {
+		t.Fatal(err)
+	}
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
 		t.Fatal(err)
@@ -1072,7 +1089,7 @@ func TestFinalizeReleaseFailedPromotesPendingSHAAndRejectsStaleFenceIntegration(
 		Audit: testAudit("00000000-0000-0000-0000-000000000075", "deploy.failed", releaseOneID)}); !errors.Is(err, ErrLeaseNotOwned) {
 		t.Fatalf("stale finalization error=%v", err)
 	}
-	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('3')); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('3')); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dataStore.FinalizeReleaseFailed(ctx, FailReleaseParams{Lease: lease, FailureReason: "terminal",
@@ -1088,7 +1105,7 @@ func TestFinalizeReleaseFailedPromotesPendingSHAAndRejectsStaleFenceIntegration(
 func TestFinalizeReleasePromotionFailureRollsBackReleaseAliasAndLeaseIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
@@ -1142,7 +1159,6 @@ func TestFinalizeReleaseAuditFailureRollsBackEverythingIntegration(t *testing.T)
 func TestRecoveredFinalizationGeneratesAuditAndPromotesPendingCommitAtomicallyIntegration(t *testing.T) {
 	store, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	if _, err := store.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID,
 		repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000071",
@@ -1153,11 +1169,15 @@ func TestRecoveredFinalizationGeneratesAuditAndPromotesPendingCommitAtomicallyIn
 		WHERE org_id = $1 AND environment_id = $2`, orgOneID, environmentOneID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.EnqueueOrCoalesceOrchestration(ctx, orchestrationParams(orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-000000000079", commitSHA('2'), "recovery-pending")); err != nil {
+		t.Fatal(err)
+	}
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	lease, err := store.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetPendingCommitSHA(ctx, lease, commitSHA('2')); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('2')); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CheckpointDeployRecovery(ctx, lease, "claimed"); err != nil {
@@ -1189,7 +1209,7 @@ func TestRecoveredFinalizationGeneratesAuditAndPromotesPendingCommitAtomicallyIn
 func TestAdoptRecoveredReleaseCreatesAliasFromPlannedHostnameAtomicallyIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
@@ -1267,13 +1287,13 @@ func TestQuarantineDeployRecoveryPersistsFailureAndPreservesOwnershipIntegration
 	seedTenant(t, pool, tenantOne())
 	seedCompletedOrchestrationRoute(t, dataStore, pool, orgOneID, repositoryOneID, environmentOneID,
 		"00000000-0000-0000-0000-000000000084", commitSHA('1'), "quarantine-route")
-	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
 	ctx := context.Background()
 	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dataStore.SetPendingCommitSHA(ctx, lease, commitSHA('f')); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE environments SET pending_commit_sha=$2 WHERE id=$1`, environmentOneID, commitSHA('f')); err != nil {
 		t.Fatal(err)
 	}
 	if err := dataStore.QuarantineDeployRecovery(ctx, lease, "recovery_state_invalid", "snapshot is malformed"); err != nil {
@@ -1298,6 +1318,280 @@ func TestQuarantineDeployRecoveryPersistsFailureAndPreservesOwnershipIntegration
 	if deploys, err := dataStore.ListExpiredDeploys(ctx); err != nil || len(deploys) != 0 {
 		t.Fatalf("ListExpiredDeploys() = %+v, %v", deploys, err)
 	}
+}
+
+func TestClaimResolvedJobDeployMaterializesOneReleaseAndDoesNotReplayIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	ctx := t.Context()
+	jobID := seedImageResolutionJob(t, dataStore, pool, "claim-resolved")
+	claim := claimImageResolution(t, dataStore, "resolver")
+	completion := imageResolutionCompleteParams(jobID, claim.Lease)
+	completion.DesiredGeneration = claim.Job.DesiredGeneration
+	completion.Claim = claim
+	if _, err := dataStore.CompleteImageResolution(ctx, completion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE apps SET desired_generation=environment.desired_generation
+		FROM environments environment WHERE apps.id=environment.app_id AND environment.id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+
+	execution, err := dataStore.ClaimResolvedJobDeploy(ctx, orgOneID, nil)
+	if err != nil || execution.ReleaseID != jobID || execution.EnvironmentID != environmentOneID || execution.Fence.IsZero() {
+		var status, deployment, resolution, annotation string
+		var generation, environmentGeneration, appGeneration int64
+		if queryErr := pool.QueryRow(ctx, `SELECT job.status,job.deployment_state,job.oci_resolution_state,job.oci_annotation_status,
+			job.desired_generation,environment.desired_generation,app.desired_generation FROM orchestration_jobs job
+			JOIN environments environment ON environment.id=job.environment_id JOIN apps app ON app.id=job.app_id WHERE job.id=$1`, jobID).
+			Scan(&status, &deployment, &resolution, &annotation, &generation, &environmentGeneration, &appGeneration); queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		t.Fatalf("claim resolved deploy = %+v, %v; job=%s/%s/%s/%s generations=%d/%d/%d", execution, err, status, deployment, resolution, annotation, generation, environmentGeneration, appGeneration)
+	}
+	if _, err := dataStore.ClaimResolvedJobDeploy(ctx, orgOneID, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("replayed claim error = %v, want ErrNotFound", err)
+	}
+	var releases, bindings int
+	var releaseID, owner *string
+	if err := pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM releases WHERE orchestration_job_id=$1),
+		(SELECT count(*) FROM orchestration_jobs WHERE id=$1 AND release_id=$1),
+		(SELECT release_id::text FROM orchestration_jobs WHERE id=$1),
+		(SELECT in_progress_release_id::text FROM environments WHERE id=$2)`, jobID, environmentOneID).
+		Scan(&releases, &bindings, &releaseID, &owner); err != nil {
+		t.Fatal(err)
+	}
+	if releases != 1 || bindings != 1 || releaseID == nil || *releaseID != jobID || owner == nil || *owner != jobID {
+		t.Fatalf("materialized release=%d bindings=%d job=%v owner=%v", releases, bindings, releaseID, owner)
+	}
+}
+
+func TestClaimResolvedJobDeployAcceptsAbsentAnnotationsAndRejectsMalformedAbsenceIntegration(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		annotation string
+		wantClaim  bool
+	}{
+		{name: "absent", annotation: "absent", wantClaim: true},
+		{name: "malformed absence", annotation: "absent", wantClaim: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dataStore, pool := newIntegrationStore(t)
+			seedTenant(t, pool, tenantOne())
+			ctx := t.Context()
+			jobID := seedImageResolutionJob(t, dataStore, pool, "annotation-"+test.name)
+			claim := claimImageResolution(t, dataStore, "resolver")
+			completion := imageResolutionCompleteParams(jobID, claim.Lease)
+			completion.DesiredGeneration = claim.Job.DesiredGeneration
+			completion.Claim = claim
+			if _, err := dataStore.CompleteImageResolution(ctx, completion); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(ctx, `UPDATE apps SET desired_generation=environment.desired_generation
+				FROM environments environment WHERE apps.id=environment.app_id AND environment.id=$1`, environmentOneID); err != nil {
+				t.Fatal(err)
+			}
+			if test.wantClaim {
+				if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_annotation_status='absent',oci_source=NULL,oci_revision=NULL WHERE id=$1`, jobID); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := pool.Exec(ctx, `UPDATE orchestration_jobs SET oci_annotation_status='absent',oci_source='acme/one',oci_revision=NULL WHERE id=$1`, jobID); err != nil {
+				t.Fatal(err)
+			}
+			execution, err := dataStore.ClaimResolvedJobDeploy(ctx, orgOneID, nil)
+			if test.wantClaim && (err != nil || execution.ReleaseID != jobID) {
+				t.Fatalf("absent annotation claim = %+v, %v", execution, err)
+			}
+			if !test.wantClaim && !errors.Is(err, ErrNotFound) {
+				t.Fatalf("malformed absent annotation claim = %+v, %v; want ErrNotFound", execution, err)
+			}
+		})
+	}
+}
+
+func TestAcceptReleaseRejectsPublicOrchestrationJobWithRegistryEvidenceIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	jobID := seedImageResolutionJob(t, dataStore, pool, "manual-public-registry-evidence")
+	claim := claimImageResolution(t, dataStore, "resolver")
+	completion := imageResolutionCompleteParams(jobID, claim.Lease)
+	completion.DesiredGeneration, completion.Claim = claim.Job.DesiredGeneration, claim
+	if _, err := dataStore.CompleteImageResolution(t.Context(), completion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET desired_generation=environment.desired_generation
+		FROM environments environment WHERE apps.id=environment.app_id AND environment.id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	registryID := seedActiveImageResolutionRegistry(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET image_visibility='public',registry_id=NULL,image_repository='acme/app-one' WHERE id=$1`, appOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET registry_credential_state='not_required',required_registry_credential_generation=NULL,
+		ready_registry_credential_generation=NULL WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE orchestration_jobs SET resolved_registry_id=$2,resolved_registry_generation=1 WHERE id=$1`, jobID, registryID); err != nil {
+		t.Fatal(err)
+	}
+	idem := IdempotencyClaimParams{OrgID: orgOneID, Scope: "deploy.accept", Key: "manual-public-registry-evidence", RequestHash: requestHash("manual-public-registry-evidence"), Owner: "user", LeaseDuration: time.Minute, Retention: time.Hour}
+	if _, err := dataStore.ClaimIdempotency(t.Context(), idem); err != nil {
+		t.Fatal(err)
+	}
+	_, err := dataStore.AcceptRelease(t.Context(), AcceptReleaseParams{ID: releaseOneID, OrgID: orgOneID, EnvironmentID: environmentOneID,
+		ImageRef: completion.ImmutableReference, GitCommitSHA: &completion.CommitSHA, Kind: "deploy",
+		ConfigSnapshot: testReleaseSnapshot(completion.ImmutableReference), ConfigHash: strings.Repeat("b", 64),
+		Idempotency: CompleteIdempotencyParams{Scope: idem.Scope, Key: idem.Key, RequestHash: idem.RequestHash, Owner: idem.Owner, Status: "completed", StatusCode: 202, Body: json.RawMessage(`{"status":"queued"}`)},
+		Audit:       testAudit("00000000-0000-0000-0000-0000000008f2", "ignored", releaseOneID)})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("public job with registry evidence error = %v, want ErrConflict", err)
+	}
+	var releaseID *string
+	if err := pool.QueryRow(t.Context(), `SELECT release_id::text FROM orchestration_jobs WHERE id=$1`, jobID).Scan(&releaseID); err != nil || releaseID != nil {
+		t.Fatalf("public job was relabeled release=%v err=%v", releaseID, err)
+	}
+}
+
+func TestAcceptReleaseRejectsOldGenerationOrchestrationJobAfterRotationIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	jobID := seedImageResolutionJob(t, dataStore, pool, "manual-old-generation")
+	claim := claimImageResolution(t, dataStore, "resolver")
+	completion := imageResolutionCompleteParams(jobID, claim.Lease)
+	completion.DesiredGeneration, completion.Claim = claim.Job.DesiredGeneration, claim
+	if _, err := dataStore.CompleteImageResolution(t.Context(), completion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE environments SET desired_generation=desired_generation+1 WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE apps SET desired_generation=environment.desired_generation
+		FROM environments environment WHERE apps.id=environment.app_id AND environment.id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	idem := IdempotencyClaimParams{OrgID: orgOneID, Scope: "deploy.accept", Key: "manual-old-generation", RequestHash: requestHash("manual-old-generation"), Owner: "user", LeaseDuration: time.Minute, Retention: time.Hour}
+	if _, err := dataStore.ClaimIdempotency(t.Context(), idem); err != nil {
+		t.Fatal(err)
+	}
+	_, err := dataStore.AcceptRelease(t.Context(), AcceptReleaseParams{ID: releaseOneID, OrgID: orgOneID, EnvironmentID: environmentOneID,
+		ImageRef: completion.ImmutableReference, GitCommitSHA: &completion.CommitSHA, Kind: "deploy",
+		ConfigSnapshot: testReleaseSnapshot(completion.ImmutableReference), ConfigHash: strings.Repeat("b", 64),
+		Idempotency: CompleteIdempotencyParams{Scope: idem.Scope, Key: idem.Key, RequestHash: idem.RequestHash, Owner: idem.Owner, Status: "completed", StatusCode: 202, Body: json.RawMessage(`{"status":"queued"}`)},
+		Audit:       testAudit("00000000-0000-0000-0000-0000000008f3", "ignored", releaseOneID)})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("old-generation manual claim error = %v, want ErrConflict", err)
+	}
+	var releaseID *string
+	if err := pool.QueryRow(t.Context(), `SELECT release_id::text FROM orchestration_jobs WHERE id=$1`, jobID).Scan(&releaseID); err != nil || releaseID != nil {
+		t.Fatalf("old-generation job was relabeled release=%v err=%v", releaseID, err)
+	}
+}
+
+func TestDeployRecoveryMutationsRejectGenerationStaleFenceIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "deploying")
+	ctx := t.Context()
+	lease, err := dataStore.AcquireDeployLease(ctx, orgOneID, environmentOneID, releaseOneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE environments SET desired_generation=desired_generation+1 WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
+	for name, operation := range map[string]func() error{
+		"verify": func() error {
+			return dataStore.VerifyDeployFence(ctx, lease, ImmutableReleaseSnapshot{ID: releaseOneID})
+		},
+		"reschedule":   func() error { return dataStore.RescheduleDeployRecovery(ctx, lease, time.Second) },
+		"quarantine":   func() error { return dataStore.QuarantineDeployRecovery(ctx, lease, "stale", "generation changed") },
+		"take pending": func() error { _, err := dataStore.TakePendingCommitSHA(ctx, lease); return err },
+		"release": func() error {
+			return dataStore.ReleaseDeployLease(ctx, lease, testAudit("00000000-0000-0000-0000-0000000000d1", "ignored", environmentOneID))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := operation(); !errors.Is(err, ErrLeaseNotOwned) {
+				t.Fatalf("%s stale fence error = %v, want ErrLeaseNotOwned", name, err)
+			}
+		})
+	}
+	var owner string
+	if err := pool.QueryRow(ctx, `SELECT in_progress_release_id::text FROM environments WHERE id=$1`, environmentOneID).Scan(&owner); err != nil || owner != releaseOneID {
+		t.Fatalf("stale mutation released lease owner=%q err=%v", owner, err)
+	}
+}
+
+func TestVerifyDeployFenceAllowsOnlyCurrentLiveReleaseWithoutLeaseIntegration(t *testing.T) {
+	dataStore, pool := newIntegrationStore(t)
+	seedTenant(t, pool, tenantOne())
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseOneID, "live")
+	lease := DeployLease{OrgID: orgOneID, EnvironmentID: environmentOneID, ReleaseID: releaseOneID}
+	evidence := ImmutableReleaseSnapshot{ID: releaseOneID, DesiredGeneration: 1}
+	if err := dataStore.VerifyDeployFence(t.Context(), lease, evidence); err != nil {
+		t.Fatalf("current live reconciliation fence = %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE releases SET status='superseded' WHERE id=$1`, releaseOneID); err != nil {
+		t.Fatal(err)
+	}
+	seedDeployableRelease(t, pool, orgOneID, environmentOneID, releaseTwoID, "live")
+	if err := dataStore.VerifyDeployFence(t.Context(), lease, evidence); !errors.Is(err, ErrLeaseNotOwned) {
+		t.Fatalf("stale live reconciliation fence = %v, want ErrLeaseNotOwned", err)
+	}
+}
+
+func TestResolvedJobDeployGenerationRotationBeforeAndAfterClaimIntegration(t *testing.T) {
+	t.Run("before claim discards resolved generation without release", func(t *testing.T) {
+		dataStore, pool := newIntegrationStore(t)
+		seedTenant(t, pool, tenantOne())
+		ctx := t.Context()
+		jobID := seedImageResolutionJob(t, dataStore, pool, "rotation-before-claim")
+		claim := claimImageResolution(t, dataStore, "resolver")
+		completion := imageResolutionCompleteParams(jobID, claim.Lease)
+		completion.DesiredGeneration = claim.Job.DesiredGeneration
+		completion.Claim = claim
+		if _, err := dataStore.CompleteImageResolution(ctx, completion); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE environments SET desired_generation=desired_generation+1 WHERE id=$1`, environmentOneID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := dataStore.ClaimResolvedJobDeploy(ctx, orgOneID, nil); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("rotated resolved job claim error = %v, want ErrNotFound", err)
+		}
+		var releases int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM releases WHERE orchestration_job_id=$1`, jobID).Scan(&releases); err != nil || releases != 0 {
+			t.Fatalf("rotated resolved job releases=%d, %v", releases, err)
+		}
+	})
+
+	t.Run("after claim invalidates fence", func(t *testing.T) {
+		dataStore, pool := newIntegrationStore(t)
+		seedTenant(t, pool, tenantOne())
+		ctx := t.Context()
+		jobID := seedImageResolutionJob(t, dataStore, pool, "rotation-after-claim")
+		claim := claimImageResolution(t, dataStore, "resolver")
+		completion := imageResolutionCompleteParams(jobID, claim.Lease)
+		completion.DesiredGeneration = claim.Job.DesiredGeneration
+		completion.Claim = claim
+		if _, err := dataStore.CompleteImageResolution(ctx, completion); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE apps SET desired_generation=environment.desired_generation FROM environments environment WHERE apps.id=environment.app_id AND environment.id=$1`, environmentOneID); err != nil {
+			t.Fatal(err)
+		}
+		lease, err := dataStore.ClaimResolvedJobDeploy(ctx, orgOneID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE environments SET desired_generation=desired_generation+1 WHERE id=$1`, environmentOneID); err != nil {
+			t.Fatal(err)
+		}
+		if err := dataStore.VerifyDeployFence(ctx, lease, ImmutableReleaseSnapshot{ID: jobID}); !errors.Is(err, ErrLeaseNotOwned) {
+			t.Fatalf("rotated claimed fence error = %v, want ErrLeaseNotOwned", err)
+		}
+	})
 }
 
 func TestOrchestrationReplayConflictDeadlineReconciliationAndTenantFilteringIntegration(t *testing.T) {
@@ -2062,6 +2356,9 @@ func TestEnvVarMutationCreatesImmutableReleaseLeaseAuditAndCompletesIdempotencyI
 	if envEnvelope.DesiredState.Deployment.Container.Resources != liveEnvelope.DesiredState.Deployment.Container.Resources || envEnvelope.DesiredState.Deployment.RuntimeClassName != liveEnvelope.DesiredState.Deployment.RuntimeClassName || envEnvelope.DesiredState.Scaling.Kind != liveEnvelope.DesiredState.Scaling.Kind || envEnvelope.EnvVarRevision == nil {
 		t.Fatalf("env-change snapshot did not preserve live desired state: %+v", envEnvelope)
 	}
+	if envEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"] != releaseTwoID {
+		t.Fatalf("env-change release annotation = %q, want %q", envEnvelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"], releaseTwoID)
+	}
 }
 
 func TestEnvVarMutationRollsBackProtectedMutationWhenIdempotencyLeaseIsLostIntegration(t *testing.T) {
@@ -2170,6 +2467,19 @@ func TestRollbackTargetsMustHavePreviouslyServedIntegration(t *testing.T) {
 			}
 			if !valid && !errors.Is(err, ErrNotFound) {
 				t.Fatalf("invalid %s rollback target error = %v, want ErrNotFound", status, err)
+			}
+			if valid {
+				release, getErr := dataStore.GetRelease(t.Context(), orgOneID, releaseTwoID)
+				if getErr != nil {
+					t.Fatal(getErr)
+				}
+				envelope, decodeErr := DecodeReleaseSnapshot(release.ConfigSnapshot)
+				if decodeErr != nil {
+					t.Fatal(decodeErr)
+				}
+				if envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"] != releaseTwoID {
+					t.Fatalf("rollback release annotation = %q, want %q", envelope.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"], releaseTwoID)
+				}
 			}
 		})
 	}
@@ -2296,7 +2606,6 @@ func TestAcceptDeployInheritsCurrentEnvRevisionAtomicallyIntegration(t *testing.
 	if acceptedEnvelope.DesiredState.Deployment.Container.Image != newEnvelope.DesiredState.Deployment.Container.Image || acceptedEnvelope.DesiredState.Service.TargetPort != 9090 || acceptedEnvelope.DesiredState.Deployment.Container.Port != 9090 {
 		t.Fatalf("accepted deploy lost new mutable basis: %+v", acceptedEnvelope.DesiredState)
 	}
-	seedCompletedOrchestrationRoute(t, dataStore, pool, orgOneID, repositoryOneID, environmentOneID, "00000000-0000-0000-0000-0000000000a5", commitSHA('a'), "inherit-finalize-route")
 	if _, err := dataStore.FinalizeReleaseLive(ctx, FinalizeReleaseParams{Lease: lease, Hostname: "planned-one.example.test", Audit: testAudit("00000000-0000-0000-0000-0000000000a6", "ignored", deployReleaseID)}); err != nil {
 		t.Fatal(err)
 	}
@@ -2407,7 +2716,7 @@ func TestProjectAndAppCreateUpdateAreTenantScopedIntegration(t *testing.T) {
 	}
 	app, err := dataStore.CreateApp(ctx, SaveAppParams{App: App{ID: appID, OrgID: orgOneID,
 		ProjectID: projectID, Name: "Created App", Slug: "created-app", HostnameLabel: "created-app",
-		ImageRepository: stringPointer("ghcr.io/acme/created-app"), GitHubWorkflowPath: ".github/workflows/deploy.yml",
+		ImageRepository: stringPointer("acme/created-app"), GitHubWorkflowPath: ".github/workflows/deploy.yml",
 		ProductionBranch: "main", AnnotationPolicy: "validate_if_present", ImageVisibility: "public",
 		ContainerPort: 8080, HealthCheckPath: "/", ScalingMode: "hpa", MinReplicas: 1, MaxReplicas: 3,
 		HPATargetCPUPercent: 70, CPURequestMillicores: 100, CPULimitMillicores: 1000,
@@ -2577,8 +2886,8 @@ func TestRequestPreviewTeardownFencesEveryActiveOrchestrationStateIntegration(t 
 		case "deploying":
 			_, err = pool.Exec(ctx, `UPDATE orchestration_jobs job SET status='deploying',attempt=1,
 				github_run_status='completed',github_run_conclusion='success',github_run_head_sha=desired_checkout_sha,
-				image_tag_ref=app.image_repository||':'||desired_checkout_sha,resolved_image_digest='sha256:'||repeat('9',64),
-				immutable_image_ref=app.image_repository||'@sha256:'||repeat('9',64),
+				image_tag_ref='ghcr.io/'||app.image_repository||':'||desired_checkout_sha,resolved_image_digest='sha256:'||repeat('9',64),
+				immutable_image_ref='ghcr.io/'||app.image_repository||'@sha256:'||repeat('9',64),
 				oci_media_type='application/vnd.oci.image.manifest.v1+json',oci_resolution_state='resolved',
 				oci_deadline_at=now()+interval '5 minutes',oci_annotation_status='absent',
 				oci_resolved_at=now(),deployment_state='ready' FROM apps app WHERE job.id=$1 AND app.id=job.app_id`, jobID)
@@ -2757,6 +3066,15 @@ func seedRelease(t *testing.T, pool *pgxpool.Pool, orgID, environmentID, release
 		VALUES ($1, $2, $3, 'ghcr.io/acme/test@sha256:' || repeat('a', 64),
 			'deploy', $5, repeat('b', 64), $4)`, releaseID, orgID, environmentID, status,
 		testReleaseSnapshot("ghcr.io/acme/test@sha256:"+strings.Repeat("a", 64))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedDeployableRelease(t *testing.T, pool *pgxpool.Pool, orgID, environmentID, releaseID, status string) {
+	t.Helper()
+	seedRelease(t, pool, orgID, environmentID, releaseID, status)
+	if _, err := pool.Exec(t.Context(), `UPDATE apps AS app SET desired_generation=environment.desired_generation
+		FROM environments AS environment WHERE app.org_id=$1 AND app.id=environment.app_id AND environment.id=$2`, orgID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 }

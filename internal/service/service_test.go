@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -141,7 +142,8 @@ func TestDeploymentSnapshotStampsTenantIdentity(t *testing.T) {
 	environment := store.Environment{ID: "env-123", OrgID: "org-abc", AppID: "app-xyz", Kind: "production", Namespace: "ns-1", PlannedHostname: &hostname}
 	app := store.App{
 		ID: "app-xyz", OrgID: "org-abc", Slug: "api", ScalingMode: "hpa",
-		MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70,
+		ImageVisibility: "public",
+		MinReplicas:     1, MaxReplicas: 3, HPATargetCPUPercent: 70,
 		ContainerPort: 8080, HealthCheckPath: "/healthz", RuntimeClass: "runc", DeployTimeoutSeconds: 120,
 		CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256,
 	}
@@ -165,5 +167,37 @@ func TestDeploymentSnapshotStampsTenantIdentity(t *testing.T) {
 	}
 	if got := deployment.PodLabels["cyclopus.dev/environment-id"]; got != environment.ID {
 		t.Fatalf("environment-id label = %q, want %q", got, environment.ID)
+	}
+}
+
+func TestDeploymentSnapshotSetsVisibilitySpecificImagePullSecrets(t *testing.T) {
+	hostname := "api.example.test"
+	environment := store.Environment{ID: "env-123", OrgID: "org-abc", AppID: "app-xyz", Kind: "production", Namespace: "ns-1", PlannedHostname: &hostname}
+	for _, test := range []struct {
+		visibility string
+		want       []string
+	}{
+		{visibility: "public", want: []string{}},
+		{visibility: "private", want: []string{"cyclopus-ghcr-pull"}},
+	} {
+		t.Run(test.visibility, func(t *testing.T) {
+			app := store.App{
+				ID: "app-xyz", OrgID: "org-abc", Slug: "api", ScalingMode: "hpa", ImageVisibility: test.visibility,
+				MinReplicas: 1, MaxReplicas: 3, HPATargetCPUPercent: 70,
+				ContainerPort: 8080, HealthCheckPath: "/healthz", RuntimeClass: "runc", DeployTimeoutSeconds: 120,
+				CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256,
+			}
+			encoded, err := deploymentSnapshot(environment, app, "ghcr.io/acme/api@sha256:"+strings.Repeat("a", 64), "rel-789")
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope, err := store.DecodeReleaseSnapshot(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(envelope.DesiredState.Deployment.ImagePullSecrets, test.want) {
+				t.Fatalf("image pull secrets = %v, want %v", envelope.DesiredState.Deployment.ImagePullSecrets, test.want)
+			}
+		})
 	}
 }

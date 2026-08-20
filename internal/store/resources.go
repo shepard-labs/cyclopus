@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ type Environment struct {
 	RegistryCredentialNextAttemptAt                                         time.Time
 	RegistryCredentialLeaseOwner                                            *string
 	RegistryCredentialLeaseExpiresAt                                        *time.Time
+	DesiredGeneration                                                       int64
 	CreatedAt, TeardownRequestedAt, TornDownAt                              *time.Time
 }
 
@@ -380,14 +382,14 @@ const environmentSelect = `SELECT environment.id::text,environment.org_id::text,
 	environment.required_registry_credential_generation,environment.ready_registry_credential_generation,environment.registry_credential_state,
 	COALESCE(environment.registry_credential_checkpoint,''),environment.registry_credential_error_code,environment.registry_credential_error_message,
 	environment.registry_credential_attempts,environment.registry_credential_next_attempt_at,environment.registry_credential_lease_owner,
-	environment.registry_credential_lease_epoch,environment.registry_credential_lease_expires_at FROM environments environment`
+	environment.registry_credential_lease_epoch,environment.registry_credential_lease_expires_at,environment.desired_generation FROM environments environment`
 
 func scanEnvironment(row rowScanner, v *Environment) error {
 	return row.Scan(&v.ID, &v.OrgID, &v.AppID, &v.Branch, &v.Kind, &v.PreviewSlug, &v.Namespace, &v.PlannedHostname, &v.LifecycleStatus, &v.LifecycleReason, &v.LifecycleErrorCode, &v.LifecycleErrorMessage, &v.CurrentReleaseID, &v.InProgressReleaseID, &v.CurrentEnvVarRevisionID, &v.PendingCommitSHA, &v.CreatedAt, &v.TeardownRequestedAt, &v.TornDownAt,
 		&v.RequiredRegistryCredentialGeneration, &v.ReadyRegistryCredentialGeneration, &v.RegistryCredentialState,
 		&v.RegistryCredentialCheckpoint, &v.RegistryCredentialErrorCode, &v.RegistryCredentialErrorMessage,
 		&v.RegistryCredentialAttempts, &v.RegistryCredentialNextAttemptAt, &v.RegistryCredentialLeaseOwner,
-		&v.RegistryCredentialLeaseEpoch, &v.RegistryCredentialLeaseExpiresAt)
+		&v.RegistryCredentialLeaseEpoch, &v.RegistryCredentialLeaseExpiresAt, &v.DesiredGeneration)
 }
 
 func (s *Store) ListReleases(ctx context.Context, orgID, environmentID string, statuses []string) ([]Release, error) {
@@ -411,11 +413,11 @@ func (s *Store) GetRelease(ctx context.Context, orgID, id string) (Release, erro
 	return v, resourceQueryError("get release", err)
 }
 
-const releaseSelect = `SELECT id::text,org_id::text,environment_id::text,image_ref,git_commit_sha,triggered_by_user_id::text,kind,env_var_revision_id::text,config_snapshot,config_hash,created_at,status,COALESCE(failure_reason,''),registry_credential_registry_id::text,registry_credential_generation FROM releases`
+const releaseSelect = `SELECT id::text,org_id::text,environment_id::text,image_ref,git_commit_sha,triggered_by_user_id::text,kind,env_var_revision_id::text,config_snapshot,config_hash,created_at,status,COALESCE(failure_reason,''),registry_credential_registry_id::text,registry_credential_generation,COALESCE(desired_generation,0),orchestration_job_id::text,provenance FROM releases`
 
 func scanRelease(r rowScanner) (Release, error) {
 	var v Release
-	err := r.Scan(&v.ID, &v.OrgID, &v.EnvironmentID, &v.ImageRef, &v.GitCommitSHA, &v.TriggeredByUserID, &v.Kind, &v.EnvVarRevisionID, &v.ConfigSnapshot, &v.ConfigHash, &v.CreatedAt, &v.Status, &v.FailureReason, &v.RegistryCredentialRegistryID, &v.RegistryCredentialGeneration)
+	err := r.Scan(&v.ID, &v.OrgID, &v.EnvironmentID, &v.ImageRef, &v.GitCommitSHA, &v.TriggeredByUserID, &v.Kind, &v.EnvVarRevisionID, &v.ConfigSnapshot, &v.ConfigHash, &v.CreatedAt, &v.Status, &v.FailureReason, &v.RegistryCredentialRegistryID, &v.RegistryCredentialGeneration, &v.DesiredGeneration, &v.OrchestrationJobID, &v.Provenance)
 	return v, err
 }
 
@@ -431,11 +433,56 @@ type AcceptReleaseParams struct {
 	Audit                                    *AuditEvent
 }
 
+var immutableGHCRReleaseRefPattern = regexp.MustCompile(`^ghcr\.io/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[0-9a-f]{64}$`)
+
 func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (DeployLease, error) {
 	var lease DeployLease
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		imageRef, snapshot, hash := p.ImageRef, p.ConfigSnapshot, p.ConfigHash
 		var envVarRevisionID *string
+		var registryID, releaseRegistryID, orchestrationJobID *string
+		var registryGeneration, releaseRegistryGeneration *int64
+		var visibility, credentialState string
+		var appGeneration, environmentGeneration int64
+		if err := tx.QueryRow(ctx, `SELECT app.image_visibility,app.registry_id::text,app.desired_generation,
+			environment.desired_generation,environment.registry_credential_state,
+			environment.required_registry_credential_generation,environment.ready_registry_credential_generation
+			FROM environments environment JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+			WHERE environment.org_id=$1 AND environment.id=$2 AND environment.lifecycle_status='ready'
+			AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL FOR UPDATE OF environment`, p.OrgID, p.EnvironmentID).Scan(
+			&visibility, &registryID, &appGeneration, &environmentGeneration, &credentialState,
+			&registryGeneration, &releaseRegistryGeneration); err == pgx.ErrNoRows {
+			return ErrConflict
+		} else if err != nil {
+			return fmt.Errorf("lock release generation basis: %w", err)
+		}
+		if appGeneration != environmentGeneration {
+			return ErrConflict
+		}
+		switch visibility {
+		case "public":
+			if registryID != nil || credentialState != "not_required" || registryGeneration != nil || releaseRegistryGeneration != nil {
+				return ErrConflict
+			}
+		case "private":
+			if registryID == nil || credentialState != "ready" || registryGeneration == nil || releaseRegistryGeneration == nil || *registryGeneration != *releaseRegistryGeneration {
+				return ErrConflict
+			}
+			var active bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM registries registry
+				JOIN registry_credential_generations generation ON generation.org_id=registry.org_id
+				 AND generation.registry_id=registry.id AND generation.generation=registry.active_generation
+				WHERE registry.org_id=$1 AND registry.id=$2 AND registry.state='ready'
+				 AND registry.active_generation=$3 AND generation.state='active')`, p.OrgID, *registryID, *registryGeneration).Scan(&active); err != nil {
+				return fmt.Errorf("validate release registry generation: %w", err)
+			}
+			if !active {
+				return ErrConflict
+			}
+			releaseRegistryID = registryID
+		default:
+			return ErrConflict
+		}
 		if p.InheritCurrentEnv {
 			var environmentLocked bool
 			if err := tx.QueryRow(ctx, `
@@ -501,16 +548,84 @@ func (s *Store) AcceptRelease(ctx context.Context, p AcceptReleaseParams) (Deplo
 			}
 		}
 		if p.RollbackTargetID != nil {
-			err := tx.QueryRow(ctx, `SELECT target.image_ref,target.config_snapshot,target.config_hash,target.env_var_revision_id::text FROM (SELECT release.*,row_number() OVER(ORDER BY release.created_at DESC,release.id DESC) retention_rank FROM releases release WHERE release.org_id=$1 AND release.environment_id=$2) target JOIN environments environment ON environment.org_id=target.org_id AND environment.id=target.environment_id JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id WHERE target.id=$3 AND target.status IN ('live','superseded') AND target.retention_rank<=app.release_retention_count`, p.OrgID, p.EnvironmentID, *p.RollbackTargetID).Scan(&imageRef, &snapshot, &hash, &envVarRevisionID)
+			err := tx.QueryRow(ctx, `SELECT target.image_ref,target.git_commit_sha,target.config_snapshot,
+				target.env_var_revision_id::text
+				FROM (SELECT release.*,row_number() OVER(ORDER BY release.created_at DESC,release.id DESC) retention_rank
+				 FROM releases release WHERE release.org_id=$1 AND release.environment_id=$2) target
+				JOIN environments environment ON environment.org_id=target.org_id AND environment.id=target.environment_id
+				JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+				WHERE target.id=$3 AND target.status IN ('live','superseded') AND target.retention_rank<=app.release_retention_count
+				AND target.provenance<>'legacy_unverified'`, p.OrgID, p.EnvironmentID, *p.RollbackTargetID).Scan(
+				&imageRef, &p.GitCommitSHA, &snapshot, &envVarRevisionID)
 			if err != nil {
 				return mapMutationError("select rollback target", err)
 			}
+			orchestrationJobID = nil
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,git_commit_sha,triggered_by_user_id,kind,env_var_revision_id,config_snapshot,config_hash,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')`, p.ID, p.OrgID, p.EnvironmentID, imageRef, p.GitCommitSHA, p.TriggeredByUserID, p.Kind, envVarRevisionID, snapshot, hash)
+		if !immutableGHCRReleaseRefPattern.MatchString(imageRef) {
+			return ErrInvalidArgument
+		}
+		envelope, err := DecodeReleaseSnapshot(snapshot)
+		if err != nil || envelope.DesiredState.Deployment.Container.Image != imageRef {
+			return ErrInvalidArgument
+		}
+		snapshot, hash, err = NormalizeReleaseSnapshotContext(snapshot, ReleaseSnapshotContext{
+			ImageVisibility: visibility,
+			ImmutableImage:  imageRef,
+			ReleaseID:       &p.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("normalize release snapshot context: %w", err)
+		}
+		if p.RollbackTargetID == nil && p.GitCommitSHA != nil {
+			if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(*p.GitCommitSHA) {
+				return ErrInvalidArgument
+			}
+			if err := tx.QueryRow(ctx, `UPDATE orchestration_jobs job SET release_id=$6,updated_at=clock_timestamp()
+					WHERE job.id=(SELECT candidate.id FROM orchestration_jobs candidate
+					 JOIN environments environment ON environment.org_id=candidate.org_id AND environment.id=candidate.environment_id
+					 JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id AND app.id=candidate.app_id
+					 LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=app.registry_id
+					 LEFT JOIN registry_credential_generations generation ON generation.org_id=registry.org_id
+					   AND generation.registry_id=registry.id AND generation.generation=registry.active_generation
+					 WHERE candidate.org_id=$1 AND candidate.environment_id=$2 AND candidate.desired_generation=$3
+					 AND app.desired_generation=environment.desired_generation AND environment.desired_generation=$3
+					 AND candidate.desired_checkout_sha=$4 AND candidate.immutable_image_ref=$5
+					 AND candidate.status='deploying' AND candidate.deployment_state='ready'
+					 AND candidate.oci_resolution_state='resolved' AND candidate.pending_checkout_sha IS NULL
+					 AND candidate.release_id IS NULL AND environment.lifecycle_status='ready' AND environment.torn_down_at IS NULL
+					 AND app.deleted_at IS NULL AND ((candidate.oci_annotation_status='matched' AND candidate.oci_revision=$4)
+					   OR (candidate.oci_annotation_status='absent' AND candidate.oci_source IS NULL AND candidate.oci_revision IS NULL))
+					 AND ((app.image_visibility='public' AND app.registry_id IS NULL AND candidate.resolved_registry_id IS NULL
+					   AND candidate.resolved_registry_generation IS NULL AND environment.registry_credential_state='not_required'
+					   AND environment.required_registry_credential_generation IS NULL AND environment.ready_registry_credential_generation IS NULL)
+					  OR (app.image_visibility='private' AND candidate.resolved_registry_id=app.registry_id
+					   AND candidate.resolved_registry_generation=registry.active_generation AND registry.state='ready' AND generation.state='active'
+					   AND environment.registry_credential_state='ready'
+					   AND environment.required_registry_credential_generation=registry.active_generation
+					   AND environment.ready_registry_credential_generation=registry.active_generation))
+					 ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED)
+					AND job.release_id IS NULL RETURNING job.id::text,job.resolved_registry_id::text,job.resolved_registry_generation`, p.OrgID, p.EnvironmentID,
+				environmentGeneration, *p.GitCommitSHA, imageRef, p.ID).Scan(&orchestrationJobID, &releaseRegistryID, &releaseRegistryGeneration); err == pgx.ErrNoRows {
+				return ErrConflict
+			} else if err != nil {
+				return fmt.Errorf("validate release image evidence: %w", err)
+			}
+		}
+		provenance := "contextual"
+		if orchestrationJobID != nil {
+			provenance = "orchestration"
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,git_commit_sha,triggered_by_user_id,
+			kind,env_var_revision_id,config_snapshot,config_hash,status,registry_credential_registry_id,
+			registry_credential_generation,desired_generation,orchestration_job_id,provenance)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',$11,$12,$13,$14,$15)`, p.ID, p.OrgID,
+			p.EnvironmentID, imageRef, p.GitCommitSHA, p.TriggeredByUserID, p.Kind, envVarRevisionID, snapshot, hash,
+			releaseRegistryID, releaseRegistryGeneration, environmentGeneration, orchestrationJobID, provenance)
 		if err != nil {
 			return mapMutationError("insert accepted release", err)
 		}
-		err = tx.QueryRow(ctx, `UPDATE environments environment SET in_progress_release_id=$3,lock_acquired_at=clock_timestamp(),deploy_recovery_checkpoint=NULL FROM apps app,projects project,orgs org WHERE environment.org_id=$1 AND environment.id=$2 AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL AND environment.lifecycle_status='ready' AND environment.planned_hostname IS NOT NULL AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.deleted_at IS NULL AND project.org_id=app.org_id AND project.id=app.project_id AND project.deleted_at IS NULL AND org.id=environment.org_id AND org.deleted_at IS NULL RETURNING environment.org_id::text,environment.id::text,environment.in_progress_release_id::text,environment.lock_acquired_at,environment.lock_acquired_at+make_interval(secs=>app.deploy_timeout_seconds)`, p.OrgID, p.EnvironmentID, p.ID).Scan(&lease.OrgID, &lease.EnvironmentID, &lease.ReleaseID, &lease.Fence, &lease.ExpiresAt)
+		err = tx.QueryRow(ctx, `UPDATE environments environment SET in_progress_release_id=$3,lock_acquired_at=clock_timestamp(),deploy_recovery_checkpoint=NULL FROM apps app,projects project,orgs org,releases release WHERE environment.org_id=$1 AND environment.id=$2 AND environment.in_progress_release_id IS NULL AND environment.torn_down_at IS NULL AND environment.lifecycle_status='ready' AND environment.planned_hostname IS NOT NULL AND environment.desired_generation=$4 AND app.org_id=environment.org_id AND app.id=environment.app_id AND app.desired_generation=$4 AND app.deleted_at IS NULL AND project.org_id=app.org_id AND project.id=app.project_id AND project.deleted_at IS NULL AND org.id=environment.org_id AND org.deleted_at IS NULL AND release.org_id=environment.org_id AND release.id=$3 AND release.desired_generation=$4 RETURNING environment.org_id::text,environment.id::text,environment.in_progress_release_id::text,environment.lock_acquired_at,environment.lock_acquired_at+make_interval(secs=>app.deploy_timeout_seconds),release.desired_generation`, p.OrgID, p.EnvironmentID, p.ID, environmentGeneration).Scan(&lease.OrgID, &lease.EnvironmentID, &lease.ReleaseID, &lease.Fence, &lease.ExpiresAt, &lease.DesiredGeneration)
 		if err != nil {
 			return mapMutationError("acquire accepted deploy lease", err)
 		}

@@ -51,7 +51,7 @@ func TestHTTPFakeAPIServerRestoresSnapshotAndPreservesMetadata(t *testing.T) {
 	}
 	api.mu.Lock()
 	defer api.mu.Unlock()
-	if api.puts != 1 || api.deployment.Spec.Template.Spec.Containers[0].Image != "old-image" || api.deployment.Labels["server-owned"] != "keep" {
+	if api.puts != 1 || api.deployment.Spec.Template.Spec.Containers[0].Image != immutableTestImage("old") || api.deployment.Labels["server-owned"] != "keep" {
 		t.Fatalf("HTTP API state = puts:%d deployment:%#v", api.puts, api.deployment)
 	}
 }

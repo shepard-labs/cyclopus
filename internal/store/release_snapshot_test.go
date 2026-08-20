@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -131,8 +133,112 @@ func TestReleaseSnapshotDecodesExistingNonEnvSnapshot(t *testing.T) {
 	}
 }
 
+func TestReleaseSnapshotImageAndPullSecretCanonicalValidation(t *testing.T) {
+	for _, image := range []string{
+		"ghcr.io/acme/app:latest",
+		"docker.io/acme/app@sha256:" + strings.Repeat("a", 64),
+		"ghcr.io/acme/app@sha256:" + strings.Repeat("A", 64),
+		"ghcr.io/acme//app@sha256:" + strings.Repeat("a", 64),
+	} {
+		envelope := testSnapshotEnvelope()
+		envelope.DesiredState.Deployment.Container.Image = image
+		if _, _, err := EncodeReleaseSnapshot(envelope); err == nil {
+			t.Fatalf("EncodeReleaseSnapshot() accepted non-canonical image %q", image)
+		}
+	}
+	for _, secrets := range [][]string{{"other"}, {"cyclopus-ghcr-pull", "other"}} {
+		envelope := testSnapshotEnvelope()
+		envelope.DesiredState.Deployment.ImagePullSecrets = secrets
+		if _, _, err := EncodeReleaseSnapshot(envelope); err == nil {
+			t.Fatalf("EncodeReleaseSnapshot() accepted image pull secrets %v", secrets)
+		}
+	}
+	private := testSnapshotEnvelope()
+	private.DesiredState.Deployment.ImagePullSecrets = []string{"cyclopus-ghcr-pull"}
+	encoded, _, err := EncodeReleaseSnapshot(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeReleaseSnapshot(encoded)
+	if err != nil || len(decoded.DesiredState.Deployment.ImagePullSecrets) != 1 || decoded.DesiredState.Deployment.ImagePullSecrets[0] != "cyclopus-ghcr-pull" {
+		t.Fatalf("private pull secret round trip = %+v, %v", decoded.DesiredState.Deployment.ImagePullSecrets, err)
+	}
+}
+
+func TestReleaseSnapshotLegacyV2AndV3UpgradePreservesFields(t *testing.T) {
+	for _, version := range []int{ReleaseSnapshotVersionV2, ReleaseSnapshotVersionV3} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			envelope := testSnapshotEnvelope()
+			envelope.Version = version
+			envelope.DesiredState.Deployment.PodAnnotations["example.test/preserved"] = "annotation"
+			envelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{"preserved-secret"}
+			expected := canonicalReleaseSnapshot(envelope)
+			expected.Version = ReleaseSnapshotVersion
+			expected.DesiredState.Deployment.ImagePullSecrets = []string{}
+			legacy, err := json.Marshal(canonicalReleaseSnapshot(envelope))
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := DecodeReleaseSnapshot(legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(decoded, expected) {
+				t.Fatalf("legacy upgrade = %+v, want every existing field preserved in %+v", decoded, expected)
+			}
+			reencoded, _, err := EncodeReleaseSnapshot(decoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			roundTrip, err := DecodeReleaseSnapshot(reencoded)
+			if err != nil || !reflect.DeepEqual(roundTrip, decoded) {
+				t.Fatalf("canonical round trip = %+v, %v; want %+v", roundTrip, err, decoded)
+			}
+		})
+	}
+}
+
+func TestNormalizeReleaseSnapshotForContextUpgradesLegacyPrivateAndPreservesFields(t *testing.T) {
+	legacy := testSnapshotEnvelope()
+	legacy.Version = ReleaseSnapshotVersionV3
+	legacy.DesiredState.Deployment.PodAnnotations["example.test/preserved"] = "annotation"
+	legacy.DesiredState.Deployment.Container.EnvFromSecrets = []string{"preserved-secret"}
+	legacy.DesiredState.Scaling.HPA.MaxReplicas = 7
+	legacyBytes, err := json.Marshal(canonicalReleaseSnapshot(legacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeReleaseSnapshot(legacyBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := canonicalReleaseSnapshot(decoded)
+	expected.DesiredState.Deployment.Container.Image = "ghcr.io/acme/new-app@sha256:" + strings.Repeat("b", 64)
+	expected.DesiredState.Deployment.ImagePullSecrets = []string{"cyclopus-ghcr-pull"}
+	expected.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"] = "new-release"
+	releaseID := "new-release"
+	normalized, err := NormalizeReleaseSnapshotForContext(decoded, ReleaseSnapshotContext{
+		ImageVisibility: "private",
+		ImmutableImage:  expected.DesiredState.Deployment.Container.Image,
+		ReleaseID:       &releaseID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(normalized, expected) {
+		t.Fatalf("contextual legacy normalization = %+v, want every unrelated field preserved in %+v", normalized, expected)
+	}
+	if decoded.Version != ReleaseSnapshotVersion || len(decoded.DesiredState.Deployment.ImagePullSecrets) != 0 || decoded.DesiredState.Deployment.Container.Image == expected.DesiredState.Deployment.Container.Image || string(legacyBytes) == "" {
+		t.Fatalf("decoded historical input was mutated: %+v", decoded)
+	}
+	if _, _, err := EncodeReleaseSnapshot(normalized); err != nil {
+		t.Fatalf("normalized private snapshot did not encode: %v", err)
+	}
+}
+
 func TestEnvSnapshotLegacyV2FixtureUpgradesInMemoryWithoutChangingStoredHash(t *testing.T) {
 	envelope := testSnapshotEnvelope()
+	envelope.Version = ReleaseSnapshotVersionV2
 	variables := []ReleaseEnvironment{{Key: "DATABASE_URL", SecretRef: "k8s-secret://tenant/source#DATABASE_URL", IsSecret: true}}
 	envelope.EnvVarRevision = &EnvVarRevision{Version: 1, ID: "018f4f5a-legacy", Revision: 7, Variables: variables}
 	envelope.EnvVarRevision.Hash = ComputeEnvVarRevisionHash(variables)

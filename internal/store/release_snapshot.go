@@ -17,10 +17,12 @@ import (
 )
 
 var cronShapePattern = regexp.MustCompile(`^\S+( \S+){4}$`)
+var immutableGHCRImagePattern = regexp.MustCompile(`^ghcr\.io/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[0-9a-f]{64}$`)
 
 const (
-	ReleaseSnapshotVersion      = 3
+	ReleaseSnapshotVersion      = 4
 	ReleaseSnapshotVersionV2    = 2 // HPA/none snapshots from before Phase 4 KEDA support
+	ReleaseSnapshotVersionV3    = 3 // snapshots from before image pull secrets were persisted
 	DesiredStateSnapshotVersion = 1
 	EnvVarRevisionVersion       = 1
 )
@@ -73,6 +75,7 @@ type DeploymentIntent struct {
 	PodAnnotations          map[string]string   `json:"pod_annotations"`
 	RuntimeClassName        string              `json:"runtime_class_name"`
 	ProgressDeadlineSeconds int32               `json:"progress_deadline_seconds"`
+	ImagePullSecrets        []string            `json:"image_pull_secrets,omitempty"`
 	Container               ContainerIntent     `json:"container"`
 }
 
@@ -172,7 +175,44 @@ type ReleaseEnvironment struct {
 	IsSecret  bool   `json:"is_secret"`
 }
 
+type ReleaseSnapshotContext struct {
+	ImageVisibility string
+	ImmutableImage  string
+	ReleaseID       *string
+}
+
+// NormalizeReleaseSnapshotForContext prepares a snapshot for a new release
+// without changing the historical snapshot it was decoded from.
+func NormalizeReleaseSnapshotForContext(envelope ReleaseSnapshotEnvelope, context ReleaseSnapshotContext) (ReleaseSnapshotEnvelope, error) {
+	normalized, err := upgradeLegacyReleaseSnapshot(envelope)
+	if err != nil {
+		return ReleaseSnapshotEnvelope{}, err
+	}
+	normalized = canonicalReleaseSnapshot(normalized)
+	normalized.DesiredState.Deployment.Container.Image = context.ImmutableImage
+	switch context.ImageVisibility {
+	case "public":
+		normalized.DesiredState.Deployment.ImagePullSecrets = []string{}
+	case "private":
+		normalized.DesiredState.Deployment.ImagePullSecrets = []string{"cyclopus-ghcr-pull"}
+	default:
+		return ReleaseSnapshotEnvelope{}, errors.New("release snapshot: image visibility must be public or private")
+	}
+	if context.ReleaseID != nil {
+		normalized.DesiredState.Deployment.PodAnnotations["cyclopus.dev/release-id"] = *context.ReleaseID
+	}
+	if err := ValidateReleaseSnapshot(normalized); err != nil {
+		return ReleaseSnapshotEnvelope{}, err
+	}
+	return normalized, nil
+}
+
 func EncodeReleaseSnapshot(envelope ReleaseSnapshotEnvelope) (json.RawMessage, string, error) {
+	var err error
+	envelope, err = upgradeLegacyReleaseSnapshot(envelope)
+	if err != nil {
+		return nil, "", err
+	}
 	canonical := canonicalReleaseSnapshot(envelope)
 	if err := ValidateReleaseSnapshot(canonical); err != nil {
 		return nil, "", err
@@ -199,7 +239,10 @@ func DecodeReleaseSnapshot(encoded []byte) (ReleaseSnapshotEnvelope, error) {
 		}
 		return ReleaseSnapshotEnvelope{}, fmt.Errorf("decode release snapshot trailing data: %w", err)
 	}
-	envelope = upgradeLegacyReleaseSnapshot(envelope)
+	envelope, err := upgradeLegacyReleaseSnapshot(envelope)
+	if err != nil {
+		return ReleaseSnapshotEnvelope{}, err
+	}
 	envelope = canonicalReleaseSnapshot(envelope)
 	if err := ValidateReleaseSnapshot(envelope); err != nil {
 		return ReleaseSnapshotEnvelope{}, err
@@ -207,10 +250,86 @@ func DecodeReleaseSnapshot(encoded []byte) (ReleaseSnapshotEnvelope, error) {
 	return envelope, nil
 }
 
-func upgradeLegacyReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotEnvelope {
+// NormalizeReleaseSnapshotContext upgrades a readable historical snapshot and
+// binds it to a new immutable release context. The historical row is unchanged.
+func NormalizeReleaseSnapshotContext(encoded []byte, context ReleaseSnapshotContext) (json.RawMessage, string, error) {
+	envelope, err := DecodeReleaseSnapshot(encoded)
+	if err != nil {
+		return nil, "", err
+	}
+	envelope, err = NormalizeReleaseSnapshotForContext(envelope, context)
+	if err != nil {
+		return nil, "", err
+	}
+	return EncodeReleaseSnapshot(envelope)
+}
+
+func buildContextualReleaseSnapshot(environment Environment, app App, imageRef, releaseID, visibility string) (json.RawMessage, string, error) {
+	labels := map[string]string{"app.kubernetes.io/managed-by": "cyclopus", "app.kubernetes.io/name": app.Slug,
+		"cyclopus.dev/environment-id": environment.ID}
+	selector := map[string]string{"app.kubernetes.io/name": app.Slug, "cyclopus.dev/environment-id": environment.ID}
+	replicas := int32(app.MinReplicas)
+	scaling := ScalingIntent{Version: 1, Name: app.Slug}
+	if environment.Kind == "preview" {
+		replicas, scaling.Kind, scaling.Name = 1, "none", ""
+	} else if app.ScalingMode == "hpa" {
+		scaling.Kind = "hpa"
+		scaling.HPA = &HPAIntent{MinReplicas: int32(app.MinReplicas), MaxReplicas: int32(app.MaxReplicas), TargetCPUPercent: int32(app.HPATargetCPUPercent)}
+	} else {
+		scaling.Kind = "keda"
+		mode := strings.TrimPrefix(app.ScalingMode, "keda_")
+		scaling.KEDA = &KEDAIntent{Mode: mode, MinReplicas: int32(app.MinReplicas), MaxReplicas: int32(app.MaxReplicas), TargetCPUPercent: int32(app.HPATargetCPUPercent)}
+		if mode == "cron" {
+			for _, schedule := range app.KEDACronSchedules {
+				scaling.KEDA.CronSchedules = append(scaling.KEDA.CronSchedules, KEDACronScheduleIntent{Timezone: schedule.Timezone,
+					Start: schedule.Start, End: schedule.End, DesiredReplicas: int32(schedule.DesiredReplicas)})
+			}
+		} else {
+			scaling.KEDA.HTTPTargetPendingRequests = int32(app.KEDAHTTPTargetPendingRequests)
+		}
+	}
+	identity := func(name string) ObjectIdentity {
+		return ObjectIdentity{Name: name, Namespace: environment.Namespace, Labels: labels}
+	}
+	envelope := ReleaseSnapshotEnvelope{Version: ReleaseSnapshotVersion, DesiredState: DesiredStateSnapshot{Version: 1,
+		Deployment: DeploymentIntent{Version: 1, Identity: identity(app.Slug), Selector: selector, Replicas: replicas,
+			Strategy: RollingUpdateIntent{Type: "RollingUpdate", MaxSurge: 1}, PodLabels: labels,
+			PodAnnotations: map[string]string{"cyclopus.dev/release-id": releaseID, "cyclopus.dev/config-hash": ConfigHashAnnotationTemplate,
+				"cyclopus.dev/app-id": app.ID, "cyclopus.dev/org-id": app.OrgID}, RuntimeClassName: app.RuntimeClass,
+			ProgressDeadlineSeconds: int32(app.DeployTimeoutSeconds), Container: ContainerIntent{Name: "app", Image: imageRef,
+				Port: int32(app.ContainerPort), Resources: ResourceIntent{CPURequestMillicores: int64(app.CPURequestMillicores),
+					CPULimitMillicores: int64(app.CPULimitMillicores), MemoryRequestMiB: int64(app.MemoryRequestMiB), MemoryLimitMiB: int64(app.MemoryLimitMiB)},
+				ReadinessProbe: ReadinessIntent{Path: app.HealthCheckPath, Port: int32(app.ContainerPort)}}},
+		Service: ServiceIntent{Version: 1, Identity: identity(app.Slug), Selector: selector, Port: 80, TargetPort: int32(app.ContainerPort)},
+		Ingress: IngressIntent{Version: 1, Identity: identity(app.Slug), Hostname: *environment.PlannedHostname, Path: "/",
+			ServiceName: app.Slug, ServicePort: 80, TLS: TLSIntent{Enabled: true, SecretName: app.Slug + "-tls"}}, Scaling: scaling}}
+	encoded, _, err := EncodeReleaseSnapshot(envelope)
+	if err != nil {
+		return nil, "", err
+	}
+	return NormalizeReleaseSnapshotContext(encoded, ReleaseSnapshotContext{
+		ImageVisibility: visibility,
+		ImmutableImage:  imageRef,
+		ReleaseID:       &releaseID,
+	})
+}
+
+func upgradeLegacyReleaseSnapshot(envelope ReleaseSnapshotEnvelope) (ReleaseSnapshotEnvelope, error) {
+	switch envelope.Version {
+	case ReleaseSnapshotVersionV2:
+		// v2 snapshots pre-date KEDA support. KEDA snapshots were never deployed
+		// because the deployment path returned ErrKEDAUnsupported.
+		if envelope.DesiredState.Scaling.Kind == "keda" {
+			return ReleaseSnapshotEnvelope{}, errors.New("release snapshot: v2 KEDA snapshots require migration before deployment")
+		}
+		fallthrough
+	case ReleaseSnapshotVersionV3:
+		envelope.Version = ReleaseSnapshotVersion
+		envelope.DesiredState.Deployment.ImagePullSecrets = []string{}
+	}
 	revision := envelope.EnvVarRevision
 	if revision == nil || envelope.DesiredState.Secret != nil || len(envelope.DesiredState.Deployment.Container.EnvFromSecrets) != 0 {
-		return envelope
+		return envelope, nil
 	}
 	name := EnvDestinationSecretName(envelope.DesiredState.Deployment.Identity.Name, revision.ID)
 	entries := make([]SecretEntryIntent, len(revision.Variables))
@@ -228,19 +347,13 @@ func upgradeLegacyReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnaps
 		Entries:   entries,
 	}
 	envelope.DesiredState.Deployment.Container.EnvFromSecrets = []string{name}
-	return envelope
+	return envelope, nil
 }
 
 func ValidateReleaseSnapshot(envelope ReleaseSnapshotEnvelope) error {
 	switch envelope.Version {
-	case ReleaseSnapshotVersionV2:
-		// v2 snapshots pre-date KEDA support. Only HPA and none scaling is valid.
-		// KEDA snapshots were never deployed (code returned ErrKEDAUnsupported).
-		if envelope.DesiredState.Scaling.Kind == "keda" {
-			return errors.New("release snapshot: v2 KEDA snapshots require migration to v3 before deployment")
-		}
 	case ReleaseSnapshotVersion:
-		// v3 is the current version, full validation below.
+		// v4 is the current version, full validation below.
 	default:
 		return fmt.Errorf("release snapshot: unsupported version %d", envelope.Version)
 	}
@@ -330,8 +443,11 @@ func validateDesiredState(desired DesiredStateSnapshot) error {
 	if d.RuntimeClassName != "gvisor" && d.RuntimeClassName != "runc" {
 		return errors.New("release snapshot deployment: runtime class must be gvisor or runc")
 	}
-	if d.ProgressDeadlineSeconds <= 0 || d.Container.Name == "" || strings.TrimSpace(d.Container.Image) == "" || d.Container.Port < 1 || d.Container.Port > 65535 {
-		return errors.New("release snapshot deployment: progress deadline, container, image, and port are required")
+	if d.ProgressDeadlineSeconds <= 0 || d.Container.Name == "" || !immutableGHCRImagePattern.MatchString(d.Container.Image) || d.Container.Port < 1 || d.Container.Port > 65535 {
+		return errors.New("release snapshot deployment: progress deadline, container, immutable GHCR image, and port are required")
+	}
+	if len(d.ImagePullSecrets) > 1 || len(d.ImagePullSecrets) == 1 && d.ImagePullSecrets[0] != "cyclopus-ghcr-pull" {
+		return errors.New("release snapshot deployment: image pull secrets must be empty or exactly cyclopus-ghcr-pull")
 	}
 	r := d.Container.Resources
 	if r.CPURequestMillicores <= 0 || r.CPULimitMillicores < r.CPURequestMillicores || r.MemoryRequestMiB <= 0 || r.MemoryLimitMiB < r.MemoryRequestMiB {
@@ -424,6 +540,7 @@ func canonicalReleaseSnapshot(envelope ReleaseSnapshotEnvelope) ReleaseSnapshotE
 	copy.DesiredState.Deployment.Selector = cloneMap(envelope.DesiredState.Deployment.Selector)
 	copy.DesiredState.Deployment.PodLabels = cloneMap(envelope.DesiredState.Deployment.PodLabels)
 	copy.DesiredState.Deployment.PodAnnotations = cloneMap(envelope.DesiredState.Deployment.PodAnnotations)
+	copy.DesiredState.Deployment.ImagePullSecrets = append([]string{}, envelope.DesiredState.Deployment.ImagePullSecrets...)
 	copy.DesiredState.Service.Identity.Labels = cloneMap(envelope.DesiredState.Service.Identity.Labels)
 	copy.DesiredState.Service.Selector = cloneMap(envelope.DesiredState.Service.Selector)
 	copy.DesiredState.Ingress.Identity.Labels = cloneMap(envelope.DesiredState.Ingress.Identity.Labels)

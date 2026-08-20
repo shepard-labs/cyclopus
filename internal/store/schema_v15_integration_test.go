@@ -11,9 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const schemaV15ActorID = "00000000-0000-0000-0000-000000000160"
+
+func seedSchemaV15Actor(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO users(id,org_id,email,password_hash,display_name,operator)
+		VALUES($1,$2,'schema-v15@example.test','hash','Schema V15 Admin',true)`, schemaV15ActorID, orgOneID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnablePhase6SchemaEpochIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedSchemaV15Actor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000141"
 	operationID := "00000000-0000-0000-0000-000000000142"
@@ -30,8 +41,8 @@ func TestEnablePhase6SchemaEpochIntegration(t *testing.T) {
 		'k8s-secret://cyclopus-system/enable-ghcr#dockerconfigjson',$3)`, registryID, orgOneID, operationID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,candidate_generation,idempotency_key)
-		VALUES($1,$2,$3,'create',1,'enable-phase6')`, operationID, orgOneID, registryID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,checkpoint,candidate_generation,idempotency_key,
+		credential_fingerprint,actor_user_id) VALUES($1,$2,$3,'create','source_secret_written',1,'enable-phase6',decode(repeat('a',64),'hex'),$4)`, operationID, orgOneID, registryID, schemaV15ActorID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id)
@@ -182,6 +193,7 @@ func TestEnablePhase6SchemaEpochRejectsWithoutPartialConversion(t *testing.T) {
 func TestSchemaV15OperationGenerationIdentityIntegration(t *testing.T) {
 	_, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedSchemaV15Actor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000145"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
@@ -196,8 +208,8 @@ func TestSchemaV15OperationGenerationIdentityIntegration(t *testing.T) {
 		if _, err = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,checkpoint,candidate_generation,idempotency_key)
-			VALUES($1,$2,$3,'create','reserved',$4,$5)`, operationID, orgOneID, registryID, candidate, operationID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_operations(id,org_id,registry_id,kind,checkpoint,candidate_generation,idempotency_key,
+			credential_fingerprint,actor_user_id) VALUES($1,$2,$3,'create','reserved',$4,$5,decode(repeat('a',64),'hex'),$6)`, operationID, orgOneID, registryID, candidate, operationID, schemaV15ActorID); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id)
@@ -279,6 +291,10 @@ func TestSchemaV15DeferredGenerationRotationAndEnvironmentDependenciesIntegratio
 		VALUES($1,$2,2,'k8s-secret://cyclopus-system/g2#dockerconfigjson','active',$3,now(),now())`, orgOneID, registryID, operationTwo); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec(ctx, `UPDATE environments SET required_registry_credential_generation=2,ready_registry_credential_generation=2,
+		registry_credential_checkpoint='activated' WHERE id=$1`, environmentOneID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = tx.Exec(ctx, `UPDATE registries SET active_generation=2,active_credential_secret_ref='k8s-secret://cyclopus-system/g2#dockerconfigjson' WHERE id=$1`, registryID); err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +313,7 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	dataStore, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
 	seedTenant(t, pool, tenantTwo())
+	seedSchemaV15Actor(t, pool)
 	ctx := t.Context()
 	now := time.Date(2026, 8, 19, 12, 34, 56, 123456000, time.UTC)
 	registryID := "00000000-0000-0000-0000-000000000151"
@@ -336,9 +353,9 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 		orgOneID, registryID, now); err != nil {
 		t.Fatal(err)
 	}
-	for generation, state := range map[int]string{2: "garbage_collected", 3: "retired", 4: "failed"} {
+	for generation, state := range map[int]string{2: "garbage_collected", 3: "active", 4: "failed"} {
 		validated, activated, retired, collected := any(now.Add(-6*time.Hour)), any(now.Add(-5*time.Hour)), any(nil), any(nil)
-		if generation >= 3 {
+		if generation >= 3 && state == "retired" {
 			retired = now.Add(-3 * time.Hour)
 		}
 		if generation == 2 {
@@ -429,7 +446,8 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 		t.Fatalf("operation round trip = %+v, %v", operation, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE registry_credential_operations SET status='leased',lease_owner='operation-worker',
-		lease_epoch=12,lease_expires_at=$2,failure_code=NULL,failure_message=NULL,terminal_at=NULL WHERE id=$1`, operationID, now.Add(time.Hour)); err != nil {
+		lease_epoch=12,lease_expires_at=$2,failure_code=NULL,failure_message=NULL,terminal_at=NULL,
+		credential_fingerprint=decode(repeat('a',64),'hex'),actor_user_id=$3 WHERE id=$1`, operationID, now.Add(time.Hour), schemaV15ActorID); err != nil {
 		t.Fatal(err)
 	}
 	leasedOperation, err := dataStore.GetRegistryCredentialOperation(ctx, orgOneID, operationID)
@@ -520,6 +538,10 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE releases SET status='failed' WHERE id=$1`, releaseID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE registries SET state='ready',checkpoint='activated',pending_generation=NULL,
+		pending_credential_secret_ref=NULL,operation_id=NULL,failure_code=NULL,failure_message=NULL WHERE id=$1`, registryID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO releases(id,org_id,environment_id,image_ref,kind,config_snapshot,config_hash,status,
 		registry_credential_registry_id,registry_credential_generation) VALUES
 		($1,$3,$4,'ghcr.io/acme/private@sha256:'||repeat('e',64),'deploy',$5,repeat('1',64),'live',$6,3),
@@ -570,6 +592,7 @@ func TestSchemaV15RoundTripIntegration(t *testing.T) {
 func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 	_, pool := newIntegrationStore(t)
 	seedTenant(t, pool, tenantOne())
+	seedSchemaV15Actor(t, pool)
 	ctx := t.Context()
 	registryID := "00000000-0000-0000-0000-000000000161"
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,provider,registry_host) VALUES($1,$2,'ghcr','ghcr.io')`, registryID, orgOneID); err != nil {
@@ -604,6 +627,15 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 		FROM generate_series(1,12000) g`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `DROP INDEX users_singleton`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO users(id,org_id,email,password_hash,display_name,operator)
+		SELECT ('20000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,
+		('10000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,'plan-'||g||'@example.test','hash','Plan Admin',true
+		FROM generate_series(1,12000) g`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO registries(org_id,provider,registry_host,state,checkpoint,attempts,next_attempt_at,
 		lease_owner,lease_epoch,lease_expires_at)
 		SELECT ('10000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,'ghcr','ghcr.io',
@@ -615,12 +647,13 @@ func TestSchemaV15CandidatePlansIntegration(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `WITH operations AS (
 		INSERT INTO registry_credential_operations(org_id,registry_id,kind,status,checkpoint,candidate_generation,idempotency_key,
-		attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at)
+		attempts,next_attempt_at,lease_owner,lease_epoch,lease_expires_at,credential_fingerprint,actor_user_id)
 		SELECT registry.org_id,registry.id,'create',CASE WHEN row_number() OVER ()%2=0 THEN 'pending' ELSE 'leased' END,'source_secret_written',1,
 		'plan-'||registry.id,CASE WHEN row_number() OVER ()<=100 THEN 1 ELSE 12 END,clock_timestamp()-interval '1 second',
 		CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE 'seed' END,
 		CASE WHEN row_number() OVER ()%2=0 THEN 0 ELSE 1 END,
-		CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE clock_timestamp()-interval '1 second' END
+		CASE WHEN row_number() OVER ()%2=0 THEN NULL ELSE clock_timestamp()-interval '1 second' END,
+		decode(repeat('a',64),'hex'),('20000000-0000-0000-0000-'||right(registry.org_id::text,12))::uuid
 		FROM registries registry WHERE registry.org_id<>$1 RETURNING id,org_id,registry_id)
 		INSERT INTO registry_credential_generations(org_id,registry_id,generation,secret_ref,state,operation_id)
 		SELECT org_id,registry_id,1,'k8s-secret://cyclopus-system/g-'||replace(registry_id::text,'-','')||'#dockerconfigjson',

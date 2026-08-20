@@ -95,6 +95,12 @@ func BuildDesiredObjects(execution store.DeployExecution, envelope store.Release
 	if d.Identity.Namespace != execution.Namespace || desired.Service.Identity.Namespace != execution.Namespace || desired.Ingress.Identity.Namespace != execution.Namespace {
 		return DesiredObjects{}, fmt.Errorf("%w: snapshot namespace differs from execution namespace", ErrDesiredStateInvalid)
 	}
+	if err := validateReleaseEvidence(execution.FailedRelease, nil); err != nil {
+		return DesiredObjects{}, fmt.Errorf("%w: %v", ErrDesiredStateInvalid, err)
+	}
+	if d.Container.Image != execution.FailedRelease.ImageRef {
+		return DesiredObjects{}, fmt.Errorf("%w: snapshot image differs from immutable release image", ErrDesiredStateInvalid)
+	}
 	labels := managedLabels(d.Identity.Labels, execution.EnvironmentID)
 	annotations := resolvedAnnotations(d.PodAnnotations, execution)
 	replicas := d.Replicas
@@ -117,7 +123,7 @@ func BuildDesiredObjects(execution store.DeployExecution, envelope store.Release
 		Replicas: &replicas, ProgressDeadlineSeconds: &deadline,
 		Strategy: appsv1.DeploymentStrategy{Type: appsv1.RollingUpdateDeploymentStrategyType, RollingUpdate: &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}},
 		Selector: &metav1.LabelSelector{MatchLabels: cloneStrings(d.Selector)},
-		Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: managedLabels(d.PodLabels, execution.EnvironmentID), Annotations: cloneStrings(annotations)}, Spec: corev1.PodSpec{RuntimeClassName: &d.RuntimeClassName, Containers: []corev1.Container{container}}},
+		Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: managedLabels(d.PodLabels, execution.EnvironmentID), Annotations: cloneStrings(annotations)}, Spec: corev1.PodSpec{RuntimeClassName: &d.RuntimeClassName, ImagePullSecrets: imagePullSecretReferences(d.ImagePullSecrets), Containers: []corev1.Container{container}}},
 	}}
 	service := &corev1.Service{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"}, ObjectMeta: metav1.ObjectMeta{Name: desired.Service.Identity.Name, Namespace: execution.Namespace, Labels: managedLabels(desired.Service.Identity.Labels, execution.EnvironmentID), Annotations: cloneStrings(annotations)}, Spec: corev1.ServiceSpec{Selector: cloneStrings(desired.Service.Selector), Ports: []corev1.ServicePort{{Name: "http", Port: desired.Service.Port, TargetPort: intstr.FromString("http")}}}}
 	pathType := networkingv1.PathTypePrefix
@@ -186,6 +192,55 @@ func BuildDesiredObjects(execution store.DeployExecution, envelope store.Release
 		}
 	}
 	return objects, nil
+}
+
+func imagePullSecretReferences(names []string) []corev1.LocalObjectReference {
+	references := make([]corev1.LocalObjectReference, len(names))
+	for i, name := range names {
+		references[i] = corev1.LocalObjectReference{Name: name}
+	}
+	return references
+}
+
+func validateReleaseEvidence(release store.ImmutableReleaseSnapshot, deployment *appsv1.Deployment) error {
+	private := release.RegistryCredentialRegistryID != nil || release.RegistryCredentialGeneration != nil
+	if private && (release.RegistryCredentialRegistryID == nil || release.RegistryCredentialGeneration == nil || *release.RegistryCredentialRegistryID == "" || *release.RegistryCredentialGeneration <= 0) {
+		return errors.New("release registry credential evidence is incomplete")
+	}
+	envelope, err := store.DecodeReleaseSnapshot(release.ConfigSnapshot)
+	if err != nil {
+		return err
+	}
+	want := envelope.DesiredState.Deployment.ImagePullSecrets
+	if private {
+		if len(want) != 1 || want[0] != ImagePullSecretName {
+			return errors.New("private release snapshot must use exactly cyclopus-ghcr-pull")
+		}
+	} else if len(want) != 0 {
+		return errors.New("public release snapshot must not use a managed image pull secret")
+	}
+	if envelope.DesiredState.Deployment.Container.Image != release.ImageRef {
+		return errors.New("release snapshot image differs from immutable release image")
+	}
+	if deployment != nil {
+		if len(deployment.Spec.Template.Spec.Containers) != 1 || deployment.Spec.Template.Spec.Containers[0].Image != release.ImageRef ||
+			!imagePullSecretsMatch(deployment.Spec.Template.Spec.ImagePullSecrets, want) {
+			return errors.New("decoded deployment differs from immutable release image or pull-secret evidence")
+		}
+	}
+	return nil
+}
+
+func imagePullSecretsMatch(actual []corev1.LocalObjectReference, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for i := range expected {
+		if actual[i].Name != expected[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // buildKEDAHTTPBridgeService creates an ExternalName Service that routes the
@@ -287,6 +342,14 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 		a.logDeployFailed(execution, started, cause)
 		return a.failWithoutMutation(ctx, execution, cause)
 	}
+	if err := validateReleaseEvidence(execution.FailedRelease, nil); err != nil {
+		cause := fmt.Errorf("%w: %v", ErrDesiredStateInvalid, err)
+		a.logDeployFailed(execution, started, cause)
+		return a.failWithoutMutation(ctx, execution, cause)
+	}
+	if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+		return result, err
+	}
 	secretData, err := a.resolveSecretData(ctx, execution, envelope)
 	if err != nil {
 		if isForwardRetryable(err) {
@@ -294,6 +357,9 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 		}
 		a.logDeployFailed(execution, started, err)
 		return a.failWithoutMutation(ctx, execution, err)
+	}
+	if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+		return result, err
 	}
 	objects, err := BuildDesiredObjects(execution, envelope, secretData)
 	if err != nil {
@@ -324,6 +390,9 @@ func (a *RecoveryAdapter) ExecuteDeploy(ctx context.Context, execution store.Dep
 	err = a.observeForward(ctx, &execution, objects.Deployment)
 	result.Lease = execution
 	if err == nil {
+		if err = a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+			return result, err
+		}
 		_, err = a.store.(ForwardStore).FinalizeReleaseLive(ctx, store.FinalizeReleaseParams{
 			Lease: execution, Hostname: execution.PlannedHostname, Audit: forwardAuditEvent(),
 		})
@@ -357,6 +426,9 @@ func (a *RecoveryAdapter) logDeployFailed(execution store.DeployExecution, start
 
 func (a *RecoveryAdapter) failWithoutMutation(ctx context.Context, execution store.DeployExecution, cause error) (store.DeployRecoveryResult, error) {
 	result := store.DeployRecoveryResult{Lease: execution}
+	if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+		return result, err
+	}
 	_, err := a.store.(ForwardStore).FinalizeReleaseFailed(ctx, store.FailReleaseParams{
 		Lease: execution, FailureReason: cause.Error(), Audit: forwardAuditEvent(),
 	})
@@ -433,10 +505,14 @@ func (a *RecoveryAdapter) ensureSecretReaderNames(ctx context.Context, execution
 	}
 	labels := map[string]string{ManagedByLabel: ManagedByValue, EnvironmentIDLabel: execution.EnvironmentID,
 		OrgIDLabel: execution.OrgID, AppIDLabel: appID}
+	annotations := map[string]string{DeployFenceAnnotation: execution.Fence.UTC().Format(time.RFC3339Nano)}
 	roles := a.provisioner.RbacV1().Roles(execution.Namespace)
 	role, err := roles.Get(ctx, secretReaderRoleName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		role, err = roles.Create(ctx, &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace, Labels: labels}}, metav1.CreateOptions{})
+		if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+			return err
+		}
+		role, err = roles.Create(ctx, &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace, Labels: labels, Annotations: annotations}}, metav1.CreateOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("read source Secret Role: %w", err)
@@ -444,21 +520,31 @@ func (a *RecoveryAdapter) ensureSecretReaderNames(ctx context.Context, execution
 	if !ownedByEnvironment(role.Labels, execution.EnvironmentID) || role.Labels[OrgIDLabel] != execution.OrgID || role.Labels[AppIDLabel] != labels[AppIDLabel] {
 		return ErrResourceOwnership
 	}
+	if err := verifyExecutionObject(role.Labels, role.Annotations, execution); err != nil {
+		return err
+	}
 	desiredRules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: resourceNames, Verbs: []string{"get"}}}
-	if !reflect.DeepEqual(role.Rules, desiredRules) {
+	if !reflect.DeepEqual(role.Rules, desiredRules) || role.Annotations[DeployFenceAnnotation] != annotations[DeployFenceAnnotation] {
 		candidate := role.DeepCopy()
 		candidate.Rules = desiredRules
+		candidate.Annotations = annotations
+		if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+			return err
+		}
 		if _, err := roles.Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("update source Secret Role: %w", err)
 		}
 	}
 	serviceAccountNamespace, serviceAccountName := cyclopusServiceAccount()
-	binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace, Labels: labels},
+	binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace, Labels: labels, Annotations: annotations},
 		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: secretReaderRoleName},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: serviceAccountName, Namespace: serviceAccountNamespace}}}
 	bindings := a.provisioner.RbacV1().RoleBindings(execution.Namespace)
 	currentBinding, err := bindings.Get(ctx, binding.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+			return err
+		}
 		_, err = bindings.Create(ctx, binding, metav1.CreateOptions{})
 		return err
 	}
@@ -468,6 +554,19 @@ func (a *RecoveryAdapter) ensureSecretReaderNames(ctx context.Context, execution
 	if !ownedByEnvironment(currentBinding.Labels, execution.EnvironmentID) || currentBinding.Labels[OrgIDLabel] != execution.OrgID ||
 		currentBinding.Labels[AppIDLabel] != labels[AppIDLabel] || currentBinding.RoleRef != binding.RoleRef || !reflect.DeepEqual(currentBinding.Subjects, binding.Subjects) {
 		return ErrResourceOwnership
+	}
+	if err := verifyExecutionObject(currentBinding.Labels, currentBinding.Annotations, execution); err != nil {
+		return err
+	}
+	if currentBinding.Annotations[DeployFenceAnnotation] != annotations[DeployFenceAnnotation] {
+		candidate := currentBinding.DeepCopy()
+		candidate.Annotations = annotations
+		if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+			return err
+		}
+		if _, err := bindings.Update(ctx, candidate, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("update source Secret RoleBinding: %w", err)
+		}
 	}
 	return nil
 }
@@ -498,7 +597,7 @@ func (a *RecoveryAdapter) preflightDesired(ctx context.Context, execution store.
 	if objects.Secret != nil {
 		current, err := a.client.CoreV1().Secrets(objects.Secret.Namespace).Get(ctx, objects.Secret.Name, metav1.GetOptions{})
 		if err == nil {
-			if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+			if err := verifyExecutionObject(current.Labels, current.Annotations, execution); err != nil {
 				return err
 			}
 			if current.Immutable == nil || !*current.Immutable || !reflect.DeepEqual(current.Data, objects.Secret.Data) ||
@@ -519,7 +618,7 @@ func (a *RecoveryAdapter) preflightDesired(ctx context.Context, execution store.
 			if err != nil {
 				return err
 			}
-			return verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence)
+			return verifyExecutionObject(current.Labels, current.Annotations, execution)
 		},
 		func() error {
 			current, err := a.client.AppsV1().Deployments(objects.Deployment.Namespace).Get(ctx, objects.Deployment.Name, metav1.GetOptions{})
@@ -529,7 +628,7 @@ func (a *RecoveryAdapter) preflightDesired(ctx context.Context, execution store.
 			if err != nil {
 				return err
 			}
-			if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+			if err := verifyExecutionObject(current.Labels, current.Annotations, execution); err != nil {
 				return err
 			}
 			if !reflect.DeepEqual(current.Spec.Selector, objects.Deployment.Spec.Selector) {
@@ -545,7 +644,7 @@ func (a *RecoveryAdapter) preflightDesired(ctx context.Context, execution store.
 			if err != nil {
 				return err
 			}
-			return verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence)
+			return verifyExecutionObject(current.Labels, current.Annotations, execution)
 		},
 	} {
 		if err := check(); err != nil {
@@ -563,7 +662,7 @@ func (a *RecoveryAdapter) preflightScaling(ctx context.Context, execution store.
 		}
 		current, err := a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
-			if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+			if err := verifyExecutionObject(current.Labels, current.Annotations, execution); err != nil {
 				return err
 			}
 		} else if !apierrors.IsNotFound(err) {
@@ -601,7 +700,7 @@ func (a *RecoveryAdapter) preflightScaling(ctx context.Context, execution store.
 		}
 		current, err := a.dynamic.Resource(scaler.gvr).Namespace(execution.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
-			if err := verifyObject(current.GetLabels(), current.GetAnnotations(), execution.EnvironmentID, execution.Fence); err != nil {
+			if err := verifyExecutionObject(current.GetLabels(), current.GetAnnotations(), execution); err != nil {
 				return err
 			}
 		} else if !apierrors.IsNotFound(err) {
@@ -738,13 +837,16 @@ func (a *RecoveryAdapter) applySecret(ctx context.Context, execution *store.Depl
 		stampFence(&desired.ObjectMeta, lease)
 		current, err := a.client.CoreV1().Secrets(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
+			if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+				return err
+			}
 			_, err = a.provisioner.CoreV1().Secrets(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyExecutionObject(current.Labels, current.Annotations, *execution); err != nil {
 			return err
 		}
 		if current.Immutable == nil || !*current.Immutable || !reflect.DeepEqual(current.Data, desired.Data) ||
@@ -762,13 +864,16 @@ func (a *RecoveryAdapter) applyService(ctx context.Context, execution *store.Dep
 		stampFence(&desired.ObjectMeta, lease)
 		current, err := a.client.CoreV1().Services(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
+			if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+				return err
+			}
 			_, err = a.client.CoreV1().Services(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyExecutionObject(current.Labels, current.Annotations, *execution); err != nil {
 			return err
 		}
 		candidate := current.DeepCopy()
@@ -785,6 +890,9 @@ func (a *RecoveryAdapter) applyService(ctx context.Context, execution *store.Dep
 			}
 		}
 		candidate.Spec.Ports = ports
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
 		_, err = a.client.CoreV1().Services(desired.Namespace).Update(opCtx, candidate, metav1.UpdateOptions{})
 		return err
 	})
@@ -796,13 +904,16 @@ func (a *RecoveryAdapter) applyDeployment(ctx context.Context, execution *store.
 		stampFenceAnnotation(desired.Spec.Template.Annotations, lease)
 		current, err := a.client.AppsV1().Deployments(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
+			if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+				return err
+			}
 			_, err = a.client.AppsV1().Deployments(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyExecutionObject(current.Labels, current.Annotations, *execution); err != nil {
 			return err
 		}
 		if !reflect.DeepEqual(current.Spec.Selector, desired.Spec.Selector) {
@@ -817,7 +928,11 @@ func (a *RecoveryAdapter) applyDeployment(ctx context.Context, execution *store.
 		candidate.Spec.Template.Labels = desired.Spec.Template.Labels
 		candidate.Spec.Template.Annotations = desired.Spec.Template.Annotations
 		candidate.Spec.Template.Spec.RuntimeClassName = desired.Spec.Template.Spec.RuntimeClassName
+		candidate.Spec.Template.Spec.ImagePullSecrets = append([]corev1.LocalObjectReference(nil), desired.Spec.Template.Spec.ImagePullSecrets...)
 		candidate.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
 		_, err = a.client.AppsV1().Deployments(desired.Namespace).Update(opCtx, candidate, metav1.UpdateOptions{})
 		return err
 	})
@@ -855,18 +970,24 @@ func (a *RecoveryAdapter) applyIngress(ctx context.Context, execution *store.Dep
 		stampFence(&desired.ObjectMeta, lease)
 		current, err := a.client.NetworkingV1().Ingresses(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
+			if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+				return err
+			}
 			_, err = a.client.NetworkingV1().Ingresses(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyExecutionObject(current.Labels, current.Annotations, *execution); err != nil {
 			return err
 		}
 		candidate := current.DeepCopy()
 		mergeManagedMetadata(&candidate.ObjectMeta, desired.ObjectMeta)
 		candidate.Spec = desired.Spec
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
 		_, err = a.client.NetworkingV1().Ingresses(desired.Namespace).Update(opCtx, candidate, metav1.UpdateOptions{})
 		return err
 	})
@@ -877,18 +998,24 @@ func (a *RecoveryAdapter) applyHPA(ctx context.Context, execution *store.DeployE
 		stampFence(&desired.ObjectMeta, lease)
 		current, err := a.client.AutoscalingV2().HorizontalPodAutoscalers(desired.Namespace).Get(opCtx, desired.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
+			if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+				return err
+			}
 			_, err = a.client.AutoscalingV2().HorizontalPodAutoscalers(desired.Namespace).Create(opCtx, desired, metav1.CreateOptions{})
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyExecutionObject(current.Labels, current.Annotations, *execution); err != nil {
 			return err
 		}
 		candidate := current.DeepCopy()
 		mergeManagedMetadata(&candidate.ObjectMeta, desired.ObjectMeta)
 		candidate.Spec = desired.Spec
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
 		_, err = a.client.AutoscalingV2().HorizontalPodAutoscalers(desired.Namespace).Update(opCtx, candidate, metav1.UpdateOptions{})
 		return err
 	})
@@ -903,14 +1030,17 @@ func (a *RecoveryAdapter) deleteOwnedService(ctx context.Context, execution *sto
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyDeleteObject(current.Labels, current.Annotations, *execution); err != nil {
+			return err
+		}
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
 			return err
 		}
 		return a.client.CoreV1().Services(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
 	})
 }
 
-func (a *RecoveryAdapter) deleteOwnedIngress(ctx context.Context, execution *store.DeployExecution, name string) error {
+func (a *RecoveryAdapter) deleteOwnedIngress(ctx context.Context, execution *store.DeployExecution, name string, beforeDelete func(context.Context) (bool, error)) error {
 	return a.withMutationLease(ctx, execution, func(opCtx context.Context, lease store.DeployLease) error {
 		current, err := a.client.NetworkingV1().Ingresses(execution.Namespace).Get(opCtx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
@@ -919,8 +1049,17 @@ func (a *RecoveryAdapter) deleteOwnedIngress(ctx context.Context, execution *sto
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyDeleteObject(current.Labels, current.Annotations, *execution); err != nil {
 			return err
+		}
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
+		if beforeDelete != nil {
+			proceed, err := beforeDelete(opCtx)
+			if err != nil || !proceed {
+				return err
+			}
 		}
 		return a.client.NetworkingV1().Ingresses(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
 	})
@@ -935,7 +1074,10 @@ func (a *RecoveryAdapter) deleteOwnedDeployment(ctx context.Context, execution *
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyDeleteObject(current.Labels, current.Annotations, *execution); err != nil {
+			return err
+		}
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
 			return err
 		}
 		return a.client.AppsV1().Deployments(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
@@ -951,7 +1093,10 @@ func (a *RecoveryAdapter) deleteOwnedHPA(ctx context.Context, execution *store.D
 		if err != nil {
 			return err
 		}
-		if err := verifyObject(current.Labels, current.Annotations, execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyDeleteObject(current.Labels, current.Annotations, *execution); err != nil {
+			return err
+		}
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
 			return err
 		}
 		return a.client.AutoscalingV2().HorizontalPodAutoscalers(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}})
@@ -969,18 +1114,24 @@ func (a *RecoveryAdapter) applyScaledObject(ctx context.Context, execution *stor
 		current, err := a.dynamic.Resource(gvr).Namespace(desired.GetNamespace()).Get(opCtx, desired.GetName(), metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			stampUnstructuredFence(desired, lease)
+			if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+				return err
+			}
 			_, err = a.dynamic.Resource(gvr).Namespace(desired.GetNamespace()).Create(opCtx, desired, metav1.CreateOptions{})
 			return classifyDynamicError(err)
 		}
 		if err != nil {
 			return classifyDynamicError(err)
 		}
-		if err := verifyObject(current.GetLabels(), current.GetAnnotations(), execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyExecutionObject(current.GetLabels(), current.GetAnnotations(), *execution); err != nil {
 			return err
 		}
 		candidate := current.DeepCopy()
 		mergeUnstructuredMetadata(candidate, desired)
 		candidate.Object["spec"] = desired.Object["spec"]
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
 		_, err = a.dynamic.Resource(gvr).Namespace(desired.GetNamespace()).Update(opCtx, candidate, metav1.UpdateOptions{})
 		return classifyDynamicError(err)
 	})
@@ -1002,10 +1153,13 @@ func (a *RecoveryAdapter) deleteOwnedScaledObject(ctx context.Context, execution
 		if err != nil {
 			return classifyDynamicError(err)
 		}
-		if err := verifyObject(current.GetLabels(), current.GetAnnotations(), execution.EnvironmentID, execution.Fence); err != nil {
+		if err := verifyDeleteObject(current.GetLabels(), current.GetAnnotations(), *execution); err != nil {
 			return err
 		}
 		uid := current.GetUID()
+		if err := a.verifyFence(opCtx, lease, execution.FailedRelease); err != nil {
+			return err
+		}
 		return classifyDynamicError(a.dynamic.Resource(gvr).Namespace(execution.Namespace).Delete(opCtx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}))
 	})
 }
@@ -1090,18 +1244,19 @@ func isReconcileApply(ctx context.Context) bool {
 
 func (a *RecoveryAdapter) withMutationLease(ctx context.Context, execution *store.DeployExecution, mutation func(context.Context, store.DeployLease) error) error {
 	if isReconcileApply(ctx) {
+		if err := a.verifyFence(ctx, *execution, execution.FailedRelease); err != nil {
+			return err
+		}
 		opCtx, cancel := a.operationContext(ctx, *execution)
 		defer cancel()
 		return mutation(opCtx, *execution)
 	}
-	renewed, err := a.renew(ctx, *execution)
-	if err != nil {
+	if err := a.verifyFence(ctx, *execution, execution.FailedRelease); err != nil {
 		return err
 	}
-	*execution = renewed
-	opCtx, cancel := a.operationContext(ctx, renewed)
+	opCtx, cancel := a.operationContext(ctx, *execution)
 	defer cancel()
-	return mutation(opCtx, renewed)
+	return mutation(opCtx, *execution)
 }
 
 func (a *RecoveryAdapter) observeForward(ctx context.Context, execution *store.DeployExecution, expected *appsv1.Deployment) error {
@@ -1128,6 +1283,9 @@ func (a *RecoveryAdapter) observeForward(ctx context.Context, execution *store.D
 func (a *RecoveryAdapter) compensateForward(ctx context.Context, execution store.DeployExecution, reason string) (store.DeployRecoveryResult, error) {
 	result := store.DeployRecoveryResult{Lease: execution}
 	if execution.PreviousRelease == nil {
+		if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+			return result, err
+		}
 		_, err := a.store.(ForwardStore).FinalizeReleaseFailed(ctx, store.FailReleaseParams{
 			Lease: execution, FailureReason: reason, Audit: forwardAuditEvent(),
 		})
@@ -1140,6 +1298,9 @@ func (a *RecoveryAdapter) compensateForward(ctx context.Context, execution store
 		return result, err
 	}
 	result.Lease = execution
+	if err := a.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+		return result, err
+	}
 	_, err = a.store.(ForwardStore).FinalizeReleaseFailed(ctx, store.FailReleaseParams{
 		Lease: execution, FailureReason: reason, Audit: forwardAuditEvent(),
 	})
@@ -1160,17 +1321,23 @@ func (a *RecoveryAdapter) restorePreviousDesiredState(ctx context.Context, lease
 	previousIdentity := lease
 	previousIdentity.ReleaseID = lease.PreviousRelease.ID
 	previousIdentity.FailedRelease = *lease.PreviousRelease
+	if err := a.verifyFence(ctx, lease, lease.FailedRelease); err != nil {
+		return lease, nil, err
+	}
 	objects, err := BuildDesiredObjects(previousIdentity, previousEnvelope, nil)
 	if err != nil {
 		return lease, nil, err
 	}
 	objects.Secret = nil
-	if err := a.applyDesiredWithIdentity(ctx, &lease, objects, lease.PreviousRelease.ID, lease.PreviousRelease.ConfigHash); err != nil {
+	compensationExecution := lease
+	if err := a.applyDesiredWithIdentity(ctx, &compensationExecution, objects, lease.PreviousRelease.ID, lease.PreviousRelease.ConfigHash); err != nil {
 		if !isTransient(err) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, store.ErrLeaseNotOwned) {
 			return lease, objects.Deployment, fmt.Errorf("%w: restore previous desired state: %v", ErrCompensationUnproven, err)
 		}
 		return lease, objects.Deployment, fmt.Errorf("restore previous desired state: %w", err)
 	}
+	lease.Fence = compensationExecution.Fence
+	lease.ExpiresAt = compensationExecution.ExpiresAt
 	if err := a.store.CheckpointDeployRecovery(ctx, lease, "desired_state_restored"); err != nil {
 		return lease, objects.Deployment, fmt.Errorf("checkpoint restored desired state: %w", err)
 	}
@@ -1201,18 +1368,37 @@ func resolvedAnnotations(source map[string]string, execution store.DeployExecuti
 	return annotations
 }
 
-func verifyObject(labels, annotations map[string]string, environmentID string, fence time.Time) error {
-	if labels[ManagedByLabel] != ManagedByValue || labels[EnvironmentIDLabel] != environmentID {
+func verifyExecutionObject(labels, annotations map[string]string, execution store.DeployExecution) error {
+	if labels[ManagedByLabel] != ManagedByValue || labels[EnvironmentIDLabel] != execution.EnvironmentID {
 		return ErrResourceOwnership
+	}
+	if execution.Fence.IsZero() {
+		if annotations[ReleaseAnnotation] == execution.ReleaseID && annotations[ConfigHashAnnotation] != execution.FailedRelease.ConfigHash {
+			return ErrNewerDeployFence
+		}
+		return nil
 	}
 	if raw := annotations[DeployFenceAnnotation]; raw != "" {
 		existing, err := time.Parse(time.RFC3339Nano, raw)
 		if err != nil {
 			return ErrResourceOwnership
 		}
-		if existing.After(fence) {
+		if existing.After(execution.Fence) {
 			return ErrNewerDeployFence
 		}
+	}
+	return nil
+}
+
+func verifyDeleteObject(labels, annotations map[string]string, execution store.DeployExecution) error {
+	if !execution.Fence.IsZero() {
+		return verifyExecutionObject(labels, annotations, execution)
+	}
+	if labels[ManagedByLabel] != ManagedByValue || labels[EnvironmentIDLabel] != execution.EnvironmentID {
+		return ErrResourceOwnership
+	}
+	if annotations[ReleaseAnnotation] == execution.ReleaseID && annotations[ConfigHashAnnotation] != execution.FailedRelease.ConfigHash {
+		return ErrNewerDeployFence
 	}
 	return nil
 }

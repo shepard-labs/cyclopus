@@ -280,6 +280,9 @@ func ensurePendingCommitCanonical(ctx context.Context, tx pgx.Tx, lease DeployLe
 }
 
 func lockOwnedDeployLease(ctx context.Context, tx pgx.Tx, lease DeployLease) (json.RawMessage, error) {
+	if err := verifyDeployFenceTx(ctx, tx, lease); err != nil {
+		return nil, err
+	}
 	var before json.RawMessage
 	err := tx.QueryRow(ctx, `
 		SELECT jsonb_build_object('status', release.status, 'failure_reason', release.failure_reason)
@@ -289,10 +292,23 @@ func lockOwnedDeployLease(ctx context.Context, tx pgx.Tx, lease DeployLease) (js
 		JOIN orgs AS org ON org.id = environment.org_id
 		JOIN releases AS release ON release.org_id = environment.org_id
 		  AND release.environment_id = environment.id AND release.id = environment.in_progress_release_id
+		LEFT JOIN registries registry ON registry.org_id=app.org_id AND registry.id=release.registry_credential_registry_id
+		LEFT JOIN registry_credential_generations generation ON generation.org_id=release.org_id
+		  AND generation.registry_id=release.registry_credential_registry_id AND generation.generation=release.registry_credential_generation
 		WHERE environment.org_id = $1 AND environment.id = $2
 		  AND environment.in_progress_release_id = $3 AND environment.lock_acquired_at = $4
 		  AND environment.lock_acquired_at > now() - make_interval(secs => app.deploy_timeout_seconds)
-		  AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
+			  AND release.desired_generation=environment.desired_generation AND app.desired_generation=environment.desired_generation
+		  AND ((app.image_visibility='public' AND app.registry_id IS NULL
+		    AND release.registry_credential_registry_id IS NULL AND release.registry_credential_generation IS NULL
+		    AND environment.registry_credential_state='not_required'
+		    AND environment.required_registry_credential_generation IS NULL AND environment.ready_registry_credential_generation IS NULL)
+		   OR (app.image_visibility='private' AND release.registry_credential_registry_id=app.registry_id
+		    AND release.registry_credential_generation=registry.active_generation AND registry.state='ready'
+		    AND generation.state='active' AND environment.registry_credential_state='ready'
+		    AND environment.required_registry_credential_generation=release.registry_credential_generation
+		    AND environment.ready_registry_credential_generation=release.registry_credential_generation))
+		  AND environment.lifecycle_status='ready' AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL
 		  AND project.deleted_at IS NULL AND org.deleted_at IS NULL
 		FOR UPDATE OF environment, release`, lease.OrgID, lease.EnvironmentID, lease.ReleaseID, lease.Fence).Scan(&before)
 	if err == pgx.ErrNoRows {
@@ -304,7 +320,45 @@ func lockOwnedDeployLease(ctx context.Context, tx pgx.Tx, lease DeployLease) (js
 	return before, nil
 }
 
+func verifyDeployFenceTx(ctx context.Context, tx pgx.Tx, lease DeployLease) error {
+	var valid bool
+	err := tx.QueryRow(ctx, `SELECT true FROM environments environment
+		JOIN apps app ON app.org_id=environment.org_id AND app.id=environment.app_id
+		JOIN projects project ON project.org_id=app.org_id AND project.id=app.project_id
+		JOIN orgs org ON org.id=environment.org_id
+		JOIN releases release ON release.org_id=environment.org_id AND release.environment_id=environment.id
+		 AND release.id=environment.in_progress_release_id
+		WHERE environment.org_id=$1 AND environment.id=$2 AND environment.in_progress_release_id=$3
+		 AND environment.lock_acquired_at=$4 AND environment.lock_acquired_at>now()-make_interval(secs=>app.deploy_timeout_seconds)
+		 AND release.provenance<>'legacy_unverified' AND release.desired_generation=environment.desired_generation
+		 AND app.desired_generation=environment.desired_generation AND environment.lifecycle_status='ready'
+		 AND environment.torn_down_at IS NULL AND app.deleted_at IS NULL AND project.deleted_at IS NULL AND org.deleted_at IS NULL
+		 AND ((app.image_visibility='public' AND app.registry_id IS NULL AND release.registry_credential_registry_id IS NULL
+		   AND release.registry_credential_generation IS NULL AND environment.registry_credential_state='not_required'
+		   AND environment.required_registry_credential_generation IS NULL AND environment.ready_registry_credential_generation IS NULL)
+		  OR (app.image_visibility='private' AND release.registry_credential_registry_id=app.registry_id
+		   AND environment.registry_credential_state='ready'
+		   AND environment.required_registry_credential_generation=release.registry_credential_generation
+		   AND environment.ready_registry_credential_generation=release.registry_credential_generation
+		   AND EXISTS(SELECT 1 FROM registries registry JOIN registry_credential_generations generation
+		    ON generation.org_id=registry.org_id AND generation.registry_id=registry.id
+		    AND generation.generation=registry.active_generation AND generation.state='active'
+		    WHERE registry.org_id=release.org_id AND registry.id=release.registry_credential_registry_id
+		    AND registry.state='ready' AND registry.active_generation=release.registry_credential_generation)))`,
+		lease.OrgID, lease.EnvironmentID, lease.ReleaseID, lease.Fence).Scan(&valid)
+	if err == pgx.ErrNoRows {
+		return ErrLeaseNotOwned
+	}
+	if err != nil {
+		return fmt.Errorf("verify deploy fence: %w", err)
+	}
+	return nil
+}
+
 func takePendingAndReleaseLease(ctx context.Context, tx pgx.Tx, lease DeployLease, pending **string) error {
+	if err := verifyDeployFenceTx(ctx, tx, lease); err != nil {
+		return err
+	}
 	err := tx.QueryRow(ctx, `
 		UPDATE environments AS environment
 		SET pending_commit_sha = NULL, in_progress_release_id = NULL, lock_acquired_at = NULL,

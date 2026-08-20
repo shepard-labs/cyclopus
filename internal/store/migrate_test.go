@@ -55,6 +55,8 @@ func TestEmbeddedMigrations(t *testing.T) {
 		"000019_registry_credential_fingerprint.up.sql",
 		"000020_namespace_credential_transitions.down.sql",
 		"000020_namespace_credential_transitions.up.sql",
+		"000021_release_generation_fencing.down.sql",
+		"000021_release_generation_fencing.up.sql",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("embedded migrations = %v, want exactly %v", entries, want)
@@ -222,6 +224,34 @@ func TestMigration000020SchemaContract(t *testing.T) {
 		sum := sha256.Sum256(contents)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			t.Fatalf("%s checksum = %s, want v20 migration fingerprint %s", name, got, want)
+		}
+	}
+}
+
+func TestMigration000021SchemaContract(t *testing.T) {
+	for name, want := range map[string]string{
+		"000021_release_generation_fencing.up.sql":   "0821d0022879a6c79499fc1557b624d4c3cfd02f490038986c00c04c55829155",
+		"000021_release_generation_fencing.down.sql": "e28f4d1748741e68c78b802d08a5a118f2d67b9017b55b60b80697135feeaeaa",
+	} {
+		contents, err := fs.ReadFile(Migrations, "migrations/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"desired_generation", "orchestration_job_id", "assert_release_generation_v21_down_safe"} {
+			if !strings.Contains(string(contents), required) {
+				t.Errorf("%s does not contain %q", name, required)
+			}
+		}
+		if strings.HasSuffix(name, ".up.sql") {
+			for _, required := range []string{"legacy_unverified", "SET search_path FROM CURRENT", "BEFORE TRUNCATE ON schema_migrations"} {
+				if !strings.Contains(string(contents), required) {
+					t.Errorf("%s does not contain %q", name, required)
+				}
+			}
+		}
+		sum := sha256.Sum256(contents)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Fatalf("%s checksum = %s, want v21 migration fingerprint %s", name, got, want)
 		}
 	}
 }

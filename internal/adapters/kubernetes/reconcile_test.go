@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 )
 
 type fakeReconcileStore struct {
-	RecoveryStore // embedded (nil) to satisfy the RecoveryStore-typed adapter field
 	envByOrg      []store.Environment
 	envByApp      []store.Environment
 	env           store.Environment
@@ -33,7 +33,33 @@ type fakeReconcileStore struct {
 	listByOrgHit  bool
 	listByAppHit  bool
 	verifiedDoms  []store.Domain
+	listDomains   func() []store.Domain
 	appendErr     func(store.ReconciliationEvidence) error
+	verifyFences  int
+	verifyFence   func(int)
+}
+
+func (*fakeReconcileStore) RenewDeployLease(context.Context, store.DeployLease) (store.DeployLease, error) {
+	return store.DeployLease{}, store.ErrLeaseNotOwned
+}
+func (f *fakeReconcileStore) VerifyDeployFence(context.Context, store.DeployLease, store.ImmutableReleaseSnapshot) error {
+	f.verifyFences++
+	if f.verifyFence != nil {
+		f.verifyFence(f.verifyFences)
+	}
+	return nil
+}
+func (*fakeReconcileStore) CheckpointDeployRecovery(context.Context, store.DeployLease, string) error {
+	return nil
+}
+func (*fakeReconcileStore) AdoptRecoveredReleaseLive(context.Context, store.DeployLease) (store.FinalizeReleaseResult, error) {
+	return store.FinalizeReleaseResult{}, nil
+}
+func (*fakeReconcileStore) FinalizeRecoveredReleaseFailed(context.Context, store.DeployLease, string) (store.FinalizeReleaseResult, error) {
+	return store.FinalizeReleaseResult{}, nil
+}
+func (*fakeReconcileStore) QuarantineDeployRecovery(context.Context, store.DeployLease, string, string) error {
+	return nil
 }
 
 func (f *fakeReconcileStore) ListEnvironmentsByOrg(context.Context, string) ([]store.Environment, error) {
@@ -54,6 +80,9 @@ func (f *fakeReconcileStore) GetRelease(context.Context, string, string) (store.
 	return f.release, nil
 }
 func (f *fakeReconcileStore) ListVerifiedDomainsByApp(context.Context, string, string) ([]store.Domain, error) {
+	if f.listDomains != nil {
+		return f.listDomains(), nil
+	}
 	return f.verifiedDoms, nil
 }
 func (f *fakeReconcileStore) StartReconciliationRun(_ context.Context, _, _, _ string, plan json.RawMessage, _ *store.AuditEvent) error {
@@ -84,7 +113,7 @@ func reconcileTestRelease(t *testing.T) store.Release {
 		t.Fatal(err)
 	}
 	return store.Release{ImmutableReleaseSnapshot: store.ImmutableReleaseSnapshot{
-		ID: "release", OrgID: "org", EnvironmentID: "environment", ConfigSnapshot: encoded, ConfigHash: hash,
+		ID: "release", OrgID: "org", EnvironmentID: "environment", ImageRef: envelope.DesiredState.Deployment.Container.Image, ConfigSnapshot: encoded, ConfigHash: hash, DesiredGeneration: 1,
 	}}
 }
 
@@ -327,6 +356,39 @@ func TestReconcileAppliesOnNonDryRun(t *testing.T) {
 	}
 }
 
+func TestReconcilePublicSnapshotRemovesManagedPullSecretAndPreservesImmutableImage(t *testing.T) {
+	release := reconcileTestRelease(t)
+	envelope, err := store.DecodeReleaseSnapshot(release.ConfigSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := store.DeployExecution{OrgID: "org", EnvironmentID: "environment", ReleaseID: release.ID, Namespace: "tenant", FailedRelease: release.ImmutableReleaseSnapshot}
+	desired, err := BuildDesiredObjects(execution, envelope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := desired.Deployment.DeepCopy()
+	current.ResourceVersion = "1"
+	current.Annotations[ReleaseAnnotation] = "previous-release"
+	current.Annotations[ConfigHashAnnotation] = "stale"
+	current.Annotations[DeployFenceAnnotation] = time.Now().Add(-time.Hour).Format(time.RFC3339Nano)
+	current.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: ImagePullSecretName}}
+	current.Spec.Template.Spec.Containers[0].Image = "ghcr.io/acme/other@sha256:" + strings.Repeat("f", 64)
+	client := fake.NewSimpleClientset(current)
+	rs := &fakeReconcileStore{env: reconcileEnv(), release: release, app: store.App{RuntimeClass: "gvisor"}}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment"}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.AppsV1().Deployments("tenant").Get(context.Background(), "app", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Spec.Template.Spec.ImagePullSecrets) != 0 || got.Spec.Template.Spec.Containers[0].Image != release.ImageRef {
+		t.Fatalf("deployment image=%q pullSecrets=%#v", got.Spec.Template.Spec.Containers[0].Image, got.Spec.Template.Spec.ImagePullSecrets)
+	}
+}
+
 func productionReconcileEnv() store.Environment {
 	env := reconcileEnv()
 	env.Kind = "production"
@@ -339,7 +401,7 @@ func TestReconcileRestoresMissingCustomDomainIngress(t *testing.T) {
 	rs := &fakeReconcileStore{
 		env:          productionReconcileEnv(),
 		release:      release,
-		app:          store.App{RuntimeClass: "gvisor", Slug: "app"},
+		app:          store.App{ID: "app", RuntimeClass: "gvisor", Slug: "app"},
 		verifiedDoms: []store.Domain{{ID: "domain-1", OrgID: "org", AppID: "app", Hostname: "app.customer.test"}},
 	}
 	adapter := &RecoveryAdapter{
@@ -360,6 +422,34 @@ func TestReconcileRestoresMissingCustomDomainIngress(t *testing.T) {
 	}
 	if ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name != "app" {
 		t.Fatalf("restored ingress backend = %+v, want app", ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service)
+	}
+	if rs.verifyFences < 2 {
+		t.Fatalf("deploy fence checks = %d, want initial and immediate pre-create checks", rs.verifyFences)
+	}
+}
+
+func TestReconcileDoesNotRestoreCustomDomainDeletedAfterPlanning(t *testing.T) {
+	release := reconcileTestRelease(t)
+	client := fake.NewSimpleClientset()
+	listCalls := 0
+	rs := &fakeReconcileStore{
+		env:     productionReconcileEnv(),
+		release: release,
+		app:     store.App{ID: "app", RuntimeClass: "gvisor", Slug: "app"},
+		listDomains: func() []store.Domain {
+			listCalls++
+			if listCalls == 1 {
+				return []store.Domain{{ID: "domain-1", OrgID: "org", AppID: "app", Hostname: "app.customer.test"}}
+			}
+			return nil
+		},
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: false}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	if hasActionOn(client.Actions(), "create", "ingresses", "custom-domain-domain-1") {
+		t.Fatal("reconciliation recreated a custom-domain Ingress deleted after planning")
 	}
 }
 
@@ -444,6 +534,8 @@ func TestReconcilePruneReportsOrphan(t *testing.T) {
 func TestReconcilePruneDeletesOrphanWhenEnabled(t *testing.T) {
 	release := reconcileTestRelease(t)
 	orphan := managedDeployment("orphan-app")
+	orphan.Annotations = map[string]string{ReleaseAnnotation: "previous-release", ConfigHashAnnotation: "previous-hash",
+		DeployFenceAnnotation: time.Now().Add(-time.Hour).Format(time.RFC3339Nano)}
 	client := fake.NewSimpleClientset(orphan)
 	rs := &fakeReconcileStore{env: reconcileEnv(), release: release, app: store.App{RuntimeClass: "gvisor"}}
 	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: false, Prune: true}
@@ -484,7 +576,7 @@ func TestReconcilePruneReportsOrphanCustomDomainIngress(t *testing.T) {
 	rs := &fakeReconcileStore{
 		env:     productionReconcileEnv(),
 		release: release,
-		app:     store.App{RuntimeClass: "gvisor", Slug: "app"},
+		app:     store.App{ID: "app", RuntimeClass: "gvisor", Slug: "app"},
 		// no verified domains -> the stale custom-domain Ingress has no desired match
 	}
 	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: true, Prune: false}
@@ -509,11 +601,13 @@ func TestReconcilePruneReportsOrphanCustomDomainIngress(t *testing.T) {
 func TestReconcilePruneDeletesOrphanCustomDomainIngress(t *testing.T) {
 	release := reconcileTestRelease(t)
 	stale := managedIngress("custom-domain-deleted-1")
+	stale.Annotations = map[string]string{ReleaseAnnotation: "previous-release", ConfigHashAnnotation: "previous-hash",
+		DeployFenceAnnotation: time.Now().Add(-time.Hour).Format(time.RFC3339Nano)}
 	client := fake.NewSimpleClientset(stale)
 	rs := &fakeReconcileStore{
 		env:     productionReconcileEnv(),
 		release: release,
-		app:     store.App{RuntimeClass: "gvisor", Slug: "app"},
+		app:     store.App{ID: "app", RuntimeClass: "gvisor", Slug: "app"},
 	}
 	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", DryRun: false, Prune: true}
 	if err := runReconcile(t, rs, client, run); err != nil {
@@ -530,6 +624,30 @@ func TestReconcilePruneDeletesOrphanCustomDomainIngress(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected delete evidence with audit for orphan Ingress, got %+v", rs.evidence)
+	}
+}
+
+func TestReconcilePrunePreservesCustomDomainVerifiedAfterPlanning(t *testing.T) {
+	release := reconcileTestRelease(t)
+	stale := managedIngress("custom-domain-domain-1")
+	stale.Annotations = map[string]string{ReleaseAnnotation: "previous-release", ConfigHashAnnotation: "previous-config"}
+	client := fake.NewSimpleClientset(stale)
+	rs := &fakeReconcileStore{
+		env:     productionReconcileEnv(),
+		release: release,
+		app:     store.App{ID: "app", RuntimeClass: "gvisor", Slug: "app"},
+	}
+	rs.verifyFence = func(call int) {
+		if call == 2 {
+			rs.verifiedDoms = []store.Domain{{ID: "domain-1", OrgID: "org", AppID: "app", Hostname: "app.customer.test"}}
+		}
+	}
+	run := &store.ReconciliationRun{ID: "run", OrgID: "org", ScopeKind: "environment", ScopeID: "environment", Prune: true}
+	if err := runReconcile(t, rs, client, run); err != nil {
+		t.Fatal(err)
+	}
+	if hasActionOn(client.Actions(), "delete", "ingresses", "custom-domain-domain-1") {
+		t.Fatal("reconciliation deleted a custom-domain Ingress verified after planning")
 	}
 }
 

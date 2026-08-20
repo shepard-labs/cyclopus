@@ -77,6 +77,10 @@ func EncodeDeploymentSnapshot(deployment *appsv1.Deployment) ([]byte, error) {
 			envFrom = append(envFrom, source.SecretRef.Name)
 		}
 	}
+	imagePullSecrets := make([]string, len(copy.Spec.Template.Spec.ImagePullSecrets))
+	for index, secret := range copy.Spec.Template.Spec.ImagePullSecrets {
+		imagePullSecrets[index] = secret.Name
+	}
 	identity := store.ObjectIdentity{Name: copy.Name, Namespace: copy.Namespace, Labels: labels}
 	scaling := store.ScalingIntent{Version: 1, Kind: "none"}
 	if *copy.Spec.Replicas != 1 {
@@ -87,7 +91,8 @@ func EncodeDeploymentSnapshot(deployment *appsv1.Deployment) ([]byte, error) {
 		Deployment: store.DeploymentIntent{Version: 1, Identity: identity, Selector: selector, Replicas: *copy.Spec.Replicas,
 			Strategy: store.RollingUpdateIntent{Type: "RollingUpdate", MaxUnavailable: 0, MaxSurge: 1}, PodLabels: podLabels,
 			PodAnnotations: annotations, RuntimeClassName: runtimeClass, ProgressDeadlineSeconds: deadline,
-			Container: store.ContainerIntent{Name: container.Name, Image: container.Image, Port: port, EnvFromSecrets: envFrom, Resources: resources, ReadinessProbe: store.ReadinessIntent{Path: path, Port: port}}},
+			ImagePullSecrets: imagePullSecrets,
+			Container:        store.ContainerIntent{Name: container.Name, Image: container.Image, Port: port, EnvFromSecrets: envFrom, Resources: resources, ReadinessProbe: store.ReadinessIntent{Path: path, Port: port}}},
 		Service: store.ServiceIntent{Version: 1, Identity: identity, Selector: selector, Port: 80, TargetPort: port},
 		Ingress: store.IngressIntent{Version: 1, Identity: identity, Hostname: copy.Name + ".example.test", Path: "/", ServiceName: copy.Name, ServicePort: 80, TLS: store.TLSIntent{Enabled: true, SecretName: copy.Name + "-tls"}},
 		Scaling: scaling,
@@ -126,6 +131,9 @@ func DecodeDeploymentSnapshot(encoded []byte) (*appsv1.Deployment, error) {
 			Selector: &metav1.LabelSelector{MatchLabels: cloneStrings(d.Selector)},
 			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: cloneStrings(d.PodLabels), Annotations: annotations}, Spec: corev1.PodSpec{RuntimeClassName: &d.RuntimeClassName, Containers: []corev1.Container{container}}},
 		},
+	}
+	for _, name := range d.ImagePullSecrets {
+		deployment.Spec.Template.Spec.ImagePullSecrets = append(deployment.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{Name: name})
 	}
 	for _, name := range d.Container.EnvFromSecrets {
 		deployment.Spec.Template.Spec.Containers[0].EnvFrom = append(deployment.Spec.Template.Spec.Containers[0].EnvFrom, corev1.EnvFromSource{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: name}}})

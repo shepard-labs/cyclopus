@@ -1201,6 +1201,14 @@ func deploymentSnapshot(environment store.Environment, app store.App, imageRef, 
 		Ingress: store.IngressIntent{Version: 1, Identity: identity(app.Slug), Hostname: *environment.PlannedHostname, Path: "/", ServiceName: app.Slug, ServicePort: 80, TLS: store.TLSIntent{Enabled: true, SecretName: app.Slug + "-tls"}},
 		Scaling: scaling,
 	}}
+	envelope, err := store.NormalizeReleaseSnapshotForContext(envelope, store.ReleaseSnapshotContext{
+		ImageVisibility: app.ImageVisibility,
+		ImmutableImage:  imageRef,
+		ReleaseID:       &releaseID,
+	})
+	if err != nil {
+		return nil, err
+	}
 	encoded, _, err := store.EncodeReleaseSnapshot(envelope)
 	return encoded, err
 }

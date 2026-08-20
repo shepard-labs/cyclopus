@@ -60,8 +60,13 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 		var imageRef, namespace string
 		var gitCommitSHA *string
 		var liveSnapshot json.RawMessage
+		var registryID *string
+		var registryGeneration *int64
+		var visibility string
+		var desiredGeneration int64
 		if err := tx.QueryRow(ctx, `
-			SELECT release.image_ref, release.git_commit_sha, release.config_snapshot, environment.namespace
+			SELECT release.image_ref, release.git_commit_sha, release.config_snapshot, environment.namespace,
+			  app.registry_id::text,environment.ready_registry_credential_generation,environment.desired_generation,app.image_visibility
 			FROM environments AS environment
 			JOIN apps AS app ON app.org_id = environment.org_id AND app.id = environment.app_id
 			JOIN projects AS project ON project.org_id = app.org_id AND project.id = app.project_id
@@ -69,9 +74,22 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 			JOIN releases AS release ON release.org_id = environment.org_id
 			  AND release.environment_id = environment.id AND release.status = 'live'
 			WHERE environment.org_id = $1 AND environment.id = $2
-			  AND environment.torn_down_at IS NULL AND environment.in_progress_release_id IS NULL
+			  AND environment.lifecycle_status='ready' AND environment.torn_down_at IS NULL AND environment.in_progress_release_id IS NULL
+			  AND app.desired_generation=environment.desired_generation
+			  AND ((app.image_visibility='public' AND app.registry_id IS NULL
+			    AND environment.registry_credential_state='not_required'
+			    AND environment.required_registry_credential_generation IS NULL AND environment.ready_registry_credential_generation IS NULL)
+			   OR (app.image_visibility='private' AND app.registry_id IS NOT NULL
+			    AND environment.registry_credential_state='ready'
+			    AND environment.required_registry_credential_generation=environment.ready_registry_credential_generation
+			    AND EXISTS(SELECT 1 FROM registries registry JOIN registry_credential_generations generation
+			      ON generation.org_id=registry.org_id AND generation.registry_id=registry.id
+			      AND generation.generation=registry.active_generation AND generation.state='active'
+			      WHERE registry.org_id=app.org_id AND registry.id=app.registry_id
+			      AND registry.state='ready' AND registry.active_generation=environment.ready_registry_credential_generation)))
 			  AND app.deleted_at IS NULL AND project.deleted_at IS NULL AND org.deleted_at IS NULL
-			FOR UPDATE OF environment`, params.OrgID, params.EnvironmentID).Scan(&imageRef, &gitCommitSHA, &liveSnapshot, &namespace); err == pgx.ErrNoRows {
+			FOR UPDATE OF environment`, params.OrgID, params.EnvironmentID).Scan(&imageRef, &gitCommitSHA, &liveSnapshot,
+			&namespace, &registryID, &registryGeneration, &desiredGeneration, &visibility); err == pgx.ErrNoRows {
 			return ErrConflict
 		} else if err != nil {
 			return fmt.Errorf("lock environment for env-var mutation: %w", err)
@@ -159,13 +177,23 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 		if err != nil {
 			return err
 		}
+		result.ConfigSnapshot, result.ConfigHash, err = NormalizeReleaseSnapshotContext(result.ConfigSnapshot, ReleaseSnapshotContext{
+			ImageVisibility: visibility,
+			ImmutableImage:  imageRef,
+			ReleaseID:       &params.ReleaseID,
+		})
+		if err != nil {
+			return fmt.Errorf("normalize env-change snapshot context: %w", err)
+		}
 
 		if _, err := tx.Exec(ctx, `INSERT INTO releases (
 			id, org_id, environment_id, image_ref, git_commit_sha, triggered_by_user_id,
-			kind, env_var_revision_id, config_snapshot, config_hash, status
-		) VALUES ($1, $2, $3, $4, $5, $6, 'env_change', $7, $8, $9, 'pending')`,
+			kind, env_var_revision_id, config_snapshot, config_hash, status,
+			registry_credential_registry_id,registry_credential_generation,desired_generation,provenance
+		) VALUES ($1, $2, $3, $4, $5, $6, 'env_change', $7, $8, $9, 'pending',$10,$11,$12,'contextual')`,
 			params.ReleaseID, params.OrgID, params.EnvironmentID, imageRef, gitCommitSHA,
-			params.TriggeredByUserID, revisionID, result.ConfigSnapshot, result.ConfigHash); err != nil {
+			params.TriggeredByUserID, revisionID, result.ConfigSnapshot, result.ConfigHash, registryID,
+			registryGeneration, desiredGeneration); err != nil {
 			return fmt.Errorf("insert env-change release: %w", err)
 		}
 		if err := tx.QueryRow(ctx, `
@@ -174,6 +202,8 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 			FROM apps AS app, projects AS project, orgs AS org
 			WHERE environment.org_id = $1 AND environment.id = $2
 			  AND environment.in_progress_release_id IS NULL
+			  AND environment.lifecycle_status='ready' AND environment.desired_generation=$4
+			  AND app.desired_generation=$4
 			  AND app.org_id = environment.org_id AND app.id = environment.app_id
 			  AND project.org_id = app.org_id AND project.id = app.project_id
 			  AND org.id = environment.org_id
@@ -182,13 +212,14 @@ func (s *Store) ReplaceEnvVarsAndCreateRelease(ctx context.Context, params Repla
 			RETURNING environment.org_id::text, environment.id::text,
 				environment.in_progress_release_id::text, environment.lock_acquired_at,
 				environment.lock_acquired_at + make_interval(secs => app.deploy_timeout_seconds)`,
-			params.OrgID, params.EnvironmentID, params.ReleaseID).Scan(&result.Lease.OrgID,
+			params.OrgID, params.EnvironmentID, params.ReleaseID, desiredGeneration).Scan(&result.Lease.OrgID,
 			&result.Lease.EnvironmentID, &result.Lease.ReleaseID, &result.Lease.Fence,
 			&result.Lease.ExpiresAt); err == pgx.ErrNoRows {
 			return ErrConflict
 		} else if err != nil {
 			return fmt.Errorf("acquire env-change deploy lease: %w", err)
 		}
+		result.Lease.DesiredGeneration = desiredGeneration
 
 		resourceType := "release"
 		params.Idempotency.OrgID = params.OrgID

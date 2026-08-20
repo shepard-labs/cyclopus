@@ -40,6 +40,118 @@ func TestPreviewDesiredObjectsForceOneReplicaAndDeleteOwnedHPA(t *testing.T) {
 	}
 }
 
+func TestDesiredObjectsUsePersistedImagePullSecretsExactly(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		private bool
+		want    []corev1.LocalObjectReference
+	}{
+		{name: "public"},
+		{name: "private", private: true, want: []corev1.LocalObjectReference{{Name: ImagePullSecretName}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envelope := deployEnvelope(t, "none")
+			if tc.private {
+				envelope.DesiredState.Deployment.ImagePullSecrets = []string{ImagePullSecretName}
+			}
+			execution := deployExecution(t, envelope)
+			if tc.private {
+				registryID, generation := "registry", int64(7)
+				execution.FailedRelease.RegistryCredentialRegistryID = &registryID
+				execution.FailedRelease.RegistryCredentialGeneration = &generation
+			}
+			objects, err := BuildDesiredObjects(execution, envelope, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !imagePullSecretsMatch(objects.Deployment.Spec.Template.Spec.ImagePullSecrets, localReferenceNames(tc.want)) {
+				t.Fatalf("imagePullSecrets = %#v, want %#v", objects.Deployment.Spec.Template.Spec.ImagePullSecrets, tc.want)
+			}
+		})
+	}
+}
+
+func localReferenceNames(references []corev1.LocalObjectReference) []string {
+	names := make([]string, len(references))
+	for i := range references {
+		names[i] = references[i].Name
+	}
+	return names
+}
+
+func TestDesiredObjectsRejectReleaseEvidenceMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		pullSecret bool
+		private    bool
+	}{
+		{name: "public snapshot with managed secret", pullSecret: true},
+		{name: "private snapshot without managed secret", private: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envelope := deployEnvelope(t, "none")
+			if tc.pullSecret {
+				envelope.DesiredState.Deployment.ImagePullSecrets = []string{ImagePullSecretName}
+			}
+			execution := deployExecution(t, envelope)
+			if tc.private {
+				registryID, generation := "registry", int64(7)
+				execution.FailedRelease.RegistryCredentialRegistryID = &registryID
+				execution.FailedRelease.RegistryCredentialGeneration = &generation
+			}
+			if _, err := BuildDesiredObjects(execution, envelope, nil); !errors.Is(err, ErrDesiredStateInvalid) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDeployFenceStopsBeforeBuildApplyAndFinalize(t *testing.T) {
+	envelope := deployEnvelope(t, "none")
+	execution := deployExecution(t, envelope)
+	t.Run("build", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		dataStore := newFakeForwardStore(execution)
+		dataStore.verifyErrAt = 1
+		adapter := newForwardAdapter(t, client, dataStore)
+		if _, err := adapter.ExecuteDeploy(context.Background(), execution); !errors.Is(err, store.ErrLeaseNotOwned) {
+			t.Fatalf("error = %v", err)
+		}
+		if len(client.Actions()) != 0 || dataStore.liveCalls != 0 || dataStore.failedCalls != 0 {
+			t.Fatalf("actions=%v live=%d failed=%d", client.Actions(), dataStore.liveCalls, dataStore.failedCalls)
+		}
+	})
+	t.Run("apply", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		dataStore := newFakeForwardStore(execution)
+		dataStore.verifyErrAt = 1
+		adapter := newForwardAdapter(t, client, dataStore)
+		objects, _ := BuildDesiredObjects(execution, envelope, nil)
+		if err := adapter.applyDeployment(context.Background(), &execution, objects.Deployment); !errors.Is(err, store.ErrLeaseNotOwned) {
+			t.Fatalf("error = %v", err)
+		}
+		if countResourceActions(client.Actions(), "create", "deployments") != 0 {
+			t.Fatalf("actions=%v", client.Actions())
+		}
+	})
+	t.Run("finalize", func(t *testing.T) {
+		objects, _ := BuildDesiredObjects(execution, envelope, nil)
+		ready := objects.Deployment.DeepCopy()
+		ready.Generation = 1
+		ready.Status = readyStatus(1)
+		client := fake.NewSimpleClientset(objects.Service.DeepCopy(), ready, objects.Ingress.DeepCopy())
+		dataStore := newFakeForwardStore(execution)
+		dataStore.verifyErrAt = 6
+		adapter := newForwardAdapter(t, client, dataStore)
+		if _, err := adapter.ExecuteDeploy(context.Background(), execution); !errors.Is(err, store.ErrLeaseNotOwned) {
+			t.Fatalf("error = %v verifies=%d", err, dataStore.verifyCalls)
+		}
+		if dataStore.liveCalls != 0 {
+			t.Fatal("stale release was finalized live")
+		}
+	})
+}
+
 func TestDeployDesiredObjectsBuildAutoscalingV2HPA(t *testing.T) {
 	envelope := deployEnvelope(t, "hpa")
 	execution := deployExecution(t, envelope)
@@ -496,8 +608,8 @@ func TestDeployTerminalRolloutRestoresCompletePreviousDesiredStateBeforeFinaliza
 			}
 			fence := time.Now().UTC().Truncate(time.Microsecond)
 			execution := store.DeployExecution{OrgID: "org", EnvironmentID: "environment", ReleaseID: "failed", Namespace: "tenant", PlannedHostname: "failed.example.test", Fence: fence, ExpiresAt: fence.Add(time.Hour), Timeout: time.Minute,
-				FailedRelease:   store.ImmutableReleaseSnapshot{ID: "failed", EnvironmentID: "environment", ConfigSnapshot: failedSnapshot, ConfigHash: failedHash},
-				PreviousRelease: &store.ImmutableReleaseSnapshot{ID: "previous", EnvironmentID: "environment", ConfigSnapshot: previousSnapshot, ConfigHash: previousHash},
+				FailedRelease:   store.ImmutableReleaseSnapshot{ID: "failed", EnvironmentID: "environment", ImageRef: failedEnvelope.DesiredState.Deployment.Container.Image, ConfigSnapshot: failedSnapshot, ConfigHash: failedHash},
+				PreviousRelease: &store.ImmutableReleaseSnapshot{ID: "previous", EnvironmentID: "environment", ImageRef: previousEnvelope.DesiredState.Deployment.Container.Image, ConfigSnapshot: previousSnapshot, ConfigHash: previousHash},
 			}
 			failedObjects, err := BuildDesiredObjects(execution, failedEnvelope, nil)
 			if err != nil {
@@ -552,8 +664,8 @@ func TestDeployCompensationRestoreFailureQuarantinesWithoutFinalization(t *testi
 	failedSnapshot, failedHash, _ := store.EncodeReleaseSnapshot(failedEnvelope)
 	execution := deployExecution(t, failedEnvelope)
 	execution.ReleaseID = "failed"
-	execution.FailedRelease = store.ImmutableReleaseSnapshot{ID: "failed", EnvironmentID: "environment", ConfigSnapshot: failedSnapshot, ConfigHash: failedHash}
-	execution.PreviousRelease = &store.ImmutableReleaseSnapshot{ID: "previous", EnvironmentID: "environment", ConfigSnapshot: previousSnapshot, ConfigHash: previousHash}
+	execution.FailedRelease = store.ImmutableReleaseSnapshot{ID: "failed", EnvironmentID: "environment", ImageRef: failedEnvelope.DesiredState.Deployment.Container.Image, ConfigSnapshot: failedSnapshot, ConfigHash: failedHash}
+	execution.PreviousRelease = &store.ImmutableReleaseSnapshot{ID: "previous", EnvironmentID: "environment", ImageRef: previousEnvelope.DesiredState.Deployment.Container.Image, ConfigSnapshot: previousSnapshot, ConfigHash: previousHash}
 	failedObjects, _ := BuildDesiredObjects(execution, failedEnvelope, nil)
 	terminal := failedObjects.Deployment.DeepCopy()
 	terminal.Generation = 2
@@ -587,7 +699,7 @@ func compensationEnvelope(t *testing.T, scaling, identity string) store.ReleaseS
 		envelope.DesiredState.Scaling.Name = "app"
 	}
 	if identity == "previous" {
-		envelope.DesiredState.Deployment.Container.Image = "registry/previous@sha256:" + strings.Repeat("1", 64)
+		envelope.DesiredState.Deployment.Container.Image = "ghcr.io/acme/previous@sha256:" + strings.Repeat("1", 64)
 		envelope.DesiredState.Deployment.Container.Port = 8181
 		envelope.DesiredState.Service.TargetPort = 8181
 		envelope.DesiredState.Deployment.Container.Resources = store.ResourceIntent{CPURequestMillicores: 75, CPULimitMillicores: 250, MemoryRequestMiB: 96, MemoryLimitMiB: 384}
@@ -601,7 +713,7 @@ func compensationEnvelope(t *testing.T, scaling, identity string) store.ReleaseS
 		envelope.DesiredState.Ingress.ServicePort = 80
 		envelope.DesiredState.Ingress.TLS.SecretName = "previous-tls"
 	} else {
-		envelope.DesiredState.Deployment.Container.Image = "registry/failed@sha256:" + strings.Repeat("2", 64)
+		envelope.DesiredState.Deployment.Container.Image = "ghcr.io/acme/failed@sha256:" + strings.Repeat("2", 64)
 		envelope.DesiredState.Deployment.Container.Port = 9292
 		envelope.DesiredState.Service.TargetPort = 9292
 		envelope.DesiredState.Deployment.Container.Resources = store.ResourceIntent{CPURequestMillicores: 150, CPULimitMillicores: 500, MemoryRequestMiB: 192, MemoryLimitMiB: 768}
@@ -781,15 +893,34 @@ func TestEnvSnapshotBootstrapsExactNameSecretRoleAndBindingRestartSafely(t *test
 	}
 	role, err := client.RbacV1().Roles("tenant").Get(context.Background(), secretReaderRoleName, metav1.GetOptions{})
 	wantNames := []string{store.EnvDestinationSecretName("app", "revision"), "source"}
-	if err != nil || len(role.Rules) != 1 || !reflect.DeepEqual(role.Rules[0].ResourceNames, wantNames) || !reflect.DeepEqual(role.Rules[0].Verbs, []string{"get"}) {
+	if err != nil || len(role.Rules) != 1 || !reflect.DeepEqual(role.Rules[0].ResourceNames, wantNames) || !reflect.DeepEqual(role.Rules[0].Verbs, []string{"get"}) || role.Annotations[DeployFenceAnnotation] == "" {
 		t.Fatalf("role = %+v, %v", role, err)
 	}
 	binding, err := client.RbacV1().RoleBindings("tenant").Get(context.Background(), secretReaderRoleName, metav1.GetOptions{})
-	if err != nil || len(binding.Subjects) != 1 || binding.RoleRef.Name != secretReaderRoleName {
+	if err != nil || len(binding.Subjects) != 1 || binding.RoleRef.Name != secretReaderRoleName || binding.Annotations[DeployFenceAnnotation] == "" {
 		t.Fatalf("binding = %+v, %v", binding, err)
 	}
 	if countResourceActions(client.Actions(), "create", "roles") != 1 || countResourceActions(client.Actions(), "create", "rolebindings") != 1 {
 		t.Fatalf("bootstrap was not restart-safe: %#v", client.Actions())
+	}
+}
+
+func TestEnvSnapshotRejectsNewerSecretReaderFenceWithoutMutation(t *testing.T) {
+	envelope := envDeployEnvelope(t)
+	execution := deployExecution(t, envelope)
+	role := managedTestSecretRole()
+	role.Annotations = map[string]string{DeployFenceAnnotation: execution.Fence.Add(time.Hour).Format(time.RFC3339Nano)}
+	serviceAccountNamespace, serviceAccountName := cyclopusServiceAccount()
+	binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: secretReaderRoleName, Namespace: execution.Namespace,
+		Labels: role.Labels, Annotations: role.Annotations}, RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: secretReaderRoleName},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: serviceAccountName, Namespace: serviceAccountNamespace}}}
+	client := fake.NewSimpleClientset(managedTestNamespace(), role, binding)
+	adapter := newForwardAdapter(t, client, newFakeForwardStore(execution))
+	if err := adapter.ensureSecretReaderNames(context.Background(), execution, envelope); !errors.Is(err, ErrNewerDeployFence) {
+		t.Fatalf("error = %v, want newer deploy fence", err)
+	}
+	if countResourceActions(client.Actions(), "update", "roles") != 0 || countResourceActions(client.Actions(), "update", "rolebindings") != 0 {
+		t.Fatalf("newer RBAC fence was mutated: %#v", client.Actions())
 	}
 }
 
@@ -900,7 +1031,7 @@ func deployEnvelope(t *testing.T, scaling string) store.ReleaseSnapshotEnvelope 
 	selector := map[string]string{EnvironmentIDLabel: "environment", "app.kubernetes.io/name": "app"}
 	identity := store.ObjectIdentity{Name: "app", Namespace: "tenant", Labels: labels}
 	snapshot := store.ReleaseSnapshotEnvelope{Version: store.ReleaseSnapshotVersion, DesiredState: store.DesiredStateSnapshot{Version: 1,
-		Deployment: store.DeploymentIntent{Version: 1, Identity: identity, Selector: selector, Replicas: 1, Strategy: store.RollingUpdateIntent{Type: "RollingUpdate", MaxUnavailable: 0, MaxSurge: 1}, PodLabels: labels, PodAnnotations: map[string]string{ReleaseAnnotation: store.ReleaseIDAnnotationTemplate, ConfigHashAnnotation: store.ConfigHashAnnotationTemplate, AppIDLabel: "app", OrgIDLabel: "org"}, RuntimeClassName: "gvisor", ProgressDeadlineSeconds: 60, Container: store.ContainerIntent{Name: "app", Image: "registry/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Port: 8080, Resources: store.ResourceIntent{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}, ReadinessProbe: store.ReadinessIntent{Path: "/ready", Port: 8080}}},
+		Deployment: store.DeploymentIntent{Version: 1, Identity: identity, Selector: selector, Replicas: 1, Strategy: store.RollingUpdateIntent{Type: "RollingUpdate", MaxUnavailable: 0, MaxSurge: 1}, PodLabels: labels, PodAnnotations: map[string]string{ReleaseAnnotation: store.ReleaseIDAnnotationTemplate, ConfigHashAnnotation: store.ConfigHashAnnotationTemplate, AppIDLabel: "app", OrgIDLabel: "org"}, RuntimeClassName: "gvisor", ProgressDeadlineSeconds: 60, Container: store.ContainerIntent{Name: "app", Image: "ghcr.io/acme/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Port: 8080, Resources: store.ResourceIntent{CPURequestMillicores: 100, CPULimitMillicores: 200, MemoryRequestMiB: 128, MemoryLimitMiB: 256}, ReadinessProbe: store.ReadinessIntent{Path: "/ready", Port: 8080}}},
 		Service:    store.ServiceIntent{Version: 1, Identity: identity, Selector: selector, Port: 80, TargetPort: 8080},
 		Ingress:    store.IngressIntent{Version: 1, Identity: identity, Hostname: "app.example.test", Path: "/", ServiceName: "app", ServicePort: 80, TLS: store.TLSIntent{Enabled: true, SecretName: "app-tls"}},
 		Scaling:    store.ScalingIntent{Version: 1, Kind: scaling},
@@ -937,7 +1068,7 @@ func deployExecution(t *testing.T, envelope store.ReleaseSnapshotEnvelope) store
 		t.Fatal(err)
 	}
 	fence := time.Now().UTC().Truncate(time.Microsecond)
-	return store.DeployExecution{OrgID: "org", EnvironmentID: "environment", ReleaseID: "release", Namespace: "tenant", PlannedHostname: "app.example.test", Fence: fence, ExpiresAt: fence.Add(time.Hour), Timeout: time.Minute, FailedRelease: store.ImmutableReleaseSnapshot{ID: "release", EnvironmentID: "environment", ConfigSnapshot: encoded, ConfigHash: hash}}
+	return store.DeployExecution{OrgID: "org", EnvironmentID: "environment", ReleaseID: "release", Namespace: "tenant", PlannedHostname: "app.example.test", Fence: fence, ExpiresAt: fence.Add(time.Hour), Timeout: time.Minute, DesiredGeneration: 1, FailedRelease: store.ImmutableReleaseSnapshot{ID: "release", EnvironmentID: "environment", ImageRef: envelope.DesiredState.Deployment.Container.Image, ConfigSnapshot: encoded, ConfigHash: hash, DesiredGeneration: 1}}
 }
 
 func newForwardAdapter(t *testing.T, client *fake.Clientset, dataStore *fakeForwardStore) *RecoveryAdapter {
@@ -980,6 +1111,8 @@ type fakeForwardStore struct {
 	quarantineReason    string
 	actionCount         func() int
 	finalizeActionCount int
+	verifyCalls         int
+	verifyErrAt         int
 }
 
 func newFakeForwardStore(lease store.DeployLease) *fakeForwardStore {
@@ -991,6 +1124,16 @@ func (f *fakeForwardStore) RenewDeployLease(_ context.Context, lease store.Deplo
 	lease.ExpiresAt = lease.ExpiresAt.Add(time.Minute)
 	f.lease = lease
 	return lease, nil
+}
+func (f *fakeForwardStore) VerifyDeployFence(_ context.Context, lease store.DeployLease, evidence store.ImmutableReleaseSnapshot) error {
+	f.verifyCalls++
+	if evidence.ID != lease.ReleaseID {
+		return store.ErrLeaseNotOwned
+	}
+	if f.verifyErrAt == f.verifyCalls {
+		return store.ErrLeaseNotOwned
+	}
+	return nil
 }
 func (*fakeForwardStore) CheckpointDeployRecovery(context.Context, store.DeployLease, string) error {
 	return nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +23,9 @@ import (
 
 func TestRecoverExpiredDeployRestoresSnapshotPreservingMetadataAndFinalizes(t *testing.T) {
 	previous := testDeployment("old-image")
+	previous.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: ImagePullSecretName}}
 	failed := testDeployment("bad-image")
+	failed.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: ImagePullSecretName}}
 	current := failed.DeepCopy()
 	current.ResourceVersion = "12"
 	current.Generation = 3
@@ -31,6 +35,11 @@ func TestRecoverExpiredDeployRestoresSnapshotPreservingMetadataAndFinalizes(t *t
 	current.Status = readyStatus(3)
 
 	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
+	registryID, generation := "registry", int64(7)
+	recoveryStore.lease.FailedRelease.RegistryCredentialRegistryID = &registryID
+	recoveryStore.lease.FailedRelease.RegistryCredentialGeneration = &generation
+	recoveryStore.lease.PreviousRelease.RegistryCredentialRegistryID = &registryID
+	recoveryStore.lease.PreviousRelease.RegistryCredentialGeneration = &generation
 	client := fake.NewSimpleClientset(recoveryObjects(t, recoveryStore, current)...)
 	client.PrependReactor("update", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		updated := action.(clienttesting.UpdateAction).GetObject().(*appsv1.Deployment)
@@ -47,11 +56,14 @@ func TestRecoverExpiredDeployRestoresSnapshotPreservingMetadataAndFinalizes(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Spec.Template.Spec.Containers[0].Image != "old-image" || got.Labels["external"] != "preserved" || got.Annotations["external/annotation"] != "preserved" || got.Finalizers[0] != "external/finalizer" {
+	if got.Spec.Template.Spec.Containers[0].Image != immutableTestImage("old") || got.Labels["external"] != "preserved" || got.Annotations["external/annotation"] != "preserved" || got.Finalizers[0] != "external/finalizer" {
 		t.Fatalf("restored deployment = %#v", got)
 	}
 	if got.Annotations[ReleaseAnnotation] != "previous" || got.Annotations[ConfigHashAnnotation] != "previous-hash" || got.Annotations[DeployFenceAnnotation] == "" {
 		t.Fatalf("restored identity annotations = %#v", got.Annotations)
+	}
+	if !reflect.DeepEqual(got.Spec.Template.Spec.ImagePullSecrets, previous.Spec.Template.Spec.ImagePullSecrets) {
+		t.Fatalf("restored pull secrets = %#v", got.Spec.Template.Spec.ImagePullSecrets)
 	}
 	if recoveryStore.finalizeCalls != 1 || recoveryStore.finalizedLease.Fence != recoveryStore.lease.Fence {
 		t.Fatalf("finalization = calls:%d lease:%+v latest:%+v", recoveryStore.finalizeCalls, recoveryStore.finalizedLease, recoveryStore.lease)
@@ -109,7 +121,7 @@ func TestRecoverExpiredDeployRecreatesMissingOwnedPreviousDeployment(t *testing.
 		t.Fatalf("RecoverExpiredDeploy() error = %v", err)
 	}
 	got, err := client.AppsV1().Deployments("tenant").Get(context.Background(), "app", metav1.GetOptions{})
-	if err != nil || got.Spec.Template.Spec.Containers[0].Image != "old-image" {
+	if err != nil || got.Spec.Template.Spec.Containers[0].Image != immutableTestImage("old") {
 		t.Fatalf("recreated deployment = %#v, %v", got, err)
 	}
 }
@@ -315,7 +327,7 @@ func TestRecoverExpiredDeployStopsWhenLeaseFenceIsLost(t *testing.T) {
 	failed := testDeployment("bad-image")
 	client := fake.NewSimpleClientset(failed.DeepCopy())
 	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
-	recoveryStore.renewErrAt = 2
+	recoveryStore.verifyErrAt = 1
 	adapter := newTestAdapter(t, client, recoveryStore)
 
 	_, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease)
@@ -324,6 +336,20 @@ func TestRecoverExpiredDeployStopsWhenLeaseFenceIsLost(t *testing.T) {
 	}
 	if updates := countActions(client.Actions(), "update"); updates != 0 {
 		t.Fatalf("deployment updates = %d", updates)
+	}
+}
+
+func TestRecoverExpiredDeployCreateStopsWhenFailedReleaseLeaseIsStale(t *testing.T) {
+	previous := testDeployment("old-image")
+	failed := testDeployment("bad-image")
+	client := fake.NewSimpleClientset()
+	recoveryStore := newFakeRecoveryStore(recoveryState(t, failed, previous))
+	recoveryStore.verifyErrAt = 1
+	adapter := newTestAdapter(t, client, recoveryStore)
+
+	_, err := adapter.RecoverExpiredDeploy(context.Background(), recoveryStore.lease)
+	if !errors.Is(err, store.ErrLeaseNotOwned) || countResourceActions(client.Actions(), "create", "deployments") != 0 {
+		t.Fatalf("RecoverExpiredDeploy() error = %v, deployment creates = %d", err, countResourceActions(client.Actions(), "create", "deployments"))
 	}
 }
 
@@ -359,6 +385,7 @@ func testEnvSecretIntent(envelope store.ReleaseSnapshotEnvelope) *store.SecretIn
 func recoveryState(t *testing.T, failed, previous *appsv1.Deployment) RecoveryState {
 	t.Helper()
 	failed = failed.DeepCopy()
+	failed.Spec.Template.Spec.Containers[0].Image = immutableTestImage("bad")
 	failed.Annotations[ReleaseAnnotation] = "failed"
 	failed.Annotations[ConfigHashAnnotation] = "failed-hash"
 	failedSnapshot, err := EncodeDeploymentSnapshot(failed)
@@ -368,6 +395,7 @@ func recoveryState(t *testing.T, failed, previous *appsv1.Deployment) RecoverySt
 	state := RecoveryState{Namespace: "tenant", DeploymentName: "app", FailureReason: "ProgressDeadlineExceeded", FailedDeploymentSnapshot: failedSnapshot}
 	if previous != nil {
 		previous = previous.DeepCopy()
+		previous.Spec.Template.Spec.Containers[0].Image = immutableTestImage("old")
 		previous.Annotations[ReleaseAnnotation] = "previous"
 		previous.Annotations[ConfigHashAnnotation] = "previous-hash"
 		state.PreviousDeploymentSnapshot, err = EncodeDeploymentSnapshot(previous)
@@ -400,18 +428,31 @@ type fakeRecoveryStore struct {
 	finalizedLease store.DeployLease
 	checkpoint     string
 	adoptCalls     int
+	verifyCalls    int
+	verifyErrAt    int
 }
 
 func newFakeRecoveryStore(state RecoveryState) *fakeRecoveryStore {
 	lease := store.DeployLease{
-		OrgID: "org", EnvironmentID: "environment", ReleaseID: "release",
+		OrgID: "org", EnvironmentID: "environment", ReleaseID: "failed",
 		Fence: time.Unix(1, 0), ExpiresAt: time.Now().Add(time.Minute), Namespace: state.Namespace, Timeout: time.Minute,
-		FailedRelease: store.ImmutableReleaseSnapshot{ID: "failed", ConfigHash: "failed-hash", ConfigSnapshot: state.FailedDeploymentSnapshot},
+		DesiredGeneration: 1, FailedRelease: store.ImmutableReleaseSnapshot{ID: "failed", ConfigHash: "failed-hash", ConfigSnapshot: state.FailedDeploymentSnapshot, DesiredGeneration: 1},
 	}
+	failedEnvelope, _ := store.DecodeReleaseSnapshot(state.FailedDeploymentSnapshot)
+	lease.FailedRelease.ImageRef = failedEnvelope.DesiredState.Deployment.Container.Image
 	if len(state.PreviousDeploymentSnapshot) > 0 {
-		lease.PreviousRelease = &store.ImmutableReleaseSnapshot{ID: "previous", ConfigHash: "previous-hash", ConfigSnapshot: state.PreviousDeploymentSnapshot}
+		previousEnvelope, _ := store.DecodeReleaseSnapshot(state.PreviousDeploymentSnapshot)
+		lease.PreviousRelease = &store.ImmutableReleaseSnapshot{ID: "previous", ImageRef: previousEnvelope.DesiredState.Deployment.Container.Image, ConfigHash: "previous-hash", ConfigSnapshot: state.PreviousDeploymentSnapshot, DesiredGeneration: 1}
 	}
 	return &fakeRecoveryStore{state: state, lease: lease}
+}
+
+func immutableTestImage(seed string) string {
+	character := "a"
+	if seed == "old" {
+		character = "b"
+	}
+	return "ghcr.io/acme/app@sha256:" + strings.Repeat(character, 64)
 }
 
 func recoveryObjects(t *testing.T, recoveryStore *fakeRecoveryStore, current *appsv1.Deployment) []runtime.Object {
@@ -447,6 +488,17 @@ func (f *fakeRecoveryStore) RenewDeployLease(_ context.Context, lease store.Depl
 	lease.ExpiresAt = lease.ExpiresAt.Add(time.Minute)
 	f.lease = lease
 	return lease, nil
+}
+
+func (f *fakeRecoveryStore) VerifyDeployFence(_ context.Context, lease store.DeployLease, evidence store.ImmutableReleaseSnapshot) error {
+	f.verifyCalls++
+	if evidence.ID != lease.ReleaseID {
+		return store.ErrLeaseNotOwned
+	}
+	if f.verifyErrAt == f.verifyCalls {
+		return store.ErrLeaseNotOwned
+	}
+	return nil
 }
 
 func (f *fakeRecoveryStore) FinalizeRecoveredReleaseFailed(_ context.Context, lease store.DeployLease, _ string) (store.FinalizeReleaseResult, error) {

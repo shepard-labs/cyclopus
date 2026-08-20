@@ -75,6 +75,7 @@ type RecoveryState struct {
 
 type RecoveryStore interface {
 	RenewDeployLease(context.Context, store.DeployLease) (store.DeployLease, error)
+	VerifyDeployFence(context.Context, store.DeployLease, store.ImmutableReleaseSnapshot) error
 	CheckpointDeployRecovery(context.Context, store.DeployLease, string) error
 	AdoptRecoveredReleaseLive(context.Context, store.DeployLease) (store.FinalizeReleaseResult, error)
 	FinalizeRecoveredReleaseFailed(context.Context, store.DeployLease, string) (store.FinalizeReleaseResult, error)
@@ -196,6 +197,14 @@ func (a *RecoveryAdapter) RecoverExpiredDeploy(ctx context.Context, lease store.
 	if err != nil {
 		return result, err
 	}
+	if err := validateReleaseEvidence(lease.FailedRelease, failed); err != nil {
+		return result, fmt.Errorf("%w: failed snapshot: %v", ErrRecoveryStateInvalid, err)
+	}
+	if previous != nil {
+		if err := validateReleaseEvidence(*lease.PreviousRelease, previous); err != nil {
+			return result, fmt.Errorf("%w: previous snapshot: %v", ErrRecoveryStateInvalid, err)
+		}
+	}
 
 	lease, err = a.renew(ctx, lease)
 	if err != nil {
@@ -225,6 +234,9 @@ func (a *RecoveryAdapter) RecoverExpiredDeploy(ctx context.Context, lease store.
 		return result, err
 	}
 	result.Lease = lease
+	if err := a.verifyFence(ctx, lease, lease.FailedRelease); err != nil {
+		return result, err
+	}
 	if _, err := a.store.FinalizeRecoveredReleaseFailed(ctx, lease, state.FailureReason); err != nil {
 		return result, fmt.Errorf("finalize compensated release failure: %w", err)
 	}
@@ -371,6 +383,9 @@ func (a *RecoveryAdapter) observeTerminalFailure(ctx context.Context, lease *sto
 			return false, fmt.Errorf("%w: first deployment no longer matches its release snapshot", ErrCompensationUnproven)
 		}
 		if deploymentReady(deployment, *lease, lease.FailedRelease) {
+			if err := a.verifyFence(ctx, *lease, lease.FailedRelease); err != nil {
+				return false, err
+			}
 			if err := a.store.CheckpointDeployRecovery(ctx, *lease, "late_ready_observed"); err != nil {
 				return false, fmt.Errorf("checkpoint late-ready deployment: %w", err)
 			}
@@ -522,6 +537,7 @@ func patchOwnedPodTemplate(candidate, expected *appsv1.Deployment, release store
 			return fmt.Errorf("%w: owned container %q is missing", ErrCompensationUnproven, wanted.Name)
 		}
 	}
+	candidate.Spec.Template.Spec.ImagePullSecrets = append([]corev1.LocalObjectReference(nil), expected.Spec.Template.Spec.ImagePullSecrets...)
 	if candidate.Spec.Template.Annotations == nil {
 		candidate.Spec.Template.Annotations = map[string]string{}
 	}
@@ -536,6 +552,9 @@ func patchOwnedPodTemplate(candidate, expected *appsv1.Deployment, release store
 }
 
 func ownedTemplateMatches(actual, expected *appsv1.Deployment) bool {
+	if !reflect.DeepEqual(actual.Spec.Template.Spec.ImagePullSecrets, expected.Spec.Template.Spec.ImagePullSecrets) {
+		return false
+	}
 	for _, wanted := range expected.Spec.Template.Spec.Containers {
 		matched := false
 		for _, current := range actual.Spec.Template.Spec.Containers {
@@ -585,13 +604,29 @@ func (a *RecoveryAdapter) getDeployment(ctx context.Context, lease store.DeployL
 }
 
 func (a *RecoveryAdapter) updateDeployment(ctx context.Context, lease store.DeployLease, namespace string, deployment *appsv1.Deployment) (*appsv1.Deployment, error) {
+	if err := a.verifyFence(ctx, lease, lease.FailedRelease); err != nil {
+		return nil, err
+	}
 	opCtx, cancel := a.operationContext(ctx, lease)
 	defer cancel()
 	return a.client.AppsV1().Deployments(namespace).Update(opCtx, deployment, metav1.UpdateOptions{})
 }
 
 func (a *RecoveryAdapter) createDeployment(ctx context.Context, lease store.DeployLease, namespace string, deployment *appsv1.Deployment) (*appsv1.Deployment, error) {
+	if err := a.verifyFence(ctx, lease, lease.FailedRelease); err != nil {
+		return nil, err
+	}
 	opCtx, cancel := a.operationContext(ctx, lease)
 	defer cancel()
 	return a.client.AppsV1().Deployments(namespace).Create(opCtx, deployment, metav1.CreateOptions{})
+}
+
+func (a *RecoveryAdapter) verifyFence(ctx context.Context, lease store.DeployLease, evidence store.ImmutableReleaseSnapshot) error {
+	if a.store == nil {
+		return errors.New("verify deploy fence: store is unavailable")
+	}
+	if err := a.store.VerifyDeployFence(ctx, lease, evidence); err != nil {
+		return fmt.Errorf("verify deploy fence: %w", err)
+	}
+	return nil
 }

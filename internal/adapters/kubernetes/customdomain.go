@@ -24,12 +24,17 @@ const customDomainIngressPrefix = "custom-domain-"
 // certificate for the custom hostname. It uses only the typed networkingv1
 // client — no cert-manager Go module.
 type CustomDomainProvisioner struct {
-	client kubernetes.Interface
+	client         kubernetes.Interface
+	beforeMutation func(context.Context) error
 }
 
 // NewCustomDomainProvisioner builds a provisioner backed by the typed client.
 func NewCustomDomainProvisioner(client kubernetes.Interface) *CustomDomainProvisioner {
 	return &CustomDomainProvisioner{client: client}
+}
+
+func newFencedCustomDomainProvisioner(client kubernetes.Interface, beforeMutation func(context.Context) error) *CustomDomainProvisioner {
+	return &CustomDomainProvisioner{client: client, beforeMutation: beforeMutation}
 }
 
 // CustomDomainIngressName derives the deterministic Ingress name for a domain.
@@ -55,6 +60,11 @@ func (p *CustomDomainProvisioner) ProvisionCustomDomain(ctx context.Context, req
 	ingresses := p.client.NetworkingV1().Ingresses(req.Namespace)
 	current, err := ingresses.Get(ctx, desired.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if p.beforeMutation != nil {
+			if err := p.beforeMutation(ctx); err != nil {
+				return err
+			}
+		}
 		_, err = ingresses.Create(ctx, desired, metav1.CreateOptions{})
 		return err
 	}
@@ -70,6 +80,11 @@ func (p *CustomDomainProvisioner) ProvisionCustomDomain(ctx context.Context, req
 	candidate.Labels = desired.Labels
 	candidate.Annotations = desired.Annotations
 	candidate.Spec = desired.Spec
+	if p.beforeMutation != nil {
+		if err := p.beforeMutation(ctx); err != nil {
+			return err
+		}
+	}
 	_, err = ingresses.Update(ctx, candidate, metav1.UpdateOptions{})
 	return err
 }

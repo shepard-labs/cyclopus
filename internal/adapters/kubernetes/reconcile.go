@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ import (
 // requires. It is distinct from RecoveryStore so tests can provide a targeted
 // fake.
 type ReconcileStore interface {
+	VerifyDeployFence(context.Context, store.DeployLease, store.ImmutableReleaseSnapshot) error
 	ListEnvironmentsByOrg(context.Context, string) ([]store.Environment, error)
 	ListEnvironments(context.Context, string, string, bool) ([]store.Environment, error)
 	GetEnvironment(context.Context, string, string) (store.Environment, error)
@@ -277,7 +279,11 @@ func (e *reconcileExec) planEnvironment(ctx context.Context, env store.Environme
 		ReleaseID:     release.ID,
 		FailedRelease: release.ImmutableReleaseSnapshot,
 		Fence:         e.adapter.now(),
-		ExpiresAt:     e.reconcileDeadline(),
+		ExpiresAt:     e.reconcileDeadline(), DesiredGeneration: release.DesiredGeneration,
+	}
+	execution.Fence = time.Time{}
+	if err := e.adapter.verifyFence(ctx, execution, release.ImmutableReleaseSnapshot); err != nil {
+		return envPlan{}, nil, nil, fmt.Errorf("verify release fence: %w", err)
 	}
 	objects, err := BuildDesiredObjects(execution, envelope, nil)
 	if err != nil {
@@ -413,6 +419,9 @@ func (e *reconcileExec) compareObj(ctx context.Context, env store.Environment, k
 func (e *reconcileExec) applyOperation(ctx context.Context, ep *envPlan, op objectAction) error {
 	applyCtx := withReconcileApply(ctx)
 	execution := ep.execution
+	if err := e.adapter.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+		return err
+	}
 	setDesiredIdentity(ep.objects, execution.ReleaseID, execution.FailedRelease.ConfigHash)
 	switch op.ObjectKind {
 	case "Deployment":
@@ -428,10 +437,43 @@ func (e *reconcileExec) applyOperation(ctx context.Context, ep *envPlan, op obje
 		}
 		// Reuse the shared, idempotent provisioner so reconcile restores exactly
 		// the object VerifyDomain creates (get-or-create with ownership check).
-		return NewCustomDomainProvisioner(e.adapter.client).ProvisionCustomDomain(applyCtx, req)
+		provisioner := newFencedCustomDomainProvisioner(e.adapter.client, func(mutationCtx context.Context) error {
+			if err := e.verifyCustomDomainIntent(mutationCtx, ep, req); err != nil {
+				return err
+			}
+			return e.adapter.verifyFence(mutationCtx, execution, execution.FailedRelease)
+		})
+		return provisioner.ProvisionCustomDomain(applyCtx, req)
 	default:
 		return fmt.Errorf("unsupported object kind for apply: %s", op.ObjectKind)
 	}
+}
+
+func (e *reconcileExec) verifyCustomDomainIntent(ctx context.Context, ep *envPlan, req service.CustomDomainRequest) error {
+	env, err := e.rs.GetEnvironment(ctx, e.run.OrgID, ep.env.ID)
+	if err != nil {
+		return err
+	}
+	if env.ID != req.EnvironmentID || env.AppID != ep.env.AppID || env.Namespace != req.Namespace || env.Kind != "production" {
+		return fmt.Errorf("custom-domain environment changed during reconciliation")
+	}
+	app, err := e.rs.GetApp(ctx, e.run.OrgID, env.AppID)
+	if err != nil {
+		return err
+	}
+	if app.ID != env.AppID || app.Slug != req.ServiceName {
+		return fmt.Errorf("custom-domain app changed during reconciliation")
+	}
+	domains, err := e.rs.ListVerifiedDomainsByApp(ctx, e.run.OrgID, env.AppID)
+	if err != nil {
+		return err
+	}
+	for _, domain := range domains {
+		if domain.ID == req.DomainID && domain.OrgID == e.run.OrgID && domain.AppID == env.AppID && domain.Hostname == req.Hostname {
+			return nil
+		}
+	}
+	return fmt.Errorf("custom domain changed during reconciliation")
 }
 
 func (e *reconcileExec) reconcileDeadline() time.Time {
@@ -599,13 +641,18 @@ func (e *reconcileExec) detectOrphans(ctx context.Context, ep envPlan) ([]object
 func (e *reconcileExec) deleteOrphan(ctx context.Context, ep *envPlan, orphan objectAction) error {
 	applyCtx := withReconcileApply(ctx)
 	execution := ep.execution
+	if err := e.adapter.verifyFence(ctx, execution, execution.FailedRelease); err != nil {
+		return err
+	}
 	switch orphan.ObjectKind {
 	case "Deployment":
 		return e.adapter.deleteOwnedDeployment(applyCtx, &execution, orphan.ObjectName)
 	case "Service":
 		return e.adapter.deleteOwnedService(applyCtx, &execution, orphan.ObjectName)
 	case "Ingress":
-		return e.adapter.deleteOwnedIngress(applyCtx, &execution, orphan.ObjectName)
+		return e.adapter.deleteOwnedIngress(applyCtx, &execution, orphan.ObjectName, func(deleteCtx context.Context) (bool, error) {
+			return e.customDomainIngressStillOrphaned(deleteCtx, ep, orphan.ObjectName)
+		})
 	case "HorizontalPodAutoscaler":
 		return e.adapter.deleteOwnedHPA(applyCtx, &execution, orphan.ObjectName)
 	case "ScaledObject":
@@ -615,6 +662,36 @@ func (e *reconcileExec) deleteOrphan(ctx context.Context, ep *envPlan, orphan ob
 	default:
 		return fmt.Errorf("unsupported orphan kind for delete: %s", orphan.ObjectKind)
 	}
+}
+
+func (e *reconcileExec) customDomainIngressStillOrphaned(ctx context.Context, ep *envPlan, name string) (bool, error) {
+	if !strings.HasPrefix(name, customDomainIngressPrefix) {
+		return true, nil
+	}
+	env, err := e.rs.GetEnvironment(ctx, e.run.OrgID, ep.env.ID)
+	if err != nil {
+		return false, err
+	}
+	if env.ID != ep.env.ID || env.AppID != ep.env.AppID || env.Namespace != ep.env.Namespace || env.Kind != "production" {
+		return false, fmt.Errorf("custom-domain environment changed during reconciliation")
+	}
+	app, err := e.rs.GetApp(ctx, e.run.OrgID, env.AppID)
+	if err != nil {
+		return false, err
+	}
+	if app.ID != env.AppID {
+		return false, fmt.Errorf("custom-domain app changed during reconciliation")
+	}
+	domains, err := e.rs.ListVerifiedDomainsByApp(ctx, e.run.OrgID, env.AppID)
+	if err != nil {
+		return false, err
+	}
+	for _, domain := range domains {
+		if domain.OrgID == e.run.OrgID && domain.AppID == env.AppID && CustomDomainIngressName(domain.ID) == name {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func orphanAction(envID, ns, kind, name string) objectAction {

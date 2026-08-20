@@ -59,14 +59,14 @@ func TestPostgres18Migrations(t *testing.T) {
 	}
 	defer db.Close(context.Background())
 
-	t.Run("greenfield reaches migration 000020 and preserves epoch", func(t *testing.T) {
+	t.Run("greenfield reaches migration 000021 and preserves epoch", func(t *testing.T) {
 		var version uint
 		var dirty bool
 		if err := db.QueryRow(context.Background(), "SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 			t.Fatal(err)
 		}
-		if version != 20 || dirty {
-			t.Fatalf("schema migration state = version:%d dirty:%t, want version:20 dirty:false", version, dirty)
+		if version != 21 || dirty {
+			t.Fatalf("schema migration state = version:%d dirty:%t, want version:21 dirty:false", version, dirty)
 		}
 		var nullable string
 		if err := db.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='github_setup_sessions' AND column_name='state_generation'`).Scan(&nullable); err != nil {
@@ -1622,6 +1622,104 @@ func TestMigration000020ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testi
 	}
 	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 20 || dirty {
 		t.Fatalf("v20 re-up state = %d/%t, %v", version, dirty, err)
+	}
+}
+
+func TestMigration000021ExactUpgradeGuardedDownReUpAndHostileSearchPath(t *testing.T) {
+	url, schema, admin := newGitHubWebhookSchema(t)
+	defer admin.Close(context.Background())
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+	migrator := githubWebhookMigrator(t, url)
+	defer migrator.Close()
+	if err := migrator.Migrate(20); err != nil {
+		t.Fatalf("migrate to exact v20: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	fixture := seedTenantGraph(t, conn, "migration-twenty-one", "main", "", "migration-twenty-one-production")
+	snapshot := testReleaseSnapshot("ghcr.io/acme/migration-twenty-one@sha256:" + strings.Repeat("a", 64))
+	snapshot = []byte(strings.Replace(string(snapshot), `"version":4`, `"version":3`, 1))
+	var legacyID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO releases(org_id,environment_id,image_ref,kind,config_snapshot,config_hash,status)
+		VALUES($1,$2,$3,'deploy',$4,repeat('a',64),'superseded') RETURNING id::text`, fixture.org, fixture.environment,
+		"ghcr.io/acme/migration-twenty-one@sha256:"+strings.Repeat("a", 64), snapshot).Scan(&legacyID); err != nil {
+		t.Fatal(err)
+	}
+	v20Catalog := schemaCatalogSnapshot(t, conn)
+	if err := migrator.Migrate(21); err != nil {
+		t.Fatalf("exact v20 to v21 upgrade: %v", err)
+	}
+	var version uint
+	var dirty bool
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 21 || dirty {
+		t.Fatalf("v21 migration state = %d/%t, %v", version, dirty, err)
+	}
+	var provenance string
+	var generation *int64
+	if err := conn.QueryRow(t.Context(), `SELECT provenance,desired_generation FROM releases WHERE id=$1`, legacyID).Scan(&provenance, &generation); err != nil || provenance != "legacy_unverified" || generation != nil {
+		t.Fatalf("legacy v20 release after upgrade = %q/%v, %v", provenance, generation, err)
+	}
+	var contextualID string
+	if err := conn.QueryRow(t.Context(), `INSERT INTO releases(org_id,environment_id,image_ref,kind,config_snapshot,config_hash,status)
+		VALUES($1,$2,$3,'deploy',$4,repeat('b',64),'superseded') RETURNING id::text`, fixture.org, fixture.environment,
+		"ghcr.io/acme/migration-twenty-one@sha256:"+strings.Repeat("b", 64), snapshot).Scan(&contextualID); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT provenance,desired_generation FROM releases WHERE id=$1`, contextualID).Scan(&provenance, &generation); err != nil || provenance != "contextual" || generation == nil || *generation <= 0 {
+		t.Fatalf("new v21 release evidence = %q/%v, %v", provenance, generation, err)
+	}
+	if err := migrator.Migrate(20); err == nil || !strings.Contains(err.Error(), "000021 downgrade would discard release generation provenance or evidence") {
+		t.Fatalf("guarded v21 down error = %v", err)
+	}
+	if err := conn.QueryRow(t.Context(), `SELECT version,dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil || version != 21 || dirty {
+		t.Fatalf("blocked down state = %d/%t, %v", version, dirty, err)
+	}
+	if _, err := conn.Exec(t.Context(), `DELETE FROM releases WHERE id=$1`, contextualID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.Migrate(20); err != nil {
+		t.Fatalf("clean v21 down: %v", err)
+	}
+	if got := schemaCatalogSnapshot(t, conn); got != v20Catalog {
+		t.Fatalf("v20 catalog after v21 down differs from seeded v20 catalog\nwant:\n%s\n\ngot:\n%s", v20Catalog, got)
+	}
+	if err := migrator.Migrate(21); err != nil {
+		t.Fatalf("v21 re-up: %v", err)
+	}
+
+	hostile := schema + "_hostile"
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+pgx.Identifier{hostile}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{hostile}.Sanitize()+" CASCADE")
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`CREATE TABLE ` + pgx.Identifier{hostile, "releases"}.Sanitize() + ` (provenance text,desired_generation bigint,orchestration_job_id uuid)`, nil},
+		{`INSERT INTO ` + pgx.Identifier{hostile, "releases"}.Sanitize() + ` VALUES('contextual',999,NULL)`, nil},
+		{`CREATE FUNCTION ` + pgx.Identifier{hostile, "assert_release_generation_v21_down_safe"}.Sanitize() + `() RETURNS void
+			LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'hostile release guard invoked'; END $$`, nil},
+	} {
+		if _, err := admin.Exec(t.Context(), statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hostileConfig, err := pgx.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostileConfig.RuntimeParams["search_path"] = pgx.Identifier{hostile}.Sanitize() + "," + pgx.Identifier{schema}.Sanitize()
+	hostileConn, err := pgx.ConnectConfig(t.Context(), hostileConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostileConn.Close(context.Background())
+	if _, err := hostileConn.Exec(t.Context(), `SELECT `+pgx.Identifier{schema, "assert_release_generation_v21_down_safe"}.Sanitize()+`() `); err != nil {
+		t.Fatalf("hostile search_path qualified safe-down assertion: %v", err)
 	}
 }
 

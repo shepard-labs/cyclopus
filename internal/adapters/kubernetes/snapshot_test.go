@@ -12,7 +12,8 @@ import (
 )
 
 func TestDeploymentSnapshotRoundTripStripsServerState(t *testing.T) {
-	deployment := testDeployment("old-image")
+	deployment := testDeployment("ghcr.io/acme/app@sha256:" + strings.Repeat("a", 64))
+	deployment.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "cyclopus-ghcr-pull"}}
 	deployment.UID = types.UID("uid")
 	deployment.ResourceVersion = "42"
 	deployment.Generation = 7
@@ -31,7 +32,7 @@ func TestDeploymentSnapshotRoundTripStripsServerState(t *testing.T) {
 	if decoded.ResourceVersion != "" || decoded.UID != "" || decoded.Generation != 0 || !decoded.CreationTimestamp.IsZero() || len(decoded.ManagedFields) != 0 {
 		t.Fatalf("server metadata survived snapshot: %#v", decoded.ObjectMeta)
 	}
-	if decoded.Status.ReadyReplicas != 0 || decoded.Spec.Template.Spec.Containers[0].Image != "old-image" {
+	if decoded.Status.ReadyReplicas != 0 || decoded.Spec.Template.Spec.Containers[0].Image != deployment.Spec.Template.Spec.Containers[0].Image || len(decoded.Spec.Template.Spec.ImagePullSecrets) != 1 || decoded.Spec.Template.Spec.ImagePullSecrets[0].Name != "cyclopus-ghcr-pull" {
 		t.Fatalf("decoded deployment = %#v", decoded)
 	}
 }
@@ -49,7 +50,7 @@ func TestDecodeDeploymentSnapshotRejectsUnknownVersionAndFields(t *testing.T) {
 }
 
 func TestDecodeDeploymentSnapshotRejectsServerMetadata(t *testing.T) {
-	deployment := testDeployment("old-image")
+	deployment := testDeployment("ghcr.io/acme/app@sha256:" + strings.Repeat("a", 64))
 	encoded, err := EncodeDeploymentSnapshot(deployment)
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +65,13 @@ func TestDecodeDeploymentSnapshotRejectsServerMetadata(t *testing.T) {
 }
 
 func testDeployment(image string) *appsv1.Deployment {
+	if !strings.Contains(image, "@sha256:") {
+		seed := "a"
+		if strings.Contains(image, "old") {
+			seed = "b"
+		}
+		image = "ghcr.io/acme/app@sha256:" + strings.Repeat(seed, 64)
+	}
 	replicas := int32(1)
 	return &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},

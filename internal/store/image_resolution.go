@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -469,7 +470,9 @@ func (s *Store) FailImageResolution(ctx context.Context, p FailImageResolutionPa
 
 func (s *Store) CompleteImageResolution(ctx context.Context, p CompleteImageResolutionParams) (ImageResolutionWriteResult, error) {
 	canonicalRepository := strings.TrimPrefix(p.Repository, "ghcr.io/")
-	if p.OrgID == "" || p.JobID == "" || p.Lease.Owner == "" || p.Lease.Epoch < 1 || p.DesiredGeneration < 1 || canonicalRepository == "" || strings.Contains(p.Repository, "://") || p.Digest == "" || p.ConfigDigest == "" || p.ConfigMediaType == "" || (p.AnnotationStatus != "matched" && p.AnnotationStatus != "absent") {
+	canonicalImmutableReference := "ghcr.io/" + canonicalRepository + "@" + p.Digest
+	canonicalTagReference := "ghcr.io/" + canonicalRepository + ":" + p.CommitSHA
+	if p.OrgID == "" || p.JobID == "" || p.Lease.Owner == "" || p.Lease.Epoch < 1 || p.DesiredGeneration < 1 || canonicalRepository == "" || strings.Contains(p.Repository, "://") || p.Digest == "" || p.ConfigDigest == "" || p.ConfigMediaType == "" || (p.AnnotationStatus != "matched" && p.AnnotationStatus != "absent") || p.ImmutableReference != canonicalImmutableReference || p.TagReference != canonicalTagReference || !immutableGHCRReleaseRefPattern.MatchString(p.ImmutableReference) || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(p.CommitSHA) || (p.AnnotationStatus == "matched" && p.Revision != p.CommitSHA) || (p.AnnotationStatus == "absent" && (p.Source != "" || p.Revision != "")) {
 		return "", ErrInvalidArgument
 	}
 	result := ImageResolutionProcessed
