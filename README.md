@@ -1,5 +1,12 @@
 # Cyclopus
 
+> ⚠️ **Active development — not ready for use.**
+> Cyclopus is under active development and is **not production-ready**. There is
+> no stable release, no upgrade path, and no support. APIs, database schemas,
+> configuration, and deployment behavior change without notice, and migrations
+> may be destructive. Do not deploy this to production or point it at data you
+> care about. Nothing here is a promise of future compatibility.
+
 🚀 **Self-hosted PaaS for small teams.** Go from an empty VPS to git-push deploys with automatic HTTPS, running on a customer-owned k3s cluster.
 
 ## What it is
