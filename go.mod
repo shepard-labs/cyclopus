@@ -11,15 +11,15 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/uuid v1.6.0
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.33.0
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.34.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/pflag v1.1.0
 	github.com/spf13/viper v1.21.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.59.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20261026165753-2ffab32bce7e
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b
+	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
